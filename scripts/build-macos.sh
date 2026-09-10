@@ -12,6 +12,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$ROOT_DIR/assets/woodfish.png" "$APP_DIR/Contents/Resources/woodfish.png"
 cp "$ROOT_DIR/assets/mallet.png" "$APP_DIR/Contents/Resources/mallet.png"
+cp "$ROOT_DIR/assets/appicon.icns" "$APP_DIR/Contents/Resources/appicon.icns"
 
 ARCHS="arm64 x86_64"
 for ARCH in $ARCHS; do
