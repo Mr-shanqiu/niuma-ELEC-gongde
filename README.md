@@ -1,6 +1,7 @@
 # 牛马电子功德
 
 仓库：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde>
+许可证：[GPL v3](LICENSE) — 任何人可以自由使用、修改和分发，但如果分发衍生作品（包括商用），必须以相同许可证开源全部代码。
 
 ## 什么是本软件
 
