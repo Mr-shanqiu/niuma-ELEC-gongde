@@ -589,12 +589,14 @@ void ClampWindowToWorkArea() {
     return;
   }
 
-  const int maximumX =
-      std::max(info.rcWork.left, info.rcWork.right - gState.windowWidth);
-  const int maximumY =
-      std::max(info.rcWork.top, info.rcWork.bottom - gState.windowHeight);
-  const int x = std::clamp(rect.left, info.rcWork.left, maximumX);
-  const int y = std::clamp(rect.top, info.rcWork.top, maximumY);
+  const LONG maximumX =
+      std::max(info.rcWork.left,
+               info.rcWork.right - static_cast<LONG>(gState.windowWidth));
+  const LONG maximumY =
+      std::max(info.rcWork.top,
+               info.rcWork.bottom - static_cast<LONG>(gState.windowHeight));
+  const LONG x = std::clamp(rect.left, info.rcWork.left, maximumX);
+  const LONG y = std::clamp(rect.top, info.rcWork.top, maximumY);
   SetWindowPos(
       gState.window, nullptr, x, y, 0, 0,
       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
