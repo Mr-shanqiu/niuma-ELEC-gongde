@@ -54,9 +54,10 @@ constexpr float kPlusStartPhase = 0.30f;
 constexpr float kPlusEndPhase = 0.70f;
 
 // Context menu command identifiers.
-constexpr UINT_PTR kMenuPrivacyNotice = 1;
-constexpr UINT_PTR kMenuLaunchAtLogin = 2;
-constexpr UINT_PTR kMenuQuit = 3;
+constexpr UINT_PTR kMenuAbout = 1;
+constexpr UINT_PTR kMenuPrivacyNotice = 2;
+constexpr UINT_PTR kMenuLaunchAtLogin = 3;
+constexpr UINT_PTR kMenuQuit = 4;
 
 struct PngResource {
   IStream* stream = nullptr;
@@ -584,6 +585,16 @@ void ShowPrivacyNotice(HWND owner) {
       L"隐私说明", MB_OK | MB_ICONINFORMATION);
 }
 
+void ShowAboutDialog(HWND owner) {
+  const std::wstring version = L"0.3.0";
+  std::wstring text = L"牛马电子功德 v" + version + L"\n\n";
+  text += L"本软件完全离线运行，不包含网络请求、遥测或自动更新功能。\n";
+  text += L"如需获取最新版本，请访问以下网址手动下载：\n\n";
+  text += L"https://github.com/Mr-shanqiu/niuma-ELEC-gongde";
+  MessageBoxW(owner, text.c_str(), L"关于牛马电子功德",
+              MB_OK | MB_ICONINFORMATION);
+}
+
 void ShowPrivacyNoticeIfNeeded(HWND owner) {
   const std::wstring path = DataPath();
   if (path.empty() ||
@@ -648,6 +659,7 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   if (menu == nullptr) {
     return;
   }
+  AppendMenuW(menu, MF_STRING, kMenuAbout, L"关于牛马电子功德");
   AppendMenuW(menu, MF_STRING, kMenuPrivacyNotice, L"隐私说明");
   AppendMenuW(
       menu,
@@ -661,7 +673,9 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
       screenPoint.x, screenPoint.y, 0, window, nullptr);
   DestroyMenu(menu);
 
-  if (command == static_cast<int>(kMenuPrivacyNotice)) {
+  if (command == static_cast<int>(kMenuAbout)) {
+    ShowAboutDialog(window);
+  } else if (command == static_cast<int>(kMenuPrivacyNotice)) {
     ShowPrivacyNotice(window);
   } else if (command == static_cast<int>(kMenuLaunchAtLogin)) {
     const bool enabled = !IsLaunchAtLoginEnabled();

@@ -63,6 +63,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)installEventTap;
 - (void)removeEventTap;
 - (void)handleEventTapDisabled;
+- (void)showAbout:(id)sender;
 - (void)checkPermission:(NSTimer *)timer;
 - (void)stopPermissionPoll;
 - (void)showPrivacyNotice:(id)sender;
@@ -564,6 +565,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     enable.target = self;
     [menu addItem:enable];
   }
+  NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:@"关于牛马电子功德"
+                                                action:@selector(showAbout:)
+                                         keyEquivalent:@""];
+  about.target = self;
+  [menu addItem:about];
   NSMenuItem *privacy = [[NSMenuItem alloc] initWithTitle:@"隐私说明"
                                                   action:@selector(showPrivacyNotice:)
                                            keyEquivalent:@""];
@@ -599,6 +605,19 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   alert.informativeText =
       @"本软件仅计数键盘按下和鼠标按键/滚轮事件发生次数，不读取按键内容、鼠标坐标、窗口名或活动应用。"
       @"所有数据仅保存在本机，不联网，不上传。";
+  [alert addButtonWithTitle:@"知道了"];
+  [alert runModal];
+}
+
+- (void)showAbout:(id)sender {
+  (void)sender;
+  NSAlert *alert = [[NSAlert alloc] init];
+  alert.messageText = @"牛马电子功德";
+  alert.informativeText =
+      @"版本 0.3.0\n\n"
+      @"本软件完全离线运行，不包含网络请求、遥测或自动更新功能。\n"
+      @"如需获取最新版本，请访问以下网址手动下载：\n\n"
+      @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde";
   [alert addButtonWithTitle:@"知道了"];
   [alert runModal];
 }
