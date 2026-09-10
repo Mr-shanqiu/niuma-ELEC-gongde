@@ -1,25 +1,28 @@
 // Keep this file ASCII-only. The resource compiler decodes .rc files with the
 // system code page, and this project cannot run a Windows build locally to
 // verify that non-ASCII resource strings are not mangled.
-#include <windows.h>
+//
+// Numeric constants are used instead of #include <windows.h> to avoid pulling
+// in windows.h definitions that conflict with the resource compiler (e.g.
+// duplicate MANIFEST entries causing CVT1100).
 
-1 RT_MANIFEST "app.manifest"
-101 RCDATA "woodfish.png"
-102 RCDATA "mallet.png"
+// RT_MANIFEST = 24
+1 24 "app.manifest"
+// RCDATA = 10
+101 10 "woodfish.png"
+102 10 "mallet.png"
+// ICON = 1
+103 1 "appicon.ico"
 
-// Application icon (displayed in taskbar, file properties, etc.)
-103 ICON "appicon.ico"
-
-// Version metadata shown in Explorer file properties and in the SmartScreen /
-// UAC prompt after the binary is signed. Keep in sync with VERSION.
+// VS_VERSION_INFO = 16
 VS_VERSION_INFO VERSIONINFO
   FILEVERSION 0,3,0,0
   PRODUCTVERSION 0,3,0,0
-  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
-  FILEFLAGS 0x0L
-  FILEOS VOS_NT_WINDOWS32
-  FILETYPE VFT_APP
-  FILESUBTYPE VFT2_UNKNOWN
+  FILEFLAGSMASK 0x3F
+  FILEFLAGS 0x0
+  FILEOS 0x40004
+  FILETYPE 0x1
+  FILESUBTYPE 0x0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
