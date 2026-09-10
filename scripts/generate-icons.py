@@ -63,36 +63,14 @@ def make_icns(square_img, output_path):
     print(f"icns: {output_path} ({total_len} bytes)")
 
 def make_ico(square_img, output_path):
-    """Create a multi-resolution .ico file (PNG-embedded entries)."""
+    """Create a multi-resolution .ico file (BMP format, MSVC RC compatible)."""
     ico_sizes = [16, 32, 48, 64, 128, 256]
-    png_entries = []
-    for size in ico_sizes:
-        resized = square_img.resize((size, size), Image.LANCZOS)
-        buf = io.BytesIO()
-        resized.save(buf, format="PNG")
-        png_entries.append(buf.getvalue())
-
-    # ICONDIR header: reserved(2) + type(2) + count(2)
-    header = struct.pack("<HHH", 0, 1, len(ico_sizes))
-    # Each ICONDIRENTRY is 16 bytes
-    offset = 6 + 16 * len(ico_sizes)
-    dir_entries = b""
-    for i, size in enumerate(ico_sizes):
-        data = png_entries[i]
-        w_byte = 0 if size >= 256 else size
-        h_byte = 0 if size >= 256 else size
-        entry = struct.pack("<BBBBHHII",
-            w_byte, h_byte, 0, 0,   # width, height, palette, reserved
-            1, 32,                   # type=1 (icon), bpp
-            len(data), offset)
-        dir_entries += entry
-        offset += len(data)
-
-    with open(output_path, "wb") as f:
-        f.write(header)
-        f.write(dir_entries)
-        for data in png_entries:
-            f.write(data)
+    # Pillow's ICO writer with bitmap_format='bmp' produces traditional BMP
+    # entries that the MSVC resource compiler accepts. PNG-embedded entries
+    # (the default) cause RC2169 "not in 2.03 format".
+    square_img.save(output_path, format="ICO",
+                    sizes=[(s, s) for s in ico_sizes],
+                    bitmap_format="bmp")
     fsize = os.path.getsize(output_path)
     print(f"ico: {output_path} ({fsize} bytes)")
 
