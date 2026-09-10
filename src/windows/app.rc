@@ -1,3 +1,39 @@
+// Keep this file ASCII-only. The resource compiler decodes .rc files with the
+// system code page, and this project cannot run a Windows build locally to
+// verify that non-ASCII resource strings are not mangled.
+#include <windows.h>
+
 1 RT_MANIFEST "app.manifest"
 101 RCDATA "woodfish.png"
 102 RCDATA "mallet.png"
+
+// Version metadata shown in Explorer file properties and in the SmartScreen /
+// UAC prompt after the binary is signed. Keep in sync with VERSION.
+VS_VERSION_INFO VERSIONINFO
+  FILEVERSION 0,3,0,0
+  PRODUCTVERSION 0,3,0,0
+  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+  FILEFLAGS 0x0L
+  FILEOS VOS_NT_WINDOWS32
+  FILETYPE VFT_APP
+  FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "Mr-shanqiu"
+      VALUE "FileDescription", "NiuMa Merit"
+      VALUE "FileVersion", "0.3.0"
+      VALUE "InternalName", "niuma-merit"
+      VALUE "LegalCopyright", "Copyright (c) 2026 Mr-shanqiu"
+      VALUE "OriginalFilename", "niuma-merit.exe"
+      VALUE "ProductName", "NiuMa Merit"
+      VALUE "ProductVersion", "0.3.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

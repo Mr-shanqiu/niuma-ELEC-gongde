@@ -18,6 +18,10 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Read version
+        shell: bash
+        run: echo "VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+
       - name: Build Release package
         shell: powershell
         run: ./scripts/build-windows.ps1
@@ -25,9 +29,9 @@ jobs:
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: niuma-merit-windows-0.3.0
+          name: niuma-merit-windows-${{ env.VERSION }}
           path: |
             dist/niuma-merit.exe
-            dist/niuma-merit-windows-0.3.0-Release.zip
+            dist/niuma-merit-windows-${{ env.VERSION }}-Release.zip
           if-no-files-found: error
           retention-days: 14

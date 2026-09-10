@@ -181,7 +181,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                          hints:nil];
   [NSGraphicsContext restoreGraphicsState];
 
-    if (!controller.paused && striking && phase >= .30 && phase <= .70) {
+  if (controller.paused) {
+    [self drawCenteredText:@"已暂停"
+                      rect:NSMakeRect(0, 148, kWindowWidth, 30)
+                      font:[NSFont systemFontOfSize:18 weight:NSFontWeightRegular]
+                     color:[NSColor colorWithCalibratedRed:.94 green:.50 blue:.16 alpha:.8]];
+  } else if (striking && phase >= .30 && phase <= .70) {
     [self drawCenteredText:@"+1"
                       rect:NSMakeRect(0, 148, kWindowWidth, 30)
                       font:[NSFont monospacedDigitSystemFontOfSize:23

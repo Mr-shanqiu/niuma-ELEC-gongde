@@ -47,6 +47,19 @@ constexpr int kDefaultStrikeMs = 220;
 constexpr int kMinStrikeMs = 120;
 constexpr int kMaxStrikeMs = 240;
 
+// Animation constants shared with the macOS client (see WORK_PLAN 5.3/5.5).
+constexpr double kTempoFactor = 1.05;
+constexpr float kContactPhase = 0.42f;
+constexpr float kPlusStartPhase = 0.30f;
+constexpr float kPlusEndPhase = 0.70f;
+
+// Context menu command identifiers.
+constexpr UINT_PTR kMenuTogglePause = 1;
+constexpr UINT_PTR kMenuClearTotal = 2;
+constexpr UINT_PTR kMenuPrivacyNotice = 3;
+constexpr UINT_PTR kMenuLaunchAtLogin = 4;
+constexpr UINT_PTR kMenuQuit = 5;
+
 struct PngResource {
   IStream* stream = nullptr;
   std::unique_ptr<Gdiplus::Image> image;
@@ -73,14 +86,13 @@ struct AppState {
   int windowWidth = kWindowDipWidth;
   int windowHeight = kWindowDipHeight;
   std::uint64_t total = 0;
+  bool paused = false;
   ULONGLONG lastInputTime = 0;
   ULONGLONG lastScrollEventTime = 0;
   double intervalEma = static_cast<double>(kDefaultStrikeMs);
   bool striking = false;
   ULONGLONG strikeStarted = 0;
   int strikeDurationMs = kDefaultStrikeMs;
-  bool plusVisible = false;
-  ULONGLONG plusStarted = 0;
   bool dirty = false;
   bool timerRunning = false;
 };
@@ -284,6 +296,8 @@ void SaveState() {
   WritePrivateProfileStringW(L"state", L"total", total, path.c_str());
   WritePrivateProfileStringW(L"state", L"x", x, path.c_str());
   WritePrivateProfileStringW(L"state", L"y", y, path.c_str());
+  WritePrivateProfileStringW(
+      L"state", L"paused", gState.paused ? L"1" : L"0", path.c_str());
   gState.dirty = false;
 }
 
@@ -339,9 +353,10 @@ void DrawCenteredText(Gdiplus::Graphics& graphics,
                       const std::wstring& text,
                       const Gdiplus::RectF& rect,
                       float fontSize,
-                      BYTE alpha) {
-  Gdiplus::Font font(
-      L"Segoe UI", fontSize, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                      BYTE alpha,
+                      const wchar_t* family = L"Segoe UI",
+                      Gdiplus::FontStyle style = Gdiplus::FontStyleBold) {
+  Gdiplus::Font font(family, fontSize, style, Gdiplus::UnitPixel);
   Gdiplus::StringFormat format;
   format.SetAlignment(Gdiplus::StringAlignmentCenter);
   format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
@@ -356,9 +371,18 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
   graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
   graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
 
-  DrawCenteredText(
-      graphics, std::to_wstring(gState.total),
-      Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), 30.0f, 255);
+  const std::wstring totalText = std::to_wstring(gState.total);
+  float totalFont = 36.0f;
+  if (totalText.size() > 18) {
+    totalFont = 27.0f;
+  }
+  if (totalText.size() > 24) {
+    totalFont = 23.0f;
+  }
+  // Monospaced digits keep the number from jittering as digits are added.
+  DrawCenteredText(graphics, totalText,
+                   Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), totalFont, 255,
+                   L"Consolas");
 
   Gdiplus::SolidBrush shadow(Gdiplus::Color(62, 0, 0, 0));
   graphics.FillEllipse(&shadow, 34.0f, 227.0f, 172.0f, 18.0f);
@@ -366,18 +390,23 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
   graphics.DrawImage(
       gFish.image.get(), Gdiplus::RectF(18.0f, 102.0f, 232.0f, 140.0f));
 
-  float angle = 6.0f;
+  float progress = 0.0f;
   if (gState.striking) {
     const float elapsed =
         static_cast<float>(now - gState.strikeStarted);
-    const float progress =
+    progress =
         std::clamp(elapsed / static_cast<float>(gState.strikeDurationMs),
                    0.0f, 1.0f);
-    if (progress < 0.36f) {
-      const float down = SmoothStep(progress / 0.36f);
+  }
+
+  float angle = 6.0f;
+  if (gState.striking) {
+    if (progress < kContactPhase) {
+      const float down = SmoothStep(progress / kContactPhase);
       angle = 6.0f + (-4.5f - 6.0f) * down;
     } else {
-      const float up = SmoothStep((progress - 0.36f) / 0.64f);
+      const float up = SmoothStep((progress - kContactPhase) /
+                                  (1.0f - kContactPhase));
       angle = -4.5f + (6.0f + 4.5f) * up;
     }
   }
@@ -390,19 +419,16 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
       gMallet.image.get(), Gdiplus::RectF(72.0f, 63.0f, 214.0f, 54.0f));
   graphics.Restore(transformState);
 
-  // Draw +1 last so the mallet can never cover it.
-  if (gState.plusVisible) {
-    const float progress = std::clamp(
-        static_cast<float>(now - gState.plusStarted) /
-            static_cast<float>(gState.strikeDurationMs),
-        0.0f, 1.0f);
-    const float eased = SmoothStep(progress);
-    const float y = 66.0f - 12.0f * eased;
-    const BYTE alpha = static_cast<BYTE>(
-        std::clamp(255.0f * (1.0f - 0.72f * eased), 0.0f, 255.0f));
+  // Draw the middle band last so the mallet can never cover it.
+  if (gState.paused) {
+    DrawCenteredText(graphics, L"已暂停",
+                     Gdiplus::RectF(0.0f, 66.0f, 240.0f, 30.0f), 18.0f, 200,
+                     L"Segoe UI", Gdiplus::FontStyleRegular);
+  } else if (gState.striking && progress >= kPlusStartPhase &&
+             progress <= kPlusEndPhase) {
     DrawCenteredText(
-        graphics, L"+1", Gdiplus::RectF(0.0f, y, 240.0f, 30.0f),
-        22.0f, alpha);
+        graphics, L"+1", Gdiplus::RectF(0.0f, 66.0f, 240.0f, 30.0f),
+        22.0f, 255);
   }
 }
 
@@ -478,6 +504,9 @@ void EnsureAnimationTimer() {
 }
 
 void CountOneOperation() {
+  if (gState.paused) {
+    return;
+  }
   const ULONGLONG now = GetTickCount64();
   int nextDuration = kDefaultStrikeMs;
 
@@ -488,7 +517,7 @@ void CountOneOperation() {
           gState.intervalEma * 0.65 +
           static_cast<double>(interval) * 0.35;
       nextDuration = std::clamp(
-          static_cast<int>(std::lround(gState.intervalEma * 0.92)),
+          static_cast<int>(std::lround(gState.intervalEma * kTempoFactor)),
           kMinStrikeMs, kMaxStrikeMs);
     } else {
       gState.intervalEma = static_cast<double>(kDefaultStrikeMs);
@@ -505,8 +534,6 @@ void CountOneOperation() {
     gState.striking = true;
     gState.strikeStarted = now;
     gState.strikeDurationMs = nextDuration;
-    gState.plusVisible = true;
-    gState.plusStarted = now;
   }
 
   const bool wasRunning = gState.timerRunning;
@@ -517,6 +544,9 @@ void CountOneOperation() {
 }
 
 void CountScrollGesture() {
+  if (gState.paused) {
+    return;
+  }
   const ULONGLONG now = GetTickCount64();
   const bool startsNewGesture =
       gState.lastScrollEventTime == 0 ||
@@ -560,6 +590,15 @@ LRESULT CALLBACK MouseHook(
   return CallNextHookEx(gState.mouseHook, code, message, data);
 }
 
+void ShowPrivacyNotice(HWND owner) {
+  MessageBoxW(
+      owner,
+      L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
+      L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
+      L"剪贴板或屏幕内容；程序不包含联网功能。",
+      L"隐私说明", MB_OK | MB_ICONINFORMATION);
+}
+
 void ShowPrivacyNoticeIfNeeded(HWND owner) {
   const std::wstring path = DataPath();
   if (path.empty() ||
@@ -567,12 +606,7 @@ void ShowPrivacyNoticeIfNeeded(HWND owner) {
     return;
   }
 
-  MessageBoxW(
-      owner,
-      L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\\n\\n"
-      L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
-      L"剪贴板或屏幕内容；程序不包含联网功能。",
-      L"隐私说明", MB_OK | MB_ICONINFORMATION);
+  ShowPrivacyNotice(owner);
   WritePrivateProfileStringW(
       L"state", L"privacy_shown", L"1", path.c_str());
 }
@@ -602,30 +636,67 @@ void ClampWindowToWorkArea() {
       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+void ApplyWindowDpi(HWND window) {
+  using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+  const HMODULE user32 = GetModuleHandleW(L"user32.dll");
+  const auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
+      GetProcAddress(user32, "GetDpiForWindow"));
+  if (getDpiForWindow == nullptr) {
+    return;
+  }
+  const UINT windowDpi = getDpiForWindow(window);
+  if (windowDpi == 0 || windowDpi == gState.dpi) {
+    return;
+  }
+
+  gState.dpi = windowDpi;
+  gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
+  gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
+  RECT rect = {};
+  GetWindowRect(window, &rect);
+  SetWindowPos(window, nullptr, rect.left, rect.top, gState.windowWidth,
+               gState.windowHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 void ShowContextMenu(HWND window, POINT screenPoint) {
   HMENU menu = CreatePopupMenu();
   if (menu == nullptr) {
     return;
   }
-  AppendMenuW(menu, MF_STRING, 1, L"功德清零");
+  AppendMenuW(menu, MF_STRING, kMenuTogglePause,
+              gState.paused ? L"继续计数" : L"暂停计数");
+  AppendMenuW(menu, MF_STRING, kMenuClearTotal, L"清空总功德");
+  AppendMenuW(menu, MF_STRING, kMenuPrivacyNotice, L"隐私说明");
   AppendMenuW(
       menu,
       MF_STRING | (IsLaunchAtLoginEnabled() ? MF_CHECKED : MF_UNCHECKED),
-      2, L"登录后自动启动");
+      kMenuLaunchAtLogin, L"登录后自动启动");
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, 3, L"退出");
+  AppendMenuW(menu, MF_STRING, kMenuQuit, L"退出");
 
   const int command = TrackPopupMenu(
       menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
       screenPoint.x, screenPoint.y, 0, window, nullptr);
   DestroyMenu(menu);
 
-  if (command == 1) {
-    gState.total = 0;
+  if (command == static_cast<int>(kMenuTogglePause)) {
+    gState.paused = !gState.paused;
     gState.dirty = true;
     SaveState();
     RenderLayeredWindow(GetTickCount64());
-  } else if (command == 2) {
+  } else if (command == static_cast<int>(kMenuClearTotal)) {
+    const int choice = MessageBoxW(
+        window, L"确定清空全部功德？此操作无法撤销。", kWindowTitle,
+        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+    if (choice == IDYES) {
+      gState.total = 0;
+      gState.dirty = true;
+      SaveState();
+      RenderLayeredWindow(GetTickCount64());
+    }
+  } else if (command == static_cast<int>(kMenuPrivacyNotice)) {
+    ShowPrivacyNotice(window);
+  } else if (command == static_cast<int>(kMenuLaunchAtLogin)) {
     const bool enabled = !IsLaunchAtLoginEnabled();
     if (SetLaunchAtLoginEnabled(enabled)) {
       SaveLaunchAtLoginPreference(enabled);
@@ -633,7 +704,7 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
       MessageBoxW(window, L"无法修改登录启动项，请稍后重试。",
                   kWindowTitle, MB_OK | MB_ICONERROR);
     }
-  } else if (command == 3) {
+  } else if (command == static_cast<int>(kMenuQuit)) {
     DestroyWindow(window);
   }
 }
@@ -658,12 +729,11 @@ LRESULT CALLBACK WindowProcedure(
         break;
       }
       const ULONGLONG now = GetTickCount64();
-      bool needsRender = gState.striking || gState.plusVisible;
+      bool needsRender = gState.striking;
       if (gState.striking &&
           now - gState.strikeStarted >=
               static_cast<ULONGLONG>(gState.strikeDurationMs)) {
         gState.striking = false;
-        gState.plusVisible = false;
         needsRender = true;
       }
       if (needsRender) {
@@ -673,7 +743,7 @@ LRESULT CALLBACK WindowProcedure(
           now - gState.lastInputTime >= 500) {
         SaveState();
       }
-      if (!gState.striking && !gState.plusVisible && !gState.dirty) {
+      if (!gState.striking && !gState.dirty) {
         KillTimer(window, kAnimationTimer);
         gState.timerRunning = false;
       }
@@ -810,6 +880,8 @@ int WINAPI wWinMain(
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
   gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
   gState.total = ReadIniTotal();
+  gState.paused =
+      GetPrivateProfileIntW(L"state", L"paused", 0, DataPath().c_str()) == 1;
 
   RECT workArea = {};
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
@@ -837,6 +909,9 @@ int WINAPI wWinMain(
     return 1;
   }
 
+  // A per-monitor aware process must size itself from the DPI of the monitor
+  // that actually hosts the window, which can differ from the system DPI.
+  ApplyWindowDpi(window);
   ClampWindowToWorkArea();
   RenderLayeredWindow(GetTickCount64());
   ShowWindow(window, SW_SHOWNOACTIVATE);
