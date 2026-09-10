@@ -5,7 +5,6 @@
 #include <cmath>
 
 static NSString *const kTotal = @"total";
-static NSString *const kPaused = @"paused";
 static NSString *const kLaunchAtLoginConfigured = @"launchAtLoginConfigured";
 static NSString *const kLaunchAtLoginEnabled = @"launchAtLoginEnabled";
 static NSString *const kLaunchAgentLabel = @"cn.niuma.merit.autostart";
@@ -45,7 +44,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic) CFMachPortRef eventTap;
 @property(nonatomic) CFRunLoopSourceRef eventSource;
 @property(nonatomic) long long total;
-@property(nonatomic) BOOL paused;
 @property(nonatomic) BOOL dirty;
 @property(nonatomic) BOOL strikeActive;
 @property(nonatomic) BOOL inputMonitoringAuthorized;
@@ -181,12 +179,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                          hints:nil];
   [NSGraphicsContext restoreGraphicsState];
 
-  if (controller.paused) {
-    [self drawCenteredText:@"已暂停"
-                      rect:NSMakeRect(0, 148, kWindowWidth, 30)
-                      font:[NSFont systemFontOfSize:18 weight:NSFontWeightRegular]
-                     color:[NSColor colorWithCalibratedRed:.94 green:.50 blue:.16 alpha:.8]];
-  } else if (striking && phase >= .30 && phase <= .70) {
+  if (striking && phase >= .30 && phase <= .70) {
     [self drawCenteredText:@"+1"
                       rect:NSMakeRect(0, 148, kWindowWidth, 30)
                       font:[NSFont monospacedDigitSystemFontOfSize:23
@@ -204,7 +197,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)loadState {
   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
   self.total = [defaults integerForKey:kTotal];
-  self.paused = [defaults boolForKey:kPaused];
   self.strikeActive = NO;
   self.strikeStartTime = -1;
   self.lastInputTime = 0;
@@ -217,7 +209,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (!self.dirty) return;
   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
   [defaults setInteger:self.total forKey:kTotal];
-  [defaults setBool:self.paused forKey:kPaused];
   self.dirty = NO;
 }
 
@@ -516,7 +507,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)count {
-  if (self.paused) return;
   self.total++;
   self.dirty = YES;
   NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
@@ -539,7 +529,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)countScrollGesture {
-  if (self.paused) return;
   NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
   BOOL beginsNewGesture = self.lastScrollEventTime <= 0 ||
                           now - self.lastScrollEventTime > kScrollGestureIdleGap;
@@ -575,16 +564,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     enable.target = self;
     [menu addItem:enable];
   }
-  NSMenuItem *pause = [[NSMenuItem alloc] initWithTitle:(self.paused ? @"继续计数" : @"暂停计数")
-                                                action:@selector(togglePause:)
-                                         keyEquivalent:@""];
-  pause.target = self;
-  [menu addItem:pause];
-  NSMenuItem *clear = [[NSMenuItem alloc] initWithTitle:@"清空总功德"
-                                                action:@selector(clearTotal:)
-                                         keyEquivalent:@""];
-  clear.target = self;
-  [menu addItem:clear];
   NSMenuItem *privacy = [[NSMenuItem alloc] initWithTitle:@"隐私说明"
                                                   action:@selector(showPrivacyNotice:)
                                            keyEquivalent:@""];
@@ -613,15 +592,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [self setLaunchAtLoginEnabled:!self.isLaunchAtLoginEnabled showError:YES];
 }
 
-- (void)togglePause:(id)sender {
-  (void)sender;
-  self.paused = !self.paused;
-  self.lastScrollEventTime = 0;
-  self.dirty = YES;
-  [self saveState];
-  [self.view setNeedsDisplay:YES];
-}
-
 - (void)showPrivacyNotice:(id)sender {
   (void)sender;
   NSAlert *alert = [[NSAlert alloc] init];
@@ -631,24 +601,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       @"所有数据仅保存在本机，不联网，不上传。";
   [alert addButtonWithTitle:@"知道了"];
   [alert runModal];
-}
-
-- (void)clearTotal:(id)sender {
-  (void)sender;
-  NSAlert *alert = [[NSAlert alloc] init];
-  alert.messageText = @"确定清空全部功德？";
-  alert.informativeText = @"这个操作无法撤销。";
-  [alert addButtonWithTitle:@"清空"];
-  [alert addButtonWithTitle:@"取消"];
-  if ([alert runModal] == NSAlertFirstButtonReturn) {
-    self.total = 0;
-    self.lastInputTime = 0;
-    self.lastScrollEventTime = 0;
-    self.smoothedInputInterval = kDefaultStrikeDuration;
-    self.dirty = YES;
-    [self saveState];
-    [self.view setNeedsDisplay:YES];
-  }
 }
 
 @end

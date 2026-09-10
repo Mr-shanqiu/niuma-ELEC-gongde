@@ -54,11 +54,9 @@ constexpr float kPlusStartPhase = 0.30f;
 constexpr float kPlusEndPhase = 0.70f;
 
 // Context menu command identifiers.
-constexpr UINT_PTR kMenuTogglePause = 1;
-constexpr UINT_PTR kMenuClearTotal = 2;
-constexpr UINT_PTR kMenuPrivacyNotice = 3;
-constexpr UINT_PTR kMenuLaunchAtLogin = 4;
-constexpr UINT_PTR kMenuQuit = 5;
+constexpr UINT_PTR kMenuPrivacyNotice = 1;
+constexpr UINT_PTR kMenuLaunchAtLogin = 2;
+constexpr UINT_PTR kMenuQuit = 3;
 
 struct PngResource {
   IStream* stream = nullptr;
@@ -86,7 +84,6 @@ struct AppState {
   int windowWidth = kWindowDipWidth;
   int windowHeight = kWindowDipHeight;
   std::uint64_t total = 0;
-  bool paused = false;
   ULONGLONG lastInputTime = 0;
   ULONGLONG lastScrollEventTime = 0;
   double intervalEma = static_cast<double>(kDefaultStrikeMs);
@@ -296,8 +293,6 @@ void SaveState() {
   WritePrivateProfileStringW(L"state", L"total", total, path.c_str());
   WritePrivateProfileStringW(L"state", L"x", x, path.c_str());
   WritePrivateProfileStringW(L"state", L"y", y, path.c_str());
-  WritePrivateProfileStringW(
-      L"state", L"paused", gState.paused ? L"1" : L"0", path.c_str());
   gState.dirty = false;
 }
 
@@ -420,12 +415,8 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
   graphics.Restore(transformState);
 
   // Draw the middle band last so the mallet can never cover it.
-  if (gState.paused) {
-    DrawCenteredText(graphics, L"已暂停",
-                     Gdiplus::RectF(0.0f, 66.0f, 240.0f, 30.0f), 18.0f, 200,
-                     L"Segoe UI", Gdiplus::FontStyleRegular);
-  } else if (gState.striking && progress >= kPlusStartPhase &&
-             progress <= kPlusEndPhase) {
+  if (gState.striking && progress >= kPlusStartPhase &&
+      progress <= kPlusEndPhase) {
     DrawCenteredText(
         graphics, L"+1", Gdiplus::RectF(0.0f, 66.0f, 240.0f, 30.0f),
         22.0f, 255);
@@ -504,9 +495,6 @@ void EnsureAnimationTimer() {
 }
 
 void CountOneOperation() {
-  if (gState.paused) {
-    return;
-  }
   const ULONGLONG now = GetTickCount64();
   int nextDuration = kDefaultStrikeMs;
 
@@ -544,9 +532,6 @@ void CountOneOperation() {
 }
 
 void CountScrollGesture() {
-  if (gState.paused) {
-    return;
-  }
   const ULONGLONG now = GetTickCount64();
   const bool startsNewGesture =
       gState.lastScrollEventTime == 0 ||
@@ -663,9 +648,6 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   if (menu == nullptr) {
     return;
   }
-  AppendMenuW(menu, MF_STRING, kMenuTogglePause,
-              gState.paused ? L"继续计数" : L"暂停计数");
-  AppendMenuW(menu, MF_STRING, kMenuClearTotal, L"清空总功德");
   AppendMenuW(menu, MF_STRING, kMenuPrivacyNotice, L"隐私说明");
   AppendMenuW(
       menu,
@@ -679,22 +661,7 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
       screenPoint.x, screenPoint.y, 0, window, nullptr);
   DestroyMenu(menu);
 
-  if (command == static_cast<int>(kMenuTogglePause)) {
-    gState.paused = !gState.paused;
-    gState.dirty = true;
-    SaveState();
-    RenderLayeredWindow(GetTickCount64());
-  } else if (command == static_cast<int>(kMenuClearTotal)) {
-    const int choice = MessageBoxW(
-        window, L"确定清空全部功德？此操作无法撤销。", kWindowTitle,
-        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
-    if (choice == IDYES) {
-      gState.total = 0;
-      gState.dirty = true;
-      SaveState();
-      RenderLayeredWindow(GetTickCount64());
-    }
-  } else if (command == static_cast<int>(kMenuPrivacyNotice)) {
+  if (command == static_cast<int>(kMenuPrivacyNotice)) {
     ShowPrivacyNotice(window);
   } else if (command == static_cast<int>(kMenuLaunchAtLogin)) {
     const bool enabled = !IsLaunchAtLoginEnabled();
@@ -880,8 +847,6 @@ int WINAPI wWinMain(
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
   gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
   gState.total = ReadIniTotal();
-  gState.paused =
-      GetPrivateProfileIntW(L"state", L"paused", 0, DataPath().c_str()) == 1;
 
   RECT workArea = {};
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
