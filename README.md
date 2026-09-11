@@ -74,17 +74,19 @@ cmake --build build --config Release
 ### Windows（云端真实构建 + 用户真机基础运行）
 
 - GitHub Actions 已在真实 `windows-2022` runner 上用 MSVC Release 构建成功（`Visual Studio 17 2022`，x64）。
-- 单平台产物：`niuma-merit.exe` 约 `711KB`，ZIP 约 `626KB`，均小于 `5MB` 目标。
+- 最新图标版构建记录：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde/actions/runs/34553422972>。
+- 最新图标版产物：`niuma-merit.exe` 约 `812KB`，ZIP 约 `676KB`，均小于 `5MB` 目标。
 - 静态链接 C/C++ Runtime，用户无需安装 VC 运行库。
-- 用户已在**一台真实 Windows 电脑**上确认应用基础运行正常。
-- 该结论只覆盖“单台机器 + 基础运行”，不等于 Windows 7 / 10 / 11 全版本兼容，也不替代逐项输入行为、自启动和性能测试。
+- 用户已在**一台真实 Windows 电脑**上确认上一版应用基础运行正常；最新图标版仍需重新进行真机确认。
+- 真机结论只覆盖“单台机器 + 基础运行”，不等于 Windows 7 / 10 / 11 全版本兼容，也不替代逐项输入行为、自启动和性能测试。
 
 ### macOS（本机构建与运行）
 
 - 本地构建脚本 `./scripts/build-macos.sh` 成功。
 - `lipo -info`：`x86_64 arm64`（Universal 2）。
 - `codesign -d --entitlements -` 不包含 App Sandbox 或网络 entitlement。
-- `.app` 约 `768KB`，ZIP 约 `584KB`，均小于 `5MB` 目标。
+- 最新图标版 `.app` 约 `2.38MB`，ZIP 约 `2.30MB`，演示 DMG 约 `2.78MB`，均小于 `5MB` 目标。
+- 演示 DMG 已通过 `hdiutil verify` 完整性校验。
 - 启动 8 秒后实测：RSS 约 `35MB~46MB`，空闲 CPU 长时均值接近 `0%`。
 - 登录后自启动 LaunchAgent 已实现并被 macOS 接受。
 
@@ -95,7 +97,7 @@ cmake --build build --config Release
 
 ## 尚未验收（不声称已完成）
 
-- Windows：系统版本兼容性矩阵（Windows 7 SP1 / Windows 10 22H2 / 当前 Windows 11）、多显示器混合 DPI、100%/125%/150%/200% 缩放、键盘与全部鼠标按键逐个验证、滚轮手势合并、高频输入、暂停、持久化、窗口拖动、自启动、CPU 与内存实测。
+- Windows：最新图标版真机运行、系统版本兼容性矩阵（Windows 7 SP1 / Windows 10 22H2 / 当前 Windows 11）、多显示器混合 DPI、100%/125%/150%/200% 缩放、键盘与全部鼠标按键逐个验证、滚轮手势合并、高频输入、持久化、窗口拖动、自启动、CPU 与内存实测。
 - macOS：干净环境首次权限引导流程、Intel Mac 真机运行、权限被系统撤销后的恢复、Developer ID 签名、苹果公证与 staple、Gatekeeper 验证。
 - 两个平台：正式签名后的包体与性能复测。
 

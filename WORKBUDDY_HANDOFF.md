@@ -210,7 +210,18 @@ SHA-256：
 7. `README.md`：更新 Windows 真实构建状态、未签名说明、双平台实测数据与“尚未验收”清单；补充新仓库地址。
 8. 本地 `git remote` 已更新为新仓库名；文档中的旧仓库地址已全部替换。
 
-待验证：Windows 源码改动未经过任何 Windows 编译器验证，必须在 GitHub Actions 重新构建成功、并重新跑一遍真机逐项测试后才能称为“Windows 完成”。
+后续接管结果（2026-09-11）：
+
+- 用户确认保留 GPLv3，许可证不再是待决事项。
+- 已确认 WorkBuddy 连续构建失败的根因之一是 `src/windows/app.rc` 将应用图标错误声明为数字资源类型 `1`；该数字在 Win32 中对应光标，而不是 `ICON` 资源脚本关键字。
+- 已改回标准 `ICON` 声明，并将 ICO 生成器改为保留透明通道的 32 位 BGRA DIB 与 AND mask。
+- 已关闭 MSVC 链接器自动生成的默认 manifest，保留项目自带的 DPI、兼容性与 `asInvoker` manifest，消除重复 manifest 错误。
+- 已统一本地与远端分叉并推送到公开仓库主分支。
+- 最新 Windows GitHub Actions MSVC Release 构建成功：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde/actions/runs/34553422972>。
+- 最新 Windows EXE 约 `812KB`，ZIP 约 `676KB`，ZIP 完整性检查通过；该图标版仍待用户在真实 Windows 电脑重新运行确认。
+- macOS 最新代码已完成离线审计和 Universal 2 真实构建；演示 DMG 约 `2.78MB` 并通过 `hdiutil verify`。
+
+仍待验证：最新 Windows 图标版真机行为、详细 Windows 测试矩阵、macOS 当前输入监控全局计数、正式双平台签名与发布。
 
 ## 12. WorkBuddy 接手提示词
 
@@ -249,4 +260,3 @@ SHA-256：
 
 执行中必须把源码检查、构建成功、真机运行、兼容性验收和正式发布分别报告，不得互相替代。先向我提交接管审计和下一步计划，再等待我确认是否继续修改。
 ```
-
