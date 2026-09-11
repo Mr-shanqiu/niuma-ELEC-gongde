@@ -11,8 +11,9 @@
 // RCDATA = 10
 101 10 "woodfish.png"
 102 10 "mallet.png"
-// ICON = 1
-103 1 "appicon.ico"
+// ICON is a resource-script keyword. Do not replace it with numeric type 1:
+// Win32 resource type 1 is RT_CURSOR, not an application icon.
+103 ICON "appicon.ico"
 
 // VS_VERSION_INFO = 16
 VS_VERSION_INFO VERSIONINFO
