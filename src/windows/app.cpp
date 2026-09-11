@@ -28,7 +28,6 @@ namespace {
 
 constexpr wchar_t kWindowClass[] = L"NiuMaMeritWindow";
 constexpr wchar_t kPickerClass[] = L"NiuMaMeritAppearancePicker";
-constexpr wchar_t kWindowTitle[] = L"牛马电子功德";
 constexpr wchar_t kMutexName[] = L"Local\\NiuMaMeritCounter";
 constexpr wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -65,6 +64,18 @@ constexpr UINT_PTR kMenuAbout = 1;
 constexpr UINT_PTR kMenuLaunchAtLogin = 2;
 constexpr UINT_PTR kMenuAppearance = 3;
 constexpr UINT_PTR kMenuQuit = 4;
+
+bool IsChineseUi() {
+  return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;
+}
+
+const wchar_t* UiText(const wchar_t* chinese, const wchar_t* english) {
+  return IsChineseUi() ? chinese : english;
+}
+
+const wchar_t* WindowTitle() {
+  return UiText(L"牛马电子功德", L"NiuMa Merit");
+}
 
 enum class MeritScene : int {
   Woodfish = 0,
@@ -684,32 +695,41 @@ LRESULT CALLBACK MouseHook(
 void ShowPrivacyNotice(HWND owner) {
   MessageBoxW(
       owner,
-      L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
-      L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
-      L"剪贴板或屏幕内容；程序不包含联网功能。",
-      L"隐私说明", MB_OK | MB_ICONINFORMATION);
+      UiText(
+          L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
+          L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
+          L"剪贴板或屏幕内容；程序不包含联网功能。",
+          L"NiuMa Merit counts only keyboard presses, mouse button presses, "
+          L"and scroll gestures.\n\nIt does not read, save, or upload key content, "
+          L"mouse positions, the current app, clipboard data, or screen content. "
+          L"The app has no network features."),
+      UiText(L"隐私说明", L"Privacy"), MB_OK | MB_ICONINFORMATION);
 }
 
 void ShowAboutDialog(HWND owner) {
   const std::wstring version = L"0.3.0";
-  std::wstring text = L"牛马电子功德 v" + version + L"\n\n";
-  text += L"只统计按键、鼠标按键和滚轮手势发生的次数，"
-          L"不读取具体内容、鼠标位置或窗口信息。\n";
-  text += L"所有数据仅保存在本机，本软件不包含网络请求、"
-          L"遥测或自动更新。\n\n";
-  text += L"客户端源代码依 GPLv3 许可证开放。\n\n";
-  text += L"项目主页：\n";
+  std::wstring text = IsChineseUi()
+      ? L"牛马电子功德 v" + version + L"\n\n"
+        L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
+        L"鼠标位置或窗口信息。\n所有数据仅保存在本机，本软件不包含网络请求、"
+        L"遥测或自动更新。\n\n客户端源代码依 GPLv3 许可证开放。\n\n项目主页：\n"
+      : L"NiuMa Merit v" + version + L"\n\n"
+        L"Counts keyboard presses, mouse button presses, and scroll gestures without "
+        L"reading specific content, mouse positions, or window information.\n"
+        L"All data stays on this computer. The app contains no network requests, "
+        L"telemetry, or automatic updates.\n\nClient source code is available under GPLv3."
+        L"\n\nProject page:\n";
   text += L"https://github.com/Mr-shanqiu/niuma-ELEC-gongde";
-  MessageBoxW(owner, text.c_str(), L"关于牛马电子功德",
+  MessageBoxW(owner, text.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
               MB_OK | MB_ICONINFORMATION);
 }
 
 const wchar_t* SceneTitle(MeritScene scene) {
   switch (scene) {
-    case MeritScene::LuckyCat: return L"招财猫";
-    case MeritScene::ChickPecking: return L"小鸡啄米";
-    case MeritScene::HamsterWheel: return L"仓鼠跑轮";
-    default: return L"默认木鱼";
+    case MeritScene::LuckyCat: return UiText(L"招财猫", L"Lucky Cat");
+    case MeritScene::ChickPecking: return UiText(L"小鸡啄米", L"Pecking Chick");
+    case MeritScene::HamsterWheel: return UiText(L"仓鼠跑轮", L"Hamster Wheel");
+    default: return UiText(L"默认木鱼", L"Woodfish");
   }
 }
 
@@ -779,11 +799,11 @@ LRESULT CALLBACK PickerWindowProcedure(
   switch (message) {
     case WM_CREATE: {
       const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
-      CreateWindowW(L"BUTTON", L"确认", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+      CreateWindowW(L"BUTTON", UiText(L"确认", L"Confirm"), WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
           ScaleDip(188, dpi), ScaleDip(302, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
           window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
           GetModuleHandleW(nullptr), nullptr);
-      CreateWindowW(L"BUTTON", L"取消", WS_CHILD | WS_VISIBLE,
+      CreateWindowW(L"BUTTON", UiText(L"取消", L"Cancel"), WS_CHILD | WS_VISIBLE,
           ScaleDip(272, dpi), ScaleDip(302, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
           window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
           GetModuleHandleW(nullptr), nullptr);
@@ -843,7 +863,7 @@ void ShowAppearancePicker(HWND owner) {
       proposedY, static_cast<int>(monitorInfo.rcWork.top),
       static_cast<int>(monitorInfo.rcWork.bottom) - height);
   gPicker.window = CreateWindowExW(
-      WS_EX_TOOLWINDOW, kPickerClass, L"更换形象", WS_CAPTION | WS_SYSMENU,
+      WS_EX_TOOLWINDOW, kPickerClass, UiText(L"更换形象", L"Change Appearance"), WS_CAPTION | WS_SYSMENU,
       pickerX, pickerY,
       width, height, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
   if (gPicker.window == nullptr) return;
@@ -940,14 +960,16 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   if (menu == nullptr) {
     return;
   }
-  AppendMenuW(menu, MF_STRING, kMenuAbout, L"关于牛马电子功德");
+  AppendMenuW(menu, MF_STRING, kMenuAbout,
+              UiText(L"关于牛马电子功德", L"About NiuMa Merit"));
   AppendMenuW(
       menu,
       MF_STRING | (IsLaunchAtLoginEnabled() ? MF_CHECKED : MF_UNCHECKED),
-      kMenuLaunchAtLogin, L"登录后自动启动");
-  AppendMenuW(menu, MF_STRING, kMenuAppearance, L"更换形象");
+      kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"));
+  AppendMenuW(menu, MF_STRING, kMenuAppearance,
+              UiText(L"更换形象", L"Change Appearance"));
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, kMenuQuit, L"退出");
+  AppendMenuW(menu, MF_STRING, kMenuQuit, UiText(L"退出", L"Exit"));
 
   const int command = TrackPopupMenu(
       menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
@@ -961,8 +983,10 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     if (SetLaunchAtLoginEnabled(enabled)) {
       SaveLaunchAtLoginPreference(enabled);
     } else {
-      MessageBoxW(window, L"无法修改登录启动项，请稍后重试。",
-                  kWindowTitle, MB_OK | MB_ICONERROR);
+      MessageBoxW(window,
+                  UiText(L"无法修改登录启动项，请稍后重试。",
+                         L"Unable to change login startup. Please try again."),
+                  WindowTitle(), MB_OK | MB_ICONERROR);
     }
   } else if (command == static_cast<int>(kMenuAppearance)) {
     ShowAppearancePicker(window);
@@ -1110,7 +1134,8 @@ int WINAPI wWinMain(
 
   if (!LoadAllPngResources()) {
     MessageBoxW(
-        nullptr, L"形象资源加载失败。", kWindowTitle,
+        nullptr, UiText(L"形象资源加载失败。",
+                        L"Appearance resources could not be loaded."), WindowTitle(),
         MB_OK | MB_ICONERROR);
     ReleaseAllPngResources();
     Gdiplus::GdiplusShutdown(gState.gdiplusToken);
@@ -1176,7 +1201,7 @@ int WINAPI wWinMain(
 
   HWND window = CreateWindowExW(
       WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-      kWindowClass, kWindowTitle, WS_POPUP,
+      kWindowClass, WindowTitle(), WS_POPUP,
       static_cast<int>(x), static_cast<int>(y),
       gState.windowWidth, gState.windowHeight,
       nullptr, nullptr, instance, nullptr);
@@ -1212,7 +1237,8 @@ int WINAPI wWinMain(
       SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
   if (gState.keyboardHook == nullptr || gState.mouseHook == nullptr) {
     MessageBoxW(
-        window, L"无法启动全局键盘或鼠标计数。", kWindowTitle,
+        window, UiText(L"无法启动全局键盘或鼠标计数。",
+                       L"Unable to start global keyboard or mouse counting."), WindowTitle(),
         MB_OK | MB_ICONERROR);
     DestroyWindow(window);
   }

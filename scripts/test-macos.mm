@@ -13,6 +13,12 @@ static void Snapshot(NSView *view, NSString *name) {
 int main() {
   @autoreleasepool {
     [NSApplication sharedApplication];
+    const char *expectedLanguage = getenv("NIUMA_UI_LANGUAGE");
+    assert(expectedLanguage != nullptr);
+    const BOOL expectChinese = strcmp(expectedLanguage, "zh") == 0;
+    assert(IsChineseUI() == expectChinese);
+    assert([UiText(@"中文", @"English")
+        isEqualToString:(expectChinese ? @"中文" : @"English")]);
     [NSFileManager.defaultManager createDirectoryAtPath:@"/tmp/niuma-acceptance"
         withIntermediateDirectories:YES attributes:nil error:nil];
     MeritController *controller = [[MeritController alloc] init];
@@ -94,6 +100,6 @@ int main() {
     Snapshot(controller.view, @"cat-wave.png");
     controller.strikeActive = NO;
     printf("PASS: 101 cat poses keep attachment fixed; paw moves vertically with zero horizontal drift\n");
-    printf("PASS: 100 key events; all mouse buttons; scroll grouping; ignored key-up; no animation queue; modal timer completion; overflow guard; four-card selection isolation; alpha and green-key checks; scene renders\n");
+    printf("PASS: %s UI localization; 100 key events; all mouse buttons; scroll grouping; ignored key-up; no animation queue; modal timer completion; overflow guard; four-card selection isolation; alpha and green-key checks; scene renders\n", expectedLanguage);
   }
 }

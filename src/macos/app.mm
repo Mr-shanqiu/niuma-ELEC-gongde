@@ -57,9 +57,17 @@ static NSString *const kSelectedScene = @"selectedScene";
 static NSString *const kLaunchAtLoginConfigured = @"launchAtLoginConfigured";
 static NSString *const kLaunchAtLoginEnabled = @"launchAtLoginEnabled";
 static NSString *const kLaunchAgentLabel = @"cn.niuma.merit.autostart";
-static NSString *const kPermissionIntroText =
-    @"为了在其他软件中也能敲木鱼，macOS 需要“输入监控”权限。"
-    @"本应用只判断是否发生按键/鼠标事件，不读取具体按键、鼠标坐标、窗口名或内容。";
+static BOOL IsChineseUI(void) {
+  NSString *override = NSProcessInfo.processInfo.environment[@"NIUMA_UI_LANGUAGE"];
+  if ([override isEqualToString:@"zh"]) return YES;
+  if ([override isEqualToString:@"en"]) return NO;
+  NSString *language = NSLocale.preferredLanguages.firstObject.lowercaseString;
+  return [language hasPrefix:@"zh"];
+}
+
+static NSString *UiText(NSString *chinese, NSString *english) {
+  return IsChineseUI() ? chinese : english;
+}
 
 static const CGFloat kUiScale = 0.5;
 static const CGFloat kWindowWidth = 240;
@@ -452,9 +460,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [defaults setBool:enabled forKey:kLaunchAtLoginEnabled];
   } else if (showError) {
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"无法修改登录启动项";
-    alert.informativeText = error.localizedDescription ?: @"请稍后重试。";
-    [alert addButtonWithTitle:@"知道了"];
+    alert.messageText = UiText(@"无法修改登录启动项", @"Unable to change login startup");
+    alert.informativeText = error.localizedDescription ?:
+        UiText(@"请稍后重试。", @"Please try again later.");
+    [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
     [alert runModal];
   }
   return succeeded;
@@ -577,11 +586,17 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)showPermissionIntroIfNeeded {
   if (self.inputMonitoringAuthorized) return;
   NSAlert *alert = [[NSAlert alloc] init];
-  alert.messageText = @"需要输入监控权限";
-  alert.informativeText = [NSString
-      stringWithFormat:@"%@\n\n本版本不包含联网功能，数据只保存在本机。", kPermissionIntroText];
-  [alert addButtonWithTitle:@"开启全局计数"];
-  [alert addButtonWithTitle:@"暂不开启"];
+  alert.messageText = UiText(@"需要输入监控权限", @"Input Monitoring Permission Required");
+  alert.informativeText = UiText(
+      @"为了在其他软件中也能计数，macOS 需要“输入监控”权限。"
+       @"本应用只判断是否发生按键或鼠标事件，不读取具体按键、鼠标坐标、窗口名或内容。\n\n"
+       @"本版本不包含联网功能，数据只保存在本机。",
+      @"To count while you use other apps, macOS requires Input Monitoring permission. "
+       @"This app only detects that a keyboard or mouse event occurred. It does not read "
+       @"specific keys, mouse coordinates, window names, or content.\n\n"
+       @"This version has no network features. All data stays on this Mac.");
+  [alert addButtonWithTitle:UiText(@"开启全局计数", @"Enable Global Counting")];
+  [alert addButtonWithTitle:UiText(@"暂不开启", @"Not Now")];
   if ([alert runModal] == NSAlertFirstButtonReturn) {
     [self requestListenPermission];
   }
@@ -754,13 +769,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)showContextMenu:(NSEvent *)event {
   NSMenu *menu = [[NSMenu alloc] init];
-  NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:@"关于牛马电子功德"
+  NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:UiText(@"关于牛马电子功德", @"About NiuMa Merit")
                                                 action:@selector(showAbout:)
                                          keyEquivalent:@""];
   about.target = self;
   [menu addItem:about];
   NSMenuItem *launchAtLogin = [[NSMenuItem alloc]
-      initWithTitle:@"登录后自动启动"
+      initWithTitle:UiText(@"登录后自动启动", @"Start at Login")
              action:@selector(toggleLaunchAtLogin:)
       keyEquivalent:@""];
   launchAtLogin.target = self;
@@ -768,13 +783,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       ? NSControlStateValueOn
       : NSControlStateValueOff;
   [menu addItem:launchAtLogin];
-  NSMenuItem *appearance = [[NSMenuItem alloc] initWithTitle:@"更换形象"
+  NSMenuItem *appearance = [[NSMenuItem alloc] initWithTitle:UiText(@"更换形象", @"Change Appearance")
                                                      action:@selector(showAppearancePicker:)
                                               keyEquivalent:@""];
   appearance.target = self;
   [menu addItem:appearance];
   [menu addItem:NSMenuItem.separatorItem];
-  NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"退出"
+  NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:UiText(@"退出", @"Quit")
                                                 action:@selector(terminate:)
                                          keyEquivalent:@""];
   quit.target = NSApp;
@@ -796,7 +811,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (NSView *)appearanceGrid {
   NSView *grid = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 324, 316)];
-  NSArray *titles = @[@"默认木鱼", @"招财猫", @"小鸡啄米", @"仓鼠跑轮"];
+  NSArray *titles = IsChineseUI()
+      ? @[@"默认木鱼", @"招财猫", @"小鸡啄米", @"仓鼠跑轮"]
+      : @[@"Woodfish", @"Lucky Cat", @"Pecking Chick", @"Hamster Wheel"];
   NSMutableArray *buttons = [NSMutableArray array];
   for (NSInteger i = 0; i < 4; ++i) {
     MeritView *preview = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, 120, 125)];
@@ -827,12 +844,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)showAppearancePicker:(id)sender {
   (void)sender;
   NSAlert *alert = [[NSAlert alloc] init];
-  alert.messageText = @"更换形象";
+  alert.messageText = UiText(@"更换形象", @"Change Appearance");
   alert.informativeText = @"";
   self.pendingScene = self.selectedScene;
   alert.accessoryView = [self appearanceGrid];
-  [alert addButtonWithTitle:@"确认"];
-  [alert addButtonWithTitle:@"取消"];
+  [alert addButtonWithTitle:UiText(@"确认", @"Confirm")];
+  [alert addButtonWithTitle:UiText(@"取消", @"Cancel")];
   if ([alert runModal] == NSAlertFirstButtonReturn) {
     self.selectedScene = (MeritScene)self.pendingScene;
     self.view.scene = self.selectedScene;
@@ -848,17 +865,24 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)showAbout:(id)sender {
   (void)sender;
   NSAlert *alert = [[NSAlert alloc] init];
-  alert.messageText = @"牛马电子功德";
-  alert.informativeText =
+  alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
+  alert.informativeText = UiText(
       @"版本 0.3.0\n\n"
-      @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
-      @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
-      @"客户端源代码依 GPLv3 许可证开放。\n\n"
-      @"项目主页：\n"
-      @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde";
-  [alert addButtonWithTitle:@"知道了"];
+       @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
+       @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
+       @"客户端源代码依 GPLv3 许可证开放。\n\n"
+       @"项目主页：\n"
+       @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde",
+      @"Version 0.3.0\n\n"
+       @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
+       @"specific input, mouse positions, or window information.\n"
+       @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"
+       @"Client source code is available under GPLv3.\n\n"
+       @"Project page:\n"
+       @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde");
+  [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
   if (!self.inputMonitoringAuthorized) {
-    [alert addButtonWithTitle:@"开启输入监控"];
+    [alert addButtonWithTitle:UiText(@"开启输入监控", @"Enable Input Monitoring")];
   }
   NSModalResponse response = [alert runModal];
   if (!self.inputMonitoringAuthorized && response == NSAlertSecondButtonReturn) {

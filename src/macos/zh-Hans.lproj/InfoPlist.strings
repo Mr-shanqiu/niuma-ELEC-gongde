@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "牛马电子功德";
+"CFBundleName" = "牛马电子功德";
+"NSInputMonitoringUsageDescription" = "只统计按键、鼠标按键和滚动操作发生的次数，不读取具体内容、位置或窗口信息。";

@@ -7,5 +7,6 @@ cp "$ROOT/dist/牛马电子功德.app/Contents/Resources/"*.png "$TEST_APP/Conte
 xcrun clang++ -std=c++17 -O2 -fobjc-arc -mmacosx-version-min=10.15 \
   "$ROOT/scripts/test-macos.mm" -framework AppKit -framework ApplicationServices \
   -o "$TEST_APP/Contents/MacOS/Acceptance"
-"$TEST_APP/Contents/MacOS/Acceptance"
+NIUMA_UI_LANGUAGE=zh "$TEST_APP/Contents/MacOS/Acceptance"
+NIUMA_UI_LANGUAGE=en "$TEST_APP/Contents/MacOS/Acceptance"
 "$ROOT/scripts/audit-offline.sh"
