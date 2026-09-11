@@ -27,7 +27,7 @@
 namespace {
 
 constexpr wchar_t kWindowClass[] = L"NiuMaMeritWindow";
-constexpr wchar_t kWindowTitle[] = L"牛马电子功德";
+constexpr wchar_t kPickerClass[] = L"NiuMaMeritAppearancePicker";
 constexpr wchar_t kMutexName[] = L"Local\\NiuMaMeritCounter";
 constexpr wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -37,6 +37,12 @@ constexpr UINT kScrollMessage = WM_APP + 2;
 constexpr UINT_PTR kAnimationTimer = 1;
 constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
+constexpr int kLuckyCatBaseResource = 104;
+constexpr int kLuckyCatActorResource = 105;
+constexpr int kChickBaseResource = 106;
+constexpr int kChickActorResource = 107;
+constexpr int kHamsterHabitatResource = 108;
+constexpr int kHamsterActorResource = 109;
 constexpr int kDesignWidth = 240;
 constexpr int kDesignHeight = 250;
 constexpr int kWindowDipWidth = 120;
@@ -55,9 +61,28 @@ constexpr float kPlusEndPhase = 0.70f;
 
 // Context menu command identifiers.
 constexpr UINT_PTR kMenuAbout = 1;
-constexpr UINT_PTR kMenuPrivacyNotice = 2;
-constexpr UINT_PTR kMenuLaunchAtLogin = 3;
+constexpr UINT_PTR kMenuLaunchAtLogin = 2;
+constexpr UINT_PTR kMenuAppearance = 3;
 constexpr UINT_PTR kMenuQuit = 4;
+
+bool IsChineseUi() {
+  return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;
+}
+
+const wchar_t* UiText(const wchar_t* chinese, const wchar_t* english) {
+  return IsChineseUi() ? chinese : english;
+}
+
+const wchar_t* WindowTitle() {
+  return UiText(L"牛马电子功德", L"NiuMa Merit");
+}
+
+enum class MeritScene : int {
+  Woodfish = 0,
+  LuckyCat = 1,
+  ChickPecking = 2,
+  HamsterWheel = 3,
+};
 
 struct PngResource {
   IStream* stream = nullptr;
@@ -93,11 +118,26 @@ struct AppState {
   int strikeDurationMs = kDefaultStrikeMs;
   bool dirty = false;
   bool timerRunning = false;
+  MeritScene selectedScene = MeritScene::Woodfish;
 };
 
 AppState gState;
 PngResource gFish;
 PngResource gMallet;
+PngResource gLuckyCatBase;
+PngResource gLuckyCatActor;
+PngResource gChickBase;
+PngResource gChickActor;
+PngResource gHamsterHabitat;
+PngResource gHamsterActor;
+
+struct PickerState {
+  HWND window = nullptr;
+  MeritScene pending = MeritScene::Woodfish;
+  bool confirmed = false;
+};
+
+PickerState gPicker;
 
 void EnableBestDpiAwareness() {
   using SetContextFn = BOOL(WINAPI*)(HANDLE);
@@ -294,6 +334,10 @@ void SaveState() {
   WritePrivateProfileStringW(L"state", L"total", total, path.c_str());
   WritePrivateProfileStringW(L"state", L"x", x, path.c_str());
   WritePrivateProfileStringW(L"state", L"y", y, path.c_str());
+  WritePrivateProfileStringW(
+      L"state", L"selected_scene",
+      std::to_wstring(static_cast<int>(gState.selectedScene)).c_str(),
+      path.c_str());
   gState.dirty = false;
 }
 
@@ -340,6 +384,36 @@ bool LoadPngResource(int resourceId, PngResource& output) {
   return true;
 }
 
+bool LoadAllPngResources() {
+  return LoadPngResource(kFishResource, gFish) &&
+         LoadPngResource(kMalletResource, gMallet) &&
+         LoadPngResource(kLuckyCatBaseResource, gLuckyCatBase) &&
+         LoadPngResource(kLuckyCatActorResource, gLuckyCatActor) &&
+         LoadPngResource(kChickBaseResource, gChickBase) &&
+         LoadPngResource(kChickActorResource, gChickActor) &&
+         LoadPngResource(kHamsterHabitatResource, gHamsterHabitat) &&
+         LoadPngResource(kHamsterActorResource, gHamsterActor);
+}
+
+void ReleasePngResource(PngResource& resource) {
+  resource.image.reset();
+  if (resource.stream != nullptr) {
+    resource.stream->Release();
+    resource.stream = nullptr;
+  }
+}
+
+void ReleaseAllPngResources() {
+  ReleasePngResource(gHamsterActor);
+  ReleasePngResource(gHamsterHabitat);
+  ReleasePngResource(gChickActor);
+  ReleasePngResource(gChickBase);
+  ReleasePngResource(gLuckyCatActor);
+  ReleasePngResource(gLuckyCatBase);
+  ReleasePngResource(gMallet);
+  ReleasePngResource(gFish);
+}
+
 float SmoothStep(float value) {
   const float clamped = std::clamp(value, 0.0f, 1.0f);
   return clamped * clamped * (3.0f - 2.0f * clamped);
@@ -361,30 +435,68 @@ void DrawCenteredText(Gdiplus::Graphics& graphics,
       text.c_str(), -1, &font, rect, &format, &brush);
 }
 
+void DrawSceneArtwork(
+    Gdiplus::Graphics& graphics, MeritScene scene, float strikeAmount) {
+  using Gdiplus::GraphicsState;
+  using Gdiplus::RectF;
+
+  if (scene == MeritScene::LuckyCat) {
+    graphics.DrawImage(gLuckyCatBase.image.get(), RectF(5.0f, 20.0f, 230.0f, 230.0f));
+    const GraphicsState state = graphics.Save();
+    constexpr float shoulderX = 30.0f + 230.0f * 362.0f / 600.0f;
+    constexpr float shoulderY = 20.0f + 230.0f * 488.0f / 600.0f;
+    graphics.TranslateTransform(shoulderX, shoulderY);
+    graphics.ScaleTransform(1.0f, 1.0f - 0.20f * strikeAmount);
+    graphics.TranslateTransform(-shoulderX, -shoulderY);
+    graphics.DrawImage(gLuckyCatActor.image.get(), RectF(30.0f, 20.0f, 230.0f, 230.0f));
+    graphics.Restore(state);
+    return;
+  }
+
+  if (scene == MeritScene::ChickPecking) {
+    const RectF rect(5.0f, 18.0f, 230.0f, 230.0f);
+    graphics.DrawImage(gChickBase.image.get(), rect);
+    const GraphicsState state = graphics.Save();
+    graphics.TranslateTransform(4.0f * strikeAmount, 8.0f * strikeAmount);
+    graphics.DrawImage(gChickActor.image.get(), rect);
+    graphics.Restore(state);
+    return;
+  }
+
+  if (scene == MeritScene::HamsterWheel) {
+    graphics.DrawImage(
+        gHamsterHabitat.image.get(), RectF(27.0f, 58.0f, 186.0f, 186.0f));
+    const GraphicsState state = graphics.Save();
+    constexpr float footX = 137.0f;
+    constexpr float footY = 213.0f;
+    graphics.TranslateTransform(footX, footY - 3.0f * strikeAmount);
+    graphics.ScaleTransform(
+        1.0f + 0.012f * strikeAmount, 1.0f - 0.025f * strikeAmount);
+    graphics.TranslateTransform(-footX, -footY);
+    graphics.DrawImage(
+        gHamsterActor.image.get(), RectF(33.0f, 60.0f, 168.0f, 168.0f));
+    graphics.Restore(state);
+    return;
+  }
+
+  Gdiplus::SolidBrush shadow(Gdiplus::Color(62, 0, 0, 0));
+  graphics.FillEllipse(&shadow, 34.0f, 227.0f, 172.0f, 18.0f);
+  graphics.DrawImage(
+      gFish.image.get(), RectF(18.0f, 102.0f, 232.0f, 140.0f));
+  const GraphicsState state = graphics.Save();
+  graphics.TranslateTransform(280.0f, 90.0f);
+  graphics.RotateTransform(6.0f - 10.5f * strikeAmount);
+  graphics.TranslateTransform(-280.0f, -90.0f);
+  graphics.DrawImage(
+      gMallet.image.get(), RectF(72.0f, 63.0f, 214.0f, 54.0f));
+  graphics.Restore(state);
+}
+
 void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
   graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
   graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
   graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
   graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
-
-  const std::wstring totalText = std::to_wstring(gState.total);
-  float totalFont = 36.0f;
-  if (totalText.size() > 18) {
-    totalFont = 27.0f;
-  }
-  if (totalText.size() > 24) {
-    totalFont = 23.0f;
-  }
-  // Monospaced digits keep the number from jittering as digits are added.
-  DrawCenteredText(graphics, totalText,
-                   Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), totalFont, 255,
-                   L"Consolas");
-
-  Gdiplus::SolidBrush shadow(Gdiplus::Color(62, 0, 0, 0));
-  graphics.FillEllipse(&shadow, 34.0f, 227.0f, 172.0f, 18.0f);
-
-  graphics.DrawImage(
-      gFish.image.get(), Gdiplus::RectF(18.0f, 102.0f, 232.0f, 140.0f));
 
   float progress = 0.0f;
   if (gState.striking) {
@@ -395,33 +507,34 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
                    0.0f, 1.0f);
   }
 
-  float angle = 6.0f;
+  float strikeAmount = 0.0f;
   if (gState.striking) {
     if (progress < kContactPhase) {
-      const float down = SmoothStep(progress / kContactPhase);
-      angle = 6.0f + (-4.5f - 6.0f) * down;
+      strikeAmount = SmoothStep(progress / kContactPhase);
     } else {
-      const float up = SmoothStep((progress - kContactPhase) /
-                                  (1.0f - kContactPhase));
-      angle = -4.5f + (6.0f + 4.5f) * up;
+      strikeAmount = 1.0f - SmoothStep((progress - kContactPhase) /
+                                       (1.0f - kContactPhase));
     }
   }
-
-  const Gdiplus::GraphicsState transformState = graphics.Save();
-  graphics.TranslateTransform(280.0f, 90.0f);
-  graphics.RotateTransform(angle);
-  graphics.TranslateTransform(-280.0f, -90.0f);
-  graphics.DrawImage(
-      gMallet.image.get(), Gdiplus::RectF(72.0f, 63.0f, 214.0f, 54.0f));
-  graphics.Restore(transformState);
+  DrawSceneArtwork(graphics, gState.selectedScene, strikeAmount);
 
   // Draw the middle band last so the mallet can never cover it.
   if (gState.striking && progress >= kPlusStartPhase &&
       progress <= kPlusEndPhase) {
     DrawCenteredText(
-        graphics, L"+1", Gdiplus::RectF(0.0f, 66.0f, 240.0f, 30.0f),
+        graphics, L"+1",
+        Gdiplus::RectF(0.0f,
+            gState.selectedScene == MeritScene::Woodfish ? 66.0f : 43.0f,
+            240.0f, 30.0f),
         22.0f, 255);
   }
+
+  const std::wstring totalText = std::to_wstring(gState.total);
+  float totalFont = totalText.size() > 24 ? 20.0f :
+                    totalText.size() > 18 ? 24.0f : 30.0f;
+  DrawCenteredText(graphics, totalText,
+                   Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), totalFont, 255,
+                   L"Consolas");
 }
 
 void RenderLayeredWindow(ULONGLONG now) {
@@ -496,6 +609,9 @@ void EnsureAnimationTimer() {
 }
 
 void CountOneOperation() {
+  if (gState.total == std::numeric_limits<std::uint64_t>::max()) {
+    return;
+  }
   const ULONGLONG now = GetTickCount64();
   int nextDuration = kDefaultStrikeMs;
 
@@ -579,20 +695,205 @@ LRESULT CALLBACK MouseHook(
 void ShowPrivacyNotice(HWND owner) {
   MessageBoxW(
       owner,
-      L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
-      L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
-      L"剪贴板或屏幕内容；程序不包含联网功能。",
-      L"隐私说明", MB_OK | MB_ICONINFORMATION);
+      UiText(
+          L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
+          L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
+          L"剪贴板或屏幕内容；程序不包含联网功能。",
+          L"NiuMa Merit counts only keyboard presses, mouse button presses, "
+          L"and scroll gestures.\n\nIt does not read, save, or upload key content, "
+          L"mouse positions, the current app, clipboard data, or screen content. "
+          L"The app has no network features."),
+      UiText(L"隐私说明", L"Privacy"), MB_OK | MB_ICONINFORMATION);
 }
 
 void ShowAboutDialog(HWND owner) {
   const std::wstring version = L"0.3.0";
-  std::wstring text = L"牛马电子功德 v" + version + L"\n\n";
-  text += L"本软件完全离线运行，不包含网络请求、遥测或自动更新功能。\n";
-  text += L"如需获取最新版本，请访问以下网址手动下载：\n\n";
+  std::wstring text = IsChineseUi()
+      ? L"牛马电子功德 v" + version + L"\n\n"
+        L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
+        L"鼠标位置或窗口信息。\n所有数据仅保存在本机，本软件不包含网络请求、"
+        L"遥测或自动更新。\n\n客户端源代码依 GPLv3 许可证开放。\n\n项目主页：\n"
+      : L"NiuMa Merit v" + version + L"\n\n"
+        L"Counts keyboard presses, mouse button presses, and scroll gestures without "
+        L"reading specific content, mouse positions, or window information.\n"
+        L"All data stays on this computer. The app contains no network requests, "
+        L"telemetry, or automatic updates.\n\nClient source code is available under GPLv3."
+        L"\n\nProject page:\n";
   text += L"https://github.com/Mr-shanqiu/niuma-ELEC-gongde";
-  MessageBoxW(owner, text.c_str(), L"关于牛马电子功德",
+  MessageBoxW(owner, text.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
               MB_OK | MB_ICONINFORMATION);
+}
+
+const wchar_t* SceneTitle(MeritScene scene) {
+  switch (scene) {
+    case MeritScene::LuckyCat: return UiText(L"招财猫", L"Lucky Cat");
+    case MeritScene::ChickPecking: return UiText(L"小鸡啄米", L"Pecking Chick");
+    case MeritScene::HamsterWheel: return UiText(L"仓鼠跑轮", L"Hamster Wheel");
+    default: return UiText(L"默认木鱼", L"Woodfish");
+  }
+}
+
+RECT PickerCardRect(int index, UINT dpi) {
+  const int left = ScaleDip(16 + (index % 2) * 172, dpi);
+  const int top = ScaleDip(14 + (index / 2) * 142, dpi);
+  return {left, top, left + ScaleDip(156, dpi), top + ScaleDip(130, dpi)};
+}
+
+void PaintAppearancePicker(HWND window) {
+  PAINTSTRUCT paint = {};
+  HDC dc = BeginPaint(window, &paint);
+  RECT client = {};
+  GetClientRect(window, &client);
+  FillRect(dc, &client, reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
+  Gdiplus::Graphics graphics(dc);
+  graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+  graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+  const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+  for (int index = 0; index < 4; ++index) {
+    const MeritScene scene = static_cast<MeritScene>(index);
+    const RECT card = PickerCardRect(index, dpi);
+    const bool selected = scene == gPicker.pending;
+    Gdiplus::SolidBrush background(selected
+        ? Gdiplus::Color(255, 255, 244, 226)
+        : Gdiplus::Color(255, 250, 250, 250));
+    Gdiplus::Pen border(selected
+        ? Gdiplus::Color(255, 224, 119, 31)
+        : Gdiplus::Color(255, 205, 205, 205),
+        selected ? static_cast<float>(ScaleDip(3, dpi)) : 1.0f);
+    const Gdiplus::RectF cardRect(
+        static_cast<float>(card.left), static_cast<float>(card.top),
+        static_cast<float>(card.right - card.left),
+        static_cast<float>(card.bottom - card.top));
+    graphics.FillRectangle(&background, cardRect);
+    graphics.DrawRectangle(&border, cardRect);
+
+    Gdiplus::Bitmap thumbnail(240, 250, PixelFormat32bppARGB);
+    Gdiplus::Graphics thumbnailGraphics(&thumbnail);
+    thumbnailGraphics.Clear(Gdiplus::Color(0, 0, 0, 0));
+    thumbnailGraphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    thumbnailGraphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    DrawSceneArtwork(thumbnailGraphics, scene, 0.0f);
+    graphics.DrawImage(&thumbnail, Gdiplus::RectF(
+        static_cast<float>(card.left + ScaleDip(20, dpi)),
+        static_cast<float>(card.top + ScaleDip(3, dpi)),
+        static_cast<float>(ScaleDip(116, dpi)),
+        static_cast<float>(ScaleDip(96, dpi))));
+
+    Gdiplus::Font font(L"Microsoft YaHei UI", static_cast<float>(ScaleDip(14, dpi)),
+                       Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+    Gdiplus::StringFormat format;
+    format.SetAlignment(Gdiplus::StringAlignmentCenter);
+    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+    Gdiplus::SolidBrush text(Gdiplus::Color(255, 62, 52, 43));
+    graphics.DrawString(SceneTitle(scene), -1, &font,
+        Gdiplus::RectF(static_cast<float>(card.left),
+            static_cast<float>(card.top + ScaleDip(100, dpi)),
+            static_cast<float>(card.right - card.left),
+            static_cast<float>(ScaleDip(25, dpi))), &format, &text);
+  }
+  EndPaint(window, &paint);
+}
+
+LRESULT CALLBACK PickerWindowProcedure(
+    HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+  switch (message) {
+    case WM_CREATE: {
+      const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+      CreateWindowW(L"BUTTON", UiText(L"确认", L"Confirm"), WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+          ScaleDip(188, dpi), ScaleDip(302, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
+          GetModuleHandleW(nullptr), nullptr);
+      CreateWindowW(L"BUTTON", UiText(L"取消", L"Cancel"), WS_CHILD | WS_VISIBLE,
+          ScaleDip(272, dpi), ScaleDip(302, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
+          GetModuleHandleW(nullptr), nullptr);
+      return 0;
+    }
+    case WM_PAINT:
+      PaintAppearancePicker(window);
+      return 0;
+    case WM_LBUTTONUP: {
+      const POINT point = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+      const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+      for (int index = 0; index < 4; ++index) {
+        const RECT card = PickerCardRect(index, dpi);
+        if (PtInRect(&card, point)) {
+          gPicker.pending = static_cast<MeritScene>(index);
+          InvalidateRect(window, nullptr, FALSE);
+          break;
+        }
+      }
+      return 0;
+    }
+    case WM_COMMAND:
+      if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
+        gPicker.confirmed = LOWORD(wParam) == IDOK;
+        DestroyWindow(window);
+        return 0;
+      }
+      break;
+    case WM_CLOSE:
+      gPicker.confirmed = false;
+      DestroyWindow(window);
+      return 0;
+    default:
+      break;
+  }
+  return DefWindowProcW(window, message, wParam, lParam);
+}
+
+void ShowAppearancePicker(HWND owner) {
+  gPicker.pending = gState.selectedScene;
+  gPicker.confirmed = false;
+  const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+  RECT desired = {0, 0, ScaleDip(360, dpi), ScaleDip(348, dpi)};
+  AdjustWindowRectEx(&desired, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_TOOLWINDOW);
+  const int width = desired.right - desired.left;
+  const int height = desired.bottom - desired.top;
+  RECT ownerRect = {};
+  GetWindowRect(owner, &ownerRect);
+  MONITORINFO monitorInfo = {sizeof(monitorInfo)};
+  GetMonitorInfoW(MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST), &monitorInfo);
+  const int proposedX = ownerRect.left + (gState.windowWidth - width) / 2;
+  const int proposedY = ownerRect.top + (gState.windowHeight - height) / 2;
+  const int pickerX = std::clamp(
+      proposedX, static_cast<int>(monitorInfo.rcWork.left),
+      static_cast<int>(monitorInfo.rcWork.right) - width);
+  const int pickerY = std::clamp(
+      proposedY, static_cast<int>(monitorInfo.rcWork.top),
+      static_cast<int>(monitorInfo.rcWork.bottom) - height);
+  gPicker.window = CreateWindowExW(
+      WS_EX_TOOLWINDOW, kPickerClass, UiText(L"更换形象", L"Change Appearance"), WS_CAPTION | WS_SYSMENU,
+      pickerX, pickerY,
+      width, height, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+  if (gPicker.window == nullptr) return;
+  EnableWindow(owner, FALSE);
+  ShowWindow(gPicker.window, SW_SHOW);
+  MSG message = {};
+  while (IsWindow(gPicker.window)) {
+    const BOOL result = GetMessageW(&message, nullptr, 0, 0);
+    if (result <= 0) {
+      if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
+      break;
+    }
+    if (!IsDialogMessageW(gPicker.window, &message)) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+  }
+  EnableWindow(owner, TRUE);
+  SetActiveWindow(owner);
+  gPicker.window = nullptr;
+  if (gPicker.confirmed) {
+    gState.selectedScene = gPicker.pending;
+    gState.dirty = true;
+    gState.striking = true;
+    gState.strikeStarted = GetTickCount64();
+    gState.strikeDurationMs = 800;
+    SaveState();
+    EnsureAnimationTimer();
+    RenderLayeredWindow(gState.strikeStarted);
+  }
 }
 
 void ShowPrivacyNoticeIfNeeded(HWND owner) {
@@ -659,14 +960,16 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   if (menu == nullptr) {
     return;
   }
-  AppendMenuW(menu, MF_STRING, kMenuAbout, L"关于牛马电子功德");
-  AppendMenuW(menu, MF_STRING, kMenuPrivacyNotice, L"隐私说明");
+  AppendMenuW(menu, MF_STRING, kMenuAbout,
+              UiText(L"关于牛马电子功德", L"About NiuMa Merit"));
   AppendMenuW(
       menu,
       MF_STRING | (IsLaunchAtLoginEnabled() ? MF_CHECKED : MF_UNCHECKED),
-      kMenuLaunchAtLogin, L"登录后自动启动");
+      kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"));
+  AppendMenuW(menu, MF_STRING, kMenuAppearance,
+              UiText(L"更换形象", L"Change Appearance"));
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, kMenuQuit, L"退出");
+  AppendMenuW(menu, MF_STRING, kMenuQuit, UiText(L"退出", L"Exit"));
 
   const int command = TrackPopupMenu(
       menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
@@ -675,16 +978,18 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
 
   if (command == static_cast<int>(kMenuAbout)) {
     ShowAboutDialog(window);
-  } else if (command == static_cast<int>(kMenuPrivacyNotice)) {
-    ShowPrivacyNotice(window);
   } else if (command == static_cast<int>(kMenuLaunchAtLogin)) {
     const bool enabled = !IsLaunchAtLoginEnabled();
     if (SetLaunchAtLoginEnabled(enabled)) {
       SaveLaunchAtLoginPreference(enabled);
     } else {
-      MessageBoxW(window, L"无法修改登录启动项，请稍后重试。",
-                  kWindowTitle, MB_OK | MB_ICONERROR);
+      MessageBoxW(window,
+                  UiText(L"无法修改登录启动项，请稍后重试。",
+                         L"Unable to change login startup. Please try again."),
+                  WindowTitle(), MB_OK | MB_ICONERROR);
     }
+  } else if (command == static_cast<int>(kMenuAppearance)) {
+    ShowAppearancePicker(window);
   } else if (command == static_cast<int>(kMenuQuit)) {
     DestroyWindow(window);
   }
@@ -770,7 +1075,7 @@ LRESULT CALLBACK WindowProcedure(
       if (point.x == -1 && point.y == -1) {
         RECT rect = {};
         GetWindowRect(window, &rect);
-        point = {rect.left + rect.right / 2, rect.top + rect.bottom / 2};
+        point = {(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2};
       }
       ShowContextMenu(window, point);
       return 0;
@@ -827,11 +1132,12 @@ int WINAPI wWinMain(
     return 1;
   }
 
-  if (!LoadPngResource(kFishResource, gFish) ||
-      !LoadPngResource(kMalletResource, gMallet)) {
+  if (!LoadAllPngResources()) {
     MessageBoxW(
-        nullptr, L"木鱼图像资源加载失败。", kWindowTitle,
+        nullptr, UiText(L"形象资源加载失败。",
+                        L"Appearance resources could not be loaded."), WindowTitle(),
         MB_OK | MB_ICONERROR);
+    ReleaseAllPngResources();
     Gdiplus::GdiplusShutdown(gState.gdiplusToken);
     ReleaseMutex(gState.mutex);
     CloseHandle(gState.mutex);
@@ -848,6 +1154,7 @@ int WINAPI wWinMain(
   windowClass.hCursor = LoadCursorW(nullptr, IDC_HAND);
   windowClass.lpszClassName = kWindowClass;
   if (RegisterClassExW(&windowClass) == 0) {
+    ReleaseAllPngResources();
     Gdiplus::GdiplusShutdown(gState.gdiplusToken);
     ReleaseMutex(gState.mutex);
     CloseHandle(gState.mutex);
@@ -857,10 +1164,30 @@ int WINAPI wWinMain(
     return 1;
   }
 
+  WNDCLASSEXW pickerClass = {};
+  pickerClass.cbSize = sizeof(pickerClass);
+  pickerClass.lpfnWndProc = PickerWindowProcedure;
+  pickerClass.hInstance = instance;
+  pickerClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+  pickerClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+  pickerClass.lpszClassName = kPickerClass;
+  if (RegisterClassExW(&pickerClass) == 0) {
+    ReleaseAllPngResources();
+    Gdiplus::GdiplusShutdown(gState.gdiplusToken);
+    ReleaseMutex(gState.mutex);
+    CloseHandle(gState.mutex);
+    if (SUCCEEDED(comResult)) CoUninitialize();
+    return 1;
+  }
+
   gState.dpi = SystemDpi();
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
   gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
   gState.total = ReadIniTotal();
+  const long selectedScene = ReadIniLong(L"selected_scene", 0);
+  gState.selectedScene = selectedScene >= 0 && selectedScene <= 3
+      ? static_cast<MeritScene>(selectedScene)
+      : MeritScene::Woodfish;
 
   RECT workArea = {};
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
@@ -874,11 +1201,12 @@ int WINAPI wWinMain(
 
   HWND window = CreateWindowExW(
       WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-      kWindowClass, kWindowTitle, WS_POPUP,
+      kWindowClass, WindowTitle(), WS_POPUP,
       static_cast<int>(x), static_cast<int>(y),
       gState.windowWidth, gState.windowHeight,
       nullptr, nullptr, instance, nullptr);
   if (window == nullptr) {
+    ReleaseAllPngResources();
     Gdiplus::GdiplusShutdown(gState.gdiplusToken);
     ReleaseMutex(gState.mutex);
     CloseHandle(gState.mutex);
@@ -909,7 +1237,8 @@ int WINAPI wWinMain(
       SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
   if (gState.keyboardHook == nullptr || gState.mouseHook == nullptr) {
     MessageBoxW(
-        window, L"无法启动全局键盘或鼠标计数。", kWindowTitle,
+        window, UiText(L"无法启动全局键盘或鼠标计数。",
+                       L"Unable to start global keyboard or mouse counting."), WindowTitle(),
         MB_OK | MB_ICONERROR);
     DestroyWindow(window);
   }
@@ -927,16 +1256,7 @@ int WINAPI wWinMain(
     UnhookWindowsHookEx(gState.mouseHook);
   }
 
-  gMallet.image.reset();
-  if (gMallet.stream != nullptr) {
-    gMallet.stream->Release();
-    gMallet.stream = nullptr;
-  }
-  gFish.image.reset();
-  if (gFish.stream != nullptr) {
-    gFish.stream->Release();
-    gFish.stream = nullptr;
-  }
+  ReleaseAllPngResources();
 
   Gdiplus::GdiplusShutdown(gState.gdiplusToken);
   ReleaseMutex(gState.mutex);

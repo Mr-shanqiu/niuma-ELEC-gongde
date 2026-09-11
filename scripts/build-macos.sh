@@ -9,10 +9,25 @@ VERSION=$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")
 mkdir -p "$BUILD_DIR"
 
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" \
+  "$APP_DIR/Contents/Resources/en.lproj" \
+  "$APP_DIR/Contents/Resources/zh-Hans.lproj" \
+  "$APP_DIR/Contents/Resources/zh-Hant.lproj"
 cp "$ROOT_DIR/assets/woodfish.png" "$APP_DIR/Contents/Resources/woodfish.png"
 cp "$ROOT_DIR/assets/mallet.png" "$APP_DIR/Contents/Resources/mallet.png"
+cp "$ROOT_DIR/assets/scenes/lucky-cat/lucky-cat-base.png" "$APP_DIR/Contents/Resources/lucky-cat-base.png"
+cp "$ROOT_DIR/assets/scenes/lucky-cat/lucky-cat-actor.png" "$APP_DIR/Contents/Resources/lucky-cat-actor.png"
+cp "$ROOT_DIR/assets/scenes/chick-pecking/chick-pecking-base.png" "$APP_DIR/Contents/Resources/chick-pecking-base.png"
+cp "$ROOT_DIR/assets/scenes/chick-pecking/chick-pecking-actor.png" "$APP_DIR/Contents/Resources/chick-pecking-actor.png"
+cp "$ROOT_DIR/assets/scenes/hamster-wheel/runtime/hamster-habitat.png" "$APP_DIR/Contents/Resources/hamster-habitat.png"
+cp "$ROOT_DIR/assets/scenes/hamster-wheel/runtime/hamster-pet.png" "$APP_DIR/Contents/Resources/hamster-pet.png"
 cp "$ROOT_DIR/assets/appicon.icns" "$APP_DIR/Contents/Resources/appicon.icns"
+cp "$ROOT_DIR/src/macos/en.lproj/InfoPlist.strings" \
+  "$APP_DIR/Contents/Resources/en.lproj/InfoPlist.strings"
+cp "$ROOT_DIR/src/macos/zh-Hans.lproj/InfoPlist.strings" \
+  "$APP_DIR/Contents/Resources/zh-Hans.lproj/InfoPlist.strings"
+cp "$ROOT_DIR/src/macos/zh-Hant.lproj/InfoPlist.strings" \
+  "$APP_DIR/Contents/Resources/zh-Hant.lproj/InfoPlist.strings"
 
 ARCHS="arm64 x86_64"
 for ARCH in $ARCHS; do

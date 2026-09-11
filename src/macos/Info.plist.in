@@ -2,12 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleExecutable</key><string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
   <key>CFBundleIdentifier</key><string>cn.niuma.merit</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>牛马电子功德</string>
-  <key>CFBundleDisplayName</key><string>牛马电子功德</string>
+  <key>CFBundleName</key><string>NiuMa Merit</string>
+  <key>CFBundleDisplayName</key><string>NiuMa Merit</string>
+  <key>CFBundleLocalizations</key>
+  <array><string>en</string><string>zh-Hans</string><string>zh-Hant</string></array>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>appicon</string>
   <key>CFBundleShortVersionString</key><string>@PROJECT_VERSION@</string>
@@ -15,6 +17,6 @@
   <key>LSMinimumSystemVersion</key><string>10.15</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSInputMonitoringUsageDescription</key><string>只统计按键、鼠标按键和滚动操作发生的次数，不读取具体内容、位置或窗口信息。</string>
+  <key>NSInputMonitoringUsageDescription</key><string>Counts keyboard presses, mouse button presses, and scroll gestures without reading specific content, positions, or window information.</string>
 </dict>
 </plist>

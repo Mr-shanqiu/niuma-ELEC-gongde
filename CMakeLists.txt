@@ -7,6 +7,12 @@ if(WIN32)
   configure_file(src/windows/app.manifest "${CMAKE_CURRENT_BINARY_DIR}/app.manifest" COPYONLY)
   configure_file(assets/woodfish.png "${CMAKE_CURRENT_BINARY_DIR}/woodfish.png" COPYONLY)
   configure_file(assets/mallet.png "${CMAKE_CURRENT_BINARY_DIR}/mallet.png" COPYONLY)
+  configure_file(assets/scenes/lucky-cat/lucky-cat-base.png "${CMAKE_CURRENT_BINARY_DIR}/lucky-cat-base.png" COPYONLY)
+  configure_file(assets/scenes/lucky-cat/lucky-cat-actor.png "${CMAKE_CURRENT_BINARY_DIR}/lucky-cat-actor.png" COPYONLY)
+  configure_file(assets/scenes/chick-pecking/chick-pecking-base.png "${CMAKE_CURRENT_BINARY_DIR}/chick-pecking-base.png" COPYONLY)
+  configure_file(assets/scenes/chick-pecking/chick-pecking-actor.png "${CMAKE_CURRENT_BINARY_DIR}/chick-pecking-actor.png" COPYONLY)
+  configure_file(assets/scenes/hamster-wheel/windows/hamster-habitat.png "${CMAKE_CURRENT_BINARY_DIR}/hamster-habitat.png" COPYONLY)
+  configure_file(assets/scenes/hamster-wheel/windows/hamster-pet.png "${CMAKE_CURRENT_BINARY_DIR}/hamster-pet.png" COPYONLY)
   configure_file(assets/appicon.ico "${CMAKE_CURRENT_BINARY_DIR}/appicon.ico" COPYONLY)
   add_executable(niuma-merit WIN32
     src/windows/app.cpp
@@ -28,13 +34,31 @@ elseif(APPLE)
   set(MACOS_RESOURCES
     assets/woodfish.png
     assets/mallet.png
+    assets/scenes/lucky-cat/lucky-cat-base.png
+    assets/scenes/lucky-cat/lucky-cat-actor.png
+    assets/scenes/chick-pecking/chick-pecking-base.png
+    assets/scenes/chick-pecking/chick-pecking-actor.png
+    assets/scenes/hamster-wheel/runtime/hamster-habitat.png
+    assets/scenes/hamster-wheel/runtime/hamster-pet.png
   )
   set_source_files_properties(${MACOS_RESOURCES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources"
   )
+  set(MACOS_LOCALIZATIONS
+    src/macos/en.lproj/InfoPlist.strings
+    src/macos/zh-Hans.lproj/InfoPlist.strings
+    src/macos/zh-Hant.lproj/InfoPlist.strings
+  )
+  set_source_files_properties(src/macos/en.lproj/InfoPlist.strings PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources/en.lproj")
+  set_source_files_properties(src/macos/zh-Hans.lproj/InfoPlist.strings PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources/zh-Hans.lproj")
+  set_source_files_properties(src/macos/zh-Hant.lproj/InfoPlist.strings PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources/zh-Hant.lproj")
   add_executable(niuma-merit MACOSX_BUNDLE
     src/macos/app.mm
     ${MACOS_RESOURCES}
+    ${MACOS_LOCALIZATIONS}
   )
   target_compile_features(niuma-merit PRIVATE cxx_std_17)
   target_compile_options(niuma-merit PRIVATE -Wall -Wextra -fobjc-arc)
@@ -43,7 +67,7 @@ elseif(APPLE)
     "-framework ApplicationServices"
   )
   set_target_properties(niuma-merit PROPERTIES
-    MACOSX_BUNDLE_BUNDLE_NAME "牛马电子功德"
+    MACOSX_BUNDLE_BUNDLE_NAME "NiuMa Merit"
     MACOSX_BUNDLE_GUI_IDENTIFIER "cn.niuma.merit"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/src/macos/Info.plist.in"
     MACOSX_DEPLOYMENT_TARGET "10.15"
