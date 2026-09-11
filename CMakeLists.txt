@@ -19,6 +19,9 @@ if(WIN32)
   if(MSVC)
     set_property(TARGET niuma-merit PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_options(niuma-merit PRIVATE /W4 /permissive- /utf-8)
+    # app.rc embeds our explicit DPI/compatibility manifest. Disable the
+    # linker's generated default manifest to avoid a duplicate resource.
+    target_link_options(niuma-merit PRIVATE /MANIFEST:NO)
   endif()
 elseif(APPLE)
   enable_language(OBJCXX)
