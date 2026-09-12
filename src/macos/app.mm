@@ -53,6 +53,7 @@ static NSImage *LoadHamsterSprite(NSString *name) {
 }
 
 static NSString *const kTotal = @"total";
+static NSString *const kDailyTotals = @"dailyTotals";
 static NSString *const kSelectedScene = @"selectedScene";
 static NSString *const kLaunchAtLoginConfigured = @"launchAtLoginConfigured";
 static NSString *const kLaunchAtLoginEnabled = @"launchAtLoginEnabled";
@@ -67,6 +68,18 @@ static BOOL IsChineseUI(void) {
 
 static NSString *UiText(NSString *chinese, NSString *english) {
   return IsChineseUI() ? chinese : english;
+}
+
+static NSString *DateKeyForDate(NSDate *date) {
+  static NSDateFormatter *formatter;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.dateFormat = @"yyyy-MM-dd";
+  });
+  formatter.timeZone = NSTimeZone.localTimeZone;
+  return [formatter stringFromDate:date];
 }
 
 static const CGFloat kUiScale = 0.5;
@@ -104,6 +117,7 @@ typedef NS_ENUM(NSInteger, MeritScene) {
 };
 
 @class MeritController;
+@class MeritCalendarView;
 static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, void *);
 
 @interface MeritView : NSView
@@ -127,9 +141,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic, strong) NSTimer *animationTimer;
 @property(nonatomic, strong) NSTimer *permissionPollTimer;
 @property(nonatomic, strong) NSTimer *saveTimer;
+@property(nonatomic, strong) NSTimer *dayTimer;
+@property(nonatomic, strong) NSWindow *calendarWindow;
+@property(nonatomic, strong) MeritCalendarView *calendarView;
 @property(nonatomic) CFMachPortRef eventTap;
 @property(nonatomic) CFRunLoopSourceRef eventSource;
 @property(nonatomic) long long total;
+@property(nonatomic) long long todayTotal;
+@property(nonatomic, copy) NSString *currentDayKey;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *dailyTotals;
 @property(nonatomic) BOOL dirty;
 @property(nonatomic) BOOL strikeActive;
 @property(nonatomic) BOOL inputMonitoringAuthorized;
@@ -159,6 +179,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)handleEventTapDisabled;
 - (void)showAbout:(id)sender;
 - (void)showAppearancePicker:(id)sender;
+- (void)showMeritCalendar:(id)sender;
+- (void)shiftCalendarMonth:(NSButton *)sender;
+- (void)ensureCurrentDay;
 - (void)checkPermission:(NSTimer *)timer;
 - (void)stopPermissionPoll;
 - (void)configureLaunchAtLogin;
@@ -359,7 +382,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   // The counter is the product's source of truth and must never be hidden by
   // a scene or one of its moving layers, so it is deliberately drawn last.
   if (!self.previewOnly) {
-  NSString *totalText = [NSString stringWithFormat:@"%lld", controller.total];
+  NSString *totalText = [NSString stringWithFormat:@"%lld", controller.todayTotal];
   CGFloat totalFont = totalText.length > 18 ? 24 : 30;
   if (totalText.length > 24) totalFont = 20;
   [self drawCenteredText:totalText
@@ -374,11 +397,127 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 @end
 
+@interface MeritCalendarView : NSView
+@property(nonatomic, weak) MeritController *controller;
+@property(nonatomic) NSInteger year;
+@property(nonatomic) NSInteger month;
+- (void)showCurrentMonth;
+- (void)shiftMonth:(NSInteger)delta;
+@end
+
+@implementation MeritCalendarView
+
+- (BOOL)isFlipped { return YES; }
+
+- (void)showCurrentMonth {
+  NSDateComponents *parts = [NSCalendar.currentCalendar
+      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
+  self.year = parts.year;
+  self.month = parts.month;
+  [self setNeedsDisplay:YES];
+}
+
+- (void)shiftMonth:(NSInteger)delta {
+  NSDateComponents *parts = [[NSDateComponents alloc] init];
+  parts.year = self.year;
+  parts.month = self.month + delta;
+  parts.day = 1;
+  NSDate *date = [NSCalendar.currentCalendar dateFromComponents:parts];
+  NSDateComponents *normalized = [NSCalendar.currentCalendar
+      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:date];
+  self.year = normalized.year;
+  self.month = normalized.month;
+  [self setNeedsDisplay:YES];
+}
+
+- (void)drawText:(NSString *)text rect:(NSRect)rect size:(CGFloat)size
+           color:(NSColor *)color weight:(NSFontWeight)weight {
+  NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+  paragraph.alignment = NSTextAlignmentCenter;
+  paragraph.lineBreakMode = NSLineBreakByClipping;
+  [text drawInRect:rect withAttributes:@{
+    NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:size weight:weight],
+    NSForegroundColorAttributeName: color,
+    NSParagraphStyleAttributeName: paragraph
+  }];
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+  (void)dirtyRect;
+  [[NSColor colorWithCalibratedRed:.97 green:.94 blue:.88 alpha:1] setFill];
+  NSRectFill(self.bounds);
+
+  NSColor *ink = [NSColor colorWithCalibratedRed:.24 green:.18 blue:.12 alpha:1];
+  NSColor *muted = [NSColor colorWithCalibratedRed:.49 green:.42 blue:.34 alpha:1];
+  NSColor *accent = [NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1];
+  NSString *monthTitle = IsChineseUI()
+      ? [NSString stringWithFormat:@"%ld 年 %ld 月", (long)self.year, (long)self.month]
+      : [NSString stringWithFormat:@"%ld / %02ld", (long)self.year, (long)self.month];
+  [self drawText:monthTitle rect:NSMakeRect(90, 18, 380, 32) size:22 color:ink weight:NSFontWeightSemibold];
+
+  NSString *prefix = [NSString stringWithFormat:@"%04ld-%02ld-", (long)self.year, (long)self.month];
+  unsigned long long monthTotal = 0;
+  for (NSString *key in self.controller.dailyTotals) {
+    if ([key hasPrefix:prefix]) monthTotal += self.controller.dailyTotals[key].unsignedLongLongValue;
+  }
+  NSString *allText = [NSString stringWithFormat:@"%@  %lld",
+      UiText(@"累计功德", @"Total Merit"), self.controller.total];
+  NSString *monthText = [NSString stringWithFormat:@"%@  %llu",
+      UiText(@"本月功德", @"This Month"), monthTotal];
+  [self drawText:allText rect:NSMakeRect(24, 62, 250, 28) size:17 color:accent weight:NSFontWeightBold];
+  [self drawText:monthText rect:NSMakeRect(286, 62, 250, 28) size:17 color:accent weight:NSFontWeightBold];
+
+  NSArray<NSString *> *weekdays = IsChineseUI()
+      ? @[@"一", @"二", @"三", @"四", @"五", @"六", @"日"]
+      : @[@"MON", @"TUE", @"WED", @"THU", @"FRI", @"SAT", @"SUN"];
+  const CGFloat left = 14, top = 112, cellWidth = 76, cellHeight = 51;
+  for (NSInteger column = 0; column < 7; ++column) {
+    [self drawText:weekdays[column]
+              rect:NSMakeRect(left + column * cellWidth, 94, cellWidth, 20)
+              size:11 color:muted weight:NSFontWeightMedium];
+  }
+
+  NSDateComponents *firstParts = [[NSDateComponents alloc] init];
+  firstParts.year = self.year; firstParts.month = self.month; firstParts.day = 1;
+  NSDate *firstDate = [NSCalendar.currentCalendar dateFromComponents:firstParts];
+  NSInteger firstWeekday = [NSCalendar.currentCalendar component:NSCalendarUnitWeekday
+                                                         fromDate:firstDate];
+  NSInteger offset = (firstWeekday + 5) % 7;
+  NSRange days = [NSCalendar.currentCalendar rangeOfUnit:NSCalendarUnitDay
+                                                  inUnit:NSCalendarUnitMonth
+                                                 forDate:firstDate];
+  NSString *todayKey = DateKeyForDate(NSDate.date);
+  for (NSInteger day = 1; day <= (NSInteger)days.length; ++day) {
+    NSInteger slot = offset + day - 1;
+    NSInteger row = slot / 7, column = slot % 7;
+    NSRect cell = NSMakeRect(left + column * cellWidth, top + row * cellHeight,
+                             cellWidth - 2, cellHeight - 3);
+    NSString *key = [NSString stringWithFormat:@"%04ld-%02ld-%02ld",
+        (long)self.year, (long)self.month, (long)day];
+    if ([key isEqualToString:todayKey]) {
+      [[NSColor colorWithCalibratedRed:.95 green:.77 blue:.49 alpha:.38] setFill];
+      [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(cell, 2, 3) xRadius:9 yRadius:9] fill];
+    }
+    unsigned long long value = self.controller.dailyTotals[key].unsignedLongLongValue;
+    NSString *text = IsChineseUI()
+        ? [NSString stringWithFormat:@"%llu（%02ld）", value, (long)day]
+        : [NSString stringWithFormat:@"%llu (%02ld)", value, (long)day];
+    CGFloat size = text.length > 12 ? 10 : (text.length > 8 ? 11 : 15);
+    [self drawText:text rect:NSInsetRect(cell, 2, 14) size:size color:ink weight:NSFontWeightSemibold];
+  }
+}
+
+@end
+
 @implementation MeritController
 
 - (void)loadState {
   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
   self.total = [defaults integerForKey:kTotal];
+  NSDictionary *storedDaily = [defaults dictionaryForKey:kDailyTotals];
+  self.dailyTotals = storedDaily ? [storedDaily mutableCopy] : [NSMutableDictionary dictionary];
+  self.currentDayKey = DateKeyForDate(NSDate.date);
+  self.todayTotal = self.dailyTotals[self.currentDayKey].longLongValue;
   self.strikeActive = NO;
   self.strikeStartTime = -1;
   self.lastInputTime = 0;
@@ -396,7 +535,17 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (!self.dirty) return;
   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
   [defaults setInteger:self.total forKey:kTotal];
+  [defaults setObject:self.dailyTotals forKey:kDailyTotals];
   self.dirty = NO;
+}
+
+- (void)ensureCurrentDay {
+  NSString *today = DateKeyForDate(NSDate.date);
+  if ([today isEqualToString:self.currentDayKey]) return;
+  self.currentDayKey = today;
+  self.todayTotal = self.dailyTotals[today].longLongValue;
+  [self.view setNeedsDisplay:YES];
+  [self.calendarView setNeedsDisplay:YES];
 }
 
 - (NSURL *)launchAgentURL {
@@ -546,6 +695,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                                    repeats:YES];
   [NSRunLoop.mainRunLoop addTimer:self.saveTimer forMode:NSRunLoopCommonModes];
   [NSRunLoop.mainRunLoop addTimer:self.saveTimer forMode:NSModalPanelRunLoopMode];
+  self.dayTimer = [NSTimer scheduledTimerWithTimeInterval:30
+                                                   target:self
+                                                 selector:@selector(ensureCurrentDay)
+                                                 userInfo:nil
+                                                  repeats:YES];
+  [NSRunLoop.mainRunLoop addTimer:self.dayTimer forMode:NSRunLoopCommonModes];
+  [NSRunLoop.mainRunLoop addTimer:self.dayTimer forMode:NSModalPanelRunLoopMode];
   // Monitor tap health even on a silent autostart or after a failed installation.
   self.permissionPollTimer = [NSTimer timerWithTimeInterval:kPermissionPollInterval * 2
       target:self selector:@selector(checkPermission:) userInfo:nil repeats:YES];
@@ -557,12 +713,14 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
   (void)notification;
+  [self ensureCurrentDay];
   [self checkPermission:nil];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
   (void)notification;
   [self saveState];
+  [self.dayTimer invalidate];
   [self removeEventTap];
   [self stopPermissionPoll];
 }
@@ -718,8 +876,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)count {
+  [self ensureCurrentDay];
   if (self.total == LLONG_MAX) return;
   self.total++;
+  if (self.todayTotal < LLONG_MAX) self.todayTotal++;
+  self.dailyTotals[self.currentDayKey] = @(self.todayTotal);
   self.dirty = YES;
   NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
   if (self.lastInputTime > 0) {
@@ -738,6 +899,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       self.smoothedInputInterval * 1.05, kMinStrikeDuration, kMaxStrikeDuration);
   [self startStrikeWithDuration:desiredDuration];
   [self.view setNeedsDisplay:YES];
+  [self.calendarView setNeedsDisplay:YES];
 }
 
 - (void)countScrollGesture {
@@ -788,6 +950,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                               keyEquivalent:@""];
   appearance.target = self;
   [menu addItem:appearance];
+  NSMenuItem *calendar = [[NSMenuItem alloc]
+      initWithTitle:UiText(@"功德日历…", @"Merit Calendar…")
+             action:@selector(showMeritCalendar:)
+      keyEquivalent:@""];
+  calendar.target = self;
+  [menu addItem:calendar];
   [menu addItem:NSMenuItem.separatorItem];
   NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:UiText(@"退出", @"Quit")
                                                 action:@selector(terminate:)
@@ -800,6 +968,38 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)toggleLaunchAtLogin:(id)sender {
   (void)sender;
   [self setLaunchAtLoginEnabled:!self.isLaunchAtLoginEnabled showError:YES];
+}
+
+- (void)showMeritCalendar:(id)sender {
+  (void)sender;
+  [self ensureCurrentDay];
+  if (!self.calendarWindow) {
+    NSRect frame = NSMakeRect(0, 0, 560, 430);
+    self.calendarView = [[MeritCalendarView alloc] initWithFrame:frame];
+    self.calendarView.controller = self;
+    [self.calendarView showCurrentMonth];
+    NSButton *previous = [[NSButton alloc] initWithFrame:NSMakeRect(24, 18, 44, 28)];
+    previous.title = @"<"; previous.tag = -1; previous.target = self;
+    previous.action = @selector(shiftCalendarMonth:);
+    NSButton *next = [[NSButton alloc] initWithFrame:NSMakeRect(492, 18, 44, 28)];
+    next.title = @">"; next.tag = 1; next.target = self;
+    next.action = @selector(shiftCalendarMonth:);
+    [self.calendarView addSubview:previous];
+    [self.calendarView addSubview:next];
+    self.calendarWindow = [[NSWindow alloc] initWithContentRect:frame
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+          backing:NSBackingStoreBuffered defer:NO];
+    self.calendarWindow.title = UiText(@"功德日历", @"Merit Calendar");
+    self.calendarWindow.contentView = self.calendarView;
+    self.calendarWindow.releasedWhenClosed = NO;
+    [self.calendarWindow center];
+  }
+  [NSApp activateIgnoringOtherApps:YES];
+  [self.calendarWindow makeKeyAndOrderFront:nil];
+}
+
+- (void)shiftCalendarMonth:(NSButton *)sender {
+  [self.calendarView shiftMonth:sender.tag];
 }
 
 - (void)selectAppearance:(NSButton *)sender {
@@ -867,13 +1067,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
   alert.informativeText = UiText(
-      @"版本 0.3.0\n\n"
+      @"版本 0.4.0\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"项目主页：\n"
        @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde",
-      @"Version 0.3.0\n\n"
+      @"Version 0.4.0\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"

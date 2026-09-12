@@ -24,11 +24,16 @@ int main() {
     MeritController *controller = [[MeritController alloc] init];
     [controller loadState];
     controller.total = 0;
+    controller.dailyTotals = [NSMutableDictionary dictionary];
+    controller.currentDayKey = DateKeyForDate(NSDate.date);
+    controller.todayTotal = 0;
     controller.view = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, 120, 125)];
     controller.view.controller = controller;
     for (int i = 0; i < 100; ++i)
       EventTapCallback(NULL, kCGEventKeyDown, NULL, (__bridge void *)controller);
     assert(controller.total == 100);
+    assert(controller.todayTotal == 100);
+    assert(controller.dailyTotals[controller.currentDayKey].longLongValue == 100);
     NSTimeInterval start = controller.strikeStartTime;
     EventTapCallback(NULL, kCGEventLeftMouseDown, NULL, (__bridge void *)controller);
     EventTapCallback(NULL, kCGEventRightMouseDown, NULL, (__bridge void *)controller);
@@ -40,6 +45,7 @@ int main() {
     controller.lastScrollEventTime -= .3;
     EventTapCallback(NULL, kCGEventScrollWheel, NULL, (__bridge void *)controller);
     assert(controller.total == 105);
+    assert(controller.todayTotal == 105);
     EventTapCallback(NULL, kCGEventKeyUp, NULL, (__bridge void *)controller);
     assert(controller.total == 105);
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:.35];
@@ -49,7 +55,19 @@ int main() {
     controller.total = LLONG_MAX;
     [controller count];
     assert(controller.total == LLONG_MAX);
+    assert(controller.todayTotal == 105);
+    const long long lifetimeBeforeRollover = controller.total;
+    NSString *todayKey = DateKeyForDate(NSDate.date);
+    [controller.dailyTotals removeObjectForKey:todayKey];
+    controller.currentDayKey = @"1900-01-01";
+    controller.todayTotal = 999;
+    [controller ensureCurrentDay];
+    assert([controller.currentDayKey isEqualToString:todayKey]);
+    assert(controller.todayTotal == 0);
+    assert(controller.total == lifetimeBeforeRollover);
     controller.total = 13700;
+    controller.dailyTotals[@"2026-09-01"] = @860;
+    controller.dailyTotals[@"2026-09-02"] = @56866;
     controller.selectedScene = MeritSceneWoodfish;
     controller.pendingScene = MeritSceneWoodfish;
     NSView *grid = [controller appearanceGrid];
@@ -60,6 +78,11 @@ int main() {
     for (NSButton *button in controller.appearanceButtons)
       assert((button.state == NSControlStateValueOn) == (button.tag == 3));
     Snapshot(grid, @"appearance-grid.png");
+    MeritCalendarView *calendar = [[MeritCalendarView alloc] initWithFrame:NSMakeRect(0, 0, 560, 430)];
+    calendar.controller = controller;
+    calendar.year = 2026;
+    calendar.month = 9;
+    Snapshot(calendar, @"merit-calendar.png");
     assert(controller.view.hamsterBaseImage && controller.view.hamsterActorImage);
     for (NSImage *sprite in @[controller.view.hamsterBaseImage, controller.view.hamsterActorImage]) {
       NSBitmapImageRep *rep = (NSBitmapImageRep *)sprite.representations.firstObject;
@@ -100,6 +123,6 @@ int main() {
     Snapshot(controller.view, @"cat-wave.png");
     controller.strikeActive = NO;
     printf("PASS: 101 cat poses keep attachment fixed; paw moves vertically with zero horizontal drift\n");
-    printf("PASS: %s UI localization; 100 key events; all mouse buttons; scroll grouping; ignored key-up; no animation queue; modal timer completion; overflow guard; four-card selection isolation; alpha and green-key checks; scene renders\n", expectedLanguage);
+    printf("PASS: %s UI localization; daily and lifetime totals; single-line calendar; 100 key events; all mouse buttons; scroll grouping; ignored key-up; no animation queue; modal timer completion; overflow guard; four-card selection isolation; alpha and green-key checks; scene renders\n", expectedLanguage);
   }
 }

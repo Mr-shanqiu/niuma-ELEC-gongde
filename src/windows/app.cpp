@@ -28,6 +28,7 @@ namespace {
 
 constexpr wchar_t kWindowClass[] = L"NiuMaMeritWindow";
 constexpr wchar_t kPickerClass[] = L"NiuMaMeritAppearancePicker";
+constexpr wchar_t kCalendarClass[] = L"NiuMaMeritCalendar";
 constexpr wchar_t kMutexName[] = L"Local\\NiuMaMeritCounter";
 constexpr wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -35,6 +36,7 @@ constexpr wchar_t kRunValue[] = L"NiuMaMerit";
 constexpr UINT kCountMessage = WM_APP + 1;
 constexpr UINT kScrollMessage = WM_APP + 2;
 constexpr UINT_PTR kAnimationTimer = 1;
+constexpr UINT_PTR kDayTimer = 2;
 constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
 constexpr int kLuckyCatBaseResource = 104;
@@ -63,7 +65,8 @@ constexpr float kPlusEndPhase = 0.70f;
 constexpr UINT_PTR kMenuAbout = 1;
 constexpr UINT_PTR kMenuLaunchAtLogin = 2;
 constexpr UINT_PTR kMenuAppearance = 3;
-constexpr UINT_PTR kMenuQuit = 4;
+constexpr UINT_PTR kMenuCalendar = 4;
+constexpr UINT_PTR kMenuQuit = 5;
 
 bool IsChineseUi() {
   return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;
@@ -110,6 +113,8 @@ struct AppState {
   int windowWidth = kWindowDipWidth;
   int windowHeight = kWindowDipHeight;
   std::uint64_t total = 0;
+  std::uint64_t todayTotal = 0;
+  std::wstring currentDay;
   ULONGLONG lastInputTime = 0;
   ULONGLONG lastScrollEventTime = 0;
   double intervalEma = static_cast<double>(kDefaultStrikeMs);
@@ -138,6 +143,14 @@ struct PickerState {
 };
 
 PickerState gPicker;
+
+struct CalendarState {
+  HWND window = nullptr;
+  int year = 0;
+  int month = 0;
+};
+
+CalendarState gCalendar;
 
 void EnableBestDpiAwareness() {
   using SetContextFn = BOOL(WINAPI*)(HANDLE);
@@ -191,6 +204,49 @@ std::wstring DataPath() {
     return directory + L"\\data.ini";
   }();
   return path;
+}
+
+std::wstring DateKey(const SYSTEMTIME& date) {
+  wchar_t key[16] = {};
+  swprintf_s(key, L"%04u-%02u-%02u", date.wYear, date.wMonth, date.wDay);
+  return key;
+}
+
+std::uint64_t ReadDailyTotal(const std::wstring& key) {
+  const std::wstring path = DataPath();
+  if (path.empty()) return 0;
+  wchar_t value[64] = {};
+  GetPrivateProfileStringW(L"daily", key.c_str(), L"0", value,
+                           static_cast<DWORD>(std::size(value)), path.c_str());
+  wchar_t* end = nullptr;
+  const unsigned long long result = _wcstoui64(value, &end, 10);
+  return end == value ? 0 : static_cast<std::uint64_t>(result);
+}
+
+bool EnsureCurrentDay() {
+  SYSTEMTIME now = {};
+  GetLocalTime(&now);
+  const std::wstring today = DateKey(now);
+  if (today == gState.currentDay) return false;
+  gState.currentDay = today;
+  gState.todayTotal = ReadDailyTotal(today);
+  return true;
+}
+
+int DaysInMonth(int year, int month) {
+  static constexpr int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (month == 2 && (year % 400 == 0 || (year % 4 == 0 && year % 100 != 0))) return 29;
+  return days[month - 1];
+}
+
+int MondayOffset(int year, int month) {
+  SYSTEMTIME input = {};
+  input.wYear = static_cast<WORD>(year); input.wMonth = static_cast<WORD>(month); input.wDay = 1;
+  FILETIME file = {};
+  SYSTEMTIME normalized = {};
+  SystemTimeToFileTime(&input, &file);
+  FileTimeToSystemTime(&file, &normalized);
+  return (normalized.wDayOfWeek + 6) % 7;
 }
 
 bool StartedAutomatically() {
@@ -332,6 +388,11 @@ void SaveState() {
   swprintf_s(x, L"%ld", rect.left);
   swprintf_s(y, L"%ld", rect.top);
   WritePrivateProfileStringW(L"state", L"total", total, path.c_str());
+  if (!gState.currentDay.empty()) {
+    WritePrivateProfileStringW(
+        L"daily", gState.currentDay.c_str(),
+        std::to_wstring(gState.todayTotal).c_str(), path.c_str());
+  }
   WritePrivateProfileStringW(L"state", L"x", x, path.c_str());
   WritePrivateProfileStringW(L"state", L"y", y, path.c_str());
   WritePrivateProfileStringW(
@@ -529,7 +590,7 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
         22.0f, 255);
   }
 
-  const std::wstring totalText = std::to_wstring(gState.total);
+  const std::wstring totalText = std::to_wstring(gState.todayTotal);
   float totalFont = totalText.size() > 24 ? 20.0f :
                     totalText.size() > 18 ? 24.0f : 30.0f;
   DrawCenteredText(graphics, totalText,
@@ -609,6 +670,9 @@ void EnsureAnimationTimer() {
 }
 
 void CountOneOperation() {
+  if (EnsureCurrentDay()) {
+    RenderLayeredWindow(GetTickCount64());
+  }
   if (gState.total == std::numeric_limits<std::uint64_t>::max()) {
     return;
   }
@@ -631,6 +695,9 @@ void CountOneOperation() {
 
   gState.lastInputTime = now;
   ++gState.total;
+  if (gState.todayTotal < std::numeric_limits<std::uint64_t>::max()) {
+    ++gState.todayTotal;
+  }
   gState.dirty = true;
 
   // There is deliberately no animation queue. Counts are immediate, while
@@ -646,6 +713,7 @@ void CountOneOperation() {
   if (!wasRunning) {
     RenderLayeredWindow(now);
   }
+  if (gCalendar.window != nullptr) InvalidateRect(gCalendar.window, nullptr, FALSE);
 }
 
 void CountScrollGesture() {
@@ -707,7 +775,7 @@ void ShowPrivacyNotice(HWND owner) {
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.3.0";
+  const std::wstring version = L"0.4.0";
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
@@ -730,6 +798,123 @@ const wchar_t* SceneTitle(MeritScene scene) {
     case MeritScene::ChickPecking: return UiText(L"小鸡啄米", L"Pecking Chick");
     case MeritScene::HamsterWheel: return UiText(L"仓鼠跑轮", L"Hamster Wheel");
     default: return UiText(L"默认木鱼", L"Woodfish");
+  }
+}
+
+void DrawCalendarText(Gdiplus::Graphics& graphics, const std::wstring& text,
+                      const Gdiplus::RectF& rect, float size,
+                      const Gdiplus::Color& color, bool bold = false) {
+  Gdiplus::Font font(L"Microsoft YaHei UI", size,
+      bold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  Gdiplus::StringFormat format;
+  format.SetAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetTrimming(Gdiplus::StringTrimmingNone);
+  Gdiplus::SolidBrush brush(color);
+  graphics.DrawString(text.c_str(), -1, &font, rect, &format, &brush);
+}
+
+void PaintMeritCalendar(HWND window) {
+  PAINTSTRUCT paint = {};
+  HDC dc = BeginPaint(window, &paint);
+  Gdiplus::Graphics graphics(dc);
+  const float scale = static_cast<float>(gState.dpi) / 96.0f;
+  graphics.ScaleTransform(scale, scale);
+  graphics.Clear(Gdiplus::Color(255, 248, 240, 225));
+  const Gdiplus::Color ink(255, 61, 46, 31);
+  const Gdiplus::Color muted(255, 126, 107, 87);
+  const Gdiplus::Color accent(255, 199, 99, 31);
+
+  wchar_t monthTitle[32] = {};
+  if (IsChineseUi()) swprintf_s(monthTitle, L"%d 年 %d 月", gCalendar.year, gCalendar.month);
+  else swprintf_s(monthTitle, L"%d / %02d", gCalendar.year, gCalendar.month);
+  DrawCalendarText(graphics, monthTitle, Gdiplus::RectF(90, 18, 380, 34), 22, ink, true);
+  DrawCalendarText(graphics, L"<", Gdiplus::RectF(22, 18, 48, 34), 20, ink, true);
+  DrawCalendarText(graphics, L">", Gdiplus::RectF(490, 18, 48, 34), 20, ink, true);
+
+  std::uint64_t monthTotal = 0;
+  for (int day = 1; day <= DaysInMonth(gCalendar.year, gCalendar.month); ++day) {
+    wchar_t key[16] = {};
+    swprintf_s(key, L"%04d-%02d-%02d", gCalendar.year, gCalendar.month, day);
+    monthTotal += key == gState.currentDay ? gState.todayTotal : ReadDailyTotal(key);
+  }
+  DrawCalendarText(graphics,
+      std::wstring(UiText(L"累计功德  ", L"Total Merit  ")) + std::to_wstring(gState.total),
+      Gdiplus::RectF(20, 62, 250, 30), 17, accent, true);
+  DrawCalendarText(graphics,
+      std::wstring(UiText(L"本月功德  ", L"This Month  ")) + std::to_wstring(monthTotal),
+      Gdiplus::RectF(290, 62, 250, 30), 17, accent, true);
+
+  const wchar_t* zhWeekdays[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
+  const wchar_t* enWeekdays[] = {L"MON", L"TUE", L"WED", L"THU", L"FRI", L"SAT", L"SUN"};
+  const float left = 14, top = 112, cellWidth = 76, cellHeight = 51;
+  for (int column = 0; column < 7; ++column) {
+    DrawCalendarText(graphics, IsChineseUi() ? zhWeekdays[column] : enWeekdays[column],
+        Gdiplus::RectF(left + column * cellWidth, 94, cellWidth, 20), 11, muted, true);
+  }
+  SYSTEMTIME today = {};
+  GetLocalTime(&today);
+  const int offset = MondayOffset(gCalendar.year, gCalendar.month);
+  for (int day = 1; day <= DaysInMonth(gCalendar.year, gCalendar.month); ++day) {
+    const int slot = offset + day - 1, row = slot / 7, column = slot % 7;
+    const Gdiplus::RectF cell(left + column * cellWidth, top + row * cellHeight,
+                              cellWidth - 2, cellHeight - 3);
+    if (today.wYear == gCalendar.year && today.wMonth == gCalendar.month && today.wDay == day) {
+      Gdiplus::SolidBrush highlight(Gdiplus::Color(96, 242, 196, 125));
+      graphics.FillRectangle(&highlight, cell);
+    }
+    wchar_t key[16] = {};
+    swprintf_s(key, L"%04d-%02d-%02d", gCalendar.year, gCalendar.month, day);
+    const std::uint64_t value =
+        key == gState.currentDay ? gState.todayTotal : ReadDailyTotal(key);
+    std::wstring text = std::to_wstring(value) +
+        (IsChineseUi() ? L"（" : L" (") +
+        (day < 10 ? L"0" : L"") + std::to_wstring(day) +
+        (IsChineseUi() ? L"）" : L")");
+    const float fontSize = text.size() > 12 ? 10.0f : (text.size() > 8 ? 11.0f : 15.0f);
+    DrawCalendarText(graphics, text, cell, fontSize, ink, true);
+  }
+  EndPaint(window, &paint);
+}
+
+LRESULT CALLBACK CalendarWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+  (void)wParam;
+  switch (message) {
+    case WM_PAINT: PaintMeritCalendar(window); return 0;
+    case WM_LBUTTONUP: {
+      const int x = MulDiv(GET_X_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
+      const int y = MulDiv(GET_Y_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
+      if (y >= 12 && y <= 60 && (x <= 82 || x >= 478)) {
+        gCalendar.month += x <= 82 ? -1 : 1;
+        if (gCalendar.month == 0) { gCalendar.month = 12; --gCalendar.year; }
+        if (gCalendar.month == 13) { gCalendar.month = 1; ++gCalendar.year; }
+        InvalidateRect(window, nullptr, FALSE);
+      }
+      return 0;
+    }
+    case WM_CLOSE: DestroyWindow(window); return 0;
+    case WM_DESTROY: gCalendar.window = nullptr; return 0;
+    default: return DefWindowProcW(window, message, wParam, lParam);
+  }
+}
+
+void ShowMeritCalendar(HWND owner) {
+  if (gCalendar.window == nullptr) {
+    SYSTEMTIME now = {};
+    GetLocalTime(&now);
+    gCalendar.year = now.wYear; gCalendar.month = now.wMonth;
+    RECT desired = {0, 0, ScaleDip(560, gState.dpi), ScaleDip(430, gState.dpi)};
+    AdjustWindowRectEx(&desired, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_TOOLWINDOW);
+    gCalendar.window = CreateWindowExW(
+        WS_EX_TOOLWINDOW, kCalendarClass, UiText(L"功德日历", L"Merit Calendar"),
+        WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT,
+        desired.right - desired.left, desired.bottom - desired.top,
+        owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+  }
+  if (gCalendar.window != nullptr) {
+    ShowWindow(gCalendar.window, SW_SHOW);
+    SetForegroundWindow(gCalendar.window);
+    InvalidateRect(gCalendar.window, nullptr, FALSE);
   }
 }
 
@@ -968,6 +1153,8 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
       kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"));
   AppendMenuW(menu, MF_STRING, kMenuAppearance,
               UiText(L"更换形象", L"Change Appearance"));
+  AppendMenuW(menu, MF_STRING, kMenuCalendar,
+              UiText(L"功德日历…", L"Merit Calendar…"));
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kMenuQuit, UiText(L"退出", L"Exit"));
 
@@ -990,6 +1177,8 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     }
   } else if (command == static_cast<int>(kMenuAppearance)) {
     ShowAppearancePicker(window);
+  } else if (command == static_cast<int>(kMenuCalendar)) {
+    ShowMeritCalendar(window);
   } else if (command == static_cast<int>(kMenuQuit)) {
     DestroyWindow(window);
   }
@@ -1011,6 +1200,11 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_TIMER: {
+      if (wParam == kDayTimer) {
+        if (EnsureCurrentDay()) RenderLayeredWindow(GetTickCount64());
+        if (gCalendar.window != nullptr) InvalidateRect(gCalendar.window, nullptr, FALSE);
+        return 0;
+      }
       if (wParam != kAnimationTimer) {
         break;
       }
@@ -1088,6 +1282,7 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_DESTROY:
+      KillTimer(window, kDayTimer);
       if (gState.timerRunning) {
         KillTimer(window, kAnimationTimer);
         gState.timerRunning = false;
@@ -1180,10 +1375,27 @@ int WINAPI wWinMain(
     return 1;
   }
 
+  WNDCLASSEXW calendarClass = {};
+  calendarClass.cbSize = sizeof(calendarClass);
+  calendarClass.lpfnWndProc = CalendarWindowProcedure;
+  calendarClass.hInstance = instance;
+  calendarClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+  calendarClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+  calendarClass.lpszClassName = kCalendarClass;
+  if (RegisterClassExW(&calendarClass) == 0) {
+    ReleaseAllPngResources();
+    Gdiplus::GdiplusShutdown(gState.gdiplusToken);
+    ReleaseMutex(gState.mutex);
+    CloseHandle(gState.mutex);
+    if (SUCCEEDED(comResult)) CoUninitialize();
+    return 1;
+  }
+
   gState.dpi = SystemDpi();
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
   gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
   gState.total = ReadIniTotal();
+  EnsureCurrentDay();
   const long selectedScene = ReadIniLong(L"selected_scene", 0);
   gState.selectedScene = selectedScene >= 0 && selectedScene <= 3
       ? static_cast<MeritScene>(selectedScene)
@@ -1225,6 +1437,7 @@ int WINAPI wWinMain(
   SetWindowPos(
       window, HWND_TOPMOST, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  SetTimer(window, kDayTimer, 30000, nullptr);
 
   ConfigureLaunchAtLogin();
   if (!StartedAutomatically()) {
