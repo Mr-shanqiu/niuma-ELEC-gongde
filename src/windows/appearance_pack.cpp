@@ -2,7 +2,7 @@
 
 #include "miniz.h"
 
-#include <shellapi.h>
+#include <shlobj.h>
 
 #include <algorithm>
 #include <cctype>
@@ -535,7 +535,7 @@ bool LoadAppearancePackFile(const std::wstring& path,
     ~ArchiveGuard() { mz_zip_reader_end(archive); }
   } guard{&archive};
   if (archive.m_total_files == 0 || archive.m_total_files > kMaximumFiles ||
-      !mz_zip_reader_validate_archive(&archive, 0)) {
+      !mz_zip_validate_archive(&archive, 0)) {
     SetError(error, L"形象包文件数量或压缩数据不合法。");
     return false;
   }
