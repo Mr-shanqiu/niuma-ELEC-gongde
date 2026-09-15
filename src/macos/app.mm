@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import "appearance_pack.mm"
 
 #include <algorithm>
 #include <cmath>
@@ -55,6 +56,10 @@ static NSImage *LoadHamsterSprite(NSString *name) {
 static NSString *const kTotal = @"total";
 static NSString *const kDailyTotals = @"dailyTotals";
 static NSString *const kSelectedScene = @"selectedScene";
+static NSString *const kSelectedAppearance = @"selectedAppearanceId";
+static constexpr CGFloat kArtworkTop = 170.0;
+static constexpr CGFloat kFeedbackY = 174.0;
+static constexpr CGFloat kCounterY = 210.0;
 static NSString *const kLaunchAtLoginConfigured = @"launchAtLoginConfigured";
 static NSString *const kLaunchAtLoginEnabled = @"launchAtLoginEnabled";
 static NSString *const kLaunchAgentLabel = @"cn.niuma.merit.autostart";
@@ -131,6 +136,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic, strong) NSImage *hamsterBaseImage;
 @property(nonatomic, strong) NSImage *hamsterWheelImage;
 @property(nonatomic, strong) NSImage *hamsterActorImage;
+@property(nonatomic, strong) NMAppearancePack *appearancePack;
 @property(nonatomic) MeritScene scene;
 @property(nonatomic) BOOL previewOnly;
 @end
@@ -162,6 +168,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic) MeritScene selectedScene;
 @property(nonatomic) NSInteger pendingScene;
 @property(nonatomic, strong) NSArray<NSButton *> *appearanceButtons;
+@property(nonatomic, copy) NSString *selectedAppearanceId;
+@property(nonatomic, copy) NSString *pendingAppearanceId;
+@property(nonatomic, copy) NSString *suggestedAppearanceId;
+@property(nonatomic, strong) NSArray<NMAppearancePack *> *installedAppearancePacks;
+@property(nonatomic, strong) NSArray<NSDictionary *> *appearanceItems;
 @property(nonatomic) BOOL diagnostics;
 @property(nonatomic) NSUInteger receivedEvents;
 @property(nonatomic) NSUInteger receivedKeys;
@@ -188,6 +199,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)toggleLaunchAtLogin:(id)sender;
 - (NSView *)appearanceGrid;
 - (void)selectAppearance:(NSButton *)sender;
+- (void)reloadAppearancePacks;
+- (NMAppearancePack *)appearancePackWithId:(NSString *)identifier;
+- (void)applyAppearanceId:(NSString *)identifier;
 @end
 
 @implementation MeritView
@@ -278,7 +292,14 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     strikeAmount = 1.0 - eased;
   }
 
-  if (self.scene == MeritSceneLuckyCat) {
+  // Three non-overlapping layout regions: artwork 0...170, transient feedback
+  // 174...204, and the daily counter 210...250. Artwork is clipped so a
+  // malformed or oversized appearance can never cover either number.
+  [ctx saveGraphicsState];
+  [[NSBezierPath bezierPathWithRect:NSMakeRect(0, 0, kWindowWidth, kArtworkTop)] addClip];
+  if (self.appearancePack) {
+    [self.appearancePack drawAtPhase:striking ? phase : 0.0];
+  } else if (self.scene == MeritSceneLuckyCat) {
     NSRect baseRect = NSMakeRect(5, -35, 230, 230);
     NSRect actorRect = NSMakeRect(30, -35, 230, 230);
     [self.luckyCatBaseImage drawInRect:baseRect
@@ -320,7 +341,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                hints:nil];
     [NSGraphicsContext restoreGraphicsState];
   } else if (self.scene == MeritSceneHamsterWheel) {
-    NSRect hamsterRect = NSMakeRect(27, -3, 186, 186);
+    // Fit the complete perspective wheel inside the shared 0...170 artwork zone.
+    NSRect hamsterRect = NSMakeRect(35, 0, 170, 170);
     [self.hamsterBaseImage drawInRect:hamsterRect
                              fromRect:NSZeroRect
                             operation:NSCompositingOperationSourceOver
@@ -331,12 +353,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     NSAffineTransform *hamster = [NSAffineTransform transform];
     // Keep the perspective wheel fixed. A small foot-anchored stride moves
     // the animal; rotating a projected ellipse would make the whole wheel wobble.
-    [hamster translateXBy:130 yBy:58];
+    [hamster translateXBy:129 yBy:56];
     [hamster rotateByDegrees:-2.0 * strikeAmount];
     [hamster scaleXBy:1.0 + .012 * strikeAmount yBy:1.0 - .025 * strikeAmount];
-    [hamster translateXBy:-130 yBy:-58];
+    [hamster translateXBy:-129 yBy:-56];
     [hamster concat];
-    [self.hamsterActorImage drawInRect:NSMakeRect(33, 13, 168, 168)
+    [self.hamsterActorImage drawInRect:NSMakeRect(41, 15, 154, 154)
                               fromRect:NSZeroRect
                              operation:NSCompositingOperationSourceOver
                               fraction:1.0
@@ -344,12 +366,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                  hints:nil];
     [NSGraphicsContext restoreGraphicsState];
   } else {
-    NSRect shadowRect = NSMakeRect(34, 5, 172, 18);
+    [NSGraphicsContext saveGraphicsState];
+    NSAffineTransform *woodfishScale = [NSAffineTransform transform];
+    [woodfishScale translateXBy:120 yBy:0];
+    [woodfishScale scaleBy:0.88];
+    [woodfishScale translateXBy:-120 yBy:0];
+    [woodfishScale concat];
+    NSRect shadowRect = NSMakeRect(40, 3, 160, 16);
     NSBezierPath *groundShadow = [NSBezierPath bezierPathWithOvalInRect:shadowRect];
     [[NSColor colorWithWhite:0 alpha:0.25] setFill];
     [groundShadow fill];
 
-    [self.woodfishImage drawInRect:NSMakeRect(18, 8, 232, 140)
+    [self.woodfishImage drawInRect:NSMakeRect(26, 0, 214, 129)
                           fromRect:NSZeroRect
                          operation:NSCompositingOperationSourceOver
                           fraction:1.0
@@ -358,22 +386,36 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
     [NSGraphicsContext saveGraphicsState];
     NSAffineTransform *malletTransform = [NSAffineTransform transform];
-    [malletTransform translateXBy:280 yBy:160];
-    [malletTransform rotateByDegrees:-6.0 + 9.0 * strikeAmount];
+    // Keep the round head undistorted and extend only the wooden shaft by 30%.
+    // The farther off-screen pivot uses a smaller arc to land on the same apex.
+    [malletTransform translateXBy:417 yBy:180];
+    [malletTransform rotateByDegrees:3.0 + 2.2 * strikeAmount];
     [malletTransform concat];
-    [self.malletImage drawInRect:NSMakeRect(-208, -26, 214, 54)
-                        fromRect:NSZeroRect
+    NSSize malletSourceSize = self.malletImage.size;
+    NSRect shaftSource = NSMakeRect(108, 0, MAX(1, malletSourceSize.width - 108),
+                                    malletSourceSize.height);
+    [self.malletImage drawInRect:NSMakeRect(-260, -26, 266, 54)
+                        fromRect:shaftSource
+                       operation:NSCompositingOperationSourceOver
+                        fraction:1.0
+                  respectFlipped:YES
+                           hints:nil];
+    NSRect headSource = NSMakeRect(0, 0, MIN(145, malletSourceSize.width),
+                                   malletSourceSize.height);
+    [self.malletImage drawInRect:NSMakeRect(-309, -27, 60, 54)
+                        fromRect:headSource
                        operation:NSCompositingOperationSourceOver
                         fraction:1.0
                   respectFlipped:YES
                            hints:nil];
     [NSGraphicsContext restoreGraphicsState];
+    [NSGraphicsContext restoreGraphicsState];
   }
+  [ctx restoreGraphicsState];
 
   if (!self.previewOnly && striking && phase >= .30 && phase <= .70) {
-    CGFloat plusY = self.scene == MeritSceneWoodfish ? 148 : 180;
     [self drawCenteredText:@"+1"
-                      rect:NSMakeRect(0, plusY, kWindowWidth, 30)
+                      rect:NSMakeRect(0, kFeedbackY, kWindowWidth, 30)
                       font:[NSFont monospacedDigitSystemFontOfSize:23
                                                            weight:NSFontWeightBold]
                      color:[NSColor colorWithCalibratedRed:.94 green:.50 blue:.16 alpha:1]];
@@ -386,7 +428,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   CGFloat totalFont = totalText.length > 18 ? 24 : 30;
   if (totalText.length > 24) totalFont = 20;
   [self drawCenteredText:totalText
-                    rect:NSMakeRect(0, 210, kWindowWidth, 40)
+                    rect:NSMakeRect(0, kCounterY, kWindowWidth, 40)
                     font:[NSFont monospacedDigitSystemFontOfSize:totalFont
                                                          weight:NSFontWeightBold]
                    color:[NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1]];
@@ -529,6 +571,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                storedScene <= MeritSceneHamsterWheel
                            ? (MeritScene)storedScene
                            : MeritSceneWoodfish;
+  self.selectedAppearanceId = [defaults stringForKey:kSelectedAppearance];
+  if (!self.selectedAppearanceId.length) {
+    NSArray *builtinIds = @[@"builtin.woodfish", @"builtin.lucky-cat",
+                            @"builtin.chick-pecking", @"builtin.hamster-wheel"];
+    self.selectedAppearanceId = builtinIds[self.selectedScene];
+  }
 }
 
 - (void)saveState {
@@ -654,6 +702,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.view = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, kWindowScaleWidth, kWindowScaleHeight)];
   self.view.controller = self;
   self.view.scene = self.selectedScene;
+  [self reloadAppearancePacks];
+  [self applyAppearanceId:self.selectedAppearanceId];
   self.window = [[NSWindow alloc] initWithContentRect:self.view.bounds
                                             styleMask:NSWindowStyleMaskBorderless
                                               backing:NSBackingStoreBuffered
@@ -709,6 +759,32 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSModalPanelRunLoopMode];
   [self installEventTap];
   if (!self.launchedAutomatically) [self showPermissionIntroIfNeeded];
+}
+
+- (void)application:(NSApplication *)application openFiles:(NSArray<NSString *> *)filenames {
+  NSString *installedId = nil;
+  for (NSString *filename in filenames) {
+    NSError *error = nil;
+    NMAppearancePack *pack = [NMAppearancePackStore
+        installArchiveAtURL:[NSURL fileURLWithPath:filename]
+                      error:&error];
+    if (!pack) {
+      NSAlert *alert = [[NSAlert alloc] init];
+      alert.alertStyle = NSAlertStyleWarning;
+      alert.messageText = UiText(@"无法导入形象包", @"Unable to Import Appearance Pack");
+      alert.informativeText = error.localizedDescription ?: UiText(@"形象包无效。", @"The appearance pack is invalid.");
+      [alert runModal];
+      [application replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
+      return;
+    }
+    installedId = pack.identifier;
+  }
+  [application replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
+  [self reloadAppearancePacks];
+  if (installedId.length) {
+    self.suggestedAppearanceId = installedId;
+    [self showAppearancePicker:nil];
+  }
 }
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
@@ -1003,28 +1079,81 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)selectAppearance:(NSButton *)sender {
-  self.pendingScene = sender.tag;
+  if (sender.tag < 0 || sender.tag >= (NSInteger)self.appearanceItems.count) return;
+  self.pendingAppearanceId = self.appearanceItems[(NSUInteger)sender.tag][@"id"];
   for (NSButton *button in self.appearanceButtons) {
-    button.state = button.tag == self.pendingScene ? NSControlStateValueOn : NSControlStateValueOff;
+    button.state = button.tag == sender.tag ? NSControlStateValueOn : NSControlStateValueOff;
   }
 }
 
+- (void)reloadAppearancePacks {
+  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:nil];
+}
+
+- (NMAppearancePack *)appearancePackWithId:(NSString *)identifier {
+  for (NMAppearancePack *pack in self.installedAppearancePacks) {
+    if ([pack.identifier isEqualToString:identifier]) return pack;
+  }
+  return nil;
+}
+
+- (void)applyAppearanceId:(NSString *)identifier {
+  NMAppearancePack *pack = [self appearancePackWithId:identifier];
+  if (pack) {
+    self.view.appearancePack = pack;
+    self.selectedAppearanceId = pack.identifier;
+  } else {
+    NSArray *builtinIds = @[@"builtin.woodfish", @"builtin.lucky-cat",
+                            @"builtin.chick-pecking", @"builtin.hamster-wheel"];
+    NSInteger scene = [builtinIds indexOfObject:identifier];
+    if (scene == NSNotFound) scene = MeritSceneWoodfish;
+    self.selectedScene = (MeritScene)scene;
+    self.view.scene = self.selectedScene;
+    self.view.appearancePack = nil;
+    self.selectedAppearanceId = builtinIds[(NSUInteger)scene];
+    [NSUserDefaults.standardUserDefaults setInteger:self.selectedScene forKey:kSelectedScene];
+  }
+  [NSUserDefaults.standardUserDefaults setObject:self.selectedAppearanceId forKey:kSelectedAppearance];
+  [self.view setNeedsDisplay:YES];
+}
+
 - (NSView *)appearanceGrid {
-  NSView *grid = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 324, 316)];
   NSArray *titles = IsChineseUI()
       ? @[@"默认木鱼", @"招财猫", @"小鸡啄米", @"仓鼠跑轮"]
       : @[@"Woodfish", @"Lucky Cat", @"Pecking Chick", @"Hamster Wheel"];
-  NSMutableArray *buttons = [NSMutableArray array];
+  NSArray *builtinIds = @[@"builtin.woodfish", @"builtin.lucky-cat",
+                          @"builtin.chick-pecking", @"builtin.hamster-wheel"];
+  NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
   for (NSInteger i = 0; i < 4; ++i) {
-    MeritView *preview = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, 120, 125)];
-    preview.previewOnly = YES;
-    preview.scene = (MeritScene)i;
-    NSBitmapImageRep *rep = [preview bitmapImageRepForCachingDisplayInRect:preview.bounds];
-    [preview cacheDisplayInRect:preview.bounds toBitmapImageRep:rep];
-    NSImage *thumbnail = [[NSImage alloc] initWithSize:preview.bounds.size];
-    [thumbnail addRepresentation:rep];
-    NSButton *button = [[NSButton alloc] initWithFrame:NSMakeRect((i % 2) * 168, (1 - i / 2) * 162, 156, 154)];
-    button.title = titles[i];
+    [items addObject:@{@"id": builtinIds[i], @"title": titles[i], @"scene": @(i)}];
+  }
+  for (NMAppearancePack *pack in self.installedAppearancePacks) {
+    [items addObject:@{@"id": pack.identifier, @"title": [pack localizedName], @"pack": pack}];
+  }
+  self.appearanceItems = items;
+  NSInteger rows = (items.count + 1) / 2;
+  CGFloat gridHeight = rows * 162 - 8;
+  NSView *grid = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 324, gridHeight)];
+  NSMutableArray *buttons = [NSMutableArray array];
+  for (NSInteger i = 0; i < (NSInteger)items.count; ++i) {
+    NSDictionary *item = items[(NSUInteger)i];
+    NSImage *thumbnail = nil;
+    NMAppearancePack *pack = item[@"pack"];
+    if (pack) {
+      thumbnail = pack.previewImage;
+    } else {
+      MeritView *preview = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, 120, 125)];
+      preview.previewOnly = YES;
+      preview.scene = (MeritScene)[item[@"scene"] integerValue];
+      NSBitmapImageRep *rep = [preview bitmapImageRepForCachingDisplayInRect:preview.bounds];
+      [preview cacheDisplayInRect:preview.bounds toBitmapImageRep:rep];
+      thumbnail = [[NSImage alloc] initWithSize:preview.bounds.size];
+      [thumbnail addRepresentation:rep];
+    }
+    NSInteger row = i / 2;
+    NSButton *button = [[NSButton alloc] initWithFrame:NSMakeRect((i % 2) * 168,
+        gridHeight - (row + 1) * 154 - row * 8, 156, 154)];
+    button.title = item[@"title"];
     button.image = thumbnail;
     button.imagePosition = NSImageAbove;
     button.imageScaling = NSImageScaleProportionallyDown;
@@ -1033,32 +1162,59 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     button.tag = i;
     button.target = self;
     button.action = @selector(selectAppearance:);
-    button.state = i == self.pendingScene ? NSControlStateValueOn : NSControlStateValueOff;
+    button.state = [item[@"id"] isEqualToString:self.pendingAppearanceId]
+        ? NSControlStateValueOn : NSControlStateValueOff;
     [grid addSubview:button];
     [buttons addObject:button];
   }
   self.appearanceButtons = buttons;
-  return grid;
+  NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 324, MIN(478, gridHeight))];
+  scroll.documentView = grid;
+  scroll.hasVerticalScroller = gridHeight > NSHeight(scroll.bounds);
+  scroll.drawsBackground = NO;
+  return scroll;
 }
 
 - (void)showAppearancePicker:(id)sender {
   (void)sender;
-  NSAlert *alert = [[NSAlert alloc] init];
-  alert.messageText = UiText(@"更换形象", @"Change Appearance");
-  alert.informativeText = @"";
-  self.pendingScene = self.selectedScene;
-  alert.accessoryView = [self appearanceGrid];
-  [alert addButtonWithTitle:UiText(@"确认", @"Confirm")];
-  [alert addButtonWithTitle:UiText(@"取消", @"Cancel")];
-  if ([alert runModal] == NSAlertFirstButtonReturn) {
-    self.selectedScene = (MeritScene)self.pendingScene;
-    self.view.scene = self.selectedScene;
-    [NSUserDefaults.standardUserDefaults setInteger:self.selectedScene
-                                             forKey:kSelectedScene];
-    [self.view setNeedsDisplay:YES];
-    [self stopAnimation];
-    self.strikeActive = NO;
-    [self startStrikeWithDuration:0.800];
+  [self reloadAppearancePacks];
+  self.pendingAppearanceId = self.suggestedAppearanceId ?: self.selectedAppearanceId;
+  self.suggestedAppearanceId = nil;
+  while (YES) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = UiText(@"更换形象", @"Change Appearance");
+    alert.informativeText = @"";
+    alert.accessoryView = [self appearanceGrid];
+    [alert addButtonWithTitle:UiText(@"确认", @"Confirm")];
+    [alert addButtonWithTitle:UiText(@"取消", @"Cancel")];
+    [alert addButtonWithTitle:UiText(@"删除所选本地形象", @"Remove Selected Pack")];
+    NSModalResponse response = [alert runModal];
+    if (response == NSAlertFirstButtonReturn) {
+      [self applyAppearanceId:self.pendingAppearanceId];
+      [self stopAnimation];
+      self.strikeActive = NO;
+      [self startStrikeWithDuration:0.800];
+      return;
+    }
+    if (response == NSAlertSecondButtonReturn) return;
+    NMAppearancePack *pack = [self appearancePackWithId:self.pendingAppearanceId];
+    if (!pack) {
+      NSBeep();
+      continue;
+    }
+    NSError *error = nil;
+    if (![NMAppearancePackStore removePack:pack error:&error]) {
+      NSAlert *failure = [[NSAlert alloc] init];
+      failure.messageText = UiText(@"无法删除形象包", @"Unable to Remove Appearance Pack");
+      failure.informativeText = error.localizedDescription ?: @"";
+      [failure runModal];
+      continue;
+    }
+    if ([self.selectedAppearanceId isEqualToString:pack.identifier]) {
+      [self applyAppearanceId:@"builtin.woodfish"];
+    }
+    [self reloadAppearancePacks];
+    self.pendingAppearanceId = self.selectedAppearanceId;
   }
 }
 
@@ -1067,13 +1223,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
   alert.informativeText = UiText(
-      @"版本 0.4.0\n\n"
+      @"版本 0.5.2\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"项目主页：\n"
        @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde",
-      @"Version 0.4.0\n\n"
+      @"Version 0.5.2\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"

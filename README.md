@@ -8,9 +8,10 @@
 这是一个无音效、低干扰的原生桌面木鱼，目标支持 Windows 与 macOS。软件在系统范围内监听键盘按下和全部鼠标按键，并将连续滚轮事件合并为一次滚动手势；只统计操作次数，不读取按键内容、鼠标坐标、窗口名称或剪贴板内容。
 
 - 首次运行默认开启“登录后自动启动”，右键菜单可随时关闭或重新开启
-- 右键菜单支持：关于牛马电子功德、隐私说明、登录后自动启动、退出
+- 右键菜单支持：关于、隐私说明、登录后自动启动、更换形象、功德日历、退出
 - 仅展示总数和实时 `+1` 动画，不展示品牌文案、广告位或排行榜
-- 使用本地透明 PNG 绘制木鱼和敲棒，不包含音频、WebView 或远程资源
+- 使用本地透明 PNG 绘制形象，不包含音频、WebView 或远程资源
+- macOS 0.5.2 支持双击导入纯数据 `.nmgpack`，可在一个窗口内预览、选择、更新和删除本地形象
 - 完全本地持久化（总数、窗口位置、隐私说明确认状态和自启动设置）
 
 ## 隐私与离线边界
@@ -19,6 +20,7 @@
 - macOS 为支持系统级 `CGEventTap` 不启用 App Sandbox；源码不调用网络 API，构建时执行离线审计。
 - 可下载官方发布页时统计下载请求，但不能得出真实安装量、启动量、活跃量或卸载量。
 - 用户转发安装包不会被官方下载统计追踪。
+- 形象包只包含严格校验的 JSON、PNG 和关键帧数据，不能修改应用功能；未来用户作品须经运营方审核后才可在官网上架。
 - macOS 需要用户授予“输入监控”权限后才能全局计数。
 - 自动启动仅在用户登录电脑后运行；不会联网，也不会请求管理员权限。
 
@@ -37,6 +39,8 @@
 - `BINARY_BYTES`：通用二进制字节数
 - `APP_KB`：完整 `.app` 大小（KB）
 - `ZIP_BYTES`：压缩包字节数
+- `BASE_APP_ZIP_BYTES`：不含独立形象包的基础应用压缩包大小，必须小于 10MB
+- `SAMPLE_PACK_BYTES`：单独生成的示例形象包大小，不计入基础应用上限
 
 生成演示 DMG：
 
@@ -85,7 +89,7 @@ cmake --build build --config Release
 - 本地构建脚本 `./scripts/build-macos.sh` 成功。
 - `lipo -info`：`x86_64 arm64`（Universal 2）。
 - `codesign -d --entitlements -` 不包含 App Sandbox 或网络 entitlement。
-- 最新图标版 `.app` 约 `2.38MB`，ZIP 约 `2.30MB`，演示 DMG 约 `2.78MB`，均小于 `5MB` 目标。
+- 0.4 图标版 `.app` 约 `2.38MB`，ZIP 约 `2.30MB`，演示 DMG 约 `2.78MB`；0.5.2 起基础应用压缩包目标放宽为不超过 `10MB`，下载形象包单独计算。
 - 演示 DMG 已通过 `hdiutil verify` 完整性校验。
 - 启动 8 秒后实测：RSS 约 `35MB~46MB`，空闲 CPU 长时均值接近 `0%`。
 - 登录后自启动 LaunchAgent 已实现并被 macOS 接受。
@@ -104,3 +108,12 @@ cmake --build build --config Release
 ## 环境说明
 
 - 本机（macOS 开发机）未安装 `cmake`，通用 CMake 构建路径无法在本机复现；macOS 直接使用 `scripts/build-macos.sh`，Windows 使用 `scripts/build-windows.ps1` 或 GitHub Actions。
+
+## macOS 0.5.2 本地形象包
+
+- 双击 `.nmgpack` 即可导入；同一形象 ID 再次导入会在完整校验后安全更新。
+- “更换形象”直接展示全部内置形象和本机已安装形象，确认后立即切换；本地形象可删除，功德数据不受影响。
+- 形象包只能包含 JSON 动画参数和 PNG，不能修改计数、权限、菜单或任何客户端功能。
+- 基础应用 ZIP 上限为 `10MB`；单独下载的 `.nmgpack` 不计入基础应用体积。
+- 制作和校验命令：`./scripts/appearance-pack.py build|validate`。
+- 示例包输出：`dist/sample-packs/woodfish-sample.nmgpack`。

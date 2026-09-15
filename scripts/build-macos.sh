@@ -54,10 +54,28 @@ sed \
   -e "s#@PROJECT_VERSION@#$VERSION#g" \
   "$ROOT_DIR/src/macos/Info.plist.in" > "$APP_DIR/Contents/Info.plist"
 
-codesign --force --deep --sign - --options runtime \
+SIGNING_IDENTITY="${NIUMA_CODESIGN_IDENTITY:-}"
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | \
+    awk '/"Apple Development:/{print $2; exit}')"
+fi
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  if [[ "${NIUMA_ALLOW_ADHOC_SIGNING:-0}" == "1" ]]; then
+    SIGNING_IDENTITY="-"
+    echo "WARNING: using explicitly requested ad-hoc signing" >&2
+  else
+    echo "No stable macOS code-signing identity found." >&2
+    echo "Set NIUMA_CODESIGN_IDENTITY, or explicitly set NIUMA_ALLOW_ADHOC_SIGNING=1 for disposable builds." >&2
+    exit 1
+  fi
+fi
+
+codesign --force --deep --sign "$SIGNING_IDENTITY" --options runtime --timestamp=none \
   "$APP_DIR"
 
 codesign --display --entitlements - "$APP_DIR"
+echo "SIGNING_IDENTITY=$SIGNING_IDENTITY"
+codesign --display --requirements - "$APP_DIR" 2>&1 | sed 's/^/CODE_REQUIREMENT=/'
 
 ZIP_PATH="$OUTPUT_DIR/niuma-merit-macos-$VERSION.zip"
 rm -f "$ZIP_PATH"
@@ -70,3 +88,24 @@ echo "BINARY_BYTES=$(stat -f%z "$APP_DIR/Contents/MacOS/niuma-merit")"
 echo "APP_KB=$(du -sk "$APP_DIR" | awk '{print $1}')"
 echo "ZIP_BYTES=$(stat -f%z "$ZIP_PATH")"
 echo "DONE"
+
+# 0.5.2: build the separate sample appearance pack and enforce the base-app ZIP cap.
+NM_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+NM_SAMPLE_DIR="$NM_ROOT/dist/sample-packs"
+mkdir -p "$NM_SAMPLE_DIR"
+"$NM_ROOT/scripts/appearance-pack.py" build \
+  "$NM_ROOT/assets/appearance-packs/woodfish-sample" \
+  "$NM_SAMPLE_DIR/woodfish-sample.nmgpack"
+NM_BASE_ZIP="$(find "$NM_ROOT/dist" -maxdepth 1 -type f -name '*.zip' -print | head -n 1)"
+if [[ -z "$NM_BASE_ZIP" ]]; then
+  echo "No base application ZIP found" >&2
+  exit 1
+fi
+NM_BASE_BYTES="$(stat -f%z "$NM_BASE_ZIP")"
+NM_PACK_BYTES="$(stat -f%z "$NM_SAMPLE_DIR/woodfish-sample.nmgpack")"
+echo "BASE_APP_ZIP_BYTES=$NM_BASE_BYTES"
+echo "SAMPLE_PACK_BYTES=$NM_PACK_BYTES"
+if (( NM_BASE_BYTES > 10485760 )); then
+  echo "Base application ZIP exceeds the 10MB limit" >&2
+  exit 1
+fi

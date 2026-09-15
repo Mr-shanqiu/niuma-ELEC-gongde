@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "official.woodfish-sample",
+  "version": "1.0.0",
+  "name_zh": "木鱼示例包",
+  "name_en": "Woodfish Sample",
+  "author": "NiuMa Merit",
+  "publisher": "NiuMa Merit",
+  "review_id": "official-sample-0001",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "body.png",
+      "frame": [26, 0, 214, 129],
+      "anchor": [0.5, 0.5],
+      "keyframes": [
+        {"t": 0, "x": 0, "y": 0, "rotation": 0, "scale": 1, "alpha": 1}
+      ]
+    },
+    {
+      "image": "mallet.png",
+      "frame": [101, 128, 186, 42],
+      "anchor": [0.86, 0.5],
+      "keyframes": [
+        {"t": 0, "x": 0, "y": 0, "rotation": 2, "scale": 1, "alpha": 1},
+        {"t": 0.5, "x": 0, "y": 0, "rotation": 8, "scale": 1, "alpha": 1},
+        {"t": 1, "x": 0, "y": 0, "rotation": 2, "scale": 1, "alpha": 1}
+      ]
+    }
+  ]
+}

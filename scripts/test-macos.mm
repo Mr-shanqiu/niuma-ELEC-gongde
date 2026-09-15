@@ -69,11 +69,13 @@ int main() {
     controller.dailyTotals[@"2026-09-01"] = @860;
     controller.dailyTotals[@"2026-09-02"] = @56866;
     controller.selectedScene = MeritSceneWoodfish;
-    controller.pendingScene = MeritSceneWoodfish;
+    controller.selectedAppearanceId = @"builtin.woodfish";
+    controller.pendingAppearanceId = @"builtin.woodfish";
+    controller.installedAppearancePacks = @[];
     NSView *grid = [controller appearanceGrid];
     assert(controller.appearanceButtons.count == 4);
     [controller selectAppearance:controller.appearanceButtons[3]];
-    assert(controller.pendingScene == MeritSceneHamsterWheel);
+    assert([controller.pendingAppearanceId isEqualToString:@"builtin.hamster-wheel"]);
     assert(controller.selectedScene == MeritSceneWoodfish);
     for (NSButton *button in controller.appearanceButtons)
       assert((button.state == NSControlStateValueOn) == (button.tag == 3));
