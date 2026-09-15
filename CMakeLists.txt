@@ -16,11 +16,14 @@ if(WIN32)
   configure_file(assets/appicon.ico "${CMAKE_CURRENT_BINARY_DIR}/appicon.ico" COPYONLY)
   add_executable(niuma-merit WIN32
     src/windows/app.cpp
+    src/windows/appearance_pack.cpp
+    third_party/miniz/miniz.c
     "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc"
   )
+  target_include_directories(niuma-merit PRIVATE src/windows third_party/miniz)
   set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc" PROPERTIES GENERATED TRUE)
   target_compile_features(niuma-merit PRIVATE cxx_std_17)
-  target_compile_definitions(niuma-merit PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_compile_definitions(niuma-merit PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
   target_link_libraries(niuma-merit PRIVATE shell32 gdiplus ole32)
   if(MSVC)
     set_property(TARGET niuma-merit PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -28,6 +31,20 @@ if(WIN32)
     # app.rc embeds our explicit DPI/compatibility manifest. Disable the
     # linker's generated default manifest to avoid a duplicate resource.
     target_link_options(niuma-merit PRIVATE /MANIFEST:NO)
+  endif()
+
+  add_executable(niuma-pack-test
+    src/windows/appearance_pack_test.cpp
+    src/windows/appearance_pack.cpp
+    third_party/miniz/miniz.c
+  )
+  target_include_directories(niuma-pack-test PRIVATE src/windows third_party/miniz)
+  target_compile_features(niuma-pack-test PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-pack-test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-pack-test PRIVATE gdiplus ole32 shell32)
+  if(MSVC)
+    set_property(TARGET niuma-pack-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(niuma-pack-test PRIVATE /W4 /permissive- /utf-8)
   endif()
 elseif(APPLE)
   enable_language(OBJCXX)

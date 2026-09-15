@@ -12,6 +12,8 @@
 #include <gdiplus.h>
 #include <objidl.h>
 
+#include "appearance_pack.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -19,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "ole32.lib")
@@ -35,6 +38,7 @@ constexpr wchar_t kRunKey[] =
 constexpr wchar_t kRunValue[] = L"NiuMaMerit";
 constexpr UINT kCountMessage = WM_APP + 1;
 constexpr UINT kScrollMessage = WM_APP + 2;
+constexpr ULONG_PTR kAppearancePackCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
 constexpr UINT_PTR kDayTimer = 2;
 constexpr int kFishResource = 101;
@@ -124,6 +128,7 @@ struct AppState {
   bool dirty = false;
   bool timerRunning = false;
   MeritScene selectedScene = MeritScene::Woodfish;
+  std::string selectedPackId;
 };
 
 AppState gState;
@@ -135,10 +140,12 @@ PngResource gChickBase;
 PngResource gChickActor;
 PngResource gHamsterHabitat;
 PngResource gHamsterActor;
+niuma::AppearanceCatalog gAppearanceCatalog;
 
 struct PickerState {
   HWND window = nullptr;
-  MeritScene pending = MeritScene::Woodfish;
+  int pendingIndex = 0;
+  int scrollRow = 0;
   bool confirmed = false;
 };
 
@@ -204,6 +211,35 @@ std::wstring DataPath() {
     return directory + L"\\data.ini";
   }();
   return path;
+}
+
+std::wstring AppearanceDirectory() {
+  const std::wstring dataPath = DataPath();
+  const size_t separator = dataPath.find_last_of(L"\\/");
+  if (separator == std::wstring::npos) return {};
+  const std::wstring directory = dataPath.substr(0, separator) + L"\\Appearances";
+  CreateDirectoryW(directory.c_str(), nullptr);
+  return directory;
+}
+
+std::string ReadSelectedPackId() {
+  const std::wstring path = DataPath();
+  if (path.empty()) return {};
+  wchar_t value[128] = {};
+  GetPrivateProfileStringW(L"state", L"selected_pack_id", L"", value,
+                           static_cast<DWORD>(std::size(value)), path.c_str());
+  std::string result;
+  for (const wchar_t character : std::wstring(value)) {
+    if (character > 127) return {};
+    result.push_back(static_cast<char>(character));
+  }
+  return result;
+}
+
+niuma::AppearancePack* CurrentAppearancePack() {
+  return gState.selectedPackId.empty()
+      ? nullptr
+      : gAppearanceCatalog.Find(gState.selectedPackId);
 }
 
 std::wstring DateKey(const SYSTEMTIME& date) {
@@ -399,6 +435,10 @@ void SaveState() {
       L"state", L"selected_scene",
       std::to_wstring(static_cast<int>(gState.selectedScene)).c_str(),
       path.c_str());
+  const std::wstring selectedPack(
+      gState.selectedPackId.begin(), gState.selectedPackId.end());
+  WritePrivateProfileStringW(
+      L"state", L"selected_pack_id", selectedPack.c_str(), path.c_str());
   gState.dirty = false;
 }
 
@@ -577,15 +617,23 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
                                        (1.0f - kContactPhase));
     }
   }
-  DrawSceneArtwork(graphics, gState.selectedScene, strikeAmount);
+  niuma::AppearancePack* appearancePack = CurrentAppearancePack();
+  if (appearancePack != nullptr) {
+    niuma::DrawAppearancePack(graphics, *appearancePack, progress);
+  } else {
+    DrawSceneArtwork(graphics, gState.selectedScene, strikeAmount);
+  }
 
   // Draw the middle band last so the mallet can never cover it.
   if (gState.striking && progress >= kPlusStartPhase &&
       progress <= kPlusEndPhase) {
     DrawCenteredText(
         graphics, L"+1",
-        Gdiplus::RectF(0.0f,
-            gState.selectedScene == MeritScene::Woodfish ? 66.0f : 43.0f,
+        Gdiplus::RectF(
+            0.0f,
+            appearancePack != nullptr
+                ? 250.0f - static_cast<float>(appearancePack->plusY) - 30.0f
+                : (gState.selectedScene == MeritScene::Woodfish ? 66.0f : 43.0f),
             240.0f, 30.0f),
         22.0f, 255);
   }
@@ -775,7 +823,7 @@ void ShowPrivacyNotice(HWND owner) {
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.4.0";
+  const std::wstring version = L"0.6.0";
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
@@ -918,9 +966,32 @@ void ShowMeritCalendar(HWND owner) {
   }
 }
 
+constexpr int kPickerDeleteButton = 1001;
+
+int PickerItemCount() {
+  return 4 + static_cast<int>(gAppearanceCatalog.packs().size());
+}
+
+int CurrentPickerIndex() {
+  if (!gState.selectedPackId.empty()) {
+    const auto& packs = gAppearanceCatalog.packs();
+    for (size_t index = 0; index < packs.size(); ++index) {
+      if (packs[index]->id == gState.selectedPackId)
+        return 4 + static_cast<int>(index);
+    }
+  }
+  return static_cast<int>(gState.selectedScene);
+}
+
+std::wstring PickerItemTitle(int index) {
+  if (index < 4) return SceneTitle(static_cast<MeritScene>(index));
+  const auto& pack = gAppearanceCatalog.packs()[static_cast<size_t>(index - 4)];
+  return IsChineseUi() ? pack->nameZh : pack->nameEn;
+}
+
 RECT PickerCardRect(int index, UINT dpi) {
   const int left = ScaleDip(16 + (index % 2) * 172, dpi);
-  const int top = ScaleDip(14 + (index / 2) * 142, dpi);
+  const int top = ScaleDip(14 + (index / 2 - gPicker.scrollRow) * 142, dpi);
   return {left, top, left + ScaleDip(156, dpi), top + ScaleDip(130, dpi)};
 }
 
@@ -934,10 +1005,10 @@ void PaintAppearancePicker(HWND window) {
   graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
   graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
   const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
-  for (int index = 0; index < 4; ++index) {
-    const MeritScene scene = static_cast<MeritScene>(index);
+  for (int index = 0; index < PickerItemCount(); ++index) {
     const RECT card = PickerCardRect(index, dpi);
-    const bool selected = scene == gPicker.pending;
+    if (card.bottom <= 0 || card.top >= ScaleDip(442, dpi)) continue;
+    const bool selected = index == gPicker.pendingIndex;
     Gdiplus::SolidBrush background(selected
         ? Gdiplus::Color(255, 255, 244, 226)
         : Gdiplus::Color(255, 250, 250, 250));
@@ -957,7 +1028,13 @@ void PaintAppearancePicker(HWND window) {
     thumbnailGraphics.Clear(Gdiplus::Color(0, 0, 0, 0));
     thumbnailGraphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     thumbnailGraphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-    DrawSceneArtwork(thumbnailGraphics, scene, 0.0f);
+    if (index < 4) {
+      DrawSceneArtwork(thumbnailGraphics, static_cast<MeritScene>(index), 0.0f);
+    } else {
+      niuma::DrawAppearancePack(
+          thumbnailGraphics,
+          *gAppearanceCatalog.packs()[static_cast<size_t>(index - 4)], 0.0f);
+    }
     graphics.DrawImage(&thumbnail, Gdiplus::RectF(
         static_cast<float>(card.left + ScaleDip(20, dpi)),
         static_cast<float>(card.top + ScaleDip(3, dpi)),
@@ -970,7 +1047,8 @@ void PaintAppearancePicker(HWND window) {
     format.SetAlignment(Gdiplus::StringAlignmentCenter);
     format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
     Gdiplus::SolidBrush text(Gdiplus::Color(255, 62, 52, 43));
-    graphics.DrawString(SceneTitle(scene), -1, &font,
+    const std::wstring title = PickerItemTitle(index);
+    graphics.DrawString(title.c_str(), -1, &font,
         Gdiplus::RectF(static_cast<float>(card.left),
             static_cast<float>(card.top + ScaleDip(100, dpi)),
             static_cast<float>(card.right - card.left),
@@ -984,12 +1062,17 @@ LRESULT CALLBACK PickerWindowProcedure(
   switch (message) {
     case WM_CREATE: {
       const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+      CreateWindowW(L"BUTTON", UiText(L"删除所选", L"Delete Selected"),
+          WS_CHILD | WS_VISIBLE,
+          ScaleDip(16, dpi), ScaleDip(456, dpi), ScaleDip(112, dpi), ScaleDip(30, dpi),
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPickerDeleteButton)),
+          GetModuleHandleW(nullptr), nullptr);
       CreateWindowW(L"BUTTON", UiText(L"确认", L"Confirm"), WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-          ScaleDip(188, dpi), ScaleDip(302, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
+          ScaleDip(188, dpi), ScaleDip(456, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
           window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
           GetModuleHandleW(nullptr), nullptr);
       CreateWindowW(L"BUTTON", UiText(L"取消", L"Cancel"), WS_CHILD | WS_VISIBLE,
-          ScaleDip(272, dpi), ScaleDip(302, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
+          ScaleDip(272, dpi), ScaleDip(456, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
           window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
           GetModuleHandleW(nullptr), nullptr);
       return 0;
@@ -1000,17 +1083,56 @@ LRESULT CALLBACK PickerWindowProcedure(
     case WM_LBUTTONUP: {
       const POINT point = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
       const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
-      for (int index = 0; index < 4; ++index) {
+      for (int index = 0; index < PickerItemCount(); ++index) {
         const RECT card = PickerCardRect(index, dpi);
         if (PtInRect(&card, point)) {
-          gPicker.pending = static_cast<MeritScene>(index);
+          gPicker.pendingIndex = index;
           InvalidateRect(window, nullptr, FALSE);
           break;
         }
       }
       return 0;
     }
+    case WM_MOUSEWHEEL: {
+      const int maximumRow = std::max(0, (PickerItemCount() + 1) / 2 - 3);
+      gPicker.scrollRow = std::clamp(
+          gPicker.scrollRow + (GET_WHEEL_DELTA_WPARAM(wParam) < 0 ? 1 : -1),
+          0, maximumRow);
+      InvalidateRect(window, nullptr, FALSE);
+      return 0;
+    }
     case WM_COMMAND:
+      if (LOWORD(wParam) == kPickerDeleteButton) {
+        if (gPicker.pendingIndex < 4) {
+          MessageBoxW(window,
+              UiText(L"内置形象不能删除。", L"Built-in appearances cannot be deleted."),
+              WindowTitle(), MB_OK | MB_ICONINFORMATION);
+          return 0;
+        }
+        const size_t packIndex = static_cast<size_t>(gPicker.pendingIndex - 4);
+        if (packIndex >= gAppearanceCatalog.packs().size()) return 0;
+        const std::string id = gAppearanceCatalog.packs()[packIndex]->id;
+        if (MessageBoxW(window,
+                UiText(L"删除所选的本地形象包？",
+                       L"Delete the selected local appearance pack?"),
+                WindowTitle(), MB_YESNO | MB_ICONQUESTION) != IDYES) return 0;
+        std::wstring error;
+        if (!gAppearanceCatalog.Delete(id, &error)) {
+          MessageBoxW(window, error.c_str(), WindowTitle(), MB_OK | MB_ICONERROR);
+          return 0;
+        }
+        if (gState.selectedPackId == id) {
+          gState.selectedPackId.clear();
+          gState.selectedScene = MeritScene::Woodfish;
+          gState.dirty = true;
+          SaveState();
+          RenderLayeredWindow(GetTickCount64());
+        }
+        gPicker.pendingIndex = std::min(
+            gPicker.pendingIndex, std::max(0, PickerItemCount() - 1));
+        InvalidateRect(window, nullptr, FALSE);
+        return 0;
+      }
       if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
         gPicker.confirmed = LOWORD(wParam) == IDOK;
         DestroyWindow(window);
@@ -1028,10 +1150,11 @@ LRESULT CALLBACK PickerWindowProcedure(
 }
 
 void ShowAppearancePicker(HWND owner) {
-  gPicker.pending = gState.selectedScene;
+  gPicker.pendingIndex = CurrentPickerIndex();
+  gPicker.scrollRow = std::max(0, gPicker.pendingIndex / 2 - 2);
   gPicker.confirmed = false;
   const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
-  RECT desired = {0, 0, ScaleDip(360, dpi), ScaleDip(348, dpi)};
+  RECT desired = {0, 0, ScaleDip(360, dpi), ScaleDip(502, dpi)};
   AdjustWindowRectEx(&desired, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_TOOLWINDOW);
   const int width = desired.right - desired.left;
   const int height = desired.bottom - desired.top;
@@ -1070,7 +1193,14 @@ void ShowAppearancePicker(HWND owner) {
   SetActiveWindow(owner);
   gPicker.window = nullptr;
   if (gPicker.confirmed) {
-    gState.selectedScene = gPicker.pending;
+    if (gPicker.pendingIndex < 4) {
+      gState.selectedScene = static_cast<MeritScene>(gPicker.pendingIndex);
+      gState.selectedPackId.clear();
+    } else {
+      const size_t packIndex = static_cast<size_t>(gPicker.pendingIndex - 4);
+      if (packIndex >= gAppearanceCatalog.packs().size()) return;
+      gState.selectedPackId = gAppearanceCatalog.packs()[packIndex]->id;
+    }
     gState.dirty = true;
     gState.striking = true;
     gState.strikeStarted = GetTickCount64();
@@ -1078,6 +1208,53 @@ void ShowAppearancePicker(HWND owner) {
     SaveState();
     EnsureAnimationTimer();
     RenderLayeredWindow(gState.strikeStarted);
+  }
+}
+
+std::wstring AppearancePackArgument() {
+  int argumentCount = 0;
+  LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+  if (arguments == nullptr) return {};
+  std::wstring result;
+  for (int index = 1; index < argumentCount; ++index) {
+    const std::wstring argument(arguments[index]);
+    if (niuma::IsAppearancePackPath(argument)) {
+      result = argument;
+      break;
+    }
+  }
+  LocalFree(arguments);
+  return result;
+}
+
+void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
+                          bool showSuccess) {
+  std::wstring error;
+  std::string installedId;
+  if (!gAppearanceCatalog.Install(
+          sourcePath, AppearanceDirectory(), &installedId, &error)) {
+    MessageBoxW(owner, error.c_str(),
+                UiText(L"形象包导入失败", L"Appearance Pack Import Failed"),
+                MB_OK | MB_ICONERROR);
+    return;
+  }
+  if (gAppearanceCatalog.Find(installedId) == nullptr) {
+    MessageBoxW(owner,
+        UiText(L"形象包导入后无法重新读取。",
+               L"The imported appearance pack could not be reloaded."),
+        UiText(L"形象包导入失败", L"Appearance Pack Import Failed"),
+        MB_OK | MB_ICONERROR);
+    return;
+  }
+  gState.selectedPackId = installedId;
+  gState.dirty = true;
+  SaveState();
+  RenderLayeredWindow(GetTickCount64());
+  if (showSuccess) {
+    MessageBoxW(owner,
+        UiText(L"形象包已安全导入并启用。",
+               L"The appearance pack was safely imported and enabled."),
+        WindowTitle(), MB_OK | MB_ICONINFORMATION);
   }
 }
 
@@ -1199,6 +1376,20 @@ LRESULT CALLBACK WindowProcedure(
       CountScrollGesture();
       return 0;
 
+    case WM_COPYDATA: {
+      const auto* copy = reinterpret_cast<const COPYDATASTRUCT*>(lParam);
+      if (copy == nullptr || copy->dwData != kAppearancePackCopyData ||
+          copy->lpData == nullptr || copy->cbData < sizeof(wchar_t) ||
+          copy->cbData % sizeof(wchar_t) != 0) return FALSE;
+      const auto* path = static_cast<const wchar_t*>(copy->lpData);
+      const size_t characters = copy->cbData / sizeof(wchar_t);
+      if (path[characters - 1] != L'\0') return FALSE;
+      const std::wstring sourcePath(path);
+      if (!niuma::IsAppearancePackPath(sourcePath)) return FALSE;
+      ImportAppearancePack(window, sourcePath, true);
+      return TRUE;
+    }
+
     case WM_TIMER: {
       if (wParam == kDayTimer) {
         if (EnsureCurrentDay()) RenderLayeredWindow(GetTickCount64());
@@ -1304,11 +1495,30 @@ int WINAPI wWinMain(
     HINSTANCE instance, HINSTANCE, PWSTR, int) {
   EnableBestDpiAwareness();
 
+  const std::wstring pendingAppearancePack = AppearancePackArgument();
+
   gState.mutex = CreateMutexW(nullptr, TRUE, kMutexName);
   if (gState.mutex == nullptr) {
     return 1;
   }
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (!pendingAppearancePack.empty()) {
+      HWND existingWindow = nullptr;
+      for (int attempt = 0; attempt < 20 && existingWindow == nullptr; ++attempt) {
+        existingWindow = FindWindowW(kWindowClass, nullptr);
+        if (existingWindow == nullptr) Sleep(50);
+      }
+      if (existingWindow != nullptr) {
+        COPYDATASTRUCT copy = {};
+        copy.dwData = kAppearancePackCopyData;
+        copy.cbData = static_cast<DWORD>(
+            (pendingAppearancePack.size() + 1) * sizeof(wchar_t));
+        copy.lpData = const_cast<wchar_t*>(pendingAppearancePack.c_str());
+        SendMessageTimeoutW(existingWindow, WM_COPYDATA, 0,
+                            reinterpret_cast<LPARAM>(&copy),
+                            SMTO_ABORTIFHUNG, 5000, nullptr);
+      }
+    }
     CloseHandle(gState.mutex);
     gState.mutex = nullptr;
     return 0;
@@ -1340,6 +1550,11 @@ int WINAPI wWinMain(
       CoUninitialize();
     }
     return 1;
+  }
+
+  std::wstring catalogError;
+  if (!gAppearanceCatalog.Reload(AppearanceDirectory(), &catalogError)) {
+    MessageBoxW(nullptr, catalogError.c_str(), WindowTitle(), MB_OK | MB_ICONERROR);
   }
 
   WNDCLASSEXW windowClass = {};
@@ -1400,6 +1615,10 @@ int WINAPI wWinMain(
   gState.selectedScene = selectedScene >= 0 && selectedScene <= 3
       ? static_cast<MeritScene>(selectedScene)
       : MeritScene::Woodfish;
+  gState.selectedPackId = ReadSelectedPackId();
+  if (gAppearanceCatalog.Find(gState.selectedPackId) == nullptr) {
+    gState.selectedPackId.clear();
+  }
 
   RECT workArea = {};
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
@@ -1439,9 +1658,19 @@ int WINAPI wWinMain(
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
   SetTimer(window, kDayTimer, 30000, nullptr);
 
+  wchar_t executable[MAX_PATH] = {};
+  if (GetModuleFileNameW(nullptr, executable,
+                         static_cast<DWORD>(std::size(executable))) != 0) {
+    std::wstring associationError;
+    niuma::RegisterAppearancePackAssociation(executable, &associationError);
+  }
+
   ConfigureLaunchAtLogin();
   if (!StartedAutomatically()) {
     ShowPrivacyNoticeIfNeeded(window);
+  }
+  if (!pendingAppearancePack.empty()) {
+    ImportAppearancePack(window, pendingAppearancePack, true);
   }
 
   gState.keyboardHook =
