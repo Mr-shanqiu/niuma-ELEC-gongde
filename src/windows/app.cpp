@@ -1382,8 +1382,8 @@ LRESULT CALLBACK WindowProcedure(
           copy->lpData == nullptr || copy->cbData < sizeof(wchar_t) ||
           copy->cbData % sizeof(wchar_t) != 0) return FALSE;
       const auto* path = static_cast<const wchar_t*>(copy->lpData);
-      const size_t characters = copy->cbData / sizeof(wchar_t);
-      if (path[characters - 1] != L'\0') return FALSE;
+      const size_t codeUnits = copy->cbData / sizeof(wchar_t);
+      if (path[codeUnits - 1] != L'\0') return FALSE;
       const std::wstring sourcePath(path);
       if (!niuma::IsAppearancePackPath(sourcePath)) return FALSE;
       ImportAppearancePack(window, sourcePath, true);
