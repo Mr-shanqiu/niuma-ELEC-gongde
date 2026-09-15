@@ -1,8 +1,8 @@
 #pragma once
 
 #include <windows.h>
-#include <gdiplus.h>
 #include <objidl.h>
+#include <gdiplus.h>
 
 #include <memory>
 #include <string>

@@ -20,7 +20,9 @@ python (Join-Path $repoRoot "scripts\appearance-pack.py") build `
 if ($LASTEXITCODE -ne 0) { throw "Could not build appearance pack fixture" }
 
 cmake -S $repoRoot -B $BuildDir -G $gen -A x64
+if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
 cmake --build $BuildDir --config $Config
+if ($LASTEXITCODE -ne 0) { throw "Windows compilation failed" }
 
 $packTest = Join-Path $repoRoot "$BuildDir\$Config\niuma-pack-test.exe"
 if (-not (Test-Path $packTest)) {
