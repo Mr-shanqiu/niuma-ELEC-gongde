@@ -11,20 +11,14 @@
 // RCDATA = 10
 101 10 "woodfish.png"
 102 10 "mallet.png"
-104 10 "lucky-cat-base.png"
-105 10 "lucky-cat-actor.png"
-106 10 "chick-pecking-base.png"
-107 10 "chick-pecking-actor.png"
-108 10 "hamster-habitat.png"
-109 10 "hamster-pet.png"
 // ICON is a resource-script keyword. Do not replace it with numeric type 1:
 // Win32 resource type 1 is RT_CURSOR, not an application icon.
 103 ICON "appicon.ico"
 
 // VS_VERSION_INFO = 16
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION 0,6,0,0
-  PRODUCTVERSION 0,6,0,0
+  FILEVERSION 0,7,0,0
+  PRODUCTVERSION 0,7,0,0
   FILEFLAGSMASK 0x3F
   FILEFLAGS 0x0
   FILEOS 0x40004
@@ -37,12 +31,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Mr-shanqiu"
       VALUE "FileDescription", "NiuMa Merit"
-      VALUE "FileVersion", "0.6.0"
+      VALUE "FileVersion", "0.7.0"
       VALUE "InternalName", "niuma-merit"
       VALUE "LegalCopyright", "Copyright (c) 2026 Mr-shanqiu"
       VALUE "OriginalFilename", "niuma-merit.exe"
       VALUE "ProductName", "NiuMa Merit"
-      VALUE "ProductVersion", "0.6.0"
+      VALUE "ProductVersion", "0.7.0"
     END
   END
   BLOCK "VarFileInfo"

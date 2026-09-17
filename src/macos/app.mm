@@ -117,7 +117,7 @@ static NSAffineTransform *LuckyCatPawTransform(NSRect actorRect, double amount) 
 typedef NS_ENUM(NSInteger, MeritScene) {
   MeritSceneWoodfish = 0,
   MeritSceneLuckyCat = 1,
-  MeritSceneChickPecking = 2,
+  MeritSceneSeaLionBellyPat = 2,
   MeritSceneHamsterWheel = 3,
 };
 
@@ -131,8 +131,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic, strong) NSImage *malletImage;
 @property(nonatomic, strong) NSImage *luckyCatBaseImage;
 @property(nonatomic, strong) NSImage *luckyCatActorImage;
-@property(nonatomic, strong) NSImage *chickBaseImage;
-@property(nonatomic, strong) NSImage *chickActorImage;
+@property(nonatomic, strong) NSImage *seaLionBodyImage;
+@property(nonatomic, strong) NSImage *seaLionFlipperImage;
 @property(nonatomic, strong) NSImage *hamsterBaseImage;
 @property(nonatomic, strong) NSImage *hamsterWheelImage;
 @property(nonatomic, strong) NSImage *hamsterActorImage;
@@ -216,7 +216,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     if (malletPath) self.malletImage = [[NSImage alloc] initWithContentsOfFile:malletPath];
     NSArray<NSString *> *names = @[
       @"lucky-cat-base", @"lucky-cat-actor",
-      @"chick-pecking-base", @"chick-pecking-actor",
+      @"sea-lion-body", @"sea-lion-flipper",
       @"hamster-wheel-base", @"hamster-wheel-wheel", @"hamster-wheel-actor"
     ];
     NSMutableArray<NSImage *> *images = [NSMutableArray arrayWithCapacity:names.count];
@@ -227,8 +227,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     }
     self.luckyCatBaseImage = images[0];
     self.luckyCatActorImage = images[1];
-    self.chickBaseImage = images[2];
-    self.chickActorImage = images[3];
+    self.seaLionBodyImage = images[2];
+    self.seaLionFlipperImage = images[3];
     self.hamsterBaseImage = LoadHamsterSprite(@"hamster-habitat");
     self.hamsterActorImage = LoadHamsterSprite(@"hamster-pet");
   }
@@ -318,27 +318,26 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                           respectFlipped:YES
                                    hints:nil];
     [NSGraphicsContext restoreGraphicsState];
-  } else if (self.scene == MeritSceneChickPecking) {
-    NSRect chickRect = NSMakeRect(5, -10, 230, 230);
-    [self.chickBaseImage drawInRect:chickRect
-                           fromRect:NSZeroRect
-                          operation:NSCompositingOperationSourceOver
-                           fraction:1.0
-                     respectFlipped:YES
-                              hints:nil];
+  } else if (self.scene == MeritSceneSeaLionBellyPat) {
+    [self.seaLionBodyImage drawInRect:NSMakeRect(34, 0, 172, 168)
+                             fromRect:NSZeroRect
+                            operation:NSCompositingOperationSourceOver
+                             fraction:1.0
+                       respectFlipped:NO
+                                hints:nil];
     [NSGraphicsContext saveGraphicsState];
-    NSAffineTransform *head = [NSAffineTransform transform];
-    [head translateXBy:168 yBy:119];
-    [head rotateByDegrees:-12.0 * strikeAmount];
-    [head translateXBy:-168 yBy:-119];
-    [head translateXBy:5.0 * strikeAmount yBy:-18.0 * strikeAmount];
-    [head concat];
-    [self.chickActorImage drawInRect:chickRect
-                            fromRect:NSZeroRect
-                           operation:NSCompositingOperationSourceOver
-                            fraction:1.0
-                      respectFlipped:YES
-                               hints:nil];
+    NSAffineTransform *flipper = [NSAffineTransform transform];
+    [flipper translateXBy:159.65 - 3.0 * strikeAmount
+                      yBy:103.4 - 2.0 * strikeAmount];
+    [flipper rotateByDegrees:-48.0 * strikeAmount];
+    [flipper translateXBy:-159.65 yBy:-103.4];
+    [flipper concat];
+    [self.seaLionFlipperImage drawInRect:NSMakeRect(152, 44, 51, 66)
+                                fromRect:NSZeroRect
+                               operation:NSCompositingOperationSourceOver
+                                fraction:1.0
+                          respectFlipped:NO
+                                   hints:nil];
     [NSGraphicsContext restoreGraphicsState];
   } else if (self.scene == MeritSceneHamsterWheel) {
     // Fit the complete perspective wheel inside the shared 0...170 artwork zone.
@@ -566,16 +565,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.smoothedInputInterval = kDefaultStrikeDuration;
   self.activeStrikeDuration = kDefaultStrikeDuration;
   self.inputMonitoringAuthorized = NO;
-  NSInteger storedScene = [defaults integerForKey:kSelectedScene];
-  self.selectedScene = storedScene >= MeritSceneWoodfish &&
-                               storedScene <= MeritSceneHamsterWheel
-                           ? (MeritScene)storedScene
-                           : MeritSceneWoodfish;
+  self.selectedScene = MeritSceneWoodfish;
   self.selectedAppearanceId = [defaults stringForKey:kSelectedAppearance];
-  if (!self.selectedAppearanceId.length) {
-    NSArray *builtinIds = @[@"builtin.woodfish", @"builtin.lucky-cat",
-                            @"builtin.chick-pecking", @"builtin.hamster-wheel"];
-    self.selectedAppearanceId = builtinIds[self.selectedScene];
+  if (!self.selectedAppearanceId.length ||
+      ([self.selectedAppearanceId hasPrefix:@"builtin."] &&
+       ![self.selectedAppearanceId isEqualToString:@"builtin.woodfish"])) {
+    self.selectedAppearanceId = @"builtin.woodfish";
   }
 }
 
@@ -1103,14 +1098,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.view.appearancePack = pack;
     self.selectedAppearanceId = pack.identifier;
   } else {
-    NSArray *builtinIds = @[@"builtin.woodfish", @"builtin.lucky-cat",
-                            @"builtin.chick-pecking", @"builtin.hamster-wheel"];
-    NSInteger scene = [builtinIds indexOfObject:identifier];
-    if (scene == NSNotFound) scene = MeritSceneWoodfish;
-    self.selectedScene = (MeritScene)scene;
+    self.selectedScene = MeritSceneWoodfish;
     self.view.scene = self.selectedScene;
     self.view.appearancePack = nil;
-    self.selectedAppearanceId = builtinIds[(NSUInteger)scene];
+    self.selectedAppearanceId = @"builtin.woodfish";
     [NSUserDefaults.standardUserDefaults setInteger:self.selectedScene forKey:kSelectedScene];
   }
   [NSUserDefaults.standardUserDefaults setObject:self.selectedAppearanceId forKey:kSelectedAppearance];
@@ -1118,15 +1109,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (NSView *)appearanceGrid {
-  NSArray *titles = IsChineseUI()
-      ? @[@"默认木鱼", @"招财猫", @"小鸡啄米", @"仓鼠跑轮"]
-      : @[@"Woodfish", @"Lucky Cat", @"Pecking Chick", @"Hamster Wheel"];
-  NSArray *builtinIds = @[@"builtin.woodfish", @"builtin.lucky-cat",
-                          @"builtin.chick-pecking", @"builtin.hamster-wheel"];
   NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
-  for (NSInteger i = 0; i < 4; ++i) {
-    [items addObject:@{@"id": builtinIds[i], @"title": titles[i], @"scene": @(i)}];
-  }
+  [items addObject:@{@"id": @"builtin.woodfish",
+                     @"title": UiText(@"默认木鱼", @"Woodfish"),
+                     @"scene": @(MeritSceneWoodfish)}];
   for (NMAppearancePack *pack in self.installedAppearancePacks) {
     [items addObject:@{@"id": pack.identifier, @"title": [pack localizedName], @"pack": pack}];
   }
@@ -1223,13 +1209,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
   alert.informativeText = UiText(
-      @"版本 0.5.2\n\n"
+      @"版本 0.7.0\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"项目主页：\n"
        @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde",
-      @"Version 0.5.2\n\n"
+      @"Version 0.7.0\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"

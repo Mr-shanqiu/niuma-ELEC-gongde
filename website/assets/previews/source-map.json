@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "desktop-client-assets",
+  "files": {
+    "woodfish-body.png": {
+      "source": "assets/woodfish.png",
+      "sourceSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
+      "outputSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
+      "processing": "byte-for-byte-copy"
+    },
+    "woodfish-mallet.png": {
+      "source": "assets/mallet.png",
+      "sourceSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
+      "outputSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
+      "processing": "byte-for-byte-copy"
+    },
+    "lucky-cat-base.png": {
+      "source": "assets/scenes/lucky-cat/lucky-cat-base.png",
+      "sourceSha256": "6dcb91c249b642398340b61df2408c3a37a9714be90dd6389bf10fd29ea48efd",
+      "outputSha256": "6dcb91c249b642398340b61df2408c3a37a9714be90dd6389bf10fd29ea48efd",
+      "processing": "byte-for-byte-copy"
+    },
+    "lucky-cat-paw.png": {
+      "source": "assets/scenes/lucky-cat/lucky-cat-actor.png",
+      "sourceSha256": "ffa97de9b8a019a31ab8b68ef241ca482950d8d52a57c135053422ab78628bc7",
+      "outputSha256": "ffa97de9b8a019a31ab8b68ef241ca482950d8d52a57c135053422ab78628bc7",
+      "processing": "byte-for-byte-copy"
+    },
+    "hamster-habitat.png": {
+      "source": "assets/scenes/hamster-wheel/runtime/hamster-habitat.png",
+      "sourceSha256": "fb38f667b8d965c690d4d652345d498bc8f2a663913dd0850ff8eb21fa96d3ed",
+      "outputSha256": "3947cef84b4b1f06146ee6f71b34d472f8ddc5615727721e33c56aa3f6dbbf63",
+      "processing": "desktop-green-key"
+    },
+    "hamster-pet.png": {
+      "source": "assets/scenes/hamster-wheel/runtime/hamster-pet.png",
+      "sourceSha256": "2657a70212dc2341d40d2da1a2deadbc8fcabba937f0df5f735702de18c1b132",
+      "outputSha256": "baa9a2d2252d2c3d479417ff3320e40ec280b674a2bbdce51e47ef900382c302",
+      "processing": "desktop-green-key"
+    },
+    "sea-lion-body.png": {
+      "source": "assets/appearance-packs/sea-lion-belly-pat/body.png",
+      "sourceSha256": "ab49e6d6558e3973cc48304abe56386b29d3d25105ac8a3643e0125b532fd9d7",
+      "outputSha256": "ab49e6d6558e3973cc48304abe56386b29d3d25105ac8a3643e0125b532fd9d7",
+      "processing": "byte-for-byte-copy"
+    },
+    "sea-lion-flipper.png": {
+      "source": "assets/appearance-packs/sea-lion-belly-pat/flipper.png",
+      "sourceSha256": "50c8f8aeb2757c66dbfcffafd0c0120d04256ceaa4cbfc95d21418b2ea5da7ae",
+      "outputSha256": "50c8f8aeb2757c66dbfcffafd0c0120d04256ceaa4cbfc95d21418b2ea5da7ae",
+      "processing": "byte-for-byte-copy"
+    },
+    "chick-body.png": {
+      "source": "assets/appearance-packs/chick-pecking/body.png",
+      "sourceSha256": "1bbac72b0a08a139c2ad6630719759382f5c8298a7f50421f835bea13883a065",
+      "outputSha256": "1bbac72b0a08a139c2ad6630719759382f5c8298a7f50421f835bea13883a065",
+      "processing": "byte-for-byte-copy"
+    },
+    "chick-head.png": {
+      "source": "assets/appearance-packs/chick-pecking/head.png",
+      "sourceSha256": "754df9705161cc2c64e2c50b9bd6ec525008b2b76de36e94945b8639e8ae2a8f",
+      "outputSha256": "754df9705161cc2c64e2c50b9bd6ec525008b2b76de36e94945b8639e8ae2a8f",
+      "processing": "byte-for-byte-copy"
+    }
+  }
+}

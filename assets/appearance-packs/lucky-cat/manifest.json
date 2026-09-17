@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "official.lucky-cat",
+  "version": "1.0.0",
+  "name_zh": "招财猫",
+  "name_en": "Lucky Cat",
+  "author": "NiuMa Merit",
+  "publisher": "NiuMa Merit",
+  "review_id": "official-0003",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "body.png",
+      "frame": [35, 0, 170, 170],
+      "anchor": [0.5, 0.5],
+      "keyframes": [{"t": 0, "x": 0, "y": 0, "rotation": 0, "scale": 1, "alpha": 1}]
+    },
+    {
+      "image": "paw.png",
+      "frame": [35, 0, 170, 170],
+      "anchor": [0.6033, 0.1867],
+      "keyframes": [
+        {"t": 0, "x": 0, "y": 0, "rotation": 0, "scale": 1, "alpha": 1},
+        {"t": 0.42, "x": 0, "y": -12, "rotation": 0, "scale": 1, "alpha": 1},
+        {"t": 1, "x": 0, "y": 0, "rotation": 0, "scale": 1, "alpha": 1}
+      ]
+    }
+  ]
+}

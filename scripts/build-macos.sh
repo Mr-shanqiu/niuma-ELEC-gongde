@@ -15,12 +15,6 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" \
   "$APP_DIR/Contents/Resources/zh-Hant.lproj"
 cp "$ROOT_DIR/assets/woodfish.png" "$APP_DIR/Contents/Resources/woodfish.png"
 cp "$ROOT_DIR/assets/mallet.png" "$APP_DIR/Contents/Resources/mallet.png"
-cp "$ROOT_DIR/assets/scenes/lucky-cat/lucky-cat-base.png" "$APP_DIR/Contents/Resources/lucky-cat-base.png"
-cp "$ROOT_DIR/assets/scenes/lucky-cat/lucky-cat-actor.png" "$APP_DIR/Contents/Resources/lucky-cat-actor.png"
-cp "$ROOT_DIR/assets/scenes/chick-pecking/chick-pecking-base.png" "$APP_DIR/Contents/Resources/chick-pecking-base.png"
-cp "$ROOT_DIR/assets/scenes/chick-pecking/chick-pecking-actor.png" "$APP_DIR/Contents/Resources/chick-pecking-actor.png"
-cp "$ROOT_DIR/assets/scenes/hamster-wheel/runtime/hamster-habitat.png" "$APP_DIR/Contents/Resources/hamster-habitat.png"
-cp "$ROOT_DIR/assets/scenes/hamster-wheel/runtime/hamster-pet.png" "$APP_DIR/Contents/Resources/hamster-pet.png"
 cp "$ROOT_DIR/assets/appicon.icns" "$APP_DIR/Contents/Resources/appicon.icns"
 cp "$ROOT_DIR/src/macos/en.lproj/InfoPlist.strings" \
   "$APP_DIR/Contents/Resources/en.lproj/InfoPlist.strings"
@@ -39,8 +33,9 @@ for ARCH in $ARCHS; do
   -arch "$ARCH" \
   -I "$ROOT_DIR/src" \
   "$ROOT_DIR/src/macos/app.mm" \
-  -framework AppKit \
-  -framework ApplicationServices \
+    -framework AppKit \
+    -framework ApplicationServices \
+    -framework Security \
   -o "$BUILD_DIR/niuma-merit-$ARCH"
 done
 
@@ -89,22 +84,16 @@ echo "APP_KB=$(du -sk "$APP_DIR" | awk '{print $1}')"
 echo "ZIP_BYTES=$(stat -f%z "$ZIP_PATH")"
 echo "DONE"
 
-# 0.5.2: build the separate sample appearance pack and enforce the base-app ZIP cap.
+# Paid appearance packs are signed and delivered only by the server. The base
+# build must never emit an unsigned copy that bypasses the purchase flow.
 NM_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-NM_SAMPLE_DIR="$NM_ROOT/dist/sample-packs"
-mkdir -p "$NM_SAMPLE_DIR"
-"$NM_ROOT/scripts/appearance-pack.py" build \
-  "$NM_ROOT/assets/appearance-packs/woodfish-sample" \
-  "$NM_SAMPLE_DIR/woodfish-sample.nmgpack"
-NM_BASE_ZIP="$(find "$NM_ROOT/dist" -maxdepth 1 -type f -name '*.zip' -print | head -n 1)"
-if [[ -z "$NM_BASE_ZIP" ]]; then
+NM_BASE_ZIP="$ZIP_PATH"
+if [[ ! -f "$NM_BASE_ZIP" ]]; then
   echo "No base application ZIP found" >&2
   exit 1
 fi
 NM_BASE_BYTES="$(stat -f%z "$NM_BASE_ZIP")"
-NM_PACK_BYTES="$(stat -f%z "$NM_SAMPLE_DIR/woodfish-sample.nmgpack")"
 echo "BASE_APP_ZIP_BYTES=$NM_BASE_BYTES"
-echo "SAMPLE_PACK_BYTES=$NM_PACK_BYTES"
 if (( NM_BASE_BYTES > 10485760 )); then
   echo "Base application ZIP exceeds the 10MB limit" >&2
   exit 1

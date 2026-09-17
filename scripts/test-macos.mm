@@ -73,58 +73,24 @@ int main() {
     controller.pendingAppearanceId = @"builtin.woodfish";
     controller.installedAppearancePacks = @[];
     NSView *grid = [controller appearanceGrid];
-    assert(controller.appearanceButtons.count == 4);
-    [controller selectAppearance:controller.appearanceButtons[3]];
-    assert([controller.pendingAppearanceId isEqualToString:@"builtin.hamster-wheel"]);
+    assert(controller.appearanceButtons.count == 1);
+    [controller selectAppearance:controller.appearanceButtons[0]];
+    assert([controller.pendingAppearanceId isEqualToString:@"builtin.woodfish"]);
     assert(controller.selectedScene == MeritSceneWoodfish);
     for (NSButton *button in controller.appearanceButtons)
-      assert((button.state == NSControlStateValueOn) == (button.tag == 3));
+      assert((button.state == NSControlStateValueOn) == (button.tag == 0));
     Snapshot(grid, @"appearance-grid.png");
     MeritCalendarView *calendar = [[MeritCalendarView alloc] initWithFrame:NSMakeRect(0, 0, 560, 430)];
     calendar.controller = controller;
     calendar.year = 2026;
     calendar.month = 9;
     Snapshot(calendar, @"merit-calendar.png");
-    assert(controller.view.hamsterBaseImage && controller.view.hamsterActorImage);
-    for (NSImage *sprite in @[controller.view.hamsterBaseImage, controller.view.hamsterActorImage]) {
-      NSBitmapImageRep *rep = (NSBitmapImageRep *)sprite.representations.firstObject;
-      assert([rep colorAtX:0 y:0].alphaComponent < .01);
-      NSUInteger opaque = 0, green = 0;
-      for (NSInteger y = 0; y < rep.pixelsHigh; ++y) for (NSInteger x = 0; x < rep.pixelsWide; ++x) {
-        NSColor *c = [[rep colorAtX:x y:y] colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
-        if (c.alphaComponent > .5) {
-          ++opaque;
-          if (c.greenComponent > std::max(c.redComponent, c.blueComponent) + .15) ++green;
-        }
-      }
-      assert(opaque > 1000 && green == 0);
-    }
-    controller.view.scene = MeritSceneHamsterWheel;
-    Snapshot(controller.view, @"hamster-rest.png");
-    controller.strikeActive = YES;
-    controller.activeStrikeDuration = 100;
-    controller.strikeStartTime = [NSDate timeIntervalSinceReferenceDate] - 42;
-    Snapshot(controller.view, @"hamster-stride.png");
-    controller.strikeActive = NO;
-    NSRect pawRect = NSMakeRect(30, -35, 230, 230);
-    NSPoint anchor = NSMakePoint(30 + 230 * 362.0 / 600.0, -35 + 230 * 112.0 / 600.0);
-    NSPoint tip = NSMakePoint(anchor.x, anchor.y + 60);
-    for (int frame = 0; frame <= 100; ++frame) {
-      NSAffineTransform *pose = LuckyCatPawTransform(pawRect, frame / 100.0);
-      NSPoint fixed = [pose transformPoint:anchor];
-      assert(std::hypot(fixed.x - anchor.x, fixed.y - anchor.y) < 1e-8);
-      NSPoint moved = [pose transformPoint:tip];
-      assert(std::abs(moved.x - tip.x) < 1e-8);
-      assert(moved.y <= tip.y + 1e-8);
-      assert(std::hypot(moved.x - tip.x, moved.y - tip.y) < 13);
-    }
-    controller.view.scene = MeritSceneLuckyCat;
-    Snapshot(controller.view, @"cat-rest.png");
-    controller.strikeActive = YES;
-    controller.strikeStartTime = [NSDate timeIntervalSinceReferenceDate] - 42;
-    Snapshot(controller.view, @"cat-wave.png");
-    controller.strikeActive = NO;
-    printf("PASS: 101 cat poses keep attachment fixed; paw moves vertically with zero horizontal drift\n");
-    printf("PASS: %s UI localization; daily and lifetime totals; single-line calendar; 100 key events; all mouse buttons; scroll grouping; ignored key-up; no animation queue; modal timer completion; overflow guard; four-card selection isolation; alpha and green-key checks; scene renders\n", expectedLanguage);
+    assert(controller.view.woodfishImage && controller.view.malletImage);
+    assert(controller.view.luckyCatBaseImage.representations.count == 0 &&
+           controller.view.luckyCatActorImage.representations.count == 0);
+    assert(controller.view.seaLionBodyImage.representations.count == 0 &&
+           controller.view.seaLionFlipperImage.representations.count == 0);
+    assert(!controller.view.hamsterBaseImage && !controller.view.hamsterActorImage);
+    printf("PASS: %s UI localization; daily and lifetime totals; single-line calendar; 100 key events; all mouse buttons; scroll grouping; ignored key-up; no animation queue; modal timer completion; overflow guard; woodfish-only base picker and resources\n", expectedLanguage);
   }
 }

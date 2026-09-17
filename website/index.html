@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="牛马电子功德是一款完全离线的桌面互动小伙伴，只统计键盘、鼠标和滚轮操作次数，不读取输入内容。">
+  <title>牛马电子功德｜离线桌面小伙伴</title>
+  <link rel="icon" type="image/png" href="assets/woodfish.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="paper-noise" aria-hidden="true"></div>
+  <header class="nav">
+    <a class="brand" href="#top" aria-label="牛马电子功德首页">
+      <span class="brand-seal">功</span>
+      <span data-zh="牛马电子功德" data-en="NiuMa Merit">牛马电子功德</span>
+    </a>
+    <nav aria-label="主要导航">
+      <a href="#characters" data-zh="形象" data-en="Characters">形象</a>
+      <a href="#privacy" data-zh="隐私" data-en="Privacy">隐私</a>
+      <a href="#download" data-zh="下载" data-en="Download">下载</a>
+      <a href="#support" data-zh="赞赏" data-en="Support">赞赏</a>
+      <button class="language" type="button" aria-label="Switch language">EN</button>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy reveal">
+        <p class="eyebrow" data-zh="键盘鼠标功德计数器 · 完全离线" data-en="Keyboard & mouse merit counter · Fully offline">键盘鼠标功德计数器 · 完全离线</p>
+        <h1 data-zh="现代键鼠木鱼，<br>无量赛博功德" data-en="Modern keyboard woodfish.<br>Cyber merit without end.">现代键鼠木鱼，<br>无量赛博功德</h1>
+        <p class="lead" data-zh="牛马电子功德是一款常驻桌面的迷你计数器。每次按键、点击或滚动，数字立即 +1，桌面形象做一次动作。只统计次数，不读取输入内容。" data-en="NiuMa Merit is a tiny desktop counter. Every key press, click, or scroll adds +1 and triggers a character animation. It counts actions, never what you type.">牛马电子功德是一款常驻桌面的迷你计数器。每次按键、点击或滚动，数字立即 +1，桌面形象做一次动作。只统计次数，不读取输入内容。</p>
+        <div class="hero-facts" aria-label="工作方式">
+          <span data-zh="按键 / 点击 / 滚轮" data-en="Keys / clicks / scrolls">按键 / 点击 / 滚轮</span>
+          <b aria-hidden="true">→</b>
+          <span data-zh="数字 +1，形象动一下" data-en="+1 and one animation">数字 +1，形象动一下</span>
+        </div>
+        <div class="hero-actions">
+          <a class="button primary" href="#download" data-zh="下载 Mac / Windows 版" data-en="Download for Mac / Windows">下载 Mac / Windows 版</a>
+          <a class="button text-button" href="#privacy" data-zh="为什么需要输入监控" data-en="Why input permission is needed">为什么需要输入监控</a>
+        </div>
+        <p class="microcopy" data-zh="本地保存 · 开机自启 · 可换形象 · macOS / Windows" data-en="Saved locally · Launch at login · Change characters · macOS / Windows">本地保存 · 开机自启 · 可换形象 · macOS / Windows</p>
+      </div>
+
+      <div class="desktop-stage reveal" aria-label="木鱼计数动画演示">
+        <div class="counter-demo">
+          <strong id="demo-total">13700</strong>
+          <span id="demo-plus">+1</span>
+          <img class="demo-mallet" src="assets/mallet.png" alt="">
+          <img class="demo-pet" src="assets/woodfish.png" alt="立体木鱼">
+        </div>
+        <button class="strike-button" type="button" data-zh="试着敲一下" data-en="Try one strike">试着敲一下</button>
+      </div>
+    </section>
+
+    <section class="promise-strip" aria-label="产品特点">
+      <div><b>01</b><span data-zh="全局计数" data-en="Global counting">全局计数</span></div>
+      <div><b>02</b><span data-zh="永久离线" data-en="Always offline">永久离线</span></div>
+      <div><b>03</b><span data-zh="自由换形象" data-en="Change characters">自由换形象</span></div>
+      <div><b>04</b><span data-zh="功德日历" data-en="Merit calendar">功德日历</span></div>
+    </section>
+
+    <section class="characters section" id="characters">
+      <div class="section-heading reveal">
+        <p class="eyebrow" data-zh="你的桌面，住谁都可以" data-en="Choose who lives on your desktop">你的桌面，住谁都可以</p>
+        <h2 data-zh="不是皮肤，是小伙伴。" data-en="More than skins. Companions.">不是皮肤，是小伙伴。</h2>
+        <p data-zh="基础安装包只内置木鱼。1 元永久获得官方形象库资格，并可首次选择最多 10 个形象包；以后每次重新生成最多 10 个形象包，整批只收取 0.2 元。" data-en="Only the woodfish comes with the base app. A one-time ¥1 pass includes up to 10 packs in the first delivery; each later batch of up to 10 packs costs ¥0.20 total.">基础安装包只内置木鱼。1 元永久获得官方形象库资格，并可首次选择最多 10 个形象包；以后每次重新生成最多 10 个形象包，整批只收取 0.2 元。</p>
+      </div>
+
+      <div class="character-rail">
+        <article class="character-card large reveal">
+          <span class="tag" data-zh="基础形象" data-en="Included">基础形象</span>
+          <div class="character-preview preview-woodfish art-woodfish" role="img" aria-label="木鱼敲击动态预览">
+            <img class="preview-layer preview-woodfish-body" src="assets/previews/woodfish-body.png" alt="">
+            <div class="preview-woodfish-mallet" aria-hidden="true">
+              <span class="preview-mallet-shaft"><img src="assets/previews/woodfish-mallet.png" alt=""></span>
+              <span class="preview-mallet-head"><img src="assets/previews/woodfish-mallet.png" alt=""></span>
+            </div>
+          </div>
+          <h3 data-zh="默认木鱼" data-en="Woodfish">默认木鱼</h3>
+          <p data-zh="今天也替你默默积攒。" data-en="Quietly keeping count for you.">今天也替你默默积攒。</p>
+        </article>
+        <article class="character-card paid-pack reveal">
+          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
+          <div class="character-preview preview-cat art-cat" role="img" aria-label="招财猫招手动态预览">
+            <img class="preview-layer" src="assets/previews/lucky-cat-base.png" alt="">
+            <img class="preview-layer preview-cat-paw" src="assets/previews/lucky-cat-paw.png" alt="">
+          </div>
+          <h3 data-zh="招财猫" data-en="Lucky Cat">招财猫</h3>
+          <p data-zh="每一下都离发财近一点。" data-en="One tap closer to fortune.">每一下都离发财近一点。</p>
+          <label class="pack-choice"><input type="checkbox" data-asset-id="official.lucky-cat" checked><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
+        </article>
+        <article class="character-card paid-pack reveal">
+          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
+          <div class="character-preview preview-hamster art-hamster" role="img" aria-label="仓鼠跑轮动态预览">
+            <img class="preview-layer" src="assets/previews/hamster-habitat.png" alt="">
+            <img class="preview-layer preview-hamster-pet" src="assets/previews/hamster-pet.png" alt="">
+          </div>
+          <h3 data-zh="仓鼠跑轮" data-en="Hamster Wheel">仓鼠跑轮</h3>
+          <p data-zh="忙了一天，轮子很有感觉。" data-en="A very productive-looking wheel.">忙了一天，轮子很有感觉。</p>
+          <label class="pack-choice"><input type="checkbox" data-asset-id="official.hamster-wheel" checked><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
+        </article>
+        <article class="character-card paid-pack reveal">
+          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
+          <div class="character-preview preview-sea-lion art-sea-lion" role="img" aria-label="海狮拍肚皮动态预览">
+            <img class="preview-layer preview-sea-lion-body" src="assets/previews/sea-lion-body.png" alt="">
+            <img class="preview-layer preview-sea-lion-flipper" src="assets/previews/sea-lion-flipper.png" alt="">
+          </div>
+          <h3 data-zh="海狮拍肚皮" data-en="Sea Lion Belly Pat">海狮拍肚皮</h3>
+          <p data-zh="每一次输入都值得鼓掌。" data-en="Every input deserves applause.">每一次输入都值得鼓掌。</p>
+          <label class="pack-choice"><input type="checkbox" data-asset-id="official.sea-lion-belly-pat" checked><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
+        </article>
+        <article class="character-card paid-pack reveal">
+          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
+          <div class="character-preview preview-chick art-chick" role="img" aria-label="小鸡啄米动态预览">
+            <img class="preview-layer" src="assets/previews/chick-body.png" alt="">
+            <img class="preview-layer preview-chick-head" src="assets/previews/chick-head.png" alt="">
+          </div>
+          <h3 data-zh="小鸡啄米" data-en="Pecking Chick">小鸡啄米</h3>
+          <p data-zh="认真工作，也认真吃饭。" data-en="Serious about work and snacks.">认真工作，也认真吃饭。</p>
+          <label class="pack-choice"><input type="checkbox" data-asset-id="official.chick-pecking" checked><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
+        </article>
+      </div>
+      <div class="pack-purchase-bar reveal">
+        <span><strong id="selected-pack-count">4</strong> / 10 <span data-zh="个形象包已选择" data-en="packs selected">个形象包已选择</span></span>
+        <button class="button primary purchase-button" type="button" data-zh="验证手机号并下载" data-en="Verify phone and download">验证手机号并下载</button>
+      </div>
+    </section>
+
+    <section class="privacy section" id="privacy">
+      <div class="privacy-diagram reveal">
+        <div class="flow-item"><span>⌨</span><b data-zh="一次操作" data-en="One action">一次操作</b></div>
+        <i>→</i>
+        <div class="flow-item active"><span>+1</span><b data-zh="本地计数" data-en="Local count">本地计数</b></div>
+        <i>→</i>
+        <div class="flow-item"><span>▣</span><b data-zh="本机保存" data-en="Saved locally">本机保存</b></div>
+        <div class="no-cloud" data-zh="没有上传步骤" data-en="No upload step">没有上传步骤</div>
+      </div>
+      <div class="privacy-copy reveal">
+        <p class="eyebrow" data-zh="权限说清楚，安心留在桌面" data-en="Clear permissions, calm company">权限说清楚，安心留在桌面</p>
+        <h2 data-zh="只知道发生了，<br>不知道你写了什么。" data-en="It knows something happened,<br>not what you typed.">只知道发生了，<br>不知道你写了什么。</h2>
+        <p data-zh="系统授予输入监控权限后，客户端只把按键、点击和滚轮手势转换为一次数字增加。它不保存具体按键、不读取剪贴板、不记录鼠标位置，也没有任何网络功能。" data-en="After system permission is granted, the app converts key presses, clicks, and scroll gestures into a number. It stores no key content, clipboard data, or pointer location, and contains no networking.">系统授予输入监控权限后，客户端只把按键、点击和滚轮手势转换为一次数字增加。它不保存具体按键、不读取剪贴板、不记录鼠标位置，也没有任何网络功能。</p>
+        <a href="https://github.com/Mr-shanqiu/niuma-ELEC-gongde" target="_blank" rel="noreferrer" data-zh="查看开源代码" data-en="View source code">查看开源代码</a>
+      </div>
+    </section>
+
+    <section class="download section" id="download">
+      <div class="download-intro reveal">
+        <p class="eyebrow" data-zh="把它带回桌面" data-en="Bring one home">把它带回桌面</p>
+        <h2 data-zh="免费，小巧，安静。" data-en="Free, tiny, quiet.">免费，小巧，安静。</h2>
+        <p data-zh="当前为免签名公开测试版，系统可能显示未知发布者或安全提醒。请只从本站或项目 GitHub 仓库核对下载来源和 SHA-256。" data-en="This is an unsigned public preview. Your system may show an unknown-publisher or security warning. Download only here and verify SHA-256 against the project repository.">当前为免签名公开测试版，系统可能显示未知发布者或安全提醒。请只从本站或项目 GitHub 仓库核对下载来源和 SHA-256。</p>
+        <a class="manual-link" href="install.html" data-zh="查看安装与权限手册" data-en="Installation and permissions guide">查看安装与权限手册</a>
+      </div>
+      <div class="download-options">
+        <a class="download-row reveal" href="https://download.gongde.zqscreen.cn/niuma-merit-macos-0.7.0.dmg">
+          <span class="platform">macOS</span>
+          <span data-zh="0.7.0 · Universal 2 · DMG" data-en="0.7.0 · Universal 2 · DMG">0.7.0 · Universal 2 · DMG</span>
+          <b data-zh="前往下载 ↗" data-en="Download ↗">前往下载 ↗</b>
+        </a>
+        <a class="download-row reveal" href="https://download.gongde.zqscreen.cn/niuma-merit-windows-0.6.0.zip">
+          <span class="platform">Windows</span>
+          <span data-zh="0.6.0 · Windows 10/11 · x64 ZIP" data-en="0.6.0 · Windows 10/11 · x64 ZIP">0.6.0 · Windows 10/11 · x64 ZIP</span>
+          <b data-zh="前往下载 ↗" data-en="Download ↗">前往下载 ↗</b>
+        </a>
+      </div>
+      <div class="install-note reveal">
+        <strong data-zh="关于形象包" data-en="About appearance packs">关于形象包</strong>
+        <p data-zh="免费包永久有效。每次可以勾选 1 至 10 个付费形象包；生成后需在 24 小时内首次导入，成功后永久离线使用。链接有效期内重复下载不收费，过期后整批重新生成统一收取 0.2 元。" data-en="Free packs never expire. Select 1–10 paid packs per batch and import them within 24 hours; once imported they remain available offline forever. Re-downloads are free while the link is valid, and regenerating the whole batch costs ¥0.20.">免费包永久有效。每次可以勾选 1 至 10 个付费形象包；生成后需在 24 小时内首次导入，成功后永久离线使用。链接有效期内重复下载不收费，过期后整批重新生成统一收取 0.2 元。</p>
+      </div>
+    </section>
+
+    <section class="support section" id="support">
+      <div class="support-copy reveal">
+        <p class="eyebrow" data-zh="无广告的小项目" data-en="A small, ad-free project">无广告的小项目</p>
+        <h2 data-zh="没有广告，<br>只有一点点支持。" data-en="No ads.<br>Just a little support.">没有广告，<br>只有一点点支持。</h2>
+        <p data-zh="基础软件永久免费。少量服务费主要用于覆盖短信、支付、存储、带宽和持续维护成本。你也可以自愿赞赏项目；赞赏不解锁任何功能，不影响正常使用。" data-en="The base app stays free. Small service fees mainly cover SMS, payment, storage, bandwidth, and maintenance. Voluntary support unlocks nothing and never affects normal use.">基础软件永久免费。少量服务费主要用于覆盖短信、支付、存储、带宽和持续维护成本。你也可以自愿赞赏项目；赞赏不解锁任何功能，不影响正常使用。</p>
+      </div>
+      <div class="support-card reveal">
+        <strong data-zh="自愿赞赏" data-en="Voluntary support">自愿赞赏</strong>
+        <p data-zh="不构成商品购买、投资或公益捐赠。" data-en="Not a purchase, investment, or charitable donation.">不构成商品购买、投资或公益捐赠。</p>
+        <button class="button primary support-open" type="button" data-zh="支持项目" data-en="Support the project">支持项目</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="payment-modal" hidden>
+    <div class="payment-backdrop" data-payment-close></div>
+    <section class="payment-sheet" role="dialog" aria-modal="true" aria-labelledby="payment-title">
+      <button class="payment-close" type="button" aria-label="关闭" data-payment-close>×</button>
+      <p class="eyebrow" data-zh="手机号验证购买资格" data-en="Phone-verified purchase">手机号验证购买资格</p>
+      <h2 id="payment-title" data-zh="一次选择最多 10 个，价格不随数量增加。" data-en="Choose up to 10 packs for one flat price.">一次选择最多 10 个，价格不随数量增加。</h2>
+      <p class="payment-copy" data-zh="手机号只用于验证码、订单绑定和以后找回下载资格，不会传给桌面客户端。客户端仍然完全离线。" data-en="Your phone number is used only for verification, order recovery, and restoring download access. It is never sent to the desktop app, which remains fully offline.">手机号只用于验证码、订单绑定和以后找回下载资格，不会传给桌面客户端。客户端仍然完全离线。</p>
+      <div class="selected-pack-summary"><strong id="modal-selected-count">已选择 1 / 10</strong><ul id="selected-pack-list"></ul></div>
+      <div class="phone-verification">
+        <label><span data-zh="手机号" data-en="Phone number">手机号</span><input class="phone-input" type="tel" inputmode="tel" autocomplete="tel" placeholder="138 0000 0000"></label>
+        <button class="sms-send" type="button" data-zh="发送验证码" data-en="Send code">发送验证码</button>
+        <label><span data-zh="验证码" data-en="Verification code">验证码</span><input class="sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字"></label>
+        <button class="sms-verify" type="button" data-zh="验证手机号" data-en="Verify phone">验证手机号</button>
+      </div>
+      <div class="price-rules">
+        <div><strong>¥1</strong><span data-zh="永久官方形象库资格，首次可选最多 10 个" data-en="Permanent official access, up to 10 packs in the first batch">永久官方形象库资格，首次可选最多 10 个</span></div>
+        <div><strong>¥0.20</strong><span data-zh="以后每次下载最多 10 个，整批统一收费" data-en="Each later batch of up to 10 packs, one flat fee">以后每次下载最多 10 个，整批统一收费</span></div>
+      </div>
+      <div class="payment-channels" role="group" aria-label="支付方式">
+        <button class="payment-channel" type="button" data-channel="wechat" disabled><span>微信支付</span><small data-zh="扫码支付" data-en="Scan to pay">扫码支付</small></button>
+        <button class="payment-channel" type="button" data-channel="alipay" disabled><span>支付宝</span><small data-zh="电脑网站支付" data-en="Desktop web payment">电脑网站支付</small></button>
+      </div>
+      <div class="payment-summary"><span data-zh="应付金额" data-en="Total">应付金额</span><strong id="purchase-total">¥1.00</strong></div>
+      <button class="payment-submit" type="button" disabled data-zh="支付接口准备中" data-en="Payment integration in progress">支付接口准备中</button>
+      <p class="payment-status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <div class="support-modal" hidden>
+    <div class="payment-backdrop" data-support-close></div>
+    <section class="payment-sheet" role="dialog" aria-modal="true" aria-labelledby="support-title">
+      <button class="payment-close" type="button" aria-label="关闭" data-support-close>×</button>
+      <p class="eyebrow" data-zh="自愿赞赏" data-en="Voluntary support">自愿赞赏</p>
+      <h2 id="support-title" data-zh="谢谢你让这个小项目继续长大。" data-en="Thank you for helping this small project grow.">谢谢你让这个小项目继续长大。</h2>
+      <p class="payment-copy" data-zh="赞赏不需要手机号，不解锁商品或功能，也不影响任何正常服务。" data-en="Support requires no phone number, unlocks no product or feature, and never affects regular service.">赞赏不需要手机号，不解锁商品或功能，也不影响任何正常服务。</p>
+      <div class="support-amounts" role="group" aria-label="赞赏金额">
+        <button type="button" data-support-amount="100">¥1</button>
+        <button type="button" data-support-amount="500">¥5</button>
+        <button type="button" data-support-amount="1000">¥10</button>
+      </div>
+      <div class="support-channels payment-channels" role="group" aria-label="赞赏方式">
+        <button class="payment-channel" type="button" data-support-channel="wechat" disabled><span>微信支付</span><small data-zh="扫码支付" data-en="Scan to pay">扫码支付</small></button>
+        <button class="payment-channel" type="button" data-support-channel="alipay" disabled><span>支付宝</span><small data-zh="电脑网站支付" data-en="Desktop web payment">电脑网站支付</small></button>
+      </div>
+      <div class="payment-summary"><span data-zh="赞赏金额" data-en="Support amount">赞赏金额</span><strong id="support-total">¥1.00</strong></div>
+      <button class="support-submit payment-submit" type="button" disabled data-zh="赞赏通道准备中" data-en="Support channel in progress">赞赏通道准备中</button>
+      <p class="support-status payment-status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <footer>
+    <div class="brand footer-brand"><span class="brand-seal">功</span><span data-zh="牛马电子功德" data-en="NiuMa Merit">牛马电子功德</span></div>
+    <p data-zh="无广告、无遥测，会回应每一次操作的离线桌面小伙伴。" data-en="An ad-free, telemetry-free desktop companion that responds to every action.">无广告、无遥测，会回应每一次操作的离线桌面小伙伴。</p>
+    <div>
+      <a href="https://github.com/Mr-shanqiu/niuma-ELEC-gongde">GitHub</a>
+      <a href="privacy.html" data-zh="隐私" data-en="Privacy">隐私</a>
+      <a href="contact.html" data-zh="联系" data-en="Contact">联系</a>
+      <a href="#download" data-zh="安装帮助" data-en="Install help">安装帮助</a>
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">陕ICP备2026020359号</a>
+    </div>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

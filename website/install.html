@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="牛马电子功德 macOS 与 Windows 安装、输入监控权限和隐私说明。">
+  <title>安装与权限手册 · 牛马电子功德</title>
+  <style>
+    :root { --paper:#f5eddf; --ink:#29241e; --muted:#756a5d; --orange:#f58220; --green:#294f3c; --line:rgba(41,36,30,.16); }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:radial-gradient(circle at 75% 8%,#fff9ee 0,transparent 32%),var(--paper); font-family:"Songti SC","STSong","Noto Serif SC",serif; }
+    a { color:inherit; }
+    .top { position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center; padding:14px max(22px,calc((100vw - 1040px)/2)); border-bottom:1px solid var(--line); background:rgba(245,237,223,.9); backdrop-filter:blur(16px); }
+    .brand { font-weight:900; text-decoration:none; }
+    .controls { display:flex; gap:8px; }
+    button,.back { border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:transparent; font:inherit; font-size:13px; cursor:pointer; text-decoration:none; }
+    button.active { background:var(--ink); color:var(--paper); }
+    main { width:min(1040px,calc(100% - 36px)); margin:auto; padding:72px 0 120px; }
+    .hero { display:grid; grid-template-columns:1.15fr .85fr; gap:60px; align-items:end; padding-bottom:64px; border-bottom:1px solid var(--line); }
+    .eyebrow { color:var(--orange); font:800 12px/1.2 ui-monospace,monospace; letter-spacing:.12em; text-transform:uppercase; }
+    h1 { max-width:760px; margin:12px 0 18px; font-size:clamp(42px,7vw,82px); line-height:.94; letter-spacing:-.055em; }
+    .lead { margin:0; color:var(--muted); font-size:18px; line-height:1.75; }
+    .privacy-note { padding:24px; border-radius:22px; color:#fff; background:var(--green); box-shadow:0 24px 60px rgba(41,79,60,.18); }
+    .privacy-note strong { display:block; margin-bottom:8px; color:#ffd68b; font-size:19px; }
+    .privacy-note p { margin:0; line-height:1.7; }
+    .grid { display:grid; grid-template-columns:220px 1fr; gap:52px; padding-top:64px; }
+    nav { position:sticky; top:82px; align-self:start; display:grid; gap:4px; }
+    nav a { padding:9px 12px; border-radius:10px; color:var(--muted); text-decoration:none; font-size:14px; }
+    nav a:hover { color:var(--ink); background:rgba(255,255,255,.4); }
+    article { min-width:0; }
+    section { padding:0 0 54px; }
+    h2 { margin:0 0 18px; font-size:30px; letter-spacing:-.03em; }
+    h3 { margin:30px 0 10px; font-size:19px; }
+    p,li { color:var(--muted); font-size:16px; line-height:1.8; }
+    ol,ul { padding-left:1.3em; }
+    .steps { counter-reset:steps; display:grid; gap:10px; list-style:none; padding:0; }
+    .steps li { position:relative; padding:16px 18px 16px 54px; border:1px solid var(--line); border-radius:16px; background:rgba(255,255,255,.28); }
+    .steps li::before { counter-increment:steps; content:counter(steps); position:absolute; left:16px; top:15px; display:grid; place-items:center; width:25px; height:25px; border-radius:50%; color:#fff; background:var(--orange); font:800 13px/1 ui-monospace,monospace; }
+    .truth { margin:24px 0; padding:20px 22px; border-left:4px solid var(--orange); background:rgba(245,130,32,.08); }
+    .truth strong { color:var(--ink); }
+    code { padding:2px 6px; border-radius:6px; background:rgba(41,36,30,.08); font-family:ui-monospace,monospace; }
+    .lang-en { display:none; }
+    body[data-lang="en"] .lang-zh { display:none; }
+    body[data-lang="en"] .lang-en { display:block; }
+    body[data-lang="en"] span.lang-en { display:inline; }
+    @media(max-width:760px) { .hero,.grid { grid-template-columns:1fr; } .hero { gap:28px; } nav { position:static; grid-template-columns:repeat(2,1fr); } main { padding-top:42px; } h1 { font-size:48px; } }
+  </style>
+</head>
+<body data-lang="zh">
+  <header class="top">
+    <a class="brand" href="index.html">牛马电子功德</a>
+    <div class="controls">
+      <a class="back" href="index.html"><span class="lang-zh">返回官网</span><span class="lang-en">Home</span></a>
+      <button type="button" data-set-lang="zh" class="active">中文</button>
+      <button type="button" data-set-lang="en">EN</button>
+    </div>
+  </header>
+  <main>
+    <div class="hero">
+      <div>
+        <div class="eyebrow">INSTALLATION / PERMISSIONS</div>
+        <h1 class="lang-zh">安装很简单，权限要讲清楚。</h1>
+        <h1 class="lang-en">Simple setup. Honest permissions.</h1>
+        <p class="lead lang-zh">本手册适用于 macOS 与 Windows 公开测试版，包含首次启动、输入监控、形象包和常见问题。</p>
+        <p class="lead lang-en">For the macOS and Windows public preview: first launch, input permissions, appearance packs, and troubleshooting.</p>
+      </div>
+      <aside class="privacy-note">
+        <strong class="lang-zh">桌面客户端始终离线</strong><strong class="lang-en">The desktop app stays offline</strong>
+        <p class="lang-zh">网站负责下载与支付；本地软件只负责计数和动画。它不上传按键、鼠标操作或使用统计。</p>
+        <p class="lang-en">The website handles downloads and payments. The local app only counts and animates. It does not upload keyboard, mouse, or usage data.</p>
+      </aside>
+    </div>
+    <div class="grid">
+      <nav>
+        <a href="#before"><span class="lang-zh">安装前</span><span class="lang-en">Before install</span></a>
+        <a href="#mac"><span class="lang-zh">macOS</span><span class="lang-en">macOS</span></a>
+        <a href="#windows"><span class="lang-zh">Windows</span><span class="lang-en">Windows</span></a>
+        <a href="#permission"><span class="lang-zh">权限说明</span><span class="lang-en">Permissions</span></a>
+        <a href="#packs"><span class="lang-zh">形象包</span><span class="lang-en">Appearance packs</span></a>
+        <a href="#problems"><span class="lang-zh">常见问题</span><span class="lang-en">Troubleshooting</span></a>
+      </nav>
+      <article>
+        <section id="before">
+          <h2 class="lang-zh">安装前先确认来源</h2><h2 class="lang-en">Verify the source first</h2>
+          <p class="lang-zh">只从 <code>gongde.zqscreen.cn</code> 或项目公开仓库下载。当前版本没有 Apple 或 Microsoft 商业代码签名，系统可能显示未知开发者或未知发布者。请先核对官网公布的 SHA-256。</p>
+          <p class="lang-en">Download only from <code>gongde.zqscreen.cn</code> or the public project repository. This preview is not commercially code-signed, so your system may show an unknown-developer warning. Verify the published SHA-256 first.</p>
+        </section>
+        <section id="mac">
+          <h2>macOS</h2>
+          <ol class="steps lang-zh">
+            <li>打开 DMG，将“牛马电子功德”拖入“应用程序”文件夹。</li>
+            <li>从“应用程序”打开。如果系统阻止启动，进入“系统设置” → “隐私与安全性”，核对名称和来源后点击“仍要打开”。</li>
+            <li>进入“系统设置” → “隐私与安全性” → “输入监控”，允许“牛马电子功德”。</li>
+            <li>完全退出软件后重新打开。无需重新启动电脑。</li>
+          </ol>
+          <ol class="steps lang-en">
+            <li>Open the DMG and drag NiuMa Merit into Applications.</li>
+            <li>If macOS blocks it, open System Settings → Privacy &amp; Security, verify the app and source, then choose Open Anyway.</li>
+            <li>Open System Settings → Privacy &amp; Security → Input Monitoring and enable NiuMa Merit.</li>
+            <li>Quit the app completely and reopen it. A computer restart is not required.</li>
+          </ol>
+          <h3 class="lang-zh">出现多个同名权限条目</h3><h3 class="lang-en">Duplicate permission entries</h3>
+          <p class="lang-zh">退出全部旧进程，删除旧副本，只保留“应用程序”中的最新版；移除旧权限条目后重新打开最新版并允许一次。更新时应始终替换同一位置的软件。</p>
+          <p class="lang-en">Quit all old copies, remove duplicates, and keep only the current app in Applications. Remove stale permission entries, reopen the current copy, and enable it once.</p>
+        </section>
+        <section id="windows">
+          <h2>Windows</h2>
+          <ol class="steps lang-zh">
+            <li>下载 ZIP 并完整解压到固定文件夹，不要在压缩包内直接运行。</li>
+            <li>启动软件。只有文件来自官网且 SHA-256 一致时，才在 SmartScreen 中选择“更多信息” → “仍要运行”。</li>
+            <li>Windows 通常不会显示单独的输入监控授权窗口，启动后即可统计普通桌面中的键鼠操作。</li>
+          </ol>
+          <ol class="steps lang-en">
+            <li>Download the ZIP and extract it to a permanent folder. Do not run it from inside the archive.</li>
+            <li>Launch the app. Use More info → Run anyway only when the file came from the official site and its SHA-256 matches.</li>
+            <li>Windows normally shows no separate input-monitoring prompt. Counting begins after launch in the normal desktop session.</li>
+          </ol>
+          <p class="lang-zh">不要永久关闭杀毒软件。登录界面、UAC 安全桌面和部分高权限程序中的输入不会被统计。</p>
+          <p class="lang-en">Do not permanently disable antivirus protection. Input on the sign-in screen, UAC secure desktop, and some elevated apps is not counted.</p>
+        </section>
+        <section id="permission">
+          <h2 class="lang-zh">为什么需要输入监控</h2><h2 class="lang-en">Why Input Monitoring is required</h2>
+          <div class="truth">
+            <p class="lang-zh"><strong>准确说明：</strong>macOS 的这项权限在技术上允许获授权的软件接收更丰富的输入事件。系统不能只授权“次数”。安全边界来自软件实际如何处理事件，而不是权限名称。</p>
+            <p class="lang-en"><strong>The precise explanation:</strong> this macOS permission can technically expose richer input events. macOS cannot grant count-only access. The safety boundary is how the app handles events, not the permission label.</p>
+          </div>
+          <p class="lang-zh">本软件只把键盘按下、鼠标按键和独立滚动手势转换成计数。它不保存具体按键、输入文字、鼠标位置、窗口标题、软件名称、剪贴板、截图、文件内容、密码、设备标识或遥测数据。</p>
+          <p class="lang-en">The app converts key presses, mouse buttons, and distinct scroll gestures into counts. It does not save specific keys, typed text, pointer positions, window titles, app names, clipboard data, screenshots, files, passwords, device identifiers, or telemetry.</p>
+        </section>
+        <section id="packs">
+          <h2 class="lang-zh">安装形象包</h2><h2 class="lang-en">Install appearance packs</h2>
+          <ol class="steps lang-zh">
+            <li>从官网下载扩展名为 <code>.nmgpack</code> 的形象包。</li>
+            <li>双击形象包，让系统交给“牛马电子功德”导入。</li>
+            <li>右键桌面形象，选择“更换形象”，点选已安装形象并确认。</li>
+          </ol>
+          <ol class="steps lang-en">
+            <li>Download a <code>.nmgpack</code> file from the official site.</li>
+            <li>Double-click it to import it into NiuMa Merit.</li>
+            <li>Right-click the desktop character, choose Change Appearance, select an installed appearance, and confirm.</li>
+          </ol>
+          <p class="lang-zh">形象包只能包含经审核的图片、动画参数和说明信息，不能修改计数、权限、联网或其他程序功能。</p>
+          <p class="lang-en">Reviewed appearance packs contain images, animation parameters, and metadata only. They cannot change counting, permissions, networking, or other app behavior.</p>
+        </section>
+        <section id="problems">
+          <h2 class="lang-zh">常见问题</h2><h2 class="lang-en">Troubleshooting</h2>
+          <h3 class="lang-zh">允许权限后仍不计数</h3><h3 class="lang-en">No counting after permission</h3>
+          <p class="lang-zh">完全退出后重新打开，并确认“输入监控”允许的是“应用程序”文件夹中的当前版本。</p>
+          <p class="lang-en">Quit and reopen the app. Confirm that Input Monitoring is enabled for the current copy in Applications.</p>
+          <h3 class="lang-zh">点击形象会加一，其他输入不计数</h3><h3 class="lang-en">The character counts clicks, but global input does not</h3>
+          <p class="lang-zh">这表示软件本身正在运行，但全局监听未生效。重新检查输入监控权限，并在修改后退出、重新打开软件。</p>
+          <p class="lang-en">The app is running, but global monitoring is inactive. Recheck Input Monitoring, then quit and reopen the app.</p>
+          <h3 class="lang-zh">是否需要重新启动电脑</h3><h3 class="lang-en">Must I restart the computer?</h3>
+          <p class="lang-zh">不需要。权限变更后只需完全退出并重新打开软件。</p>
+          <p class="lang-en">No. Quit and reopen the app after changing permissions.</p>
+        </section>
+      </article>
+    </div>
+  </main>
+  <script>
+    const buttons = [...document.querySelectorAll('[data-set-lang]')];
+    function setLanguage(language) {
+      document.body.dataset.lang = language;
+      document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
+      buttons.forEach(button => button.classList.toggle('active', button.dataset.setLang === language));
+      try { localStorage.setItem('gongde-language', language); } catch (_) {}
+    }
+    buttons.forEach(button => button.addEventListener('click', () => setLanguage(button.dataset.setLang)));
+    let saved = 'zh';
+    try { saved = localStorage.getItem('gongde-language') || 'zh'; } catch (_) {}
+    setLanguage(saved === 'en' ? 'en' : 'zh');
+  </script>
+</body>
+</html>

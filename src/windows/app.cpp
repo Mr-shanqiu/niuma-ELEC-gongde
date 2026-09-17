@@ -11,6 +11,7 @@
 #include <shlobj.h>
 #include <gdiplus.h>
 #include <objidl.h>
+#include <bcrypt.h>
 
 #include "appearance_pack.h"
 
@@ -26,6 +27,7 @@
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "bcrypt.lib")
 
 namespace {
 
@@ -45,8 +47,8 @@ constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
 constexpr int kLuckyCatBaseResource = 104;
 constexpr int kLuckyCatActorResource = 105;
-constexpr int kChickBaseResource = 106;
-constexpr int kChickActorResource = 107;
+constexpr int kSeaLionBodyResource = 106;
+constexpr int kSeaLionFlipperResource = 107;
 constexpr int kHamsterHabitatResource = 108;
 constexpr int kHamsterActorResource = 109;
 constexpr int kDesignWidth = 240;
@@ -87,7 +89,7 @@ const wchar_t* WindowTitle() {
 enum class MeritScene : int {
   Woodfish = 0,
   LuckyCat = 1,
-  ChickPecking = 2,
+  SeaLionBellyPat = 2,
   HamsterWheel = 3,
 };
 
@@ -136,8 +138,8 @@ PngResource gFish;
 PngResource gMallet;
 PngResource gLuckyCatBase;
 PngResource gLuckyCatActor;
-PngResource gChickBase;
-PngResource gChickActor;
+PngResource gSeaLionBody;
+PngResource gSeaLionFlipper;
 PngResource gHamsterHabitat;
 PngResource gHamsterActor;
 niuma::AppearanceCatalog gAppearanceCatalog;
@@ -237,6 +239,10 @@ std::string ReadSelectedPackId() {
 }
 
 niuma::AppearancePack* CurrentAppearancePack() {
+  if (gState.selectedPackId.empty() && gState.selectedScene != MeritScene::Woodfish) {
+    gState.selectedScene = MeritScene::Woodfish;
+    gState.dirty = true;
+  }
   return gState.selectedPackId.empty()
       ? nullptr
       : gAppearanceCatalog.Find(gState.selectedPackId);
@@ -490,8 +496,8 @@ bool LoadAllPngResources() {
          LoadPngResource(kMalletResource, gMallet) &&
          LoadPngResource(kLuckyCatBaseResource, gLuckyCatBase) &&
          LoadPngResource(kLuckyCatActorResource, gLuckyCatActor) &&
-         LoadPngResource(kChickBaseResource, gChickBase) &&
-         LoadPngResource(kChickActorResource, gChickActor) &&
+         LoadPngResource(kSeaLionBodyResource, gSeaLionBody) &&
+         LoadPngResource(kSeaLionFlipperResource, gSeaLionFlipper) &&
          LoadPngResource(kHamsterHabitatResource, gHamsterHabitat) &&
          LoadPngResource(kHamsterActorResource, gHamsterActor);
 }
@@ -507,8 +513,8 @@ void ReleasePngResource(PngResource& resource) {
 void ReleaseAllPngResources() {
   ReleasePngResource(gHamsterActor);
   ReleasePngResource(gHamsterHabitat);
-  ReleasePngResource(gChickActor);
-  ReleasePngResource(gChickBase);
+  ReleasePngResource(gSeaLionFlipper);
+  ReleasePngResource(gSeaLionBody);
   ReleasePngResource(gLuckyCatActor);
   ReleasePngResource(gLuckyCatBase);
   ReleasePngResource(gMallet);
@@ -554,12 +560,16 @@ void DrawSceneArtwork(
     return;
   }
 
-  if (scene == MeritScene::ChickPecking) {
-    const RectF rect(5.0f, 18.0f, 230.0f, 230.0f);
-    graphics.DrawImage(gChickBase.image.get(), rect);
+  if (scene == MeritScene::SeaLionBellyPat) {
+    graphics.DrawImage(gSeaLionBody.image.get(), RectF(34.0f, 82.0f, 172.0f, 168.0f));
     const GraphicsState state = graphics.Save();
-    graphics.TranslateTransform(4.0f * strikeAmount, 8.0f * strikeAmount);
-    graphics.DrawImage(gChickActor.image.get(), rect);
+    constexpr float anchorX = 159.65f;
+    constexpr float anchorY = 146.6f;
+    graphics.TranslateTransform(anchorX - 3.0f * strikeAmount,
+                                anchorY + 2.0f * strikeAmount);
+    graphics.RotateTransform(48.0f * strikeAmount);
+    graphics.TranslateTransform(-anchorX, -anchorY);
+    graphics.DrawImage(gSeaLionFlipper.image.get(), RectF(152.0f, 140.0f, 51.0f, 66.0f));
     graphics.Restore(state);
     return;
   }
@@ -823,7 +833,7 @@ void ShowPrivacyNotice(HWND owner) {
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.6.0";
+  const std::wstring version = L"0.7.0";
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
@@ -843,7 +853,7 @@ void ShowAboutDialog(HWND owner) {
 const wchar_t* SceneTitle(MeritScene scene) {
   switch (scene) {
     case MeritScene::LuckyCat: return UiText(L"招财猫", L"Lucky Cat");
-    case MeritScene::ChickPecking: return UiText(L"小鸡啄米", L"Pecking Chick");
+    case MeritScene::SeaLionBellyPat: return UiText(L"海狮拍肚皮", L"Sea Lion Belly Pat");
     case MeritScene::HamsterWheel: return UiText(L"仓鼠跑轮", L"Hamster Wheel");
     default: return UiText(L"默认木鱼", L"Woodfish");
   }
@@ -969,7 +979,7 @@ void ShowMeritCalendar(HWND owner) {
 constexpr int kPickerDeleteButton = 1001;
 
 int PickerItemCount() {
-  return 4 + static_cast<int>(gAppearanceCatalog.packs().size());
+  return 1 + static_cast<int>(gAppearanceCatalog.packs().size());
 }
 
 int CurrentPickerIndex() {
@@ -977,15 +987,15 @@ int CurrentPickerIndex() {
     const auto& packs = gAppearanceCatalog.packs();
     for (size_t index = 0; index < packs.size(); ++index) {
       if (packs[index]->id == gState.selectedPackId)
-        return 4 + static_cast<int>(index);
+        return 1 + static_cast<int>(index);
     }
   }
-  return static_cast<int>(gState.selectedScene);
+  return 0;
 }
 
 std::wstring PickerItemTitle(int index) {
-  if (index < 4) return SceneTitle(static_cast<MeritScene>(index));
-  const auto& pack = gAppearanceCatalog.packs()[static_cast<size_t>(index - 4)];
+  if (index == 0) return SceneTitle(MeritScene::Woodfish);
+  const auto& pack = gAppearanceCatalog.packs()[static_cast<size_t>(index - 1)];
   return IsChineseUi() ? pack->nameZh : pack->nameEn;
 }
 
@@ -1028,12 +1038,12 @@ void PaintAppearancePicker(HWND window) {
     thumbnailGraphics.Clear(Gdiplus::Color(0, 0, 0, 0));
     thumbnailGraphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     thumbnailGraphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-    if (index < 4) {
-      DrawSceneArtwork(thumbnailGraphics, static_cast<MeritScene>(index), 0.0f);
+    if (index == 0) {
+      DrawSceneArtwork(thumbnailGraphics, MeritScene::Woodfish, 0.0f);
     } else {
       niuma::DrawAppearancePack(
           thumbnailGraphics,
-          *gAppearanceCatalog.packs()[static_cast<size_t>(index - 4)], 0.0f);
+          *gAppearanceCatalog.packs()[static_cast<size_t>(index - 1)], 0.0f);
     }
     graphics.DrawImage(&thumbnail, Gdiplus::RectF(
         static_cast<float>(card.left + ScaleDip(20, dpi)),
@@ -1103,13 +1113,13 @@ LRESULT CALLBACK PickerWindowProcedure(
     }
     case WM_COMMAND:
       if (LOWORD(wParam) == kPickerDeleteButton) {
-        if (gPicker.pendingIndex < 4) {
+        if (gPicker.pendingIndex == 0) {
           MessageBoxW(window,
               UiText(L"内置形象不能删除。", L"Built-in appearances cannot be deleted."),
               WindowTitle(), MB_OK | MB_ICONINFORMATION);
           return 0;
         }
-        const size_t packIndex = static_cast<size_t>(gPicker.pendingIndex - 4);
+        const size_t packIndex = static_cast<size_t>(gPicker.pendingIndex - 1);
         if (packIndex >= gAppearanceCatalog.packs().size()) return 0;
         const std::string id = gAppearanceCatalog.packs()[packIndex]->id;
         if (MessageBoxW(window,
@@ -1193,11 +1203,11 @@ void ShowAppearancePicker(HWND owner) {
   SetActiveWindow(owner);
   gPicker.window = nullptr;
   if (gPicker.confirmed) {
-    if (gPicker.pendingIndex < 4) {
-      gState.selectedScene = static_cast<MeritScene>(gPicker.pendingIndex);
+    if (gPicker.pendingIndex == 0) {
+      gState.selectedScene = MeritScene::Woodfish;
       gState.selectedPackId.clear();
     } else {
-      const size_t packIndex = static_cast<size_t>(gPicker.pendingIndex - 4);
+      const size_t packIndex = static_cast<size_t>(gPicker.pendingIndex - 1);
       if (packIndex >= gAppearanceCatalog.packs().size()) return;
       gState.selectedPackId = gAppearanceCatalog.packs()[packIndex]->id;
     }

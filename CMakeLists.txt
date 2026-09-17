@@ -7,12 +7,6 @@ if(WIN32)
   configure_file(src/windows/app.manifest "${CMAKE_CURRENT_BINARY_DIR}/app.manifest" COPYONLY)
   configure_file(assets/woodfish.png "${CMAKE_CURRENT_BINARY_DIR}/woodfish.png" COPYONLY)
   configure_file(assets/mallet.png "${CMAKE_CURRENT_BINARY_DIR}/mallet.png" COPYONLY)
-  configure_file(assets/scenes/lucky-cat/lucky-cat-base.png "${CMAKE_CURRENT_BINARY_DIR}/lucky-cat-base.png" COPYONLY)
-  configure_file(assets/scenes/lucky-cat/lucky-cat-actor.png "${CMAKE_CURRENT_BINARY_DIR}/lucky-cat-actor.png" COPYONLY)
-  configure_file(assets/scenes/chick-pecking/chick-pecking-base.png "${CMAKE_CURRENT_BINARY_DIR}/chick-pecking-base.png" COPYONLY)
-  configure_file(assets/scenes/chick-pecking/chick-pecking-actor.png "${CMAKE_CURRENT_BINARY_DIR}/chick-pecking-actor.png" COPYONLY)
-  configure_file(assets/scenes/hamster-wheel/windows/hamster-habitat.png "${CMAKE_CURRENT_BINARY_DIR}/hamster-habitat.png" COPYONLY)
-  configure_file(assets/scenes/hamster-wheel/windows/hamster-pet.png "${CMAKE_CURRENT_BINARY_DIR}/hamster-pet.png" COPYONLY)
   configure_file(assets/appicon.ico "${CMAKE_CURRENT_BINARY_DIR}/appicon.ico" COPYONLY)
   add_executable(niuma-merit WIN32
     src/windows/app.cpp
@@ -24,7 +18,7 @@ if(WIN32)
   set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc" PROPERTIES GENERATED TRUE)
   target_compile_features(niuma-merit PRIVATE cxx_std_17)
   target_compile_definitions(niuma-merit PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
-  target_link_libraries(niuma-merit PRIVATE shell32 gdiplus ole32)
+  target_link_libraries(niuma-merit PRIVATE shell32 gdiplus ole32 bcrypt)
   if(MSVC)
     set_property(TARGET niuma-merit PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_options(niuma-merit PRIVATE /W4 /permissive- /utf-8)
@@ -41,7 +35,7 @@ if(WIN32)
   target_include_directories(niuma-pack-test PRIVATE src/windows third_party/miniz)
   target_compile_features(niuma-pack-test PRIVATE cxx_std_17)
   target_compile_definitions(niuma-pack-test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
-  target_link_libraries(niuma-pack-test PRIVATE gdiplus ole32 shell32)
+  target_link_libraries(niuma-pack-test PRIVATE gdiplus ole32 shell32 bcrypt)
   if(MSVC)
     set_property(TARGET niuma-pack-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_options(niuma-pack-test PRIVATE /W4 /permissive- /utf-8)
@@ -51,12 +45,6 @@ elseif(APPLE)
   set(MACOS_RESOURCES
     assets/woodfish.png
     assets/mallet.png
-    assets/scenes/lucky-cat/lucky-cat-base.png
-    assets/scenes/lucky-cat/lucky-cat-actor.png
-    assets/scenes/chick-pecking/chick-pecking-base.png
-    assets/scenes/chick-pecking/chick-pecking-actor.png
-    assets/scenes/hamster-wheel/runtime/hamster-habitat.png
-    assets/scenes/hamster-wheel/runtime/hamster-pet.png
   )
   set_source_files_properties(${MACOS_RESOURCES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources"
@@ -82,6 +70,7 @@ elseif(APPLE)
   target_link_libraries(niuma-merit PRIVATE
     "-framework AppKit"
     "-framework ApplicationServices"
+    "-framework Security"
   )
   set_target_properties(niuma-merit PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "NiuMa Merit"

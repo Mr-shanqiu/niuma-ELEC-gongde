@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="联系牛马电子功德项目">
+  <title>联系项目｜牛马电子功德</title>
+  <link rel="icon" type="image/png" href="assets/woodfish.png">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .contact-intro { max-width: 720px; }
+    .contact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 34px 0 42px; }
+    .contact-card { min-width: 0; padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.26); }
+    .contact-card h2 { margin-top: 0; }
+    .contact-card p { color: var(--muted); }
+    .contact-email { display: inline-block; max-width: 100%; overflow-wrap: anywhere; color: var(--vermillion); font-size: clamp(18px,3vw,24px); font-weight: 800; }
+    .contact-qr { display: block; width: min(100%,240px); aspect-ratio: 1; margin: 18px auto 12px; border-radius: 16px; object-fit: cover; background: #fff; }
+    .contact-caption { margin-bottom: 0; text-align: center; font-size: 13px; }
+    .contact-note { padding: 18px 20px; border-left: 4px solid var(--gold); background: rgba(255,255,255,.2); }
+    @media (max-width: 680px) { .contact-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body class="legal-page">
+  <main class="legal-shell">
+    <a class="brand" href="index.html"><span class="brand-seal">功</span><span>牛马电子功德</span></a>
+    <p class="eyebrow">CONTACT</p>
+    <h1>联系我们</h1>
+    <p class="contact-intro">安装、权限、形象包、问题反馈或合作建议，都可以直接联系我们。请简单说明你使用的系统、软件版本和遇到的问题，方便我们准确回复。</p>
+    <div class="contact-grid">
+      <section class="contact-card">
+        <p class="eyebrow">EMAIL</p>
+        <h2>邮件咨询</h2>
+        <p>适合发送详细问题、错误截图、合作说明和安全报告。</p>
+        <a class="contact-email" href="mailto:f104783@outlook.com">f104783@outlook.com</a>
+        <p>建议写明 macOS 或 Windows、当前版本，以及问题出现前后的操作。</p>
+      </section>
+      <section class="contact-card">
+        <p class="eyebrow">WECHAT</p>
+        <h2>微信咨询</h2>
+        <img class="contact-qr" src="assets/contact/wechat-contact.jpg" alt="牛马电子功德微信咨询二维码">
+        <p class="contact-caption">扫码添加微信，咨询安装、使用与形象合作。</p>
+      </section>
+    </div>
+    <p class="contact-note">请不要通过邮件、微信或公开问题发送密码、短信验证码、私钥、付款密码或其他敏感凭据。我们不会向你索要这些信息。</p>
+    <h2>公开问题与建议</h2>
+    <p>可以通过项目 GitHub 提交可公开讨论的问题、功能建议和安全报告。提交前请先移除截图或日志中的手机号、邮箱和其他个人信息。</p>
+    <p><a href="https://github.com/Mr-shanqiu/niuma-ELEC-gongde/issues" target="_blank" rel="noreferrer">前往 GitHub Issues</a></p>
+    <h2>下载来源</h2>
+    <p>正式官网为 <a href="https://gongde.zqscreen.cn">gongde.zqscreen.cn</a>。如果安装包来自他人转发，请回到官网核对文件名和 SHA-256。</p>
+    <a class="back" href="index.html">返回首页</a>
+    <div class="legal-footer">陕ICP备2026020359号</div>
+  </main>
+</body>
+</html>

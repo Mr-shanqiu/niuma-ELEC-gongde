@@ -1,0 +1,41 @@
+CREATE TABLE IF NOT EXISTS gongde_orders (
+  order_no VARCHAR(48) NOT NULL PRIMARY KEY,
+  product_id VARCHAR(64) NOT NULL,
+  product_version INT UNSIGNED NOT NULL,
+  channel VARCHAR(16) NOT NULL,
+  purchase_kind VARCHAR(32) NOT NULL,
+  user_id VARCHAR(64) NULL,
+  asset_id VARCHAR(128) NULL,
+  amount_fen INT UNSIGNED NOT NULL,
+  currency CHAR(3) NOT NULL,
+  state VARCHAR(32) NOT NULL,
+  buyer_token_digest CHAR(64) NOT NULL,
+  provider_transaction_id VARCHAR(128) NULL,
+  created_at DATETIME(3) NOT NULL,
+  expires_at DATETIME(3) NOT NULL,
+  paid_at DATETIME(3) NULL,
+  fulfilled_at DATETIME(3) NULL,
+  UNIQUE KEY uq_gongde_provider_transaction (provider_transaction_id),
+  KEY idx_gongde_orders_user_created (user_id, created_at),
+  KEY idx_gongde_orders_state_expires (state, expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS gongde_entitlements (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  order_no VARCHAR(48) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  product_id VARCHAR(64) NOT NULL,
+  scope VARCHAR(32) NOT NULL,
+  asset_id VARCHAR(128) NULL,
+  entitlement_key VARCHAR(128) NOT NULL,
+  state VARCHAR(32) NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  activated_at DATETIME(3) NULL,
+  expires_at DATETIME(3) NULL,
+  revoked_at DATETIME(3) NULL,
+  CONSTRAINT fk_gongde_entitlement_order FOREIGN KEY (order_no) REFERENCES gongde_orders(order_no),
+  UNIQUE KEY uq_gongde_entitlement_order_scope_asset (order_no, scope, entitlement_key),
+  UNIQUE KEY uq_gongde_user_scope_delivery (user_id, scope, entitlement_key),
+  KEY idx_gongde_entitlements_order (order_no),
+  KEY idx_gongde_entitlements_expiry (state, expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

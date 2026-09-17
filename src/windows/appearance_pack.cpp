@@ -3,14 +3,20 @@
 #include "miniz.h"
 
 #include <shlobj.h>
+#include <bcrypt.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <climits>
 #include <cmath>
+#include <cstdint>
+#include <ctime>
 #include <cstdlib>
 #include <cstring>
 #include <cwctype>
 #include <map>
+#include <iterator>
 #include <set>
 #include <utility>
 
@@ -23,6 +29,14 @@ constexpr size_t kMaximumPngBytes = 32ULL * 1024ULL * 1024ULL;
 constexpr size_t kMaximumFiles = 8;
 constexpr size_t kMaximumLayers = 6;
 constexpr size_t kMaximumKeyframes = 8;
+constexpr unsigned char kPublicX[32] = {
+    0x2a, 0xc5, 0xfc, 0x45, 0x26, 0x01, 0xd3, 0x9c, 0xc4, 0xe2, 0x9e,
+    0xcf, 0xf9, 0xb6, 0x16, 0x95, 0xe3, 0x1c, 0x78, 0x67, 0x27, 0x41,
+    0x1a, 0x01, 0x26, 0xd3, 0xd7, 0xb5, 0x35, 0x2a, 0x6d, 0xbd};
+constexpr unsigned char kPublicY[32] = {
+    0x49, 0xb8, 0xa6, 0xf7, 0x6c, 0x7a, 0xe2, 0x83, 0x60, 0xf1, 0x80,
+    0xaf, 0x21, 0xb8, 0x17, 0xa2, 0x2c, 0x9e, 0x05, 0x1d, 0xf6, 0x17,
+    0xd9, 0xdc, 0xc1, 0xb3, 0xb8, 0x99, 0x87, 0x62, 0x22, 0xb7};
 
 struct JsonValue {
   enum class Kind { Null, Boolean, Number, String, Array, Object };
@@ -32,6 +46,15 @@ struct JsonValue {
   std::string string;
   std::vector<JsonValue> array;
   std::map<std::string, JsonValue> object;
+};
+
+struct LicenseInfo {
+  bool timed = false;
+  std::int64_t issuedAt = 0;
+  std::int64_t importBefore = 0;
+  std::string downloadId;
+  std::string contentHash;
+  std::string signature;
 };
 
 void SetError(std::wstring* error, const wchar_t* text) {
@@ -372,22 +395,142 @@ bool ReadArchiveEntry(mz_zip_archive* archive, const std::string& name,
   return true;
 }
 
+bool HexBytes(const std::string& hex, std::vector<unsigned char>* output) {
+  if (hex.size() % 2 != 0) return false;
+  output->clear();
+  output->reserve(hex.size() / 2);
+  auto nibble = [](char value) -> int {
+    if (value >= '0' && value <= '9') return value - '0';
+    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+    return -1;
+  };
+  for (size_t index = 0; index < hex.size(); index += 2) {
+    const int high = nibble(hex[index]);
+    const int low = nibble(hex[index + 1]);
+    if (high < 0 || low < 0) return false;
+    output->push_back(static_cast<unsigned char>((high << 4) | low));
+  }
+  return true;
+}
+
+bool Sha256(const std::vector<std::pair<const void*, size_t>>& parts,
+            std::array<unsigned char, 32>* digest) {
+  BCRYPT_ALG_HANDLE algorithm = nullptr;
+  BCRYPT_HASH_HANDLE hash = nullptr;
+  DWORD objectSize = 0, resultSize = 0;
+  std::vector<unsigned char> object;
+  bool ok = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM,
+                                         nullptr, 0) >= 0 &&
+      BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
+          reinterpret_cast<PUCHAR>(&objectSize), sizeof(objectSize),
+          &resultSize, 0) >= 0;
+  if (ok) {
+    object.resize(objectSize);
+    ok = BCryptCreateHash(algorithm, &hash, object.data(), objectSize,
+                          nullptr, 0, 0) >= 0;
+  }
+  for (const auto& part : parts) {
+    if (!ok || part.second > ULONG_MAX ||
+        BCryptHashData(hash,
+            const_cast<PUCHAR>(static_cast<const UCHAR*>(part.first)),
+            static_cast<ULONG>(part.second), 0) < 0) {
+      ok = false;
+      break;
+    }
+  }
+  if (ok) ok = BCryptFinishHash(hash, digest->data(),
+                                static_cast<ULONG>(digest->size()), 0) >= 0;
+  if (hash != nullptr) BCryptDestroyHash(hash);
+  if (algorithm != nullptr) BCryptCloseAlgorithmProvider(algorithm, 0);
+  return ok;
+}
+
+std::string ContentHash(
+    const std::map<std::string, std::vector<unsigned char>>& files) {
+  std::vector<std::vector<unsigned char>> lengths;
+  std::vector<std::pair<const void*, size_t>> parts;
+  lengths.reserve(files.size());
+  parts.reserve(files.size() * 4);
+  static const unsigned char zero = 0;
+  for (const auto& entry : files) {
+    lengths.emplace_back(8);
+    std::uint64_t size = static_cast<std::uint64_t>(entry.second.size());
+    for (int index = 7; index >= 0; --index) {
+      lengths.back()[static_cast<size_t>(index)] = static_cast<unsigned char>(size & 0xff);
+      size >>= 8;
+    }
+    parts.push_back({entry.first.data(), entry.first.size()});
+    parts.push_back({&zero, 1});
+    parts.push_back({lengths.back().data(), lengths.back().size()});
+    parts.push_back({entry.second.data(), entry.second.size()});
+  }
+  std::array<unsigned char, 32> digest = {};
+  if (!Sha256(parts, &digest)) return {};
+  static const char alphabet[] = "0123456789abcdef";
+  std::string hex;
+  hex.reserve(64);
+  for (unsigned char byte : digest) {
+    hex.push_back(alphabet[byte >> 4]);
+    hex.push_back(alphabet[byte & 15]);
+  }
+  return hex;
+}
+
+bool VerifyLicenseSignature(const std::string& message,
+                            const std::string& signatureHex) {
+  std::vector<unsigned char> signature;
+  if (!HexBytes(signatureHex, &signature) || signature.size() != 64) return false;
+  const std::vector<std::pair<const void*, size_t>> parts = {
+      {message.data(), message.size()}};
+  std::array<unsigned char, 32> digest = {};
+  if (!Sha256(parts, &digest)) return false;
+  BCRYPT_ALG_HANDLE algorithm = nullptr;
+  BCRYPT_KEY_HANDLE key = nullptr;
+  struct PublicBlob {
+    BCRYPT_ECCKEY_BLOB header;
+    unsigned char x[32];
+    unsigned char y[32];
+  } blob = {};
+  blob.header.dwMagic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
+  blob.header.cbKey = 32;
+  std::copy(std::begin(kPublicX), std::end(kPublicX), blob.x);
+  std::copy(std::begin(kPublicY), std::end(kPublicY), blob.y);
+  bool valid = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_ECDSA_P256_ALGORITHM,
+                                            nullptr, 0) >= 0 &&
+      BCryptImportKeyPair(algorithm, nullptr, BCRYPT_ECCPUBLIC_BLOB, &key,
+          reinterpret_cast<PUCHAR>(&blob), sizeof(blob), 0) >= 0 &&
+      BCryptVerifySignature(key, nullptr, digest.data(),
+          static_cast<ULONG>(digest.size()), signature.data(),
+          static_cast<ULONG>(signature.size()), 0) >= 0;
+  if (key != nullptr) BCryptDestroyKey(key);
+  if (algorithm != nullptr) BCryptCloseAlgorithmProvider(algorithm, 0);
+  return valid;
+}
+
 bool ParseManifest(const std::string& text, AppearancePack* pack,
-                   std::string* previewName, std::wstring* error) {
+                   std::string* previewName, LicenseInfo* license,
+                   std::wstring* error) {
   JsonValue root;
   JsonParser parser(text);
-  if (!parser.Parse(&root) ||
-      !HasExactKeys(root, {"schema_version", "id", "version", "name_zh",
-                           "name_en", "author", "publisher", "review_id",
-                           "canvas_width", "canvas_height", "preview",
-                           "plus_y", "layers"})) {
+  if (!parser.Parse(&root)) {
     SetError(error, L"manifest.json 格式不正确或包含未知字段。");
     return false;
   }
   double schema = 0, canvasWidth = 0, canvasHeight = 0, plusY = 0;
+  if (!NumberInRange(Member(root, "schema_version"), 1, 2, &schema) ||
+      std::floor(schema) != schema ||
+      !((schema == 1 && HasExactKeys(root, {"schema_version", "id", "version",
+          "name_zh", "name_en", "author", "publisher", "review_id",
+          "canvas_width", "canvas_height", "preview", "plus_y", "layers"})) ||
+        (schema == 2 && HasExactKeys(root, {"schema_version", "id", "version",
+          "name_zh", "name_en", "author", "publisher", "review_id",
+          "canvas_width", "canvas_height", "preview", "plus_y", "layers",
+          "license"})))) {
+    SetError(error, L"manifest.json 格式不正确或包含未知字段。");
+    return false;
+  }
   std::string nameZh, nameEn, author, publisher;
-  if (!NumberInRange(Member(root, "schema_version"), 1, 1, &schema) ||
-      !StringValue(Member(root, "id"), 96, &pack->id) ||
+  if (!StringValue(Member(root, "id"), 96, &pack->id) ||
       !IsSafeId(pack->id) ||
       !StringValue(Member(root, "version"), 32, &pack->version) ||
       !StringValue(Member(root, "name_zh"), 128, &nameZh) ||
@@ -412,6 +555,45 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
       pack->publisher.empty()) {
     SetError(error, L"形象包文字必须是有效 UTF-8。");
     return false;
+  }
+  if (schema == 2) {
+    const JsonValue* value = Member(root, "license");
+    std::string mode;
+    double issued = 0, deadline = 0;
+    if (value == nullptr || !HasExactKeys(*value, {"mode", "issued_at",
+          "import_before", "download_id", "content_sha256", "signature"}) ||
+        !StringValue(Member(*value, "mode"), 16, &mode) || mode != "timed" ||
+        !NumberInRange(Member(*value, "issued_at"), 1577836800, 4102444800, &issued) ||
+        !NumberInRange(Member(*value, "import_before"), 1577836800, 4102444800, &deadline) ||
+        std::floor(issued) != issued || std::floor(deadline) != deadline ||
+        deadline <= issued || deadline - issued > 86400 ||
+        !StringValue(Member(*value, "download_id"), 128, &license->downloadId) ||
+        license->downloadId.size() < 16 ||
+        !StringValue(Member(*value, "content_sha256"), 64, &license->contentHash) ||
+        license->contentHash.size() != 64 ||
+        !StringValue(Member(*value, "signature"), 128, &license->signature) ||
+        license->signature.size() != 128) {
+      SetError(error, L"限时导入凭证格式无效。");
+      return false;
+    }
+    auto safeToken = [](const std::string& value) {
+      return std::all_of(value.begin(), value.end(), [](unsigned char c) {
+        return std::isalnum(c) || c == '_' || c == '-';
+      });
+    };
+    auto lowerHex = [](const std::string& value) {
+      return std::all_of(value.begin(), value.end(), [](unsigned char c) {
+        return std::isdigit(c) || (c >= 'a' && c <= 'f');
+      });
+    };
+    if (!safeToken(license->downloadId) || !lowerHex(license->contentHash) ||
+        !lowerHex(license->signature)) {
+      SetError(error, L"限时导入凭证包含不允许的字符。");
+      return false;
+    }
+    license->timed = true;
+    license->issuedAt = static_cast<std::int64_t>(issued);
+    license->importBefore = static_cast<std::int64_t>(deadline);
   }
 
   const JsonValue* layers = Member(root, "layers");
@@ -504,6 +686,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
 }
 
 bool LoadAppearancePackFile(const std::wstring& path,
+                            bool enforceImportDeadline,
                             std::unique_ptr<AppearancePack>* output,
                             std::wstring* error) {
   WIN32_FILE_ATTRIBUTE_DATA attributes = {};
@@ -571,28 +754,65 @@ bool LoadAppearancePackFile(const std::wstring& path,
   }
   auto pack = std::make_unique<AppearancePack>();
   std::string previewName;
+  LicenseInfo license;
   if (!ParseManifest(
           std::string(reinterpret_cast<const char*>(manifestBytes.data()),
                       manifestBytes.size()),
-          pack.get(), &previewName, error)) return false;
+          pack.get(), &previewName, &license, error)) return false;
   std::set<std::string> declared = {"manifest.json", previewName};
   for (const PackLayer& layer : pack->layers) declared.insert(layer.imageName);
   if (archiveNames != declared) {
     SetError(error, L"形象包包含未声明文件或缺少声明的 PNG。");
     return false;
   }
-  std::vector<unsigned char> pngBytes;
-  if (!ReadArchiveEntry(&archive, previewName, kMaximumPngBytes, &pngBytes) ||
-      !LoadImage(pngBytes.data(), pngBytes.size(), &pack->preview)) {
+  std::map<std::string, std::vector<unsigned char>> pngFiles;
+  for (const std::string& name : declared) {
+    if (name == "manifest.json") continue;
+    if (!ReadArchiveEntry(&archive, name, kMaximumPngBytes, &pngFiles[name])) {
+      SetError(error, L"形象包 PNG 无效。");
+      return false;
+    }
+  }
+  if (!LoadImage(pngFiles[previewName].data(), pngFiles[previewName].size(),
+                 &pack->preview)) {
     SetError(error, L"形象包预览图无效。");
     return false;
   }
   for (PackLayer& layer : pack->layers) {
-    pngBytes.clear();
-    if (!ReadArchiveEntry(&archive, layer.imageName, kMaximumPngBytes, &pngBytes) ||
-        !LoadImage(pngBytes.data(), pngBytes.size(), &layer.image)) {
+    const auto& pngBytes = pngFiles[layer.imageName];
+    if (!LoadImage(pngBytes.data(), pngBytes.size(), &layer.image)) {
       SetError(error, L"形象包图层 PNG 无效。");
       return false;
+    }
+  }
+  if (license.timed) {
+    const std::string actualHash = ContentHash(pngFiles);
+    const std::string message = "NIUMA-PACK-LICENSE-V1\n" + pack->id + "\n" +
+        pack->version + "\n" + std::to_string(license.issuedAt) + "\n" +
+        std::to_string(license.importBefore) + "\n" + license.downloadId +
+        "\n" + license.contentHash;
+    if (actualHash.empty() || actualHash != license.contentHash) {
+      SetError(error, L"形象包内容与授权凭证不匹配。");
+      return false;
+    }
+    if (!VerifyLicenseSignature(message, license.signature)) {
+      SetError(error, L"形象包授权签名无效。");
+      return false;
+    }
+    if (enforceImportDeadline) {
+#ifdef NIUMA_LICENSE_TEST_TIME
+      const std::int64_t now = NIUMA_LICENSE_TEST_TIME;
+#else
+      const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+#endif
+      if (now + 300 < license.issuedAt) {
+        SetError(error, L"电脑时间早于形象包签发时间，请检查系统时间。");
+        return false;
+      }
+      if (now > license.importBefore) {
+        SetError(error, L"形象包首次导入期限已过，请登录官网重新下载，无需再次购买。");
+        return false;
+      }
     }
   }
   pack->sourcePath = path;
@@ -664,7 +884,7 @@ bool AppearanceCatalog::Reload(const std::wstring& directory,
                                    FILE_ATTRIBUTE_REPARSE_POINT)) != 0) continue;
     std::unique_ptr<AppearancePack> pack;
     std::wstring ignored;
-    if (LoadAppearancePackFile(directory + L"\\" + entry.cFileName, &pack,
+    if (LoadAppearancePackFile(directory + L"\\" + entry.cFileName, false, &pack,
                                &ignored)) {
       if (Find(pack->id) == nullptr) packs_.push_back(std::move(pack));
     }
@@ -682,7 +902,7 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
                                 std::string* installedId,
                                 std::wstring* error) {
   std::unique_ptr<AppearancePack> validated;
-  if (!LoadAppearancePackFile(sourcePath, &validated, error)) return false;
+  if (!LoadAppearancePackFile(sourcePath, true, &validated, error)) return false;
   CreateDirectoryW(directory.c_str(), nullptr);
   const std::wstring destination =
       directory + L"\\" + FileNameForId(validated->id);
@@ -693,7 +913,7 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
     return false;
   }
   std::unique_ptr<AppearancePack> copied;
-  if (!LoadAppearancePackFile(temporary, &copied, error) ||
+  if (!LoadAppearancePackFile(temporary, true, &copied, error) ||
       copied->id != validated->id ||
       !MoveFileExW(temporary.c_str(), destination.c_str(),
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
