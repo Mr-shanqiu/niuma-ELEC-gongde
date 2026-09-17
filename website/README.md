@@ -6,7 +6,7 @@
 - 正式域名：`https://gongde.zqscreen.cn`
 - 下载域名：`https://download.gongde.zqscreen.cn`
 - macOS：0.7.0 Universal 2，DMG 与 ZIP 独立分发。
-- Windows：0.6.0 x64 ZIP，独立分发。
+- Windows：0.7.0 x64 ZIP，独立分发。
 - 基础安装包只内置木鱼。其他形象由付费交付服务动态签发，不放入静态下载目录。
 - 部署：运行 `./scripts/package-website.sh` 生成冻结站点归档和下载清单，不要把安装包塞入站点归档。
 - 健康检查：`GET /healthz.txt` 返回 `200 text/plain`，正文为 `gongde-ok`。

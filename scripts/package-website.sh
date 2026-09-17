@@ -76,7 +76,7 @@ EOF
 
 cp "$ROOT_DIR/dist/niuma-merit-macos-0.7.0.dmg" "$DOWNLOAD_DIR/niuma-merit-macos-0.7.0.dmg"
 cp "$ROOT_DIR/dist/niuma-merit-macos-0.7.0.zip" "$DOWNLOAD_DIR/niuma-merit-macos-0.7.0.zip"
-cp "$ROOT_DIR/dist/windows-0.6.0-main-34935403077/niuma-merit-windows-0.6.0-Release.zip" "$DOWNLOAD_DIR/niuma-merit-windows-0.6.0.zip"
+cp "$ROOT_DIR/dist/windows-0.7.0-main-35195142968/niuma-merit-windows-0.7.0-Release.zip" "$DOWNLOAD_DIR/niuma-merit-windows-0.7.0.zip"
 rm -f "$DOWNLOAD_DIR/chick-pecking-free.nmgpack"
 
 (
@@ -84,15 +84,15 @@ rm -f "$DOWNLOAD_DIR/chick-pecking-free.nmgpack"
   shasum -a 256 \
     niuma-merit-macos-0.7.0.dmg \
     niuma-merit-macos-0.7.0.zip \
-    niuma-merit-windows-0.6.0.zip > SHA256SUMS.txt
+    niuma-merit-windows-0.7.0.zip > SHA256SUMS.txt
 )
 
 MAC_DMG_BYTES=$(stat -f '%z' "$DOWNLOAD_DIR/niuma-merit-macos-0.7.0.dmg")
 MAC_ZIP_BYTES=$(stat -f '%z' "$DOWNLOAD_DIR/niuma-merit-macos-0.7.0.zip")
-WIN_ZIP_BYTES=$(stat -f '%z' "$DOWNLOAD_DIR/niuma-merit-windows-0.6.0.zip")
+WIN_ZIP_BYTES=$(stat -f '%z' "$DOWNLOAD_DIR/niuma-merit-windows-0.7.0.zip")
 MAC_DMG_SHA=$(shasum -a 256 "$DOWNLOAD_DIR/niuma-merit-macos-0.7.0.dmg" | awk '{print $1}')
 MAC_ZIP_SHA=$(shasum -a 256 "$DOWNLOAD_DIR/niuma-merit-macos-0.7.0.zip" | awk '{print $1}')
-WIN_ZIP_SHA=$(shasum -a 256 "$DOWNLOAD_DIR/niuma-merit-windows-0.6.0.zip" | awk '{print $1}')
+WIN_ZIP_SHA=$(shasum -a 256 "$DOWNLOAD_DIR/niuma-merit-windows-0.7.0.zip" | awk '{print $1}')
 
 cat > "$DOWNLOAD_DIR/DOWNLOADS.json" <<EOF
 {
@@ -101,7 +101,7 @@ cat > "$DOWNLOAD_DIR/DOWNLOADS.json" <<EOF
   "files": [
     {"name":"niuma-merit-macos-0.7.0.dmg","type":"application/x-apple-diskimage","platform":"macOS","architecture":"universal2-arm64-x86_64","version":"0.7.0","bytes":$MAC_DMG_BYTES,"sha256":"$MAC_DMG_SHA","signature":"unsigned","notarization":"not-notarized","url":"https://download.gongde.zqscreen.cn/niuma-merit-macos-0.7.0.dmg"},
     {"name":"niuma-merit-macos-0.7.0.zip","type":"application/zip","platform":"macOS","architecture":"universal2-arm64-x86_64","version":"0.7.0","bytes":$MAC_ZIP_BYTES,"sha256":"$MAC_ZIP_SHA","signature":"unsigned","notarization":"not-notarized","url":"https://download.gongde.zqscreen.cn/niuma-merit-macos-0.7.0.zip"},
-    {"name":"niuma-merit-windows-0.6.0.zip","type":"application/zip","platform":"Windows","architecture":"x86_64","version":"0.6.0","bytes":$WIN_ZIP_BYTES,"sha256":"$WIN_ZIP_SHA","signature":"unsigned","notarization":"not-applicable","url":"https://download.gongde.zqscreen.cn/niuma-merit-windows-0.6.0.zip"}
+    {"name":"niuma-merit-windows-0.7.0.zip","type":"application/zip","platform":"Windows","architecture":"x86_64","version":"0.7.0","bytes":$WIN_ZIP_BYTES,"sha256":"$WIN_ZIP_SHA","signature":"unsigned","notarization":"not-applicable","url":"https://download.gongde.zqscreen.cn/niuma-merit-windows-0.7.0.zip"}
   ]
 }
 EOF

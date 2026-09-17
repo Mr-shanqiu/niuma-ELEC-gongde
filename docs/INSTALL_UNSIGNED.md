@@ -8,7 +8,7 @@
 
 ### 首次运行
 
-1. 从 GitHub Releases 下载 `牛马电子功德-Windows-0.6.0.zip`。
+1. 从官网下载 `niuma-merit-windows-0.7.0.zip`。
 2. 将 ZIP 解压到一个固定文件夹，然后再运行 `niuma-merit.exe`。不要长期直接从“下载”或临时目录运行。
 3. SmartScreen 可能显示“Windows 已保护你的电脑”或“未知发布者”。只有在确认文件来自上述官方 Releases，且校验值匹配时，才选择“更多信息”后继续运行。
 4. 首次运行后，程序会在当前 Windows 用户范围注册 `.nmgpack` 文件类型，不需要管理员权限。

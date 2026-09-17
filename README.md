@@ -17,7 +17,7 @@
 - 右键菜单支持：关于、登录后自动启动、更换形象、功德日历、退出
 - 仅展示总数和实时 `+1` 动画，不展示品牌文案、广告位或排行榜
 - 使用本地透明 PNG 绘制形象，不包含音频、WebView 或远程资源
-- macOS 0.6.0 与 Windows 0.6.0 支持双击导入纯数据 `.nmgpack`，可在一个窗口内预览、选择、更新和删除本地形象
+- macOS 0.7.0 与 Windows 0.7.0 支持双击导入纯数据 `.nmgpack`，可在一个窗口内预览、选择、更新和删除本地形象
 - 完全本地持久化（总数、窗口位置、隐私说明确认状态和自启动设置）
 
 ## 隐私与离线边界
@@ -116,7 +116,7 @@ cmake --build build --config Release
 
 - 本机（macOS 开发机）未安装 `cmake`，通用 CMake 构建路径无法在本机复现；macOS 直接使用 `scripts/build-macos.sh`，Windows 使用 `scripts/build-windows.ps1` 或 GitHub Actions。
 
-## 本地形象包（macOS / Windows 0.6.0）
+## 本地形象包（macOS / Windows 0.7.0）
 
 - 双击 `.nmgpack` 即可导入；同一形象 ID 再次导入会在完整校验后安全更新。
 - “更换形象”直接展示全部内置形象和本机已安装形象，确认后立即切换；本地形象可删除，功德数据不受影响。
