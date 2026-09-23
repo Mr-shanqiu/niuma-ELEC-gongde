@@ -16,6 +16,7 @@ struct PackKeyframe {
   float y = 0.0f;
   float rotation = 0.0f;
   float scale = 1.0f;
+  float scaleY = 1.0f;
   float alpha = 1.0f;
 };
 
@@ -39,6 +40,7 @@ struct PackLayer {
   float height = 0.0f;
   float anchorX = 0.5f;
   float anchorY = 0.5f;
+  bool smoothInterpolation = false;
   std::vector<PackKeyframe> keyframes;
   PackImage image;
 };

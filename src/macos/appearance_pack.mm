@@ -188,8 +188,10 @@ static NSImage *NMLoadPNG(NSURL *url, NSError **error) {
   return [[NSLocale preferredLanguages].firstObject hasPrefix:@"zh"] ? self.nameZH : self.nameEN;
 }
 
-static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat phase) {
+static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat phase, BOOL smooth) {
   if (!frames.count) return @{};
+  if (phase <= [frames.firstObject[@"t"] doubleValue]) return frames.firstObject;
+  if (phase >= [frames.lastObject[@"t"] doubleValue]) return frames.lastObject;
   NSDictionary *left = frames.firstObject;
   NSDictionary *right = frames.lastObject;
   for (NSUInteger i = 1; i < frames.count; ++i) {
@@ -202,9 +204,12 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   }
   CGFloat lt = [left[@"t"] doubleValue], rt = [right[@"t"] doubleValue];
   CGFloat mix = rt > lt ? (phase - lt) / (rt - lt) : 0;
+  mix = MAX(0, MIN(1, mix));
+  if (smooth) mix = mix * mix * (3 - 2 * mix);
   NSMutableDictionary *result = [NSMutableDictionary dictionary];
-  for (NSString *key in @[@"x", @"y", @"rotation", @"scale", @"alpha"]) {
-    CGFloat a = [left[key] doubleValue], b = [right[key] doubleValue];
+  for (NSString *key in @[@"x", @"y", @"rotation", @"scale", @"scale_y", @"alpha"]) {
+    NSNumber *fallback = [key isEqualToString:@"scale_y"] ? @1 : @0;
+    CGFloat a = [(left[key] ?: fallback) doubleValue], b = [(right[key] ?: fallback) doubleValue];
     result[key] = @(a + (b - a) * MAX(0, MIN(1, mix)));
   }
   return result;
@@ -215,7 +220,8 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
     NSImage *image = self.images[layer[@"image"]];
     NSArray *rectValues = layer[@"frame"];
     NSArray *anchor = layer[@"anchor"];
-    NSDictionary *frame = NMFrameAtPhase(layer[@"keyframes"], MAX(0, MIN(1, phase)));
+    NSDictionary *frame = NMFrameAtPhase(layer[@"keyframes"], MAX(0, MIN(1, phase)),
+                                         [layer[@"interpolation"] isEqualToString:@"smoothstep"]);
     NSRect rect = NSMakeRect([rectValues[0] doubleValue], [rectValues[1] doubleValue],
                              [rectValues[2] doubleValue], [rectValues[3] doubleValue]);
     CGFloat anchorX = NSMinX(rect) + NSWidth(rect) * [anchor[0] doubleValue];
@@ -226,7 +232,7 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
                         yBy:anchorY + [frame[@"y"] doubleValue]];
     [transform rotateByDegrees:[frame[@"rotation"] doubleValue]];
     CGFloat scale = [frame[@"scale"] doubleValue];
-    [transform scaleBy:scale];
+    [transform scaleXBy:scale yBy:scale * [(frame[@"scale_y"] ?: @1) doubleValue]];
     [transform translateXBy:-anchorX yBy:-anchorY];
     [transform concat];
     [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
@@ -288,7 +294,8 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   NSMutableSet *rootKeysV2 = [rootKeysV1 mutableCopy];
   [rootKeysV2 addObject:@"license"];
   BOOL validRoot = (schemaVersion == 1 && NMExactKeys(json, rootKeysV1)) ||
-       (schemaVersion == 2 && NMExactKeys(json, rootKeysV2));
+       (schemaVersion == 2 && NMExactKeys(json, rootKeysV2)) ||
+       (schemaVersion == 3 && NMExactKeys(json, json[@"license"] ? rootKeysV2 : rootKeysV1));
   if (!validRoot) {
     if (error) *error = NMError(32, @"manifest.json 格式或版本不受支持");
     return nil;
@@ -317,9 +324,14 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   NSMutableDictionary<NSString *, NSImage *> *images = [NSMutableDictionary dictionary];
   NSSet *layerKeys = [NSSet setWithArray:@[@"image", @"frame", @"anchor", @"keyframes"]];
   NSSet *frameKeys = [NSSet setWithArray:@[@"t", @"x", @"y", @"rotation", @"scale", @"alpha"]];
+  if (schemaVersion == 3) {
+    layerKeys = [layerKeys setByAddingObject:@"interpolation"];
+    frameKeys = [frameKeys setByAddingObject:@"scale_y"];
+  }
   double previousT;
   for (NSDictionary *layer in layers) {
     if (![layer isKindOfClass:[NSDictionary class]] || !NMExactKeys(layer, layerKeys)) goto invalidLayers;
+    if (schemaVersion == 3 && ![@[@"linear", @"smoothstep"] containsObject:layer[@"interpolation"]]) goto invalidLayers;
     NSString *imageName = layer[@"image"];
     NSArray *rect = layer[@"frame"], *anchor = layer[@"anchor"], *frames = layer[@"keyframes"];
     if (![imageName isKindOfClass:[NSString class]] || !NMIsSafeArchiveName(imageName) ||
@@ -328,15 +340,16 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
         ![frames isKindOfClass:[NSArray class]] || frames.count < 1 || frames.count > 8) goto invalidLayers;
     if (!NMNumberInRange(rect[0], -240, 480) || !NMNumberInRange(rect[1], -250, 500) ||
         !NMNumberInRange(rect[2], 1, 480) || !NMNumberInRange(rect[3], 1, 500) ||
-        [rect[1] doubleValue] + [rect[3] doubleValue] > NMArtworkTop ||
+        (schemaVersion != 3 && [rect[1] doubleValue] + [rect[3] doubleValue] > NMArtworkTop) ||
         !NMNumberInRange(anchor[0], 0, 1) || !NMNumberInRange(anchor[1], 0, 1)) goto invalidLayers;
     previousT = -1;
     for (NSDictionary *frame in frames) {
-      if (![frame isKindOfClass:[NSDictionary class]] || !NMExactKeys(frame, frameKeys) || frame.count != 6 ||
+      if (![frame isKindOfClass:[NSDictionary class]] || !NMExactKeys(frame, frameKeys) ||
           !NMNumberInRange(frame[@"t"], 0, 1) || [frame[@"t"] doubleValue] < previousT ||
           !NMNumberInRange(frame[@"x"], -480, 480) || !NMNumberInRange(frame[@"y"], -500, 500) ||
           !NMNumberInRange(frame[@"rotation"], -180, 180) || !NMNumberInRange(frame[@"scale"], 0.1, 4) ||
-          !NMNumberInRange(frame[@"alpha"], 0, 1)) goto invalidLayers;
+          !NMNumberInRange(frame[@"alpha"], 0, 1) ||
+          (schemaVersion == 3 && !NMNumberInRange(frame[@"scale_y"], 0.1, 4))) goto invalidLayers;
       previousT = [frame[@"t"] doubleValue];
     }
     [expected addObject:imageName];
@@ -345,7 +358,7 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
     if (error) *error = NMError(35, @"形象包文件必须与 manifest 声明完全一致");
     return nil;
   }
-  if (schemaVersion == 2) {
+  if (schemaVersion == 2 || (schemaVersion == 3 && json[@"license"])) {
     id licenseValue = json[@"license"];
     if (![licenseValue isKindOfClass:NSDictionary.class]) {
       if (error) *error = NMError(37, @"限时导入凭证格式无效");

@@ -517,12 +517,12 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     return false;
   }
   double schema = 0, canvasWidth = 0, canvasHeight = 0, plusY = 0;
-  if (!NumberInRange(Member(root, "schema_version"), 1, 2, &schema) ||
+  if (!NumberInRange(Member(root, "schema_version"), 1, 3, &schema) ||
       std::floor(schema) != schema ||
-      !((schema == 1 && HasExactKeys(root, {"schema_version", "id", "version",
+      !(((schema == 1 || (schema == 3 && Member(root, "license") == nullptr)) && HasExactKeys(root, {"schema_version", "id", "version",
           "name_zh", "name_en", "author", "publisher", "review_id",
           "canvas_width", "canvas_height", "preview", "plus_y", "layers"})) ||
-        (schema == 2 && HasExactKeys(root, {"schema_version", "id", "version",
+        ((schema == 2 || schema == 3) && HasExactKeys(root, {"schema_version", "id", "version",
           "name_zh", "name_en", "author", "publisher", "review_id",
           "canvas_width", "canvas_height", "preview", "plus_y", "layers",
           "license"})))) {
@@ -556,7 +556,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     SetError(error, L"形象包文字必须是有效 UTF-8。");
     return false;
   }
-  if (schema == 2) {
+  if (schema == 2 || (schema == 3 && Member(root, "license") != nullptr)) {
     const JsonValue* value = Member(root, "license");
     std::string mode;
     double issued = 0, deadline = 0;
@@ -603,11 +603,22 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     return false;
   }
   for (const JsonValue& layerValue : layers->array) {
-    if (!HasExactKeys(layerValue, {"image", "frame", "anchor", "keyframes"})) {
+    if (!(schema == 3
+        ? HasExactKeys(layerValue, {"image", "frame", "anchor", "keyframes", "interpolation"})
+        : HasExactKeys(layerValue, {"image", "frame", "anchor", "keyframes"}))) {
       SetError(error, L"图层字段不符合规范。");
       return false;
     }
     PackLayer layer;
+    if (schema == 3) {
+      std::string interpolation;
+      if (!StringValue(Member(layerValue, "interpolation"), 16, &interpolation) ||
+          (interpolation != "linear" && interpolation != "smoothstep")) {
+        SetError(error, L"Unsupported appearance interpolation.");
+        return false;
+      }
+      layer.smoothInterpolation = interpolation == "smoothstep";
+    }
     if (!StringValue(Member(layerValue, "image"), 128, &layer.imageName) ||
         !IsSafeRootPng(layer.imageName)) {
       SetError(error, L"图层图片名称不合法。");
@@ -631,7 +642,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     if (!NumberInRange(&anchor->array[0], 0, 1, &values[4]) ||
         !NumberInRange(&anchor->array[1], 0, 1, &values[5]) ||
         values[2] <= 0 || values[3] <= 0 || values[2] > 480 ||
-        values[3] > 480 || values[1] < 0 || values[1] + values[3] > 170) {
+        values[3] > 480 || (schema != 3 && (values[1] < 0 || values[1] + values[3] > 170))) {
       SetError(error, L"图层必须完全位于形象安全区内。");
       return false;
     }
@@ -650,8 +661,9 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     }
     float previousT = -1.0f;
     for (const JsonValue& keyframeValue : keyframes->array) {
-      if (!HasExactKeys(keyframeValue,
-                        {"t", "x", "y", "rotation", "scale", "alpha"})) {
+      if (!(schema == 3
+          ? HasExactKeys(keyframeValue, {"t", "x", "y", "rotation", "scale", "alpha", "scale_y"})
+          : HasExactKeys(keyframeValue, {"t", "x", "y", "rotation", "scale", "alpha"}))) {
         SetError(error, L"关键帧字段不符合规范。");
         return false;
       }
@@ -667,6 +679,12 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
         return false;
       }
       PackKeyframe keyframe;
+      double scaleY = 1.0;
+      if (schema == 3 && !NumberInRange(Member(keyframeValue, "scale_y"), 0.1, 4, &scaleY)) {
+        SetError(error, L"Invalid vertical appearance scale.");
+        return false;
+      }
+      keyframe.scaleY = static_cast<float>(scaleY);
       keyframe.t = static_cast<float>(key[0]);
       keyframe.x = static_cast<float>(key[1]);
       keyframe.y = static_cast<float>(key[2]);
@@ -821,20 +839,22 @@ bool LoadAppearancePackFile(const std::wstring& path,
 }
 
 PackKeyframe Interpolate(const std::vector<PackKeyframe>& keyframes,
-                         float progress) {
+                         float progress, bool smooth) {
   if (progress <= keyframes.front().t) return keyframes.front();
   if (progress >= keyframes.back().t) return keyframes.back();
   for (size_t index = 1; index < keyframes.size(); ++index) {
     if (progress <= keyframes[index].t) {
       const PackKeyframe& left = keyframes[index - 1];
       const PackKeyframe& right = keyframes[index];
-      const float amount = (progress - left.t) / (right.t - left.t);
+      float amount = (progress - left.t) / (right.t - left.t);
+      if (smooth) amount = amount * amount * (3.0f - 2.0f * amount);
       PackKeyframe result;
       result.t = progress;
       result.x = left.x + (right.x - left.x) * amount;
       result.y = left.y + (right.y - left.y) * amount;
       result.rotation = left.rotation + (right.rotation - left.rotation) * amount;
       result.scale = left.scale + (right.scale - left.scale) * amount;
+      result.scaleY = left.scaleY + (right.scaleY - left.scaleY) * amount;
       result.alpha = left.alpha + (right.alpha - left.alpha) * amount;
       return result;
     }
@@ -992,14 +1012,14 @@ void DrawAppearancePack(Gdiplus::Graphics& graphics,
   graphics.SetClip(Gdiplus::RectF(0.0f, 80.0f, 240.0f, 170.0f));
   for (const PackLayer& layer : pack.layers) {
     const PackKeyframe keyframe = Interpolate(
-        layer.keyframes, std::clamp(progress, 0.0f, 1.0f));
+        layer.keyframes, std::clamp(progress, 0.0f, 1.0f), layer.smoothInterpolation);
     const float top = 250.0f - layer.y - layer.height;
     const float anchorX = layer.x + layer.width * layer.anchorX;
     const float anchorY = top + layer.height * (1.0f - layer.anchorY);
     const Gdiplus::GraphicsState state = graphics.Save();
     graphics.TranslateTransform(anchorX + keyframe.x, anchorY - keyframe.y);
     graphics.RotateTransform(-keyframe.rotation);
-    graphics.ScaleTransform(keyframe.scale, keyframe.scale);
+    graphics.ScaleTransform(keyframe.scale, keyframe.scale * keyframe.scaleY);
     graphics.TranslateTransform(-anchorX, -anchorY);
     Gdiplus::ImageAttributes attributes;
     Gdiplus::ColorMatrix matrix = {

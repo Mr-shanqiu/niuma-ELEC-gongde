@@ -18,6 +18,10 @@ $fixturePack = Join-Path $fixtureDir "woodfish-sample.nmgpack"
 python (Join-Path $repoRoot "scripts\appearance-pack.py") build `
   (Join-Path $repoRoot "assets\appearance-packs\woodfish-sample") $fixturePack
 if ($LASTEXITCODE -ne 0) { throw "Could not build appearance pack fixture" }
+$luckyCatPack = Join-Path $fixtureDir "lucky-cat-schema3.nmgpack"
+python (Join-Path $repoRoot "scripts\appearance-pack.py") build `
+  (Join-Path $repoRoot "assets\appearance-packs\lucky-cat") $luckyCatPack
+if ($LASTEXITCODE -ne 0) { throw "Could not build schema-3 lucky cat fixture" }
 
 cmake -S $repoRoot -B $BuildDir -G $gen -A x64
 if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
@@ -33,6 +37,10 @@ $testInstallDir = Join-Path $fixtureDir "installed"
 New-Item -ItemType Directory -Force -Path $testInstallDir | Out-Null
 & $packTest $testInstallDir $fixturePack
 if ($LASTEXITCODE -ne 0) { throw "Appearance pack runtime test failed" }
+$catInstallDir = Join-Path $fixtureDir "installed-lucky-cat"
+New-Item -ItemType Directory -Force -Path $catInstallDir | Out-Null
+& $packTest $catInstallDir $luckyCatPack
+if ($LASTEXITCODE -ne 0) { throw "Schema-3 lucky cat runtime test failed" }
 
 $srcExe = Join-Path $repoRoot "$BuildDir\$Config\niuma-merit.exe"
 if (-not (Test-Path $srcExe)) {
@@ -64,3 +72,4 @@ if ((Get-Item $distExe).Length -ge $maximumBaseBytes -or
 "EXE_BYTES=$( (Get-Item $distExe).Length )"
 "ZIP_BYTES=$( (Get-Item $zipPath).Length )"
 "APPEARANCE_PACK_TEST=PASS"
+"LUCKY_CAT_SCHEMA3_TEST=PASS"

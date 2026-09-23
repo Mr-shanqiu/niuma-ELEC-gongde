@@ -151,7 +151,7 @@ def validate_payload(files):
     if not isinstance(manifest, dict):
         fail("manifest must be an object")
     schema = manifest.get("schema_version")
-    expected_root = ROOT_KEYS_V1 if schema == 1 else ROOT_KEYS_V2 if schema == 2 else None
+    expected_root = (ROOT_KEYS_V2 if "license" in manifest else ROOT_KEYS_V1) if schema == 3 else ROOT_KEYS_V1 if schema == 1 else ROOT_KEYS_V2 if schema == 2 else None
     if expected_root is None or set(manifest) != expected_root:
         fail("manifest schema or keys are invalid")
     if not isinstance(manifest["id"], str) or not re.fullmatch(r"[a-z0-9.-]{3,80}", manifest["id"]):
@@ -169,8 +169,10 @@ def validate_payload(files):
         fail("preview or layers are invalid")
     expected = {"manifest.json", preview}
     for index, layer in enumerate(layers):
-        if not isinstance(layer, dict) or set(layer) != LAYER_KEYS:
+        if not isinstance(layer, dict) or set(layer) != (LAYER_KEYS | {"interpolation"} if schema == 3 else LAYER_KEYS):
             fail(f"layer {index} keys are invalid")
+        if schema == 3 and layer["interpolation"] not in ("linear", "smoothstep"):
+            fail(f"layer {index} interpolation is invalid")
         image = layer["image"]
         rect, anchor, frames = layer["frame"], layer["anchor"], layer["keyframes"]
         if not isinstance(image, str) or not safe_name(image):
@@ -179,7 +181,7 @@ def validate_payload(files):
             fail(f"layer {index} geometry is invalid")
         for value, low, high, label in zip(rect, (-240, -250, 1, 1), (480, 500, 480, 500), ("x", "y", "w", "h")):
             number(value, low, high, f"layer {index} {label}")
-        if rect[1] + rect[3] > ARTWORK_TOP:
+        if schema != 3 and rect[1] + rect[3] > ARTWORK_TOP:
             fail(f"layer {index} enters the reserved +1 or counter region")
         number(anchor[0], 0, 1, f"layer {index} anchor x")
         number(anchor[1], 0, 1, f"layer {index} anchor y")
@@ -187,8 +189,10 @@ def validate_payload(files):
             fail(f"layer {index} keyframe count is invalid")
         previous = -1
         for frame in frames:
-            if not isinstance(frame, dict) or set(frame) != FRAME_KEYS:
+            if not isinstance(frame, dict) or set(frame) != (FRAME_KEYS | {"scale_y"} if schema == 3 else FRAME_KEYS):
                 fail(f"layer {index} keyframe keys are invalid")
+            if schema == 3:
+                number(frame["scale_y"], .1, 4, "scale_y")
             number(frame["t"], 0, 1, "t")
             if frame["t"] <= previous:
                 fail("keyframes must be strictly sorted by t")
@@ -204,7 +208,7 @@ def validate_payload(files):
         fail("archive files must exactly match manifest declarations")
     for name in expected - {"manifest.json"}:
         png_dimensions(files[name], name)
-    if schema == 2:
+    if schema == 2 or (schema == 3 and "license" in manifest):
         license_data = manifest["license"]
         if not isinstance(license_data, dict) or set(license_data) != LICENSE_KEYS:
             fail("license fields are invalid")
@@ -265,14 +269,14 @@ def write_archive(files, output):
 def command_validate(path):
     files = read_archive(path) if path.is_file() else read_directory(path)
     manifest = validate_payload(files)
-    mode = "timed" if manifest["schema_version"] == 2 else "free"
+    mode = "timed" if "license" in manifest else "free"
     print(f"VALID id={manifest['id']} version={manifest['version']} mode={mode} files={len(files)}")
 
 
 def command_build(source, output):
     files = read_directory(source)
     manifest = validate_payload(files)
-    if manifest["schema_version"] != 1:
+    if manifest["schema_version"] not in (1, 3) or "license" in manifest:
         fail("build creates permanent free packs; use sign for timed packs")
     write_archive(files, output)
     command_validate(output)
@@ -282,12 +286,12 @@ def command_build(source, output):
 def command_sign(source, output, private_key, valid_hours, download_id, issued_at):
     files = read_directory(source)
     manifest = validate_payload(files)
-    if manifest["schema_version"] != 1:
-        fail("sign source must be a schema 1 free-pack directory")
+    if manifest["schema_version"] not in (1, 3) or "license" in manifest:
+        fail("sign source must be an unsigned schema 1 or 3 directory")
     if not 0 < valid_hours <= 24:
         fail("valid-hours must be in the range 1..24")
     issued = int(time.time()) if issued_at is None else issued_at
-    manifest["schema_version"] = 2
+    manifest["schema_version"] = 3 if manifest["schema_version"] == 3 else 2
     manifest["license"] = {
         "mode": "timed",
         "issued_at": issued,
