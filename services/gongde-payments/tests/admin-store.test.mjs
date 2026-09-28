@@ -19,6 +19,8 @@ test("admin order queries paginate, filter, and summarize without changing order
   const page = await store.listOrders({ state: "FULFILLED", limit: 10, offset: 0 });
   assert.equal(page.total, 1);
   assert.equal(page.orders[0].orderNo, "GD_FIRST");
+  const effective = await store.listOrders({ effectiveOnly: true, limit: 10, offset: 0 });
+  assert.deepEqual(effective.orders.map((item) => item.orderNo), ["GD_FIRST"]);
   const summary = await store.summarizeOrders(new Date("2026-09-28T00:00:00Z"), new Date("2026-09-29T00:00:00Z"));
-  assert.deepEqual(summary, { total: 2, paid: 1, pending: 1, amountFen: 100 });
+  assert.deepEqual(summary, { orders: 1, amountFen: 100 });
 });

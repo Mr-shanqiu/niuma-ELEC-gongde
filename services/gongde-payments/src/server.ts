@@ -17,6 +17,7 @@ import { zipSync } from "fflate";
 import { AdminAuthService, loadAdminAuthConfiguration } from "./admin/auth.js";
 import { AdminObjectStore, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "./admin/object-store.js";
 import type { GongdeEntitlement, GongdeOrder, OrderState } from "./domain/types.js";
+import { OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH } from "./domain/catalog.js";
 
 const mode = process.env.GONGDE_PAYMENT_MODE ?? "disabled";
 if (!new Set(["disabled", "mock", "live"]).has(mode)) throw new Error("invalid_payment_mode");
@@ -206,14 +207,15 @@ const server = createServer(async (request, response) => {
       requireAdmin(request);
       const from = parseDate(url.searchParams.get("from"), "from") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
       const to = parseDate(url.searchParams.get("to"), "to") ?? new Date();
-      const [summary, downloads, recent, storeReady] = await Promise.all([
+      const [selectedDay, allTime, downloads, recent, storeReady] = await Promise.all([
         store.summarizeOrders(from, to),
+        store.summarizeOrders(new Date(0), new Date()),
         adminObjectStore ? adminObjectStore.summarizeDownloads(from, to) : Promise.resolve({ total: 0, period: 0, byFile: [] }),
-        store.listOrders({ limit: 6, offset: 0 }),
+        store.listOrders({ effectiveOnly: true, limit: 6, offset: 0 }),
         store.ready()
       ]);
       return json(response, 200, {
-        summary,
+        periods: { selectedDay, allTime },
         downloads,
         recent: recent.orders.map(adminOrder),
         services: {
@@ -233,7 +235,7 @@ const server = createServer(async (request, response) => {
       }
       const channel = url.searchParams.get("channel");
       const state = url.searchParams.get("state");
-      const validStates = new Set<OrderState>(["PENDING_PAYMENT", "PAID", "FULFILLED", "EXPIRED", "CANCELED", "EXCEPTION", "REFUND_PENDING", "REFUNDED"]);
+      const validStates = new Set<OrderState>(["PAID", "FULFILLED"]);
       if (channel && channel !== "wechat" && channel !== "alipay") return json(response, 400, { error: "invalid_channel" });
       if (state && !validStates.has(state as OrderState)) return json(response, 400, { error: "invalid_state" });
       const orderNo = url.searchParams.get("orderNo")?.trim();
@@ -251,6 +253,7 @@ const server = createServer(async (request, response) => {
         createdTo: parseDate(url.searchParams.get("to"), "to"),
         channel: channel as "wechat" | "alipay" | undefined,
         state: state as OrderState | undefined,
+        effectiveOnly: true,
         limit: perPage,
         offset: (page - 1) * perPage
       });
@@ -260,10 +263,23 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && adminOrderMatch) {
       requireAdmin(request);
       const order = await store.findOrder(adminOrderMatch[1]);
-      if (!order) return json(response, 404, { error: "order_not_found" });
+      if (!order || (order.state !== "PAID" && order.state !== "FULFILLED")) return json(response, 404, { error: "order_not_found" });
       const entitlements = await store.findEntitlementsByOrder(order.orderNo);
       audit("order_viewed", { orderNo: order.orderNo });
       return json(response, 200, { data: { ...adminOrder(order), entitlements: entitlements.map(adminEntitlement) } });
+    }
+    if (request.method === "GET" && url.pathname === "/api/gongde/admin/appearances") {
+      requireAdmin(request);
+      if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
+      const revisions = packSigner.revisions();
+      const data = OFFICIAL_ASSET_IDS.map((assetId) => ({
+        id: assetId,
+        assetId,
+        name: OFFICIAL_ASSET_NAMES_ZH[assetId] ?? assetId,
+        revision: revisions[assetId] ?? null,
+        state: revisions[assetId] ? "PUBLISHED" : "MISSING"
+      }));
+      return json(response, 200, { data, total: data.length });
     }
     if (url.pathname === "/api/gongde/admin/files") {
       requireAdmin(request);

@@ -7,6 +7,7 @@ export interface AdminOrderFilter {
   createdTo?: Date;
   channel?: PaymentChannel;
   state?: OrderState;
+  effectiveOnly?: boolean;
   limit: number;
   offset: number;
 }
@@ -17,9 +18,7 @@ export interface AdminOrderPage {
 }
 
 export interface AdminOrderSummary {
-  total: number;
-  paid: number;
-  pending: number;
+  orders: number;
   amountFen: number;
 }
 
@@ -110,6 +109,7 @@ export class InMemoryPaymentStore implements PaymentStore {
       .filter((order) => !filter.createdTo || order.createdAt < filter.createdTo)
       .filter((order) => !filter.channel || order.channel === filter.channel)
       .filter((order) => !filter.state || order.state === filter.state)
+      .filter((order) => !filter.effectiveOnly || order.state === "PAID" || order.state === "FULFILLED")
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || right.orderNo.localeCompare(left.orderNo));
     return {
       total: matching.length,
@@ -121,9 +121,7 @@ export class InMemoryPaymentStore implements PaymentStore {
     const orders = [...this.#orders.values()].filter((order) => order.createdAt >= createdFrom && order.createdAt < createdTo);
     const settled = orders.filter((order) => order.state === "PAID" || order.state === "FULFILLED");
     return {
-      total: orders.length,
-      paid: settled.length,
-      pending: orders.filter((order) => order.state === "PENDING_PAYMENT").length,
+      orders: settled.length,
       amountFen: settled.reduce((sum, order) => sum + order.amountFen, 0)
     };
   }

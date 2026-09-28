@@ -265,6 +265,9 @@ export class MySqlPaymentStore implements PaymentStore {
       conditions.push("state = ?");
       parameters.push(filter.state);
     }
+    if (filter.effectiveOnly) {
+      conditions.push("state IN ('PAID', 'FULFILLED')");
+    }
     const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
     const [countRows] = await this.executor.execute<RowDataPacket[]>(
       `SELECT COUNT(*) AS total FROM gongde_orders${where}`,
@@ -279,17 +282,14 @@ export class MySqlPaymentStore implements PaymentStore {
 
   async summarizeOrders(createdFrom: Date, createdTo: Date): Promise<AdminOrderSummary> {
     const [rows] = await this.executor.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN state IN ('PAID', 'FULFILLED') THEN 1 ELSE 0 END) AS paid,
-              SUM(CASE WHEN state = 'PENDING_PAYMENT' THEN 1 ELSE 0 END) AS pending,
-              SUM(CASE WHEN state IN ('PAID', 'FULFILLED') THEN amount_fen ELSE 0 END) AS amount_fen
-       FROM gongde_orders WHERE created_at >= ? AND created_at < ?`,
+      `SELECT COUNT(*) AS orders,
+              COALESCE(SUM(amount_fen), 0) AS amount_fen
+       FROM gongde_orders
+       WHERE created_at >= ? AND created_at < ? AND state IN ('PAID', 'FULFILLED')`,
       [createdFrom, createdTo]
     );
     return {
-      total: Number(rows[0]?.total ?? 0),
-      paid: Number(rows[0]?.paid ?? 0),
-      pending: Number(rows[0]?.pending ?? 0),
+      orders: Number(rows[0]?.orders ?? 0),
       amountFen: Number(rows[0]?.amount_fen ?? 0)
     };
   }

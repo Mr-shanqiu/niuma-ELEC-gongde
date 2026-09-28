@@ -50,4 +50,25 @@ export const OFFICIAL_ASSET_IDS = Object.freeze([
   "zqscreen.zhuan-yun-bead",
   "zqscreen.treasure-basin"
 ]);
+export const OFFICIAL_ASSET_NAMES_ZH: Readonly<Record<string, string>> = Object.freeze({
+  "official.lucky-cat": "招财猫",
+  "official.hamster-wheel": "仓鼠跑轮",
+  "official.sea-lion-belly-pat": "海狮拍肚皮",
+  "official.chick-pecking": "小鸡啄米",
+  "zqscreen.caishen-ingot": "财神元宝",
+  "zqscreen.redpanda-wave": "小熊猫挥手",
+  "zqscreen.shiba-tilt": "柴犬歪头",
+  "zqscreen.orange-cat-wave": "橘猫招手",
+  "zqscreen.raccoon-cheer": "浣熊加油",
+  "zqscreen.golden-toad-coin": "金蟾吐币",
+  "zqscreen.little-jiangshi-hop": "小僵尸蹦跳",
+  "zqscreen.frog-puff": "青蛙鼓腮",
+  "zqscreen.bee-flap": "蜜蜂振翅",
+  "zqscreen.koi-bubbles": "锦鲤吐泡泡",
+  "zqscreen.kiss-couple": "甜蜜亲亲",
+  "zqscreen.baodan-charm": "爆单符",
+  "zqscreen.woodpecker-peck": "啄木鸟啄击",
+  "zqscreen.zhuan-yun-bead": "转运珠",
+  "zqscreen.treasure-basin": "聚宝盆"
+});
 export const MAX_ASSETS_PER_DELIVERY = 10;

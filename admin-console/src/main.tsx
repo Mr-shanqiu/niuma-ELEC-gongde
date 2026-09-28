@@ -39,6 +39,7 @@ const authProvider: AuthProvider = {
 const unsupported = () => Promise.reject(new Error("read_only_admin"));
 const dataProvider: DataProvider = {
   getList: async (resource, params) => {
+    if (resource === "appearances") return await request("/appearances");
     if (resource === "appearanceFiles" || resource === "installerFiles") {
       const kind = resource === "appearanceFiles" ? "appearance" : "installer";
       return await request(`/files?kind=${kind}`);
@@ -106,8 +107,7 @@ const theme = createTheme({
 });
 
 const stateChoices = [
-  ["PENDING_PAYMENT", "待支付"], ["PAID", "已支付"], ["FULFILLED", "已交付"], ["EXPIRED", "已过期"],
-  ["CANCELED", "已取消"], ["EXCEPTION", "异常"], ["REFUND_PENDING", "退款处理中"], ["REFUNDED", "已退款"]
+  ["PAID", "已支付"], ["FULFILLED", "已交付"]
 ].map(([id, name]) => ({ id, name }));
 const kindNames: Record<string, string> = { "official-pass": "官方形象通行证", "asset-delivery": "形象包交付", support: "赞赏" };
 const stateNames = Object.fromEntries(stateChoices.map(({ id, name }) => [id, name]));
@@ -150,27 +150,32 @@ function StatusChip({ state }: { state: string }) {
 function Dashboard() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  });
   useEffect(() => {
-    const from = new Date(); from.setHours(0, 0, 0, 0);
+    setData(null);
+    setError(false);
+    const from = new Date(`${selectedDate}T00:00:00`);
     const to = new Date(from); to.setDate(to.getDate() + 1);
     request(`/overview?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`).then(setData).catch(() => setError(true));
-  }, []);
+  }, [selectedDate]);
   if (error) return <Box p={4}><Typography color="error">经营概览暂时无法读取，请稍后重试。</Typography></Box>;
   if (!data) return <Box className="dashboard-loading"><CircularProgress size={28} /></Box>;
   const serviceNames: Record<string, string> = { database: "订单数据库", wechat: "微信支付", alipay: "支付宝", appearanceDelivery: "形象包交付" };
   const statusNames: Record<string, string> = { healthy: "正常", disabled: "未启用", error: "异常" };
+  const PeriodCard = ({ label, value }: { label: string; value: { orders: number; amountFen: number } }) => <Card><CardContent><span>{label}</span><strong>{value.orders}</strong><Typography variant="caption" color="text.secondary">实收 ¥{(value.amountFen / 100).toFixed(2)}</Typography></CardContent></Card>;
   return <Box className="dashboard-shell">
-    <Box className="dashboard-heading"><div><Typography variant="overline">TODAY</Typography><Typography variant="h4">今日经营概览</Typography></div><Chip label="只读模式" color="secondary" /></Box>
+    <Box className="dashboard-heading"><div><Typography variant="overline">OVERVIEW</Typography><Typography variant="h4">经营概览</Typography></div><Stack direction="row" alignItems="center" gap={1.5}><MuiTextField label="查看日期" type="date" size="small" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /><Chip label="只看有效订单" color="secondary" /></Stack></Box>
     <Box className="metric-grid">
-      <Card><CardContent><span>今日订单</span><strong>{data.summary.total}</strong></CardContent></Card>
-      <Card><CardContent><span>已支付</span><strong>{data.summary.paid}</strong></CardContent></Card>
-      <Card><CardContent><span>待支付</span><strong>{data.summary.pending}</strong></CardContent></Card>
-      <Card><CardContent><span>今日实收</span><strong>¥{(data.summary.amountFen / 100).toFixed(2)}</strong></CardContent></Card>
-      <Card><CardContent><span>今日安装包下载</span><strong>{data.downloads.period}</strong></CardContent></Card>
+      <PeriodCard label="所选日期有效订单" value={data.periods.selectedDay} />
+      <PeriodCard label="累计有效订单" value={data.periods.allTime} />
+      <Card><CardContent><span>所选日期安装包下载</span><strong>{data.downloads.period}</strong></CardContent></Card>
       <Card><CardContent><span>累计安装包下载</span><strong>{data.downloads.total}</strong></CardContent></Card>
     </Box>
     <Card className="service-card"><CardContent><Typography variant="h6">服务状态</Typography><Stack direction="row" useFlexGap flexWrap="wrap" gap={1.2} mt={2}>{Object.entries(data.services).map(([key, value]) => <Chip key={key} variant="outlined" color={value === "healthy" ? "success" : value === "error" ? "error" : "default"} label={`${serviceNames[key]} · ${statusNames[String(value)]}`} />)}</Stack></CardContent></Card>
-    <Card className="recent-card"><CardContent><Typography variant="h6">最近订单</Typography>{data.recent.length === 0 ? <p className="empty-copy">目前还没有订单。</p> : <div className="recent-list">{data.recent.map((item: any) => <a href={`#/orders/${item.id}/show`} key={item.id}><div><b>{item.orderNo}</b><small>{kindNames[item.purchaseKind] ?? item.purchaseKind}</small></div><div><StatusChip state={item.state} /><strong>¥{(item.amountFen / 100).toFixed(2)}</strong></div></a>)}</div>}</CardContent></Card>
+    <Card className="recent-card"><CardContent><Typography variant="h6">最近有效订单</Typography>{data.recent.length === 0 ? <p className="empty-copy">目前还没有已支付订单。</p> : <div className="recent-list">{data.recent.map((item: any) => <a href={`#/orders/${item.id}/show`} key={item.id}><div><b>{item.orderNo}</b><small>{kindNames[item.purchaseKind] ?? item.purchaseKind}</small></div><div><StatusChip state={item.state} /><strong>¥{(item.amountFen / 100).toFixed(2)}</strong></div></a>)}</div>}</CardContent></Card>
   </Box>;
 }
 
@@ -184,7 +189,7 @@ const orderFilters = [
 ];
 
 function OrderList() {
-  return <List title="订单查看" filters={orderFilters} perPage={25} sort={{ field: "createdAt", order: "DESC" }} actions={false}>
+  return <List title="有效订单" filters={orderFilters} perPage={25} sort={{ field: "createdAt", order: "DESC" }} actions={false}>
     <Datagrid rowClick="show" bulkActionButtons={false}>
       <TextField source="orderNo" label="订单号" />
       <FunctionField label="类型" render={(record: any) => kindNames[record.purchaseKind] ?? record.purchaseKind} />
@@ -192,6 +197,17 @@ function OrderList() {
       <FunctionField label="支付渠道" render={(record: any) => record.channel === "wechat" ? "微信" : "支付宝"} />
       <FunctionField label="金额" render={(record: any) => `¥${(record.amountFen / 100).toFixed(2)}`} />
       <DateField source="createdAt" label="创建时间" showTime />
+    </Datagrid>
+  </List>;
+}
+
+function AppearanceCatalogList() {
+  return <List title="官方形象库" actions={false} pagination={false} sort={{ field: "name", order: "ASC" }}>
+    <Datagrid bulkActionButtons={false}>
+      <TextField source="name" label="形象名称" />
+      <TextField source="assetId" label="形象 ID" />
+      <FunctionField label="资源版本" render={(record: any) => record.revision ? `${record.revision.slice(0, 12)}…` : "缺失"} />
+      <FunctionField label="状态" render={(record: any) => <Chip size="small" color={record.state === "PUBLISHED" ? "success" : "error"} label={record.state === "PUBLISHED" ? "已发布" : "资源缺失"} />} />
     </Datagrid>
   </List>;
 }
@@ -266,8 +282,9 @@ function ManagedFileCreate({ kind }: { kind: "appearance" | "installer" }) {
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Admin title="牛马电子功德管理台" theme={theme} dataProvider={dataProvider} authProvider={authProvider} loginPage={LoginPage} dashboard={Dashboard} requireAuth disableTelemetry>
-      <Resource name="orders" options={{ label: "订单查看" }} list={OrderList} show={OrderShow} />
-      <Resource name="appearanceFiles" options={{ label: "形象包" }} list={() => <ManagedFileList kind="appearance" />} create={() => <ManagedFileCreate kind="appearance" />} />
+      <Resource name="orders" options={{ label: "有效订单" }} list={OrderList} show={OrderShow} />
+      <Resource name="appearances" options={{ label: "官方形象" }} list={AppearanceCatalogList} />
+      <Resource name="appearanceFiles" options={{ label: "独立形象包" }} list={() => <ManagedFileList kind="appearance" />} create={() => <ManagedFileCreate kind="appearance" />} />
       <Resource name="installerFiles" options={{ label: "安装包" }} list={() => <ManagedFileList kind="installer" />} create={() => <ManagedFileCreate kind="installer" />} />
     </Admin>
   </React.StrictMode>
