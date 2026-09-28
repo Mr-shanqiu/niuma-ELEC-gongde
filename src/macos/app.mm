@@ -1213,15 +1213,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
-       @"项目主页：\n"
-       @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde",
+       @"官方网站：\n"
+       @"https://gongde.zqscreen.cn/",
       @"Version 0.7.0\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"
        @"Client source code is available under GPLv3.\n\n"
-       @"Project page:\n"
-       @"https://github.com/Mr-shanqiu/niuma-ELEC-gongde");
+       @"Official website:\n"
+       @"https://gongde.zqscreen.cn/");
   [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
   if (!self.inputMonitoringAuthorized) {
     [alert addButtonWithTitle:UiText(@"开启输入监控", @"Enable Input Monitoring")];

@@ -827,19 +827,19 @@ void ShowPrivacyNotice(HWND owner) {
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.7.0";
+  const std::wstring version = L"0.7.1";
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
         L"鼠标位置或窗口信息。\n所有数据仅保存在本机，本软件不包含网络请求、"
-        L"遥测或自动更新。\n\n客户端源代码依 GPLv3 许可证开放。\n\n项目主页：\n"
+        L"遥测或自动更新。\n\n客户端源代码依 GPLv3 许可证开放。\n\n官方网站：\n"
       : L"NiuMa Merit v" + version + L"\n\n"
         L"Counts keyboard presses, mouse button presses, and scroll gestures without "
         L"reading specific content, mouse positions, or window information.\n"
         L"All data stays on this computer. The app contains no network requests, "
         L"telemetry, or automatic updates.\n\nClient source code is available under GPLv3."
-        L"\n\nProject page:\n";
-  text += L"https://github.com/Mr-shanqiu/niuma-ELEC-gongde";
+        L"\n\nOfficial website:\n";
+  text += L"https://gongde.zqscreen.cn/";
   MessageBoxW(owner, text.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
               MB_OK | MB_ICONINFORMATION);
 }
