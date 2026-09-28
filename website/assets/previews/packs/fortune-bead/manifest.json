@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "id": "zqscreen.zhuan-yun-bead",
+  "version": "1.2.0",
+  "name_zh": "转运珠",
+  "name_en": "Fortune Bead",
+  "author": "zqscreen",
+  "publisher": "zqscreen",
+  "review_id": "motion-repair-20260923-fortune-bead",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "bead.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.5682,
+        0.511
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.24,
+          "x": 0,
+          "y": 0,
+          "rotation": 22,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.5,
+          "x": 0,
+          "y": 0,
+          "rotation": -12,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.76,
+          "x": 0,
+          "y": 0,
+          "rotation": 5,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    },
+    {
+      "image": "stars.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.569,
+        0.3952
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.9,
+          "alpha": 0.3
+        },
+        {
+          "t": 0.2,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1.16,
+          "alpha": 1
+        },
+        {
+          "t": 0.42,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.98,
+          "alpha": 0.3
+        },
+        {
+          "t": 0.64,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1.18,
+          "alpha": 1
+        },
+        {
+          "t": 0.86,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 0.35
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.9,
+          "alpha": 0.3
+        }
+      ]
+    }
+  ]
+}

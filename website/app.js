@@ -17,12 +17,50 @@ languageButton.addEventListener('click', () => {
 });
 applyLanguage();
 
+const previewObserver = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    previewObserver.unobserve(entry.target);
+    window.NiuMaAppearance.load(entry.target).catch(() => {
+      entry.target.dataset.previewState = 'error';
+      entry.target.textContent = language === 'zh' ? '预览正在更新，请刷新页面' : 'Preview updating. Please reload.';
+      const choice = entry.target.closest('.character-card')?.querySelector('[data-asset-id]');
+      if (choice) { choice.checked = false; choice.disabled = true; updatePackSelection(); }
+    });
+  }
+}, { rootMargin: '240px' });
+document.querySelectorAll('[data-pack-preview]').forEach((container) => previewObserver.observe(container));
+
+document.querySelectorAll('[data-copy-sha]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const value = button.dataset.copySha;
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch (_) {
+      const field = document.createElement('textarea');
+      field.value = value;
+      field.setAttribute('readonly', '');
+      field.style.position = 'fixed';
+      field.style.opacity = '0';
+      document.body.appendChild(field);
+      field.select();
+      document.execCommand('copy');
+      field.remove();
+    }
+    button.textContent = language === 'zh' ? '已复制' : 'Copied';
+    window.setTimeout(() => {
+      button.textContent = button.dataset[language] || '';
+    }, 1400);
+  });
+});
+
 const stage = document.querySelector('.counter-demo');
 const total = document.querySelector('#demo-total');
 function demoStrike() {
   stage.classList.remove('striking');
   void stage.offsetWidth;
   stage.classList.add('striking');
+  stage.querySelector('[data-pack-preview]')?.appearancePlayer?.strike();
   total.textContent = String(Number(total.textContent) + 1);
 }
 document.querySelector('.strike-button').addEventListener('click', demoStrike);
@@ -46,21 +84,20 @@ const paymentModal = document.querySelector('.payment-modal');
 const paymentStatus = paymentModal.querySelector('.payment-status');
 const paymentSubmit = paymentModal.querySelector('.payment-submit');
 const paymentChannels = [...paymentModal.querySelectorAll('[data-channel]')];
-const phoneInput = document.querySelector('.phone-input');
-const smsCode = document.querySelector('.sms-code');
-const smsSend = document.querySelector('.sms-send');
-const smsVerify = document.querySelector('.sms-verify');
 const purchaseTotal = document.querySelector('#purchase-total');
 const packChoices = [...document.querySelectorAll('[data-asset-id]')];
 const selectedPackCount = document.querySelector('#selected-pack-count');
 const modalSelectedCount = document.querySelector('#modal-selected-count');
 const selectedPackList = document.querySelector('#selected-pack-list');
+const accessCodeInput = paymentModal.querySelector('.access-code-input');
+const accessNew = paymentModal.querySelector('.access-new');
+const accessRestore = paymentModal.querySelector('.access-restore');
+const accessHistory = paymentModal.querySelector('.access-history');
+const accessHistoryPanel = paymentModal.querySelector('.access-history-panel');
+const accessCodeResult = paymentModal.querySelector('.access-code-result');
 let selectedPaymentChannel = '';
-let phoneVerified = false;
-let ownsOfficialPass = false;
-let smsChallengeId = '';
-let phoneSession = localStorage.getItem('niuma-phone-session') || '';
-let phoneSessionExpiresAt = Number(localStorage.getItem('niuma-phone-session-expires') || '0');
+let accessMode = 'new';
+let activeAccessCode = localStorage.getItem('niuma-access-code') || '';
 
 function localize(zh, en) { return language === 'zh' ? zh : en; }
 
@@ -96,26 +133,8 @@ async function api(path, options = {}) {
   return body;
 }
 
-function hasPhoneSession() {
-  if (phoneSession && phoneSessionExpiresAt > Date.now()) return true;
-  phoneSession = '';
-  phoneSessionExpiresAt = 0;
-  localStorage.removeItem('niuma-phone-session');
-  localStorage.removeItem('niuma-phone-session-expires');
-  return false;
-}
-
-function enablePaymentChannels() {
-  paymentChannels.forEach((item) => { item.disabled = false; });
-  purchaseTotal.textContent = ownsOfficialPass ? '¥0.20' : '¥1.00';
-}
-
-async function loadAccount() {
-  if (!hasPhoneSession()) return;
-  const account = await api('/api/gongde/account', { headers: { 'x-gongde-phone-session': phoneSession } });
-  phoneVerified = true;
-  ownsOfficialPass = Boolean(account.ownsOfficialPass);
-  enablePaymentChannels();
+function normalizeAccessCode(value) {
+  return value.trim().toUpperCase().replace(/\\s+/g, '');
 }
 
 function closeModal(modal, returnFocus) {
@@ -124,27 +143,61 @@ function closeModal(modal, returnFocus) {
   returnFocus.focus();
 }
 
+function enablePaymentChannels() {
+  paymentChannels.forEach((item) => { item.disabled = false; });
+  purchaseTotal.textContent = accessMode === 'existing' ? '¥0.20' : '¥1.00';
+}
+
+function selectAccessMode(mode) {
+  accessMode = mode;
+  selectedPaymentChannel = '';
+  paymentChannels.forEach((item) => { item.disabled = true; item.classList.remove('selected'); });
+  paymentSubmit.disabled = true;
+  accessNew.classList.toggle('selected', mode === 'new');
+  accessRestore.classList.toggle('selected', mode === 'existing');
+  accessCodeResult.hidden = true;
+  if (mode === 'new') {
+    paymentStatus.textContent = localize('直接选择支付方式。付款成功后会生成你的永久权益码。', 'Choose a payment method. Your permanent access code is created after payment.');
+    enablePaymentChannels();
+  }
+}
+
+async function restoreAccess(code, quiet = false) {
+  const normalized = normalizeAccessCode(code);
+  const result = await api('/api/gongde/access', { headers: { 'x-gongde-access-code': normalized } });
+  if (!result.ownsOfficialPass) throw new Error('official_pass_required');
+  activeAccessCode = normalized;
+  accessCodeInput.value = normalized;
+  localStorage.setItem('niuma-access-code', normalized);
+  accessMode = 'existing';
+  accessNew.classList.remove('selected');
+  accessRestore.classList.add('selected');
+  enablePaymentChannels();
+  if (!quiet) paymentStatus.textContent = localize('权益已恢复。本批最多 10 个形象包，整批 ¥0.20。', 'Access restored. This batch of up to 10 packs costs ¥0.20.');
+  return result;
+}
+
 async function openPaymentModal() {
   if (selectedAssetIds().length < 1) return;
   paymentModal.hidden = false;
   document.body.classList.add('modal-open');
   selectedPaymentChannel = '';
   updatePackSelection();
-  phoneVerified = hasPhoneSession();
+  accessHistoryPanel.hidden = true;
+  accessCodeResult.hidden = true;
   paymentChannels.forEach((item) => { item.disabled = true; item.classList.remove('selected'); });
   paymentSubmit.disabled = true;
-  if (phoneVerified && !paymentTestMode) {
+  if (activeAccessCode) {
     try {
-      await loadAccount();
-      paymentStatus.textContent = localize('手机号资格已恢复，可以直接选择支付方式。', 'Your access has been restored. Choose a payment method.');
+      await restoreAccess(activeAccessCode, true);
+      paymentStatus.textContent = localize('已读取本机保存的权益码，本批统一为 ¥0.20。', 'Your saved access code is ready. This batch costs ¥0.20.');
+      return;
     } catch {
-      phoneVerified = false;
-      phoneSession = '';
-      localStorage.removeItem('niuma-phone-session');
-      localStorage.removeItem('niuma-phone-session-expires');
+      activeAccessCode = '';
+      localStorage.removeItem('niuma-access-code');
     }
   }
-  if (!phoneVerified) phoneInput.focus();
+  selectAccessMode('new');
 }
 
 const purchaseButton = document.querySelector('.purchase-button');
@@ -156,64 +209,15 @@ packChoices.forEach((choice) => choice.addEventListener('change', () => {
 updatePackSelection();
 paymentModal.querySelectorAll('[data-payment-close]').forEach((node) => node.addEventListener('click', () => closeModal(paymentModal, purchaseButton)));
 
-smsSend.addEventListener('click', async () => {
-  if (!/^1[3-9]\d{9}$/.test(phoneInput.value.replace(/[\s-]/g, ''))) {
-    paymentStatus.textContent = language === 'zh' ? '请输入正确的中国大陆手机号。' : 'Enter a valid mainland China mobile number.';
-    return;
-  }
-  if (paymentTestMode) {
-    paymentStatus.textContent = localize('测试验证码：123456，5 分钟内有效。', 'Test code: 123456, valid for 5 minutes.');
-    return;
-  }
-  smsSend.disabled = true;
-  try {
-    const result = await api('/api/gongde/auth/sms/request', { method: 'POST', body: JSON.stringify({ phone: phoneInput.value }) });
-    smsChallengeId = result.challengeId;
-    paymentStatus.textContent = localize('验证码已发送，5 分钟内有效。', 'Verification code sent. It is valid for 5 minutes.');
-    setTimeout(() => { smsSend.disabled = false; }, Math.max(60, result.retryAfterSeconds || 60) * 1000);
-  } catch {
-    smsSend.disabled = false;
-    paymentStatus.textContent = localize('验证码暂时无法发送，请稍后再试。', 'Unable to send a code right now. Please try again later.');
-  }
-});
-
-smsVerify.addEventListener('click', async () => {
-  if (paymentTestMode) {
-    if (smsCode.value !== '123456') {
-      paymentStatus.textContent = localize('测试验证码不正确。', 'The test code is incorrect.');
-      return;
-    }
-    phoneVerified = true;
-    ownsOfficialPass = localStorage.getItem('niuma-test-official-pass') === '1';
-  } else {
-    if (!smsChallengeId) {
-      paymentStatus.textContent = localize('请先发送验证码。', 'Send a verification code first.');
-      return;
-    }
-    try {
-      const result = await api('/api/gongde/auth/sms/verify', {
-        method: 'POST',
-        body: JSON.stringify({ phone: phoneInput.value, challengeId: smsChallengeId, code: smsCode.value })
-      });
-      phoneSession = result.sessionToken;
-      phoneSessionExpiresAt = Date.parse(result.expiresAt);
-      localStorage.setItem('niuma-phone-session', phoneSession);
-      localStorage.setItem('niuma-phone-session-expires', String(phoneSessionExpiresAt));
-      await loadAccount();
-    } catch {
-      paymentStatus.textContent = localize('验证码无效或已经过期。', 'The code is invalid or has expired.');
-      return;
-    }
-  }
-  enablePaymentChannels();
-  paymentStatus.textContent = ownsOfficialPass
-    ? localize('手机号已验证：本批最多 10 个形象包，统一为 ¥0.20。', 'Phone verified: this batch of up to 10 packs costs ¥0.20 total.')
-    : localize('手机号已验证：¥1 获得永久资格，并包含本批最多 10 个形象包。', 'Phone verified: ¥1 grants permanent access and includes this first batch of up to 10 packs.');
+accessNew.addEventListener('click', () => selectAccessMode('new'));
+accessRestore.addEventListener('click', async () => {
+  paymentStatus.textContent = localize('正在验证权益码…', 'Checking access code…');
+  try { await restoreAccess(accessCodeInput.value); }
+  catch { paymentStatus.textContent = localize('权益码无效，请检查后重试。', 'The access code is invalid. Check it and try again.'); }
 });
 
 paymentChannels.forEach((button) => {
   button.addEventListener('click', () => {
-    if (!phoneVerified) return;
     selectedPaymentChannel = button.dataset.channel;
     paymentChannels.forEach((item) => item.classList.toggle('selected', item === button));
     paymentSubmit.disabled = false;
@@ -233,8 +237,11 @@ function showWechatQr(statusNode, dataUrl) {
   statusNode.replaceChildren(image, text);
 }
 
-async function downloadPack(pending) {
-  const response = await fetch(`/api/gongde/orders/${pending.orderNo}/package`, { headers: { authorization: `Bearer ${pending.buyerToken}` } });
+async function downloadPack(pending, accessCode = '') {
+  const headers = accessCode
+    ? { 'x-gongde-access-code': accessCode }
+    : { authorization: `Bearer ${pending.buyerToken}` };
+  const response = await fetch(`/api/gongde/orders/${pending.orderNo}/package`, { headers });
   if (!response.ok) throw new Error('pack_download_failed');
   const blob = await response.blob();
   const link = document.createElement('a');
@@ -248,6 +255,55 @@ async function downloadPack(pending) {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+function showAccessCode(code) {
+  accessCodeResult.hidden = false;
+  const title = document.createElement('strong');
+  title.textContent = localize('请保存你的永久权益码', 'Save your permanent access code');
+  const value = document.createElement('code');
+  value.textContent = code;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = localize('复制权益码', 'Copy code');
+  copy.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(code);
+    copy.textContent = localize('已复制', 'Copied');
+  });
+  accessCodeResult.replaceChildren(title, value, copy);
+}
+
+accessHistory.addEventListener('click', async () => {
+  const code = normalizeAccessCode(accessCodeInput.value || activeAccessCode);
+  if (!code) {
+    paymentStatus.textContent = localize('请先输入权益码。', 'Enter your access code first.');
+    return;
+  }
+  try {
+    await restoreAccess(code, true);
+    const result = await api('/api/gongde/access/orders', { headers: { 'x-gongde-access-code': code } });
+    const fulfilled = result.orders.filter((order) => order.state === 'FULFILLED' && order.purchaseKind !== 'support');
+    accessHistoryPanel.hidden = false;
+    if (!fulfilled.length) {
+      accessHistoryPanel.textContent = localize('暂时没有可下载的历史批次。', 'No downloadable batches yet.');
+      return;
+    }
+    accessHistoryPanel.replaceChildren(...fulfilled.map((order) => {
+      const row = document.createElement('div');
+      const label = document.createElement('span');
+      label.textContent = `${new Date(order.createdAt).toLocaleString()} · ${order.assetIds.length} ${localize('个形象', 'packs')}`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = localize('重新下载', 'Download again');
+      button.addEventListener('click', () => downloadPack({ orderNo: order.orderNo }, code).catch(() => {
+        paymentStatus.textContent = localize('该批次首次导入期限已过，无法重新生成。', 'This batch is no longer available for first import.');
+      }));
+      row.append(label, button);
+      return row;
+    }));
+  } catch {
+    paymentStatus.textContent = localize('权益码无效，请检查后重试。', 'The access code is invalid. Check it and try again.');
+  }
+});
+
 async function pollOrder(pending, statusNode) {
   for (let attempt = 0; attempt < 300; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -255,14 +311,16 @@ async function pollOrder(pending, statusNode) {
       const result = await api(`/api/gongde/orders/${pending.orderNo}`, { headers: { authorization: `Bearer ${pending.buyerToken}` } });
       if (result.order.state === 'FULFILLED') {
         sessionStorage.removeItem('niuma-pending-checkout');
-        if (pending.purchaseKind === 'official-pass') {
-          ownsOfficialPass = true;
-          localStorage.setItem('niuma-test-official-pass', '1');
+        if (pending.accessCode) {
+          activeAccessCode = pending.accessCode;
+          accessCodeInput.value = pending.accessCode;
+          localStorage.setItem('niuma-access-code', pending.accessCode);
+          showAccessCode(pending.accessCode);
         }
         if (pending.purchaseKind !== 'support') await downloadPack(pending);
         statusNode.textContent = pending.purchaseKind === 'support'
           ? localize('赞赏成功，谢谢你的支持。', 'Support received. Thank you.')
-          : localize('支付成功，所选形象包已经开始下载。', 'Payment complete. Your selected packs are downloading.');
+          : localize('支付成功，所选形象包已经开始下载。请保存好权益码。', 'Payment complete. Your packs are downloading. Save your access code.');
         return;
       }
       if (['EXPIRED', 'CANCELED', 'EXCEPTION'].includes(result.order.state)) throw new Error('order_closed');
@@ -278,14 +336,34 @@ async function pollOrder(pending, statusNode) {
 }
 
 async function startCheckout({ channel, purchaseKind, amountFen, statusNode }) {
-  const headers = purchaseKind === 'support' ? {} : { 'x-gongde-phone-session': phoneSession };
   const assetIds = purchaseKind === 'support' ? [] : selectedAssetIds();
   if (purchaseKind !== 'support' && (assetIds.length < 1 || assetIds.length > 10)) throw new Error('invalid_asset_selection');
+  const previewRevisions = purchaseKind === 'support' ? {} : await window.NiuMaAppearance.revisions(assetIds);
+  if (purchaseKind !== 'support') {
+    const current = await api('/api/gongde/appearance-revisions');
+    if (assetIds.some((id) => current.revisions?.[id] !== previewRevisions[id])) {
+      statusNode.textContent = localize('形象已更新，请刷新页面查看新版后再购买。本次尚未创建订单或扣款。', 'Characters have changed. Reload to preview the new version before purchasing. No order or charge was created.');
+      return;
+    }
+  }
+  const headers = purchaseKind === 'asset-delivery' ? { 'x-gongde-access-code': activeAccessCode } : {};
   const checkout = await api('/api/gongde/checkout', {
     method: 'POST', headers,
-    body: JSON.stringify({ channel, purchaseKind, amountFen, assetIds })
+    body: JSON.stringify({ channel, purchaseKind, amountFen, assetIds, previewRevisions })
   });
-  const pending = { orderNo: checkout.orderNo, buyerToken: checkout.buyerToken, purchaseKind, assetIds: checkout.assetIds };
+  if (checkout.accessCode) {
+    activeAccessCode = checkout.accessCode;
+    accessCodeInput.value = checkout.accessCode;
+    localStorage.setItem('niuma-access-code', checkout.accessCode);
+    showAccessCode(checkout.accessCode);
+  }
+  const pending = {
+    orderNo: checkout.orderNo,
+    buyerToken: checkout.buyerToken,
+    accessCode: checkout.accessCode || null,
+    purchaseKind,
+    assetIds: checkout.assetIds
+  };
   sessionStorage.setItem('niuma-pending-checkout', JSON.stringify(pending));
   if (checkout.checkout.kind === 'alipay-page') {
     window.location.assign(checkout.checkout.redirectUrl);
@@ -299,11 +377,12 @@ if (paymentTestMode) {
   paymentSubmit.dataset.zh = '模拟支付成功';
   paymentSubmit.dataset.en = 'Simulate successful payment';
   paymentSubmit.addEventListener('click', () => {
-    if (!selectedPaymentChannel || !phoneVerified) return;
-    if (!ownsOfficialPass) localStorage.setItem('niuma-test-official-pass', '1');
-    paymentStatus.textContent = ownsOfficialPass
-      ? localize(`模拟支付成功：已生成 ${selectedAssetIds().length} 个24小时有效的形象包。`, `Test payment succeeded: ${selectedAssetIds().length} packs are ready for 24 hours.`)
-      : localize(`模拟支付成功：资格已绑定，首次 ${selectedAssetIds().length} 个形象包已生成。`, `Test payment succeeded: access is linked and ${selectedAssetIds().length} first-batch packs are ready.`);
+    if (!selectedPaymentChannel) return;
+    const code = activeAccessCode || 'GD-TEST-DEMO-CODE-ONLY-0001';
+    activeAccessCode = code;
+    localStorage.setItem('niuma-access-code', code);
+    showAccessCode(code);
+    paymentStatus.textContent = localize(`模拟支付成功：已生成 ${selectedAssetIds().length} 个形象包。`, `Test payment succeeded: ${selectedAssetIds().length} packs are ready.`);
     paymentSubmit.disabled = true;
   });
   applyLanguage();
@@ -311,23 +390,19 @@ if (paymentTestMode) {
   paymentSubmit.dataset.zh = '立即支付';
   paymentSubmit.dataset.en = 'Pay now';
   paymentSubmit.addEventListener('click', async () => {
-    if (!selectedPaymentChannel || !phoneVerified) return;
+    if (!selectedPaymentChannel) return;
     paymentSubmit.disabled = true;
     paymentStatus.textContent = localize('正在创建安全订单…', 'Creating a secure order…');
     try {
       await startCheckout({
         channel: selectedPaymentChannel,
-        purchaseKind: ownsOfficialPass ? 'asset-delivery' : 'official-pass',
+        purchaseKind: accessMode === 'existing' ? 'asset-delivery' : 'official-pass',
         statusNode: paymentStatus
       });
     } catch (error) {
-      if (error.code === 'official_pass_already_owned') {
-        ownsOfficialPass = true;
-        enablePaymentChannels();
-        paymentStatus.textContent = localize('已恢复永久资格，本批最多 10 个形象包统一为 ¥0.20，请再次确认支付。', 'Permanent access restored. This batch of up to 10 packs costs ¥0.20 total; confirm payment again.');
-      } else {
-        paymentStatus.textContent = localize('订单暂时无法创建，请稍后再试。', 'Unable to create the order right now. Please try again.');
-      }
+      paymentStatus.textContent = error.code === 'access_code_invalid'
+        ? localize('权益码无效，请检查后重试。', 'The access code is invalid. Check it and try again.')
+        : localize('订单暂时无法创建，请稍后再试。', 'Unable to create the order right now. Please try again.');
       paymentSubmit.disabled = false;
     }
   });

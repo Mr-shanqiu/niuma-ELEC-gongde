@@ -1,66 +1,667 @@
 {
-  "schemaVersion": 1,
-  "generatedFrom": "desktop-client-assets",
-  "files": {
-    "woodfish-body.png": {
-      "source": "assets/woodfish.png",
-      "sourceSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
-      "outputSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
-      "processing": "byte-for-byte-copy"
+  "schemaVersion": 3,
+  "generatedFrom": "appearance-pack-manifests",
+  "canvas": {
+    "width": 240,
+    "height": 250,
+    "artworkHeight": 170,
+    "plusY": 174
+  },
+  "visualEnvelope": {
+    "minWidth": 150,
+    "maxWidth": 220,
+    "minHeight": 120,
+    "maxHeight": 170
+  },
+  "packs": {
+    "lucky-cat": {
+      "id": "official.lucky-cat",
+      "version": "1.1.0",
+      "manifestSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
+      "assetSha256": "c0f469e8408bbbc08d8a56944996c066d580353f1c718e48e22c64b43df6e34b",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/lucky-cat/manifest.json",
+          "sourceSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
+          "projectedSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/lucky-cat/preview.png",
+          "sourceSha256": "5797f9123e6184b283618bb957f1212c6425b9b2f329c88359ad6cec31492f80",
+          "projectedSha256": "5797f9123e6184b283618bb957f1212c6425b9b2f329c88359ad6cec31492f80",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/lucky-cat/body.png",
+          "sourceSha256": "6dcb91c249b642398340b61df2408c3a37a9714be90dd6389bf10fd29ea48efd",
+          "projectedSha256": "6dcb91c249b642398340b61df2408c3a37a9714be90dd6389bf10fd29ea48efd",
+          "projection": "exact-copy"
+        },
+        "paw.png": {
+          "source": "assets/appearance-packs/lucky-cat/paw.png",
+          "sourceSha256": "ffa97de9b8a019a31ab8b68ef241ca482950d8d52a57c135053422ab78628bc7",
+          "projectedSha256": "ffa97de9b8a019a31ab8b68ef241ca482950d8d52a57c135053422ab78628bc7",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "woodfish-mallet.png": {
-      "source": "assets/mallet.png",
-      "sourceSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
-      "outputSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
-      "processing": "byte-for-byte-copy"
+    "hamster-wheel": {
+      "id": "official.hamster-wheel",
+      "version": "1.0.0",
+      "manifestSha256": "6ec87b5b5ad55cd6c11c0a5388a8283063b700d4c5eb685e4e00157bb2838f05",
+      "assetSha256": "59fb6c8f7b8c9f767361ea72afba64ff69f316a46dc3877323f0079d32b508ca",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/hamster-wheel/manifest.json",
+          "sourceSha256": "6ec87b5b5ad55cd6c11c0a5388a8283063b700d4c5eb685e4e00157bb2838f05",
+          "projectedSha256": "6ec87b5b5ad55cd6c11c0a5388a8283063b700d4c5eb685e4e00157bb2838f05",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/hamster-wheel/preview.png",
+          "sourceSha256": "bf21aa90afdf6d236a818ea4f7e7aca773990917245a1c29274877bcabfe7c07",
+          "projectedSha256": "bf21aa90afdf6d236a818ea4f7e7aca773990917245a1c29274877bcabfe7c07",
+          "projection": "exact-copy"
+        },
+        "habitat.png": {
+          "source": "assets/appearance-packs/hamster-wheel/habitat.png",
+          "sourceSha256": "3947cef84b4b1f06146ee6f71b34d472f8ddc5615727721e33c56aa3f6dbbf63",
+          "projectedSha256": "3947cef84b4b1f06146ee6f71b34d472f8ddc5615727721e33c56aa3f6dbbf63",
+          "projection": "exact-copy"
+        },
+        "pet.png": {
+          "source": "assets/appearance-packs/hamster-wheel/pet.png",
+          "sourceSha256": "baa9a2d2252d2c3d479417ff3320e40ec280b674a2bbdce51e47ef900382c302",
+          "projectedSha256": "baa9a2d2252d2c3d479417ff3320e40ec280b674a2bbdce51e47ef900382c302",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "lucky-cat-base.png": {
-      "source": "assets/scenes/lucky-cat/lucky-cat-base.png",
-      "sourceSha256": "6dcb91c249b642398340b61df2408c3a37a9714be90dd6389bf10fd29ea48efd",
-      "outputSha256": "6dcb91c249b642398340b61df2408c3a37a9714be90dd6389bf10fd29ea48efd",
-      "processing": "byte-for-byte-copy"
+    "sea-lion-belly-pat": {
+      "id": "official.sea-lion-belly-pat",
+      "version": "1.0.0",
+      "manifestSha256": "48a07c138a0fe8dfa0a34311be084ea35d5b7a82a485a6cdbb2a93b15cab6813",
+      "assetSha256": "aed19e8110826605f145f40af0af41dd35647d258c8f50f0101e57341251d10b",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/sea-lion-belly-pat/manifest.json",
+          "sourceSha256": "48a07c138a0fe8dfa0a34311be084ea35d5b7a82a485a6cdbb2a93b15cab6813",
+          "projectedSha256": "48a07c138a0fe8dfa0a34311be084ea35d5b7a82a485a6cdbb2a93b15cab6813",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/sea-lion-belly-pat/preview.png",
+          "sourceSha256": "ed9c4d58b79d0343a098eed1b4bf1c98414e3ec5363d2223c5228c14e536a392",
+          "projectedSha256": "ed9c4d58b79d0343a098eed1b4bf1c98414e3ec5363d2223c5228c14e536a392",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/sea-lion-belly-pat/body.png",
+          "sourceSha256": "ab49e6d6558e3973cc48304abe56386b29d3d25105ac8a3643e0125b532fd9d7",
+          "projectedSha256": "ab49e6d6558e3973cc48304abe56386b29d3d25105ac8a3643e0125b532fd9d7",
+          "projection": "exact-copy"
+        },
+        "flipper.png": {
+          "source": "assets/appearance-packs/sea-lion-belly-pat/flipper.png",
+          "sourceSha256": "50c8f8aeb2757c66dbfcffafd0c0120d04256ceaa4cbfc95d21418b2ea5da7ae",
+          "projectedSha256": "50c8f8aeb2757c66dbfcffafd0c0120d04256ceaa4cbfc95d21418b2ea5da7ae",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "lucky-cat-paw.png": {
-      "source": "assets/scenes/lucky-cat/lucky-cat-actor.png",
-      "sourceSha256": "ffa97de9b8a019a31ab8b68ef241ca482950d8d52a57c135053422ab78628bc7",
-      "outputSha256": "ffa97de9b8a019a31ab8b68ef241ca482950d8d52a57c135053422ab78628bc7",
-      "processing": "byte-for-byte-copy"
+    "chick-pecking": {
+      "id": "official.chick-pecking",
+      "version": "1.0.0",
+      "manifestSha256": "2867ba265d124a52523e7bf6579411911dca7de4e05880cbb891bee16855d312",
+      "assetSha256": "0b55997ed83b950fd2a5855a5f2bac91fbe80c8b8fdf71ba4c9a8e42c14c4d72",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/chick-pecking/manifest.json",
+          "sourceSha256": "2867ba265d124a52523e7bf6579411911dca7de4e05880cbb891bee16855d312",
+          "projectedSha256": "2867ba265d124a52523e7bf6579411911dca7de4e05880cbb891bee16855d312",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/chick-pecking/preview.png",
+          "sourceSha256": "c3f2124ed6918095ce6d7bb6bf8d165dd171d7cfedaa88d71e824aafaf0b53d7",
+          "projectedSha256": "c3f2124ed6918095ce6d7bb6bf8d165dd171d7cfedaa88d71e824aafaf0b53d7",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/chick-pecking/body.png",
+          "sourceSha256": "1bbac72b0a08a139c2ad6630719759382f5c8298a7f50421f835bea13883a065",
+          "projectedSha256": "1bbac72b0a08a139c2ad6630719759382f5c8298a7f50421f835bea13883a065",
+          "projection": "exact-copy"
+        },
+        "head.png": {
+          "source": "assets/appearance-packs/chick-pecking/head.png",
+          "sourceSha256": "754df9705161cc2c64e2c50b9bd6ec525008b2b76de36e94945b8639e8ae2a8f",
+          "projectedSha256": "754df9705161cc2c64e2c50b9bd6ec525008b2b76de36e94945b8639e8ae2a8f",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "hamster-habitat.png": {
-      "source": "assets/scenes/hamster-wheel/runtime/hamster-habitat.png",
-      "sourceSha256": "fb38f667b8d965c690d4d652345d498bc8f2a663913dd0850ff8eb21fa96d3ed",
-      "outputSha256": "3947cef84b4b1f06146ee6f71b34d472f8ddc5615727721e33c56aa3f6dbbf63",
-      "processing": "desktop-green-key"
+    "caishen-ingot": {
+      "id": "zqscreen.caishen-ingot",
+      "version": "1.2.0",
+      "manifestSha256": "899f6b1db1b4118a3fcc441969977c7ab0df510890f1750c867f95a380bf4607",
+      "assetSha256": "0b456bdbfdfac7f13bf9795559c38c5e388d83baa17644133cfe0907763f447f",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/caishen-ingot/manifest.json",
+          "sourceSha256": "899f6b1db1b4118a3fcc441969977c7ab0df510890f1750c867f95a380bf4607",
+          "projectedSha256": "899f6b1db1b4118a3fcc441969977c7ab0df510890f1750c867f95a380bf4607",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/caishen-ingot/preview.png",
+          "sourceSha256": "421921870d6534493d640c73550091c1ff52effa78a190eb5940d3c7dc2e7e25",
+          "projectedSha256": "421921870d6534493d640c73550091c1ff52effa78a190eb5940d3c7dc2e7e25",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/caishen-ingot/body.png",
+          "sourceSha256": "972491cc644a6096a998c58da5e8faa41b14af86c8eeed4315ddecdb3fcfc2c4",
+          "projectedSha256": "972491cc644a6096a998c58da5e8faa41b14af86c8eeed4315ddecdb3fcfc2c4",
+          "projection": "exact-copy"
+        },
+        "ingot.png": {
+          "source": "assets/appearance-packs/caishen-ingot/ingot.png",
+          "sourceSha256": "84120ba1de44b0f0fb77511c925ab3bd7d817020d436a2f49427ca19b2d0a09f",
+          "projectedSha256": "84120ba1de44b0f0fb77511c925ab3bd7d817020d436a2f49427ca19b2d0a09f",
+          "projection": "exact-copy"
+        },
+        "sparkle.png": {
+          "source": "assets/appearance-packs/caishen-ingot/sparkle.png",
+          "sourceSha256": "c99528cbff5a6ba71de9341994f21505283ee652bf0f65dc714517a19700df13",
+          "projectedSha256": "c99528cbff5a6ba71de9341994f21505283ee652bf0f65dc714517a19700df13",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "hamster-pet.png": {
-      "source": "assets/scenes/hamster-wheel/runtime/hamster-pet.png",
-      "sourceSha256": "2657a70212dc2341d40d2da1a2deadbc8fcabba937f0df5f735702de18c1b132",
-      "outputSha256": "baa9a2d2252d2c3d479417ff3320e40ec280b674a2bbdce51e47ef900382c302",
-      "processing": "desktop-green-key"
+    "red-panda-wave": {
+      "id": "zqscreen.redpanda-wave",
+      "version": "1.2.0",
+      "manifestSha256": "33b80a8059ed3b9bacfbe8f35cb9e021f10d98550f83d81338e3e447f3072928",
+      "assetSha256": "3ba50c37e672d9513ad19921be67255b0d3da36a852eb4352e81a55c5ca01d91",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/red-panda-wave/manifest.json",
+          "sourceSha256": "33b80a8059ed3b9bacfbe8f35cb9e021f10d98550f83d81338e3e447f3072928",
+          "projectedSha256": "33b80a8059ed3b9bacfbe8f35cb9e021f10d98550f83d81338e3e447f3072928",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/red-panda-wave/preview.png",
+          "sourceSha256": "51f460e2b95ff7d7835ee2da186549a06c14572ce0cf15acc291a7752d6170b7",
+          "projectedSha256": "51f460e2b95ff7d7835ee2da186549a06c14572ce0cf15acc291a7752d6170b7",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/red-panda-wave/body.png",
+          "sourceSha256": "2814b84a9e0e22191e7d1d6f25441580d3b883193375dcfef4ca1177901ec018",
+          "projectedSha256": "2814b84a9e0e22191e7d1d6f25441580d3b883193375dcfef4ca1177901ec018",
+          "projection": "exact-copy"
+        },
+        "paws.png": {
+          "source": "assets/appearance-packs/red-panda-wave/paws.png",
+          "sourceSha256": "463e68e01a332d140e95be6ce8712c923036f0c3c484ab9a78bbfb7f53a689a4",
+          "projectedSha256": "463e68e01a332d140e95be6ce8712c923036f0c3c484ab9a78bbfb7f53a689a4",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "sea-lion-body.png": {
-      "source": "assets/appearance-packs/sea-lion-belly-pat/body.png",
-      "sourceSha256": "ab49e6d6558e3973cc48304abe56386b29d3d25105ac8a3643e0125b532fd9d7",
-      "outputSha256": "ab49e6d6558e3973cc48304abe56386b29d3d25105ac8a3643e0125b532fd9d7",
-      "processing": "byte-for-byte-copy"
+    "shiba-tilt": {
+      "id": "zqscreen.shiba-tilt",
+      "version": "1.2.0",
+      "manifestSha256": "13ffaa0914d4d376769dc22b633adc80695d9fb6c5c679540332b0451eb0bd17",
+      "assetSha256": "12a1734ff449b25ea51ab844c68e528a300ab5247feb95fc7e5c63474a9d20da",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/shiba-tilt/manifest.json",
+          "sourceSha256": "13ffaa0914d4d376769dc22b633adc80695d9fb6c5c679540332b0451eb0bd17",
+          "projectedSha256": "13ffaa0914d4d376769dc22b633adc80695d9fb6c5c679540332b0451eb0bd17",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/shiba-tilt/preview.png",
+          "sourceSha256": "d25643e336cd4a92de805b5abbfddb17c813c4759337f4ac6295105b5c990a75",
+          "projectedSha256": "d25643e336cd4a92de805b5abbfddb17c813c4759337f4ac6295105b5c990a75",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/shiba-tilt/body.png",
+          "sourceSha256": "c458b519337dda7ba3c0a202c6929a75bc03d3544a770c4d97dbce1dec54413c",
+          "projectedSha256": "c458b519337dda7ba3c0a202c6929a75bc03d3544a770c4d97dbce1dec54413c",
+          "projection": "exact-copy"
+        },
+        "head.png": {
+          "source": "assets/appearance-packs/shiba-tilt/head.png",
+          "sourceSha256": "b2fec69f265fca75ed54926b241335e351c0a5f23899723ebac12530e2c6038f",
+          "projectedSha256": "b2fec69f265fca75ed54926b241335e351c0a5f23899723ebac12530e2c6038f",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "sea-lion-flipper.png": {
-      "source": "assets/appearance-packs/sea-lion-belly-pat/flipper.png",
-      "sourceSha256": "50c8f8aeb2757c66dbfcffafd0c0120d04256ceaa4cbfc95d21418b2ea5da7ae",
-      "outputSha256": "50c8f8aeb2757c66dbfcffafd0c0120d04256ceaa4cbfc95d21418b2ea5da7ae",
-      "processing": "byte-for-byte-copy"
+    "orange-cat-wave": {
+      "id": "zqscreen.orange-cat-wave",
+      "version": "1.2.0",
+      "manifestSha256": "ac8db37b08ca25245e3c535e374991abf479c3edc998aa6db1b8d03959ce4137",
+      "assetSha256": "bccd83d691b469db4be107671a6795d385c479715fa66274f757ba7474e77ad5",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/orange-cat-wave/manifest.json",
+          "sourceSha256": "ac8db37b08ca25245e3c535e374991abf479c3edc998aa6db1b8d03959ce4137",
+          "projectedSha256": "ac8db37b08ca25245e3c535e374991abf479c3edc998aa6db1b8d03959ce4137",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/orange-cat-wave/preview.png",
+          "sourceSha256": "40e180ce443f061f423d986df9c8b89172f8779fe57989c025334aa72bf3070d",
+          "projectedSha256": "40e180ce443f061f423d986df9c8b89172f8779fe57989c025334aa72bf3070d",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/orange-cat-wave/body.png",
+          "sourceSha256": "819e636e04f017478b386879fd029faba8d06d0e44ee6f1c18ae3a6cb12e1d7a",
+          "projectedSha256": "819e636e04f017478b386879fd029faba8d06d0e44ee6f1c18ae3a6cb12e1d7a",
+          "projection": "exact-copy"
+        },
+        "paw.png": {
+          "source": "assets/appearance-packs/orange-cat-wave/paw.png",
+          "sourceSha256": "14946d444798281c2b1ccbec10d054a11c64ec4d231b67e2aaad9862f6d14eb3",
+          "projectedSha256": "14946d444798281c2b1ccbec10d054a11c64ec4d231b67e2aaad9862f6d14eb3",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "chick-body.png": {
-      "source": "assets/appearance-packs/chick-pecking/body.png",
-      "sourceSha256": "1bbac72b0a08a139c2ad6630719759382f5c8298a7f50421f835bea13883a065",
-      "outputSha256": "1bbac72b0a08a139c2ad6630719759382f5c8298a7f50421f835bea13883a065",
-      "processing": "byte-for-byte-copy"
+    "raccoon-cheer": {
+      "id": "zqscreen.raccoon-cheer",
+      "version": "1.2.0",
+      "manifestSha256": "6d01f836f0c872ecec6daaa198043ef8e802769a84f920fa99e9068ffb59f98c",
+      "assetSha256": "b5271ec2417fd66bb7cc2d71cc355faea2024e17c35d3d13caa5b8a14587b1e1",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/raccoon-cheer/manifest.json",
+          "sourceSha256": "6d01f836f0c872ecec6daaa198043ef8e802769a84f920fa99e9068ffb59f98c",
+          "projectedSha256": "6d01f836f0c872ecec6daaa198043ef8e802769a84f920fa99e9068ffb59f98c",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/raccoon-cheer/preview.png",
+          "sourceSha256": "e542f2094793b79a9d8437dc781d43e1e1c6ba3f8e1154aec5d8e51413718940",
+          "projectedSha256": "e542f2094793b79a9d8437dc781d43e1e1c6ba3f8e1154aec5d8e51413718940",
+          "projection": "exact-copy"
+        },
+        "arm_l.png": {
+          "source": "assets/appearance-packs/raccoon-cheer/arm_l.png",
+          "sourceSha256": "1382a64a9d80300ced39650ad6535492109569a75a01cbaf213cee05d5b4b7ca",
+          "projectedSha256": "1382a64a9d80300ced39650ad6535492109569a75a01cbaf213cee05d5b4b7ca",
+          "projection": "exact-copy"
+        },
+        "arm_r.png": {
+          "source": "assets/appearance-packs/raccoon-cheer/arm_r.png",
+          "sourceSha256": "9603b88eadaa857b7052686bc323c0c18e40e0c10aab9a07fa6edfe9747ee293",
+          "projectedSha256": "9603b88eadaa857b7052686bc323c0c18e40e0c10aab9a07fa6edfe9747ee293",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/raccoon-cheer/body.png",
+          "sourceSha256": "27275b86171becb5c77a886428f2ab387b4f33b610e5f435397bcd864571a72a",
+          "projectedSha256": "27275b86171becb5c77a886428f2ab387b4f33b610e5f435397bcd864571a72a",
+          "projection": "exact-copy"
+        }
+      }
     },
-    "chick-head.png": {
-      "source": "assets/appearance-packs/chick-pecking/head.png",
-      "sourceSha256": "754df9705161cc2c64e2c50b9bd6ec525008b2b76de36e94945b8639e8ae2a8f",
-      "outputSha256": "754df9705161cc2c64e2c50b9bd6ec525008b2b76de36e94945b8639e8ae2a8f",
-      "processing": "byte-for-byte-copy"
+    "golden-toad-coin": {
+      "id": "zqscreen.golden-toad-coin",
+      "version": "1.1.0",
+      "manifestSha256": "a4d6a4279382ccb6df109af8ffff3f2da41eaab0394eaa69a4297cf7466b5862",
+      "assetSha256": "f4a868ed23910c65ee30ed8ff366b953859dbdd161e3db10f6f476aa146c6a65",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/golden-toad-coin/manifest.json",
+          "sourceSha256": "a4d6a4279382ccb6df109af8ffff3f2da41eaab0394eaa69a4297cf7466b5862",
+          "projectedSha256": "a4d6a4279382ccb6df109af8ffff3f2da41eaab0394eaa69a4297cf7466b5862",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/golden-toad-coin/preview.png",
+          "sourceSha256": "6e108ebafe05012be5a522c0e2fdd7a37c7ffe0607bdc6abfca1f27d97661a08",
+          "projectedSha256": "6e108ebafe05012be5a522c0e2fdd7a37c7ffe0607bdc6abfca1f27d97661a08",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/golden-toad-coin/body.png",
+          "sourceSha256": "6ca3b7535f454d607b5801957cc4106432457916f4c37fbb775f3c64bfbbb7f2",
+          "projectedSha256": "6ca3b7535f454d607b5801957cc4106432457916f4c37fbb775f3c64bfbbb7f2",
+          "projection": "exact-copy"
+        },
+        "coin.png": {
+          "source": "assets/appearance-packs/golden-toad-coin/coin.png",
+          "sourceSha256": "33066316969466142e9256531a95be07006143c97d5bb35b8686e0d0d9380858",
+          "projectedSha256": "33066316969466142e9256531a95be07006143c97d5bb35b8686e0d0d9380858",
+          "projection": "exact-copy"
+        },
+        "sparkle.png": {
+          "source": "assets/appearance-packs/golden-toad-coin/sparkle.png",
+          "sourceSha256": "e06b40ce7a6ec15cf189fb6b8da6a16dd9708eb04d935ca0fa2f4f1e73eb6cc3",
+          "projectedSha256": "e06b40ce7a6ec15cf189fb6b8da6a16dd9708eb04d935ca0fa2f4f1e73eb6cc3",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "little-jiangshi-hop": {
+      "id": "zqscreen.little-jiangshi-hop",
+      "version": "1.2.0",
+      "manifestSha256": "01a75d0846960038aa1b73bad8328254b96c009d919f2c046a72e052b64e5b26",
+      "assetSha256": "35db1dd2aca0c6a80656e2727f6ab347be9cacae83a5ff654f728bca0a2e2288",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/little-jiangshi-hop/manifest.json",
+          "sourceSha256": "01a75d0846960038aa1b73bad8328254b96c009d919f2c046a72e052b64e5b26",
+          "projectedSha256": "01a75d0846960038aa1b73bad8328254b96c009d919f2c046a72e052b64e5b26",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/little-jiangshi-hop/preview.png",
+          "sourceSha256": "f003cbc44e345ab0912722620328e14df627bb846af18d5f07d093c1c93cb8e4",
+          "projectedSha256": "f003cbc44e345ab0912722620328e14df627bb846af18d5f07d093c1c93cb8e4",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/little-jiangshi-hop/body.png",
+          "sourceSha256": "dbd9fb135071d64ce2303e447bf29f519254bc1974647fa2eba973c2dfc310e8",
+          "projectedSha256": "dbd9fb135071d64ce2303e447bf29f519254bc1974647fa2eba973c2dfc310e8",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "frog-puff": {
+      "id": "zqscreen.frog-puff",
+      "version": "1.2.0",
+      "manifestSha256": "bd99ac267fc06ebe2a262b018790fc1360c5aecea705dff64b75e74b4a25cb61",
+      "assetSha256": "71f9b8428e43c6b92c6cfdc200b31803e9acf2a286ca3344690c47862383d3de",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/frog-puff/manifest.json",
+          "sourceSha256": "bd99ac267fc06ebe2a262b018790fc1360c5aecea705dff64b75e74b4a25cb61",
+          "projectedSha256": "bd99ac267fc06ebe2a262b018790fc1360c5aecea705dff64b75e74b4a25cb61",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/frog-puff/preview.png",
+          "sourceSha256": "d068950fa19fd0f1505c6b0b308582822c78410a8978db89a2c9e61637266028",
+          "projectedSha256": "d068950fa19fd0f1505c6b0b308582822c78410a8978db89a2c9e61637266028",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/frog-puff/body.png",
+          "sourceSha256": "bce2924a64d9315f6e1f5b251c0b5233f07f44c3b0da54232a6406ad60dda8ca",
+          "projectedSha256": "bce2924a64d9315f6e1f5b251c0b5233f07f44c3b0da54232a6406ad60dda8ca",
+          "projection": "exact-copy"
+        },
+        "sac.png": {
+          "source": "assets/appearance-packs/frog-puff/sac.png",
+          "sourceSha256": "2bf20b80e83de83175410993b23cb25a02d4208b4c4c18712ea432d44eab158d",
+          "projectedSha256": "2bf20b80e83de83175410993b23cb25a02d4208b4c4c18712ea432d44eab158d",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "bee-flap": {
+      "id": "zqscreen.bee-flap",
+      "version": "1.2.0",
+      "manifestSha256": "f2f9c025777807f982ab626d17d8da65cf2e3d0aa910fe7ee4f11b72428ea7b1",
+      "assetSha256": "8ea0e6820b61adc640407b8c1532b77dca8b71dadea92a8948c433d9fee89c00",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/bee-flap/manifest.json",
+          "sourceSha256": "f2f9c025777807f982ab626d17d8da65cf2e3d0aa910fe7ee4f11b72428ea7b1",
+          "projectedSha256": "f2f9c025777807f982ab626d17d8da65cf2e3d0aa910fe7ee4f11b72428ea7b1",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/bee-flap/preview.png",
+          "sourceSha256": "b6584e2b3e2b5b6faed69f875af4bee6dfc0513ca253940c0d4874c786fa68c1",
+          "projectedSha256": "b6584e2b3e2b5b6faed69f875af4bee6dfc0513ca253940c0d4874c786fa68c1",
+          "projection": "exact-copy"
+        },
+        "wing_l.png": {
+          "source": "assets/appearance-packs/bee-flap/wing_l.png",
+          "sourceSha256": "1a53b7d7de2f654c453a6d8dcebcae5981eeca06fae126c14dce3a21067bff9e",
+          "projectedSha256": "1a53b7d7de2f654c453a6d8dcebcae5981eeca06fae126c14dce3a21067bff9e",
+          "projection": "exact-copy"
+        },
+        "wing_r.png": {
+          "source": "assets/appearance-packs/bee-flap/wing_r.png",
+          "sourceSha256": "6a80f8ef388e0f42fade7a942be588097c202f56982282e3fb786dcca653ee55",
+          "projectedSha256": "6a80f8ef388e0f42fade7a942be588097c202f56982282e3fb786dcca653ee55",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/bee-flap/body.png",
+          "sourceSha256": "217d42ee75f4da98a64adf1b8b344b9725fb630cd3e88dd6a5a428c3da910645",
+          "projectedSha256": "217d42ee75f4da98a64adf1b8b344b9725fb630cd3e88dd6a5a428c3da910645",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "koi-bubbles": {
+      "id": "zqscreen.koi-bubbles",
+      "version": "1.2.0",
+      "manifestSha256": "f0e1355f95cd229cc0290d0b07e42e6f134229110df6b7e34f7716b426e51663",
+      "assetSha256": "11d859fac6acf574ed6e1d527dbeebcf1c71996e42fdb2ed9c0276228f59a59e",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/koi-bubbles/manifest.json",
+          "sourceSha256": "f0e1355f95cd229cc0290d0b07e42e6f134229110df6b7e34f7716b426e51663",
+          "projectedSha256": "f0e1355f95cd229cc0290d0b07e42e6f134229110df6b7e34f7716b426e51663",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/koi-bubbles/preview.png",
+          "sourceSha256": "b3695d2860bf52efda0d50b408de03e49bfa8bb86e0f2008f531f6f58bdb14c2",
+          "projectedSha256": "b3695d2860bf52efda0d50b408de03e49bfa8bb86e0f2008f531f6f58bdb14c2",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/koi-bubbles/body.png",
+          "sourceSha256": "ce98788ccdf8a685744565acfcdf2d3879650d0ec09ed1b399c5f9e320ab8126",
+          "projectedSha256": "ce98788ccdf8a685744565acfcdf2d3879650d0ec09ed1b399c5f9e320ab8126",
+          "projection": "exact-copy"
+        },
+        "bubble.png": {
+          "source": "assets/appearance-packs/koi-bubbles/bubble.png",
+          "sourceSha256": "f2f7202d631c35c5dede564e530805ef29eea01fa989e36766cebf563a86a464",
+          "projectedSha256": "f2f7202d631c35c5dede564e530805ef29eea01fa989e36766cebf563a86a464",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "sweet-kiss": {
+      "id": "zqscreen.kiss-couple",
+      "version": "1.2.0",
+      "manifestSha256": "d0ef94439e3a690d82d8bb3777ba1d39bc74fc202649fbbd8459bef19299f6c7",
+      "assetSha256": "82ffb4d1945386cdd9fd0017cedb666d24091cf244baa50f588349116b9f6629",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/sweet-kiss/manifest.json",
+          "sourceSha256": "d0ef94439e3a690d82d8bb3777ba1d39bc74fc202649fbbd8459bef19299f6c7",
+          "projectedSha256": "d0ef94439e3a690d82d8bb3777ba1d39bc74fc202649fbbd8459bef19299f6c7",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/sweet-kiss/preview.png",
+          "sourceSha256": "2090899e97aef56fb3192660bd0a7a32ddac24dcaf8b41c36d45f06c172d34d8",
+          "projectedSha256": "2090899e97aef56fb3192660bd0a7a32ddac24dcaf8b41c36d45f06c172d34d8",
+          "projection": "exact-copy"
+        },
+        "head.png": {
+          "source": "assets/appearance-packs/sweet-kiss/head.png",
+          "sourceSha256": "3dbc332a2b1f61880cf97f7455da51bdbbb42fb187cdfdd941a96dfb6ae6ffb7",
+          "projectedSha256": "3dbc332a2b1f61880cf97f7455da51bdbbb42fb187cdfdd941a96dfb6ae6ffb7",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/sweet-kiss/body.png",
+          "sourceSha256": "b738a45758ed6b1c8bef3c330ae727b35e43b42e06f2bd0152bb0097e55b924a",
+          "projectedSha256": "b738a45758ed6b1c8bef3c330ae727b35e43b42e06f2bd0152bb0097e55b924a",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "baodan-charm": {
+      "id": "zqscreen.baodan-charm",
+      "version": "1.1.0",
+      "manifestSha256": "d8264038ce08d59ac54f9d1efac23fad3b58818c6a9200595eeba18f2e9067d4",
+      "assetSha256": "9de122e52fea6de07780722142e6b96cf8f2531ba33490546f422bdbb9a0a2e5",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/baodan-charm/manifest.json",
+          "sourceSha256": "d8264038ce08d59ac54f9d1efac23fad3b58818c6a9200595eeba18f2e9067d4",
+          "projectedSha256": "d8264038ce08d59ac54f9d1efac23fad3b58818c6a9200595eeba18f2e9067d4",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/baodan-charm/preview.png",
+          "sourceSha256": "8ee15f38acc92b74d1ca4a6cbb277119a2031fd72c1f812e8a6c899cd421c0e2",
+          "projectedSha256": "8ee15f38acc92b74d1ca4a6cbb277119a2031fd72c1f812e8a6c899cd421c0e2",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/baodan-charm/body.png",
+          "sourceSha256": "020613bc4878cd3b567df7bf94df4927852d6b0b7cb2d99c856326e6b1e117bf",
+          "projectedSha256": "020613bc4878cd3b567df7bf94df4927852d6b0b7cb2d99c856326e6b1e117bf",
+          "projection": "exact-copy"
+        },
+        "glow.png": {
+          "source": "assets/appearance-packs/baodan-charm/glow.png",
+          "sourceSha256": "c9723dd52dff23875a2e65aa31cbafa78a950a46a05ff1eec8f9ba3285917132",
+          "projectedSha256": "c9723dd52dff23875a2e65aa31cbafa78a950a46a05ff1eec8f9ba3285917132",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "woodpecker-peck": {
+      "id": "zqscreen.woodpecker-peck",
+      "version": "1.2.0",
+      "manifestSha256": "42d79e13129343dc2a926222d74fcff649a5060c3d55199d1a189374f24f1e2f",
+      "assetSha256": "3d978101c6f95d89d0db60f7daaad32299a2a46ef9f8da86e0a11e96f4ebfd8c",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/woodpecker-peck/manifest.json",
+          "sourceSha256": "42d79e13129343dc2a926222d74fcff649a5060c3d55199d1a189374f24f1e2f",
+          "projectedSha256": "42d79e13129343dc2a926222d74fcff649a5060c3d55199d1a189374f24f1e2f",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/woodpecker-peck/preview.png",
+          "sourceSha256": "3815e18291cdae574baad06c60d3124d8ea8d25fe876e3ecd0d358042fa1cbce",
+          "projectedSha256": "3815e18291cdae574baad06c60d3124d8ea8d25fe876e3ecd0d358042fa1cbce",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/woodpecker-peck/body.png",
+          "sourceSha256": "88714ce6c096108826c126420bcf09a4a3da5f98714f7aff92a31b6df180c945",
+          "projectedSha256": "88714ce6c096108826c126420bcf09a4a3da5f98714f7aff92a31b6df180c945",
+          "projection": "exact-copy"
+        },
+        "head.png": {
+          "source": "assets/appearance-packs/woodpecker-peck/head.png",
+          "sourceSha256": "3a1c25ca16202960cf32e2b1a8d23103ddbf301e48d4506a3fdf25e2751bf5c1",
+          "projectedSha256": "3a1c25ca16202960cf32e2b1a8d23103ddbf301e48d4506a3fdf25e2751bf5c1",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "fortune-bead": {
+      "id": "zqscreen.zhuan-yun-bead",
+      "version": "1.2.0",
+      "manifestSha256": "6f0dc859d6c57ab2aa763a5c8754a0c0374b3b9d7ab5f247716fb0b5a81a9fc2",
+      "assetSha256": "dd88ac07b49a8b57f7a88fb55e6464184527713242d96d24de53b37e6c3db393",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/fortune-bead/manifest.json",
+          "sourceSha256": "6f0dc859d6c57ab2aa763a5c8754a0c0374b3b9d7ab5f247716fb0b5a81a9fc2",
+          "projectedSha256": "6f0dc859d6c57ab2aa763a5c8754a0c0374b3b9d7ab5f247716fb0b5a81a9fc2",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/fortune-bead/preview.png",
+          "sourceSha256": "7e23bd1168ce26ddf1be445ac9586a3fc05fca530afb7ff19668e75ab229699a",
+          "projectedSha256": "7e23bd1168ce26ddf1be445ac9586a3fc05fca530afb7ff19668e75ab229699a",
+          "projection": "exact-copy"
+        },
+        "bead.png": {
+          "source": "assets/appearance-packs/fortune-bead/bead.png",
+          "sourceSha256": "1d988125efdd40edb844a08b0eb5c506599a00141be93afc1f56e5a90e31b8f9",
+          "projectedSha256": "1d988125efdd40edb844a08b0eb5c506599a00141be93afc1f56e5a90e31b8f9",
+          "projection": "exact-copy"
+        },
+        "stars.png": {
+          "source": "assets/appearance-packs/fortune-bead/stars.png",
+          "sourceSha256": "368704974289044d6c2610f06761389fbcda2523602ff59df0b20a109c54216a",
+          "projectedSha256": "368704974289044d6c2610f06761389fbcda2523602ff59df0b20a109c54216a",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "treasure-basin": {
+      "id": "zqscreen.treasure-basin",
+      "version": "1.2.0",
+      "manifestSha256": "f4067ed083a986b343920a03e859ec7f9c8867525b793f171f249f6aa79a10ea",
+      "assetSha256": "ec6dd7be28a59e91553e846653d6d0444fd2c9060ac41b92050f2c6a0c750170",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/treasure-basin/manifest.json",
+          "sourceSha256": "f4067ed083a986b343920a03e859ec7f9c8867525b793f171f249f6aa79a10ea",
+          "projectedSha256": "f4067ed083a986b343920a03e859ec7f9c8867525b793f171f249f6aa79a10ea",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/treasure-basin/preview.png",
+          "sourceSha256": "0d7489ae1b1cd584ec3871fade5607be3a38872c88b92b8e9489ee0cb6331d93",
+          "projectedSha256": "0d7489ae1b1cd584ec3871fade5607be3a38872c88b92b8e9489ee0cb6331d93",
+          "projection": "exact-copy"
+        },
+        "coin.png": {
+          "source": "assets/appearance-packs/treasure-basin/coin.png",
+          "sourceSha256": "426ba8f6760ca3ab77928db93421de74e7b1eb711c21e6410a9797af458d1e00",
+          "projectedSha256": "426ba8f6760ca3ab77928db93421de74e7b1eb711c21e6410a9797af458d1e00",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/treasure-basin/body.png",
+          "sourceSha256": "793a6ba0834ff7cfb947288ade4b6d5b68dd2e462ec418b3f49b0021f9819a9f",
+          "projectedSha256": "793a6ba0834ff7cfb947288ade4b6d5b68dd2e462ec418b3f49b0021f9819a9f",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "woodfish": {
+      "id": "builtin.woodfish",
+      "manifestSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
+      "files": {
+        "body.png": {
+          "source": "assets/woodfish.png",
+          "sourceSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
+          "projectedSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
+          "projection": "exact-copy"
+        },
+        "mallet.png": {
+          "source": "assets/mallet.png",
+          "sourceSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
+          "projectedSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
+          "projection": "exact-copy"
+        },
+        "manifest.json": {
+          "sourceSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
+          "projectedSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
+          "projection": "native-code-extraction"
+        }
+      }
     }
   }
 }

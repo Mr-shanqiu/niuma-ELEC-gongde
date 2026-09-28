@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "id": "zqscreen.raccoon-cheer",
+  "version": "1.2.0",
+  "name_zh": "小浣熊欢呼",
+  "name_en": "Cheering Raccoon",
+  "author": "zqscreen",
+  "publisher": "zqscreen",
+  "review_id": "motion-repair-20260923-raccoon-cheer",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "arm_l.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.3471,
+        0.4271
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.42,
+          "x": 0,
+          "y": 0,
+          "rotation": 7,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.66,
+          "x": 0,
+          "y": 0,
+          "rotation": 4,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    },
+    {
+      "image": "arm_r.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.6845,
+        0.4271
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.42,
+          "x": 0,
+          "y": 0,
+          "rotation": -7,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.66,
+          "x": 0,
+          "y": 0,
+          "rotation": -4,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    },
+    {
+      "image": "body.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    }
+  ]
+}

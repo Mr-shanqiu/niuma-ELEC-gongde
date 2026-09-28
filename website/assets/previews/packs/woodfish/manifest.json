@@ -1,0 +1,76 @@
+{
+  "renderer": "native-woodfish-v1",
+  "provenance": {
+    "macOS": "8ce2854d3e30db2be388350e36d7a303a0f6dbd081e076a48b48ab4cc7290f86",
+    "Windows": "6230a54ce92ad46e43ff9b102306131acbbb328702db2e62824ba3ccc2396b85"
+  },
+  "macOS": {
+    "scale": 0.88,
+    "center": [
+      120,
+      0
+    ],
+    "shadow": [
+      40,
+      3,
+      160,
+      16
+    ],
+    "body": [
+      26,
+      0,
+      214,
+      129
+    ],
+    "shaft": [
+      -260,
+      -26,
+      266,
+      54
+    ],
+    "head": [
+      -309,
+      -27,
+      60,
+      54
+    ],
+    "pivot": [
+      417,
+      180
+    ],
+    "angle": [
+      3,
+      2.2
+    ],
+    "shaftSourceX": 108,
+    "headSourceWidth": 145
+  },
+  "Windows": {
+    "shadow": [
+      34,
+      227,
+      172,
+      18
+    ],
+    "body": [
+      18,
+      102,
+      232,
+      140
+    ],
+    "mallet": [
+      72,
+      63,
+      214,
+      54
+    ],
+    "pivot": [
+      280,
+      90
+    ],
+    "angle": [
+      6,
+      10.5
+    ]
+  }
+}

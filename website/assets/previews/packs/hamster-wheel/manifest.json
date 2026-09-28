@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "official.hamster-wheel",
+  "version": "1.0.0",
+  "name_zh": "仓鼠跑轮",
+  "name_en": "Hamster Wheel",
+  "author": "NiuMa Merit",
+  "publisher": "NiuMa Merit",
+  "review_id": "official-0004",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "habitat.png",
+      "frame": [35, 0, 170, 170],
+      "anchor": [0.5, 0.5],
+      "keyframes": [{"t": 0, "x": 0, "y": 0, "rotation": 0, "scale": 1, "alpha": 1}]
+    },
+    {
+      "image": "pet.png",
+      "frame": [41, 15, 154, 154],
+      "anchor": [0.57143, 0.26623],
+      "keyframes": [
+        {"t": 0, "x": 0, "y": 0, "rotation": 0, "scale": 1, "alpha": 1},
+        {"t": 0.42, "x": 0, "y": 1, "rotation": -2, "scale": 1, "alpha": 1},
+        {"t": 1, "x": 0, "y": 0, "rotation": 0, "scale": 1, "alpha": 1}
+      ]
+    }
+  ]
+}

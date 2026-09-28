@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "id": "zqscreen.koi-bubbles",
+  "version": "1.2.0",
+  "name_zh": "锦鲤吐泡",
+  "name_en": "Bubble Koi",
+  "author": "zqscreen",
+  "publisher": "zqscreen",
+  "review_id": "motion-repair-20260923-koi-bubbles",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "body.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.32,
+          "x": 0,
+          "y": -1,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.64,
+          "x": 0,
+          "y": 1,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    },
+    {
+      "image": "bubble.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.1935,
+        0.5505
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.18,
+          "alpha": 0
+        },
+        {
+          "t": 0.09,
+          "x": -1,
+          "y": 3,
+          "rotation": 0,
+          "scale": 0.42,
+          "alpha": 0.9
+        },
+        {
+          "t": 0.28,
+          "x": -3,
+          "y": 18,
+          "rotation": 0,
+          "scale": 0.68,
+          "alpha": 0.8
+        },
+        {
+          "t": 0.48,
+          "x": -5,
+          "y": 32,
+          "rotation": 0,
+          "scale": 0.85,
+          "alpha": 0
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.18,
+          "alpha": 0
+        }
+      ]
+    },
+    {
+      "image": "bubble.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.1935,
+        0.5505
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.18,
+          "alpha": 0
+        },
+        {
+          "t": 0.17,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.18,
+          "alpha": 0
+        },
+        {
+          "t": 0.26,
+          "x": -1,
+          "y": 3,
+          "rotation": 0,
+          "scale": 0.42,
+          "alpha": 0.9
+        },
+        {
+          "t": 0.45000000000000007,
+          "x": -3,
+          "y": 18,
+          "rotation": 0,
+          "scale": 0.68,
+          "alpha": 0.8
+        },
+        {
+          "t": 0.65,
+          "x": -5,
+          "y": 32,
+          "rotation": 0,
+          "scale": 0.85,
+          "alpha": 0
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.18,
+          "alpha": 0
+        }
+      ]
+    },
+    {
+      "image": "bubble.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.1935,
+        0.5505
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.18,
+          "alpha": 0
+        },
+        {
+          "t": 0.34,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.18,
+          "alpha": 0
+        },
+        {
+          "t": 0.43000000000000005,
+          "x": -1,
+          "y": 3,
+          "rotation": 0,
+          "scale": 0.42,
+          "alpha": 0.9
+        },
+        {
+          "t": 0.6200000000000001,
+          "x": -3,
+          "y": 18,
+          "rotation": 0,
+          "scale": 0.68,
+          "alpha": 0.8
+        },
+        {
+          "t": 0.8200000000000001,
+          "x": -5,
+          "y": 32,
+          "rotation": 0,
+          "scale": 0.85,
+          "alpha": 0
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.18,
+          "alpha": 0
+        }
+      ]
+    }
+  ]
+}
