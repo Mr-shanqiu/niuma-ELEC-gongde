@@ -30,12 +30,22 @@ jobs:
         shell: bash
         run: ./scripts/audit-offline.sh
 
-      - name: Upload Windows package
+      - name: Build Windows installer
+        shell: powershell
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler was not found"
+          }
+          & $iscc "/DMyAppVersion=$env:VERSION" "installer\windows\niuma-merit.iss"
+
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: niuma-merit-windows-${{ env.VERSION }}
-          path: |
-            dist/niuma-merit.exe
-            dist/niuma-merit-windows-${{ env.VERSION }}-Release.zip
+          name: niuma-merit-windows-${{ env.VERSION }}-setup
+          path: dist/niuma-merit-windows-${{ env.VERSION }}-setup.exe
           if-no-files-found: error
           retention-days: 14

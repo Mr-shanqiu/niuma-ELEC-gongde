@@ -827,7 +827,7 @@ void ShowPrivacyNotice(HWND owner) {
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.7.1";
+  const std::wstring version = L"0.8.0";
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
