@@ -7,6 +7,8 @@
 - `gongde-db-bootstrap`：一次性创建 `gongde` database 及 `gongde_app`、`gongde_migrator` 两个最小权限用户。
 - `gongde-db-migrate`：只使用 migrator 密码执行功德自己的 migration。
 - 微信、支付宝、腾讯云短信 secret 只从桌球受管 generation 原位只读挂载，禁止复制。
+- 共享的是商户通道和密钥托管，不共享订单、手机号身份、权益、退款记录或 Redis 状态；功德订单固定使用 `GD_` 前缀。
 - 网关只应为 `gongde.zqscreen.cn` 精确匹配 `/api/*` 后反代 `gongde-api:8080`，其余路径仍交给静态站。
+- 管理台使用独立的 `gongde_admin_password` 与 `gongde_admin_session_secret`，只开放只读订单接口，不复用支付或短信密钥。
 
 该候选不能独立上线。桌球 00 主控仍需串行增加独立网络、把现有 MySQL 加入该网络、增加精确 Caddy 路由，并建立动态服务发布与回退入口。

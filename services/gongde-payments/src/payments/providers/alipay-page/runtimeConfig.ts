@@ -57,6 +57,9 @@ export function parseAlipayRuntimeConfiguration(
   const alipayPublicKeyPem = loadRuntimeSecret(source, "ALIPAY_PUBLIC_KEY", "ALIPAY_PUBLIC_KEY_FILE");
   const notifyUrl = httpsUrl(required(clean(source, "ALIPAY_NOTIFY_URL"), "ALIPAY_NOTIFY_URL"), "ALIPAY_NOTIFY_URL", true);
   const returnUrl = httpsUrl(required(clean(source, "ALIPAY_RETURN_URL"), "ALIPAY_RETURN_URL"), "ALIPAY_RETURN_URL", true);
+  if (notifyUrl.pathname !== "/api/gongde/payments/alipay/notify") {
+    throw new Error("ALIPAY_NOTIFY_URL must use the Gongde callback path");
+  }
   const gatewayUrl = httpsUrl(clean(source, "ALIPAY_GATEWAY_URL") || "https://openapi.alipay.com/gateway.do", "ALIPAY_GATEWAY_URL", true);
   if (!/^\d{16,32}$/u.test(appId)) throw new Error("ALIPAY_APP_ID has an invalid format");
   if (sellerId && !/^\d{16,32}$/u.test(sellerId)) throw new Error("ALIPAY_SELLER_ID has an invalid format");

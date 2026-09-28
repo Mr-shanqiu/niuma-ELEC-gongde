@@ -42,6 +42,8 @@ services:
       - alipay_app_private_key
       - alipay_public_key
       - gongde_pack_signing_key
+      - gongde_admin_password
+      - gongde_admin_session_secret
     volumes:
       - ${GONGDE_PACK_ASSET_HOST_DIR:?Set reviewed asset root}:/app/assets:ro
     networks: [gongde_backend, api_egress, frontend]
@@ -103,6 +105,8 @@ secrets:
   gongde_sms_identity_secret: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_sms_identity_secret" }
   gongde_sms_redis_url: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_sms_redis_url" }
   gongde_pack_signing_key: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_pack_signing_key" }
+  gongde_admin_password: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_admin_password" }
+  gongde_admin_session_secret: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_admin_session_secret" }
   tencent_cloud_secret_id: { file: "${SHARED_SECRET_DIR:?Set shared secret dir}/tencent_cloud_secret_id" }
   tencent_cloud_secret_key: { file: "${SHARED_SECRET_DIR:?Set shared secret dir}/tencent_cloud_secret_key" }
   wechat_pay_merchant_private_key: { file: "${SHARED_SECRET_DIR:?Set shared secret dir}/wechat_pay_merchant_private_key" }

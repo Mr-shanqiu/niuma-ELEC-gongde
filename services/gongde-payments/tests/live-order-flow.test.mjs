@@ -10,7 +10,6 @@ test("live checkout records provider presentation and fulfills idempotently", as
   const checkout = await service.createLiveCheckout({
     channel: "wechat",
     purchaseKind: "official-pass",
-    userId: "phone_live_001",
     assetIds: ["official.chick-pecking"]
   }, async () => ({ kind: "wechat-native", codeUrl: "weixin://wxpay/test", qrDataUrl: "data:image/png;base64,AA==" }));
   assert.equal(checkout.amountFen, 100);
@@ -28,6 +27,6 @@ test("live checkout records provider presentation and fulfills idempotently", as
   assert.equal(first.order.state, "FULFILLED");
   assert.equal(first.entitlements.length, 2);
   assert.equal(second.entitlements.length, 2);
-  assert.equal((await service.getAccount("phone_live_001")).ownsOfficialPass, true);
+  assert.equal((await service.getAccess(checkout.accessCode)).ownsOfficialPass, true);
   await assert.rejects(service.completePayment({ ...payment, amountFen: 20, providerTransactionId: "different" }), /provider_transaction_conflict/u);
 });

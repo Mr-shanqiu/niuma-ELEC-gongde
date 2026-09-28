@@ -4,15 +4,15 @@ import test from "node:test";
 import { GongdeOrderService } from "../dist/domain/order-service.js";
 import { InMemoryPaymentStore } from "../dist/domain/store.js";
 
-test("verified-phone one-yuan checkout grants a pass and the first delivery", async () => {
+test("anonymous one-yuan checkout grants a pass and the first delivery", async () => {
   const now = new Date("2026-09-16T14:00:00.000Z");
   const service = new GongdeOrderService(new InMemoryPaymentStore(), () => now);
   const checkout = await service.createMockCheckout({
-    channel: "wechat", purchaseKind: "official-pass", userId: "phone_test_001", assetIds: ["official.chick-pecking"]
+    channel: "wechat", purchaseKind: "official-pass", assetIds: ["official.chick-pecking"]
   });
   assert.equal(checkout.amountFen, 100);
   assert.equal(checkout.currency, "CNY");
-  assert.match(checkout.orderNo, /^NGD[A-Z0-9]+$/u);
+  assert.match(checkout.orderNo, /^GD_\d{14}[A-F0-9]{10}$/u);
 
   const first = await service.completeMockPayment(checkout.orderNo);
   const second = await service.completeMockPayment(checkout.orderNo);
@@ -28,17 +28,17 @@ test("verified-phone one-yuan checkout grants a pass and the first delivery", as
   await assert.rejects(service.getOrder(checkout.orderNo, "wrong-token"), /order_access_denied/u);
 });
 
-test("20-fen delivery requires an existing official pass", async () => {
+test("20-fen delivery requires an active access code with an official pass", async () => {
   const service = new GongdeOrderService(new InMemoryPaymentStore());
   await assert.rejects(service.createMockCheckout({
-    channel: "alipay", purchaseKind: "asset-delivery", userId: "phone_test_002", assetId: "official.chick-pecking"
-  }), /official_pass_required/u);
+    channel: "alipay", purchaseKind: "asset-delivery", accessCode: "GD-2222-2222-2222-2222-2222", assetId: "official.chick-pecking"
+  }), /access_code_invalid/u);
   const pass = await service.createMockCheckout({
-    channel: "wechat", purchaseKind: "official-pass", userId: "phone_test_002", assetIds: ["official.chick-pecking"]
+    channel: "wechat", purchaseKind: "official-pass", assetIds: ["official.chick-pecking"]
   });
   await service.completeMockPayment(pass.orderNo);
   const delivery = await service.createMockCheckout({
-    channel: "alipay", purchaseKind: "asset-delivery", userId: "phone_test_002", assetId: "official.chick-pecking"
+    channel: "alipay", purchaseKind: "asset-delivery", accessCode: pass.accessCode, assetId: "official.chick-pecking"
   });
   assert.equal(delivery.amountFen, 20);
   assert.equal((await service.completeMockPayment(delivery.orderNo)).entitlements[0].scope, "asset-download");

@@ -6,6 +6,9 @@ export function loadRuntimeSecret(
   fileName: string
 ): string {
   const direct = source[directName]?.trim() ?? "";
+  if (direct && source.NODE_ENV?.trim().toLowerCase() === "production") {
+    throw new Error(`${directName} must be provided through ${fileName} in production`);
+  }
   if (direct) return direct;
   const path = source[fileName]?.trim() ?? "";
   if (!path) throw new Error(`${directName} or ${fileName} is required`);

@@ -1,12 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_DELIVERY, OFFICIAL_CHARACTER_PASS, PROJECT_SUPPORT } from "./catalog.js";
 import type { PaymentStore } from "./store.js";
-import type { CheckoutResult, GongdeEntitlement, GongdeOrder, PaymentChannel, PurchaseKind } from "./types.js";
+import type { CheckoutResult, GongdeAccessAccount, GongdeEntitlement, GongdeOrder, PaymentChannel, PurchaseKind } from "./types.js";
 
 type CheckoutInput = {
   channel: PaymentChannel;
   purchaseKind: PurchaseKind;
-  userId?: string | null;
+  accessCode?: string | null;
   assetId?: string | null;
   assetIds?: string[];
   amountFen?: number;
@@ -14,13 +14,31 @@ type CheckoutInput = {
 
 type LiveCheckout = Exclude<CheckoutResult["checkout"], { kind: "mock" }>;
 
+export const GONGDE_ORDER_PREFIX = "GD_";
+const GONGDE_ORDER_NUMBER = /^GD_\d{14}[A-F0-9]{10}$/u;
+
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+const ACCESS_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+const ACCESS_CODE_PATTERN = /^GD(?:-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}){5}$/u;
+
+function generateAccessCode(): string {
+  const bytes = randomBytes(20);
+  const value = Array.from(bytes, (byte) => ACCESS_CODE_ALPHABET[byte % ACCESS_CODE_ALPHABET.length]).join("");
+  return `GD-${value.match(/.{4}/gu)!.join("-")}`;
+}
+
+function normalizeAccessCode(value: string): string {
+  const normalized = value.trim().toUpperCase().replace(/\s+/gu, "");
+  if (!ACCESS_CODE_PATTERN.test(normalized)) throw new Error("access_code_invalid");
+  return normalized;
+}
+
 function orderNumber(now: Date): string {
   const stamp = now.toISOString().replace(/[-:TZ.]/gu, "").slice(0, 14);
-  return `NGD${stamp}${randomBytes(5).toString("hex").toUpperCase()}`;
+  return `${GONGDE_ORDER_PREFIX}${stamp}${randomBytes(5).toString("hex").toUpperCase()}`;
 }
 
 function normalizeAssetIds(input: CheckoutInput): string[] {
@@ -40,18 +58,31 @@ export class GongdeOrderService {
     private readonly now: () => Date = () => new Date()
   ) {}
 
-  async createPendingOrder(input: CheckoutInput): Promise<{ order: GongdeOrder; buyerToken: string }> {
+  async createPendingOrder(input: CheckoutInput): Promise<{ order: GongdeOrder; buyerToken: string; accessCode: string | null }> {
     const { channel, purchaseKind } = input;
-    const userId = input.userId ?? null;
+    let userId: string | null = null;
+    let accessCode: string | null = null;
     const assetIds = purchaseKind === "support" ? [] : normalizeAssetIds(input);
     const assetId = assetIds[0] ?? null;
-    if (purchaseKind !== "support" && !userId) throw new Error("phone_verification_required");
-    if (purchaseKind === "support" && userId) throw new Error("support_order_must_not_bind_user");
+    if (purchaseKind === "support" && input.accessCode) throw new Error("support_order_must_not_bind_access");
+    if (purchaseKind === "official-pass") {
+      accessCode = generateAccessCode();
+      const account: GongdeAccessAccount = {
+        id: `acc_${randomBytes(12).toString("hex")}`,
+        codeDigest: digest(accessCode),
+        codeHint: accessCode.slice(-4),
+        state: "PENDING",
+        createdAt: this.now(),
+        activatedAt: null
+      };
+      await this.store.insertAccessAccount(account);
+      userId = account.id;
+    } else if (purchaseKind === "asset-delivery") {
+      const account = await this.requireAccessAccount(input.accessCode ?? "");
+      userId = account.id;
+    }
     if (purchaseKind === "asset-delivery") {
       if (!await this.store.findActiveEntitlement(userId!, "official-character-pass")) throw new Error("official_pass_required");
-    }
-    if (purchaseKind === "official-pass" && await this.store.findActiveEntitlement(userId!, "official-character-pass")) {
-      throw new Error("official_pass_already_owned");
     }
     const product = purchaseKind === "official-pass"
       ? OFFICIAL_CHARACTER_PASS
@@ -85,14 +116,15 @@ export class GongdeOrderService {
       fulfilledAt: null
     };
     await this.store.insertOrder(order);
-    return { order, buyerToken };
+    return { order, buyerToken, accessCode };
   }
 
   async createMockCheckout(input: CheckoutInput): Promise<CheckoutResult> {
-    const { order, buyerToken } = await this.createPendingOrder(input);
+    const { order, buyerToken, accessCode } = await this.createPendingOrder(input);
     return {
       orderNo: order.orderNo,
       buyerToken,
+      accessCode,
       amountFen: order.amountFen,
       currency: order.currency,
       expiresAt: order.expiresAt.toISOString(),
@@ -108,11 +140,12 @@ export class GongdeOrderService {
     input: CheckoutInput,
     prepare: (order: GongdeOrder) => Promise<LiveCheckout>
   ): Promise<CheckoutResult> {
-    const { order, buyerToken } = await this.createPendingOrder(input);
+    const { order, buyerToken, accessCode } = await this.createPendingOrder(input);
     const checkout = await prepare(order);
     return {
       orderNo: order.orderNo,
       buyerToken,
+      accessCode,
       amountFen: order.amountFen,
       currency: order.currency,
       expiresAt: order.expiresAt.toISOString(),
@@ -160,6 +193,13 @@ export class GongdeOrderService {
       order.paidAt = paidAt;
       order.fulfilledAt = paidAt;
       await store.updateOrder(order);
+      if (order.purchaseKind === "official-pass") {
+        const account = await store.findAccessAccountById(order.userId!);
+        if (!account) throw new Error("access_account_not_found");
+        account.state = "ACTIVE";
+        account.activatedAt = paidAt;
+        await store.updateAccessAccount(account);
+      }
       const entitlements: GongdeEntitlement[] = [];
       if (order.purchaseKind !== "support") {
         const deliveries = order.assetIds.map((assetId) => ({ scope: "asset-download" as const, assetId }));
@@ -188,8 +228,30 @@ export class GongdeOrderService {
     });
   }
 
-  async getAccount(userId: string): Promise<{ ownsOfficialPass: boolean }> {
-    return { ownsOfficialPass: Boolean(await this.store.findActiveEntitlement(userId, "official-character-pass")) };
+  async getAccess(accessCode: string): Promise<{ accessId: string; codeHint: string; ownsOfficialPass: boolean }> {
+    const account = await this.requireAccessAccount(accessCode);
+    return {
+      accessId: account.id,
+      codeHint: account.codeHint,
+      ownsOfficialPass: Boolean(await this.store.findActiveEntitlement(account.id, "official-character-pass"))
+    };
+  }
+
+  async resolveAccessId(accessCode: string): Promise<string> {
+    return (await this.requireAccessAccount(accessCode)).id;
+  }
+
+  async listAccessOrders(accessCode: string): Promise<{ orders: GongdeOrder[] }> {
+    const account = await this.requireAccessAccount(accessCode);
+    const page = await this.store.listOrders({ userId: account.id, limit: 100, offset: 0 });
+    return { orders: page.orders };
+  }
+
+  async getOrderForAccess(orderNo: string, accessCode: string): Promise<{ order: GongdeOrder; entitlements: GongdeEntitlement[] }> {
+    const account = await this.requireAccessAccount(accessCode);
+    const order = await this.requireOrder(orderNo, this.store);
+    if (order.userId !== account.id) throw new Error("order_access_denied");
+    return { order, entitlements: await this.store.findEntitlementsByOrder(orderNo) };
   }
 
   async getOrder(orderNo: string, buyerToken: string): Promise<{ order: GongdeOrder; entitlements: GongdeEntitlement[] }> {
@@ -199,8 +261,15 @@ export class GongdeOrderService {
   }
 
   private async requireOrder(orderNo: string, store: PaymentStore): Promise<GongdeOrder> {
+    if (!GONGDE_ORDER_NUMBER.test(orderNo)) throw new Error("order_not_found");
     const order = await store.findOrder(orderNo);
     if (!order) throw new Error("order_not_found");
     return order;
+  }
+
+  private async requireAccessAccount(accessCode: string): Promise<GongdeAccessAccount> {
+    const account = await this.store.findAccessAccountByDigest(digest(normalizeAccessCode(accessCode)));
+    if (!account || account.state !== "ACTIVE") throw new Error("access_code_invalid");
+    return account;
   }
 }

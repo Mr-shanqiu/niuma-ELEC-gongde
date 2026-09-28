@@ -76,6 +76,13 @@ export function parseWechatPayRuntimeConfiguration(
     "WECHAT_PAY_REFUND_NOTIFY_URL",
     true
   );
+  if (notifyUrl.pathname !== "/api/gongde/payments/wechat/notify") {
+    throw new Error("WECHAT_PAY_NOTIFY_URL must use the Gongde callback path");
+  }
+  if (refundNotifyUrl.origin !== notifyUrl.origin
+    || refundNotifyUrl.pathname !== "/api/gongde/payments/wechat/refund-notify") {
+    throw new Error("WECHAT_PAY_REFUND_NOTIFY_URL must use the Gongde callback origin and path");
+  }
   const apiOrigin = parseHttpsUrl(clean(source, "WECHAT_PAY_API_ORIGIN") || "https://api.mch.weixin.qq.com", "WECHAT_PAY_API_ORIGIN", false);
 
   if (!/^[A-Za-z0-9_-]{6,64}$/u.test(appId)) throw new Error("WECHAT_PAY_APP_ID has an invalid format");

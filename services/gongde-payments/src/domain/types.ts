@@ -10,6 +10,16 @@ export type OrderState =
   | "REFUND_PENDING"
   | "REFUNDED";
 export type EntitlementState = "PENDING" | "ACTIVE" | "REVOKE_PENDING" | "REVOKED";
+export type AccessAccountState = "PENDING" | "ACTIVE" | "REVOKED";
+
+export interface GongdeAccessAccount {
+  id: string;
+  codeDigest: string;
+  codeHint: string;
+  state: AccessAccountState;
+  createdAt: Date;
+  activatedAt: Date | null;
+}
 
 export interface GongdeOrder {
   orderNo: string;
@@ -48,6 +58,7 @@ export interface GongdeEntitlement {
 export interface CheckoutResult {
   orderNo: string;
   buyerToken: string;
+  accessCode: string | null;
   amountFen: number;
   currency: "CNY";
   expiresAt: string;

@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createSign } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { zipSync } from "fflate";
 
@@ -9,7 +9,22 @@ const ALLOWED_ASSETS: Readonly<Record<string, string>> = Object.freeze({
   "official.lucky-cat": "lucky-cat",
   "official.hamster-wheel": "hamster-wheel",
   "official.sea-lion-belly-pat": "sea-lion-belly-pat",
-  "official.chick-pecking": "chick-pecking"
+  "official.chick-pecking": "chick-pecking",
+  "zqscreen.caishen-ingot": "caishen-ingot",
+  "zqscreen.redpanda-wave": "red-panda-wave",
+  "zqscreen.shiba-tilt": "shiba-tilt",
+  "zqscreen.orange-cat-wave": "orange-cat-wave",
+  "zqscreen.raccoon-cheer": "raccoon-cheer",
+  "zqscreen.golden-toad-coin": "golden-toad-coin",
+  "zqscreen.little-jiangshi-hop": "little-jiangshi-hop",
+  "zqscreen.frog-puff": "frog-puff",
+  "zqscreen.bee-flap": "bee-flap",
+  "zqscreen.koi-bubbles": "koi-bubbles",
+  "zqscreen.kiss-couple": "sweet-kiss",
+  "zqscreen.baodan-charm": "baodan-charm",
+  "zqscreen.woodpecker-peck": "woodpecker-peck",
+  "zqscreen.zhuan-yun-bead": "fortune-bead",
+  "zqscreen.treasure-basin": "treasure-basin"
 });
 
 interface SourceManifest {
@@ -79,6 +94,29 @@ export function loadPackSignerConfiguration(
 
 export class AppearancePackSigner {
   readonly #privateKey;
+  #revisionRoot = "";
+  #revisions: Readonly<Record<string, string>> = {};
+
+  revisions(): Readonly<Record<string, string>> {
+    const root = realpathSync(this.configuration.assetRoot);
+    if (root === this.#revisionRoot) return this.#revisions;
+    const revisions: Record<string, string> = {};
+    for (const [id, directory] of Object.entries(ALLOWED_ASSETS)) {
+      const path = join(root, directory);
+      const names = readdirSync(path).sort();
+      if (names.length < 2 || names.length > 8) throw new Error("pack_file_count_invalid");
+      const lines = names.map((name) => {
+        if (name !== "manifest.json" && !safePngName(name)) throw new Error("pack_file_not_allowed");
+        const data = readRegularFile(join(path, name), "pack_asset");
+        if (data.length > MAX_PACK_BYTES) throw new Error("pack_file_too_large");
+        return `${name}\0${createHash("sha256").update(data).digest("hex")}\n`;
+      });
+      revisions[id] = createHash("sha256").update(lines.join("")).digest("hex");
+    }
+    this.#revisions = Object.freeze(revisions);
+    this.#revisionRoot = root;
+    return this.#revisions;
+  }
 
   constructor(private readonly configuration: PackSignerConfiguration) {
     const pem = readRegularFile(configuration.privateKeyFile, "pack_signing_key");
@@ -103,7 +141,9 @@ export class AppearancePackSigner {
       throw new Error("pack_import_window_invalid");
     }
 
-    const root = join(this.configuration.assetRoot, directoryName);
+    // Pin this build to an immutable release before reading any file. A live
+    // current-symlink switch must never mix old layers with a new manifest.
+    const root = join(realpathSync(this.configuration.assetRoot), directoryName);
     const entries = readdirSync(root, { withFileTypes: true });
     if (entries.length < 2 || entries.length > 8 || entries.some((entry) => !entry.isFile() || entry.isSymbolicLink())) {
       throw new Error("pack_source_files_invalid");
@@ -111,7 +151,7 @@ export class AppearancePackSigner {
     const manifestBytes = readRegularFile(join(root, "manifest.json"), "pack_manifest");
     if (manifestBytes.length > MAX_MANIFEST_BYTES) throw new Error("pack_manifest_too_large");
     const manifest = JSON.parse(manifestBytes.toString("utf8")) as SourceManifest;
-    if (manifest.schema_version !== 1 || manifest.id !== input.assetId || !Array.isArray(manifest.layers) || !safePngName(manifest.preview)) {
+    if (![1, 3].includes(manifest.schema_version) || "license" in manifest || manifest.id !== input.assetId || !Array.isArray(manifest.layers) || !safePngName(manifest.preview)) {
       throw new Error("pack_manifest_invalid");
     }
     const declared = new Set([manifest.preview]);
@@ -130,7 +170,7 @@ export class AppearancePackSigner {
     }
     const signedManifest = {
       ...manifest,
-      schema_version: 2,
+      schema_version: manifest.schema_version === 3 ? 3 : 2,
       license: {
         mode: "timed",
         issued_at: issuedAt,

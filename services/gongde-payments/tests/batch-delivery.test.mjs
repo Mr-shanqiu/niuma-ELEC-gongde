@@ -10,7 +10,6 @@ test("official pass and later delivery price a selected batch, not each asset", 
   const first = await service.createMockCheckout({
     channel: "wechat",
     purchaseKind: "official-pass",
-    userId: "phone_batch_001",
     assetIds: ["official.chick-pecking"]
   });
   assert.equal(first.amountFen, 100);
@@ -20,7 +19,7 @@ test("official pass and later delivery price a selected batch, not each asset", 
   const later = await service.createMockCheckout({
     channel: "alipay",
     purchaseKind: "asset-delivery",
-    userId: "phone_batch_001",
+    accessCode: first.accessCode,
     assetIds: ["official.chick-pecking"]
   });
   assert.equal(later.amountFen, 20);

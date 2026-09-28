@@ -2,7 +2,8 @@ import { lstatSync, readFileSync } from "node:fs";
 import mysql from "mysql2/promise";
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import type { PaymentStore } from "../domain/store.js";
-import type { GongdeEntitlement, GongdeOrder } from "../domain/types.js";
+import type { AdminOrderFilter, AdminOrderPage, AdminOrderSummary } from "../domain/store.js";
+import type { GongdeAccessAccount, GongdeEntitlement, GongdeOrder } from "../domain/types.js";
 
 export interface GongdeMySqlConfiguration {
   host: string;
@@ -107,6 +108,17 @@ function mapEntitlement(row: RowDataPacket): GongdeEntitlement {
   };
 }
 
+function mapAccessAccount(row: RowDataPacket): GongdeAccessAccount {
+  return {
+    id: String(row.id),
+    codeDigest: String(row.code_digest),
+    codeHint: String(row.code_hint),
+    state: row.state,
+    createdAt: asDate(row.created_at)!,
+    activatedAt: asDate(row.activated_at)
+  };
+}
+
 export class MySqlPaymentStore implements PaymentStore {
   constructor(
     private readonly executor: Executor,
@@ -129,6 +141,37 @@ export class MySqlPaymentStore implements PaymentStore {
       multipleStatements: false
     });
     return new MySqlPaymentStore(pool, pool);
+  }
+
+  async insertAccessAccount(account: GongdeAccessAccount): Promise<void> {
+    await this.executor.execute(
+      `INSERT INTO gongde_access_accounts (id, code_digest, code_hint, state, created_at, activated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [account.id, account.codeDigest, account.codeHint, account.state, account.createdAt, account.activatedAt]
+    );
+  }
+
+  async findAccessAccountByDigest(codeDigest: string): Promise<GongdeAccessAccount | null> {
+    const [rows] = await this.executor.execute<RowDataPacket[]>(
+      `SELECT * FROM gongde_access_accounts WHERE code_digest = ? LIMIT 1${this.transactional ? " FOR UPDATE" : ""}`,
+      [codeDigest]
+    );
+    return rows[0] ? mapAccessAccount(rows[0]) : null;
+  }
+
+  async findAccessAccountById(id: string): Promise<GongdeAccessAccount | null> {
+    const [rows] = await this.executor.execute<RowDataPacket[]>(
+      `SELECT * FROM gongde_access_accounts WHERE id = ? LIMIT 1${this.transactional ? " FOR UPDATE" : ""}`,
+      [id]
+    );
+    return rows[0] ? mapAccessAccount(rows[0]) : null;
+  }
+
+  async updateAccessAccount(account: GongdeAccessAccount): Promise<void> {
+    await this.executor.execute(
+      "UPDATE gongde_access_accounts SET state = ?, activated_at = ? WHERE id = ?",
+      [account.state, account.activatedAt, account.id]
+    );
   }
 
   async insertOrder(order: GongdeOrder): Promise<void> {
@@ -193,6 +236,62 @@ export class MySqlPaymentStore implements PaymentStore {
       [userId, scope, assetId]
     );
     return rows[0] ? mapEntitlement(rows[0]) : null;
+  }
+
+  async listOrders(filter: AdminOrderFilter): Promise<AdminOrderPage> {
+    const conditions: string[] = [];
+    const parameters: Array<string | number | Date> = [];
+    if (filter.orderNo) {
+      conditions.push("order_no LIKE ?");
+      parameters.push(`%${filter.orderNo.toUpperCase()}%`);
+    }
+    if (filter.userId) {
+      conditions.push("user_id = ?");
+      parameters.push(filter.userId);
+    }
+    if (filter.createdFrom) {
+      conditions.push("created_at >= ?");
+      parameters.push(filter.createdFrom);
+    }
+    if (filter.createdTo) {
+      conditions.push("created_at < ?");
+      parameters.push(filter.createdTo);
+    }
+    if (filter.channel) {
+      conditions.push("channel = ?");
+      parameters.push(filter.channel);
+    }
+    if (filter.state) {
+      conditions.push("state = ?");
+      parameters.push(filter.state);
+    }
+    const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+    const [countRows] = await this.executor.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total FROM gongde_orders${where}`,
+      parameters
+    );
+    const [rows] = await this.executor.execute<RowDataPacket[]>(
+      `SELECT * FROM gongde_orders${where} ORDER BY created_at DESC, order_no DESC LIMIT ? OFFSET ?`,
+      [...parameters, filter.limit, filter.offset]
+    );
+    return { orders: rows.map(mapOrder), total: Number(countRows[0]?.total ?? 0) };
+  }
+
+  async summarizeOrders(createdFrom: Date, createdTo: Date): Promise<AdminOrderSummary> {
+    const [rows] = await this.executor.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN state IN ('PAID', 'FULFILLED') THEN 1 ELSE 0 END) AS paid,
+              SUM(CASE WHEN state = 'PENDING_PAYMENT' THEN 1 ELSE 0 END) AS pending,
+              SUM(CASE WHEN state IN ('PAID', 'FULFILLED') THEN amount_fen ELSE 0 END) AS amount_fen
+       FROM gongde_orders WHERE created_at >= ? AND created_at < ?`,
+      [createdFrom, createdTo]
+    );
+    return {
+      total: Number(rows[0]?.total ?? 0),
+      paid: Number(rows[0]?.paid ?? 0),
+      pending: Number(rows[0]?.pending ?? 0),
+      amountFen: Number(rows[0]?.amount_fen ?? 0)
+    };
   }
 
   async runInTransaction<T>(work: (store: PaymentStore) => Promise<T>): Promise<T> {
