@@ -493,13 +493,7 @@ bool LoadPngResource(int resourceId, PngResource& output) {
 
 bool LoadAllPngResources() {
   return LoadPngResource(kFishResource, gFish) &&
-         LoadPngResource(kMalletResource, gMallet) &&
-         LoadPngResource(kLuckyCatBaseResource, gLuckyCatBase) &&
-         LoadPngResource(kLuckyCatActorResource, gLuckyCatActor) &&
-         LoadPngResource(kSeaLionBodyResource, gSeaLionBody) &&
-         LoadPngResource(kSeaLionFlipperResource, gSeaLionFlipper) &&
-         LoadPngResource(kHamsterHabitatResource, gHamsterHabitat) &&
-         LoadPngResource(kHamsterActorResource, gHamsterActor);
+         LoadPngResource(kMalletResource, gMallet);
 }
 
 void ReleasePngResource(PngResource& resource) {
