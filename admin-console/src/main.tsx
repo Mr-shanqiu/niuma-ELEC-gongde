@@ -167,12 +167,22 @@ function Dashboard() {
   const statusNames: Record<string, string> = { healthy: "正常", disabled: "未启用", error: "异常" };
   const PeriodCard = ({ label, value }: { label: string; value: { orders: number; amountFen: number } }) => <Card><CardContent><span>{label}</span><strong>{value.orders}</strong><Typography variant="caption" color="text.secondary">实收 ¥{(value.amountFen / 100).toFixed(2)}</Typography></CardContent></Card>;
   return <Box className="dashboard-shell">
-    <Box className="dashboard-heading"><div><Typography variant="overline">OVERVIEW</Typography><Typography variant="h4">经营概览</Typography></div><Stack direction="row" alignItems="center" gap={1.5}><MuiTextField label="查看日期" type="date" size="small" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /><Chip label="只看有效订单" color="secondary" /></Stack></Box>
+    <Box className="dashboard-heading"><div><Typography variant="overline">REPORT</Typography><Typography variant="h4">数据报表</Typography></div><Chip label="只统计有效订单" color="secondary" /></Box>
+    <Card sx={{ mb: 3, border: "1px solid rgba(214,83,45,.24)" }}>
+      <CardContent>
+        <Typography variant="overline" color="primary">累计总计</Typography>
+        <Typography variant="body2" color="text.secondary" mb={2}>从上线至今的全部有效数据，不受下方日期筛选影响。</Typography>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={4}>
+          <Box><Typography color="text.secondary">有效订单</Typography><Typography variant="h3" fontWeight={800}>{data.periods.allTime.orders}</Typography></Box>
+          <Box><Typography color="text.secondary">实收金额</Typography><Typography variant="h3" fontWeight={800}>¥{(data.periods.allTime.amountFen / 100).toFixed(2)}</Typography></Box>
+          <Box><Typography color="text.secondary">安装包下载</Typography><Typography variant="h3" fontWeight={800}>{data.downloads.total}</Typography></Box>
+        </Stack>
+      </CardContent>
+    </Card>
+    <Box className="dashboard-heading"><div><Typography variant="overline">DAILY</Typography><Typography variant="h5">按天查看</Typography></div><MuiTextField label="选择日期" type="date" size="small" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Box>
     <Box className="metric-grid">
-      <PeriodCard label="所选日期有效订单" value={data.periods.selectedDay} />
-      <PeriodCard label="累计有效订单" value={data.periods.allTime} />
-      <Card><CardContent><span>所选日期安装包下载</span><strong>{data.downloads.period}</strong></CardContent></Card>
-      <Card><CardContent><span>累计安装包下载</span><strong>{data.downloads.total}</strong></CardContent></Card>
+      <PeriodCard label={`${selectedDate} 有效订单`} value={data.periods.selectedDay} />
+      <Card><CardContent><span>{selectedDate} 安装包下载</span><strong>{data.downloads.period}</strong></CardContent></Card>
     </Box>
     <Card className="service-card"><CardContent><Typography variant="h6">服务状态</Typography><Stack direction="row" useFlexGap flexWrap="wrap" gap={1.2} mt={2}>{Object.entries(data.services).map(([key, value]) => <Chip key={key} variant="outlined" color={value === "healthy" ? "success" : value === "error" ? "error" : "default"} label={`${serviceNames[key]} · ${statusNames[String(value)]}`} />)}</Stack></CardContent></Card>
     <Card className="recent-card"><CardContent><Typography variant="h6">最近有效订单</Typography>{data.recent.length === 0 ? <p className="empty-copy">目前还没有已支付订单。</p> : <div className="recent-list">{data.recent.map((item: any) => <a href={`#/orders/${item.id}/show`} key={item.id}><div><b>{item.orderNo}</b><small>{kindNames[item.purchaseKind] ?? item.purchaseKind}</small></div><div><StatusChip state={item.state} /><strong>¥{(item.amountFen / 100).toFixed(2)}</strong></div></a>)}</div>}</CardContent></Card>
@@ -282,6 +292,7 @@ function ManagedFileCreate({ kind }: { kind: "appearance" | "installer" }) {
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Admin title="牛马电子功德管理台" theme={theme} dataProvider={dataProvider} authProvider={authProvider} loginPage={LoginPage} dashboard={Dashboard} requireAuth disableTelemetry>
+      <Resource name="reports" options={{ label: "数据报表" }} list={Dashboard} />
       <Resource name="orders" options={{ label: "有效订单" }} list={OrderList} show={OrderShow} />
       <Resource name="appearances" options={{ label: "官方形象" }} list={AppearanceCatalogList} />
       <Resource name="appearanceFiles" options={{ label: "独立形象包" }} list={() => <ManagedFileList kind="appearance" />} create={() => <ManagedFileCreate kind="appearance" />} />
