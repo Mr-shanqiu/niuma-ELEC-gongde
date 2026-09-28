@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AdminObjectStore, parseAdminFileIdentity } from "../dist/admin/object-store.js";
+import { AdminObjectStore, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "../dist/admin/object-store.js";
 
 class MemoryCos {
   objects = new Map();
@@ -62,6 +62,17 @@ test("admin file identity allows only managed extensions and flat safe names", (
   assert.throws(() => parseAdminFileIdentity("appearance", "cat.exe"), /admin_file_name_invalid/u);
   assert.throws(() => parseAdminFileIdentity("installer", "site.zip"), /admin_file_name_invalid/u);
   assert.throws(() => parseAdminFileIdentity("unknown", "file.exe"), /admin_file_kind_invalid/u);
+});
+
+test("admin object store prefers dedicated COS credentials without changing shared SMS credentials", () => {
+  const configuration = loadAdminObjectStoreConfiguration({
+    GONGDE_COS_SECRET_ID: "dedicated-cos-id",
+    GONGDE_COS_SECRET_KEY: "dedicated-cos-key",
+    TENCENT_CLOUD_SECRET_ID: "shared-sms-id",
+    TENCENT_CLOUD_SECRET_KEY: "shared-sms-key"
+  });
+  assert.equal(configuration?.secretId, "dedicated-cos-id");
+  assert.equal(configuration?.secretKey, "dedicated-cos-key");
 });
 
 test("admin object store uploads, paginates, lists and deletes only managed files", async () => {

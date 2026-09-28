@@ -52,6 +52,8 @@ export function parseAdminFileIdentity(kindValue: string | null, nameValue: stri
 
 export function loadAdminObjectStoreConfiguration(source: NodeJS.ProcessEnv = process.env): Configuration | null {
   const enabled = Boolean(
+    source.GONGDE_COS_SECRET_ID || source.GONGDE_COS_SECRET_ID_FILE ||
+    source.GONGDE_COS_SECRET_KEY || source.GONGDE_COS_SECRET_KEY_FILE ||
     source.TENCENT_CLOUD_SECRET_ID || source.TENCENT_CLOUD_SECRET_ID_FILE ||
     source.TENCENT_CLOUD_SECRET_KEY || source.TENCENT_CLOUD_SECRET_KEY_FILE
   );
@@ -66,8 +68,16 @@ export function loadAdminObjectStoreConfiguration(source: NodeJS.ProcessEnv = pr
     bucket,
     region,
     publicBaseUrl,
-    secretId: loadRuntimeSecret(source, "TENCENT_CLOUD_SECRET_ID", "TENCENT_CLOUD_SECRET_ID_FILE"),
-    secretKey: loadRuntimeSecret(source, "TENCENT_CLOUD_SECRET_KEY", "TENCENT_CLOUD_SECRET_KEY_FILE")
+    secretId: loadRuntimeSecret(
+      source,
+      source.GONGDE_COS_SECRET_ID || source.GONGDE_COS_SECRET_ID_FILE ? "GONGDE_COS_SECRET_ID" : "TENCENT_CLOUD_SECRET_ID",
+      source.GONGDE_COS_SECRET_ID || source.GONGDE_COS_SECRET_ID_FILE ? "GONGDE_COS_SECRET_ID_FILE" : "TENCENT_CLOUD_SECRET_ID_FILE"
+    ),
+    secretKey: loadRuntimeSecret(
+      source,
+      source.GONGDE_COS_SECRET_KEY || source.GONGDE_COS_SECRET_KEY_FILE ? "GONGDE_COS_SECRET_KEY" : "TENCENT_CLOUD_SECRET_KEY",
+      source.GONGDE_COS_SECRET_KEY || source.GONGDE_COS_SECRET_KEY_FILE ? "GONGDE_COS_SECRET_KEY_FILE" : "TENCENT_CLOUD_SECRET_KEY_FILE"
+    )
   };
 }
 

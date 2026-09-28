@@ -36,6 +36,8 @@ services:
       - gongde_sms_redis_url
       - tencent_cloud_secret_id
       - tencent_cloud_secret_key
+      - gongde_cos_secret_id
+      - gongde_cos_secret_key
       - wechat_pay_merchant_private_key
       - wechat_pay_public_key
       - wechat_pay_api_v3_key
@@ -107,6 +109,8 @@ secrets:
   gongde_pack_signing_key: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_pack_signing_key" }
   gongde_admin_password: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_admin_password" }
   gongde_admin_session_secret: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_admin_session_secret" }
+  gongde_cos_secret_id: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_cos_secret_id" }
+  gongde_cos_secret_key: { file: "${GONGDE_SECRET_DIR:?Set Gongde secret dir}/gongde_cos_secret_key" }
   tencent_cloud_secret_id: { file: "${SHARED_SECRET_DIR:?Set shared secret dir}/tencent_cloud_secret_id" }
   tencent_cloud_secret_key: { file: "${SHARED_SECRET_DIR:?Set shared secret dir}/tencent_cloud_secret_key" }
   wechat_pay_merchant_private_key: { file: "${SHARED_SECRET_DIR:?Set shared secret dir}/wechat_pay_merchant_private_key" }
