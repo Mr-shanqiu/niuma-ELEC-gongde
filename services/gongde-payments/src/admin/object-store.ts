@@ -19,7 +19,12 @@ export interface AdminDownloadSummary {
   byFile: Array<{ fileName: string; total: number; period: number }>;
 }
 
-type CosClient = Pick<COS, "getBucket" | "putObject" | "deleteObject">;
+type CosClient = Pick<COS, "getBucket" | "putObject" | "deleteObject"> & {
+  getObject(
+    params: { Bucket: string; Region: string; Key: string },
+    callback: (error: unknown, data: { Body?: Buffer | string }) => void
+  ): void;
+};
 
 interface Configuration {
   bucket: string;
@@ -33,6 +38,7 @@ const prefixes: Record<AdminFileKind, string> = {
   appearance: "appearance-packs/",
   installer: "installers/"
 };
+const appearanceCatalogStateKey = `${prefixes.appearance}catalog-state.json`;
 
 function isKind(value: string | null): value is AdminFileKind {
   return value === "appearance" || value === "installer";
@@ -85,7 +91,7 @@ export class AdminObjectStore {
   readonly #cos: CosClient;
 
   constructor(private readonly configuration: Configuration, client?: CosClient) {
-    this.#cos = client ?? new COS({ SecretId: configuration.secretId, SecretKey: configuration.secretKey });
+    this.#cos = client ?? new COS({ SecretId: configuration.secretId, SecretKey: configuration.secretKey }) as unknown as CosClient;
   }
 
   publicUrl(kind: AdminFileKind, name: string): string {
@@ -152,6 +158,43 @@ export class AdminObjectStore {
         Bucket: this.configuration.bucket,
         Region: this.configuration.region,
         Key: `${prefixes[kind]}${name}`
+      }, (error) => error ? reject(error) : resolve());
+    });
+  }
+
+  async publishedAssetIds(defaultIds: readonly string[]): Promise<string[]> {
+    try {
+      const result = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
+        this.#cos.getObject({
+          Bucket: this.configuration.bucket,
+          Region: this.configuration.region,
+          Key: appearanceCatalogStateKey
+        }, (error: unknown, data: { Body?: Buffer | string }) => error ? reject(error) : resolve(data));
+      });
+      const raw = Buffer.isBuffer(result.Body) ? result.Body.toString("utf8") : String(result.Body ?? "");
+      const parsed = JSON.parse(raw) as { publishedAssetIds?: unknown };
+      if (!Array.isArray(parsed.publishedAssetIds)) return [...defaultIds];
+      const allowed = new Set(defaultIds);
+      return [...new Set(parsed.publishedAssetIds.filter((item): item is string => typeof item === "string" && allowed.has(item)))];
+    } catch {
+      return [...defaultIds];
+    }
+  }
+
+  async writePublishedAssetIds(assetIds: readonly string[]): Promise<void> {
+    const body = Buffer.from(JSON.stringify({
+      version: 1,
+      publishedAssetIds: [...assetIds],
+      updatedAt: new Date().toISOString()
+    }));
+    await new Promise<void>((resolve, reject) => {
+      this.#cos.putObject({
+        Bucket: this.configuration.bucket,
+        Region: this.configuration.region,
+        Key: appearanceCatalogStateKey,
+        Body: body,
+        ContentLength: body.length,
+        ContentType: "application/json"
       }, (error) => error ? reject(error) : resolve());
     });
   }

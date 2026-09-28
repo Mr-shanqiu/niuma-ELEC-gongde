@@ -44,6 +44,13 @@ const adminAuth = adminConfiguration ? new AdminAuthService(adminConfiguration) 
 const adminObjectStoreConfiguration = loadAdminObjectStoreConfiguration();
 const adminObjectStore = adminObjectStoreConfiguration ? new AdminObjectStore(adminObjectStoreConfiguration) : null;
 
+async function availableAppearanceRevisions(): Promise<Record<string, string>> {
+  if (!packSigner) return {};
+  const revisions = packSigner.revisions();
+  const publishedIds = adminObjectStore ? await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS) : [...OFFICIAL_ASSET_IDS];
+  return Object.fromEntries(publishedIds.flatMap((assetId) => revisions[assetId] ? [[assetId, revisions[assetId]]] : []));
+}
+
 function json(response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers });
   response.end(JSON.stringify(body));
@@ -173,7 +180,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/gongde/appearance-revisions") {
       if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
-      return json(response, 200, { revisions: packSigner.revisions() });
+      return json(response, 200, { revisions: await availableAppearanceRevisions() });
     }
     if (request.method === "GET" && url.pathname === "/api/ready") {
       const storeReady = await store.ready();
@@ -272,14 +279,39 @@ const server = createServer(async (request, response) => {
       requireAdmin(request);
       if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
       const revisions = packSigner.revisions();
+      const publishedIds = new Set(adminObjectStore ? await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS) : OFFICIAL_ASSET_IDS);
       const data = OFFICIAL_ASSET_IDS.map((assetId) => ({
         id: assetId,
         assetId,
         name: OFFICIAL_ASSET_NAMES_ZH[assetId] ?? assetId,
         revision: revisions[assetId] ?? null,
-        state: revisions[assetId] ? "PUBLISHED" : "MISSING"
+        state: !revisions[assetId] ? "MISSING" : publishedIds.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
       }));
       return json(response, 200, { data, total: data.length });
+    }
+    const adminAppearanceMatch = url.pathname.match(/^\/api\/gongde\/admin\/appearances\/([A-Za-z0-9._-]+)$/u);
+    if (request.method === "PATCH" && adminAppearanceMatch) {
+      requireAdmin(request);
+      if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
+      if (!adminObjectStore) return json(response, 503, { error: "admin_object_store_not_enabled" });
+      const assetId = adminAppearanceMatch[1];
+      if (!OFFICIAL_ASSET_IDS.includes(assetId as typeof OFFICIAL_ASSET_IDS[number])) return json(response, 404, { error: "appearance_not_found" });
+      const body = await readJson(request);
+      if (typeof body.published !== "boolean") return json(response, 400, { error: "invalid_appearance_state" });
+      const revisions = packSigner.revisions();
+      if (!revisions[assetId]) return json(response, 409, { error: "appearance_resource_missing" });
+      const publishedIds = new Set(await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS));
+      if (body.published) publishedIds.add(assetId); else publishedIds.delete(assetId);
+      const orderedIds = OFFICIAL_ASSET_IDS.filter((id) => publishedIds.has(id));
+      await adminObjectStore.writePublishedAssetIds(orderedIds);
+      audit(body.published ? "appearance_published" : "appearance_unpublished", { assetId });
+      return json(response, 200, { data: {
+        id: assetId,
+        assetId,
+        name: OFFICIAL_ASSET_NAMES_ZH[assetId] ?? assetId,
+        revision: revisions[assetId],
+        state: body.published ? "PUBLISHED" : "UNPUBLISHED"
+      } });
     }
     if (url.pathname === "/api/gongde/admin/files") {
       requireAdmin(request);
@@ -340,7 +372,7 @@ const server = createServer(async (request, response) => {
         if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
         const ids = Array.isArray(body.assetIds) ? body.assetIds : [];
         const expected = body.previewRevisions;
-        const revisions = packSigner.revisions();
+        const revisions = await availableAppearanceRevisions();
         if (ids.length < 1 || ids.length > 10 || !expected || typeof expected !== "object" ||
             ids.some((id) => typeof id !== "string" || !revisions[id] ||
               (expected as Record<string, unknown>)[id] !== revisions[id])) {

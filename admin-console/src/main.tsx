@@ -211,15 +211,33 @@ function OrderList() {
   </List>;
 }
 
-function AppearanceCatalogList() {
-  return <List title="官方形象库" actions={false} pagination={false} sort={{ field: "name", order: "ASC" }}>
-    <Datagrid bulkActionButtons={false}>
-      <TextField source="name" label="形象名称" />
-      <TextField source="assetId" label="形象 ID" />
-      <FunctionField label="资源版本" render={(record: any) => record.revision ? `${record.revision.slice(0, 12)}…` : "缺失"} />
-      <FunctionField label="状态" render={(record: any) => <Chip size="small" color={record.state === "PUBLISHED" ? "success" : "error"} label={record.state === "PUBLISHED" ? "已发布" : "资源缺失"} />} />
-    </Datagrid>
-  </List>;
+function OfficialAppearancePanel() {
+  const [items, setItems] = useState<any[]>([]);
+  const [failed, setFailed] = useState(false);
+  const [busyId, setBusyId] = useState("");
+  useEffect(() => {
+    request("/appearances").then((result) => setItems(result.data ?? [])).catch(() => setFailed(true));
+  }, []);
+  const togglePublished = async (item: any) => {
+    setBusyId(item.id);
+    try {
+      const result = await request(`/appearances/${encodeURIComponent(item.assetId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ published: item.state !== "PUBLISHED" })
+      });
+      setItems((current) => current.map((entry) => entry.id === item.id ? result.data : entry));
+    } finally {
+      setBusyId("");
+    }
+  };
+  return <Card sx={{ m: 2, mb: 0 }}>
+    <CardContent>
+      <Typography variant="overline" color="primary">官方形象库</Typography>
+      <Typography variant="h6">已发布形象</Typography>
+      <Typography variant="body2" color="text.secondary" mb={2}>这里展示官网当前使用的官方形象；下方可上传和管理独立形象包文件。</Typography>
+      {failed ? <Typography color="error">官方形象暂时无法读取。</Typography> : items.length === 0 ? <CircularProgress size={24} /> : <Stack gap={1}>{items.map((item) => <Box key={item.id} display="flex" alignItems="center" justifyContent="space-between" gap={2} py={0.5} borderBottom="1px solid rgba(41,35,28,.08)"><Box><Typography fontWeight={750}>{item.name}</Typography><Typography variant="caption" color="text.secondary">{item.assetId}</Typography></Box><Stack direction="row" alignItems="center" gap={1}><Chip size="small" color={item.state === "PUBLISHED" ? "success" : item.state === "UNPUBLISHED" ? "default" : "error"} label={item.state === "PUBLISHED" ? "已上架" : item.state === "UNPUBLISHED" ? "已下架" : "资源缺失"} /><Button size="small" variant="outlined" color={item.state === "PUBLISHED" ? "warning" : "primary"} disabled={item.state === "MISSING" || busyId === item.id} onClick={() => togglePublished(item)}>{busyId === item.id ? "处理中" : item.state === "PUBLISHED" ? "下架" : "重新上架"}</Button></Stack></Box>)}</Stack>}
+    </CardContent>
+  </Card>;
 }
 
 function OrderShow() {
@@ -252,21 +270,24 @@ function ManagedFileActions({ label }: { label: string }) {
 
 function ManagedFileList({ kind }: { kind: "appearance" | "installer" }) {
   const appearance = kind === "appearance";
-  return <List
-    title={appearance ? "形象包管理" : "安装包管理"}
-    actions={<ManagedFileActions label={appearance ? "上传形象包" : "上传安装包"} />}
-    pagination={false}
-    sort={{ field: "lastModified", order: "DESC" }}
-  >
-    <Datagrid bulkActionButtons={false}>
-      <TextField source="name" label="文件名" />
-      <FunctionField label="大小" render={(record: any) => fileSize(record.size)} />
-      <FunctionField label="下载量" render={(record: any) => record.downloads ?? 0} />
-      <DateField source="lastModified" label="更新时间" showTime emptyText="未知" />
-      <FunctionField label="公开地址" render={(record: any) => <a className="file-link" href={record.url} target="_blank" rel="noreferrer">打开</a>} />
-      <DeleteButton label="删除" mutationMode="pessimistic" confirmTitle="确认删除这个文件？" confirmContent="删除后官网对应下载会立即失效，此操作无法撤销。" />
-    </Datagrid>
-  </List>;
+  return <>
+    {appearance && <OfficialAppearancePanel />}
+    <List
+      title={appearance ? "形象包管理" : "安装包管理"}
+      actions={<ManagedFileActions label={appearance ? "上传形象包" : "上传安装包"} />}
+      pagination={false}
+      sort={{ field: "lastModified", order: "DESC" }}
+    >
+      <Datagrid bulkActionButtons={false}>
+        <TextField source="name" label="文件名" />
+        <FunctionField label="大小" render={(record: any) => fileSize(record.size)} />
+        <FunctionField label="下载量" render={(record: any) => record.downloads ?? 0} />
+        <DateField source="lastModified" label="更新时间" showTime emptyText="未知" />
+        <FunctionField label="公开地址" render={(record: any) => <a className="file-link" href={record.url} target="_blank" rel="noreferrer">打开</a>} />
+        <DeleteButton label="删除" mutationMode="pessimistic" confirmTitle="确认删除这个文件？" confirmContent="删除后官网对应下载会立即失效，此操作无法撤销。" />
+      </Datagrid>
+    </List>
+  </>;
 }
 
 function ManagedFileCreate({ kind }: { kind: "appearance" | "installer" }) {
@@ -291,11 +312,10 @@ function ManagedFileCreate({ kind }: { kind: "appearance" | "installer" }) {
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Admin title="牛马电子功德管理台" theme={theme} dataProvider={dataProvider} authProvider={authProvider} loginPage={LoginPage} dashboard={Dashboard} requireAuth disableTelemetry>
+    <Admin title="牛马电子功德管理台" theme={theme} dataProvider={dataProvider} authProvider={authProvider} loginPage={LoginPage} requireAuth disableTelemetry>
       <Resource name="reports" options={{ label: "数据报表" }} list={Dashboard} />
       <Resource name="orders" options={{ label: "有效订单" }} list={OrderList} show={OrderShow} />
-      <Resource name="appearances" options={{ label: "官方形象" }} list={AppearanceCatalogList} />
-      <Resource name="appearanceFiles" options={{ label: "独立形象包" }} list={() => <ManagedFileList kind="appearance" />} create={() => <ManagedFileCreate kind="appearance" />} />
+      <Resource name="appearanceFiles" options={{ label: "形象包管理" }} list={() => <ManagedFileList kind="appearance" />} create={() => <ManagedFileCreate kind="appearance" />} />
       <Resource name="installerFiles" options={{ label: "安装包" }} list={() => <ManagedFileList kind="installer" />} create={() => <ManagedFileCreate kind="installer" />} />
     </Admin>
   </React.StrictMode>

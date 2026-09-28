@@ -133,6 +133,24 @@ async function api(path, options = {}) {
   return body;
 }
 
+async function applyPublishedAppearances() {
+  try {
+    const current = await api('/api/gongde/appearance-revisions');
+    const publishedIds = new Set(Object.keys(current.revisions || {}));
+    packChoices.forEach((choice) => {
+      if (publishedIds.has(choice.dataset.assetId)) return;
+      choice.checked = false;
+      choice.disabled = true;
+      const card = choice.closest('.character-card');
+      if (card) card.hidden = true;
+    });
+    updatePackSelection();
+  } catch (_) {
+    // Keep the published static catalog visible when availability cannot be refreshed.
+  }
+}
+applyPublishedAppearances();
+
 function normalizeAccessCode(value) {
   return value.trim().toUpperCase().replace(/\\s+/g, '');
 }
