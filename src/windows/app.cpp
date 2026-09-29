@@ -827,7 +827,7 @@ void ShowPrivacyNotice(HWND owner) {
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.8.0";
+  const std::wstring version = L"0.8.1";
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
@@ -919,12 +919,16 @@ void PaintMeritCalendar(HWND window) {
     swprintf_s(key, L"%04d-%02d-%02d", gCalendar.year, gCalendar.month, day);
     const std::uint64_t value =
         key == gState.currentDay ? gState.todayTotal : ReadDailyTotal(key);
-    std::wstring text = std::to_wstring(value) +
-        (IsChineseUi() ? L"（" : L" (") +
-        (day < 10 ? L"0" : L"") + std::to_wstring(day) +
-        (IsChineseUi() ? L"）" : L")");
-    const float fontSize = text.size() > 12 ? 10.0f : (text.size() > 8 ? 11.0f : 15.0f);
-    DrawCalendarText(graphics, text, cell, fontSize, ink, true);
+    const std::wstring meritText = std::to_wstring(value);
+    const std::wstring dateText = (day < 10 ? L"0" : L"") + std::to_wstring(day);
+    const float meritSize = meritText.size() > 10 ? 10.0f :
+        (meritText.size() > 7 ? 12.0f : 15.0f);
+    DrawCalendarText(graphics, meritText,
+        Gdiplus::RectF(cell.X + 2, cell.Y + 5, cell.Width - 4, 22),
+        meritSize, ink, true);
+    DrawCalendarText(graphics, dateText,
+        Gdiplus::RectF(cell.X + 2, cell.Y + 27, cell.Width - 4, 16),
+        10, muted, false);
   }
   EndPaint(window, &paint);
 }

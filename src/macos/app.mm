@@ -540,11 +540,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(cell, 2, 3) xRadius:9 yRadius:9] fill];
     }
     unsigned long long value = self.controller.dailyTotals[key].unsignedLongLongValue;
-    NSString *text = IsChineseUI()
-        ? [NSString stringWithFormat:@"%llu（%02ld）", value, (long)day]
-        : [NSString stringWithFormat:@"%llu (%02ld)", value, (long)day];
-    CGFloat size = text.length > 12 ? 10 : (text.length > 8 ? 11 : 15);
-    [self drawText:text rect:NSInsetRect(cell, 2, 14) size:size color:ink weight:NSFontWeightSemibold];
+    NSString *meritText = [NSString stringWithFormat:@"%llu", value];
+    NSString *dateText = [NSString stringWithFormat:@"%02ld", (long)day];
+    CGFloat meritSize = meritText.length > 10 ? 10 : (meritText.length > 7 ? 12 : 15);
+    [self drawText:meritText
+              rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 5, NSWidth(cell) - 4, 22)
+              size:meritSize color:ink weight:NSFontWeightSemibold];
+    [self drawText:dateText
+              rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 27, NSWidth(cell) - 4, 16)
+              size:10 color:muted weight:NSFontWeightMedium];
   }
 }
 
@@ -1214,13 +1218,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
   alert.informativeText = UiText(
-      @"版本 0.8.0\n\n"
+      @"版本 0.8.1\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"官方网站：\n"
        @"https://gongde.zqscreen.cn/",
-      @"Version 0.8.0\n\n"
+      @"Version 0.8.1\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"
