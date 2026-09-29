@@ -45,8 +45,14 @@ if (-not (Test-Path $packTest)) {
 if (-not (Test-Path $packTest)) { throw "Could not locate appearance pack test" }
 $testInstallDir = Join-Path $fixtureDir "installed"
 New-Item -ItemType Directory -Force -Path $testInstallDir | Out-Null
-& $packTest $testInstallDir $fixturePack $batchArchive
-if ($LASTEXITCODE -ne 0) { throw "Appearance pack runtime test failed" }
+& $packTest $testInstallDir $fixturePack
+Write-Host "SINGLE_PACK_EXIT=$LASTEXITCODE"
+if ($LASTEXITCODE -ne 0) { throw "Single appearance pack runtime test failed" }
+$batchInstallDir = Join-Path $fixtureDir "installed-batch"
+New-Item -ItemType Directory -Force -Path $batchInstallDir | Out-Null
+& $packTest $batchInstallDir $fixturePack $batchArchive
+Write-Host "BATCH_PACK_EXIT=$LASTEXITCODE"
+if ($LASTEXITCODE -ne 0) { throw "Batch appearance pack runtime test failed" }
 $catInstallDir = Join-Path $fixtureDir "installed-lucky-cat"
 New-Item -ItemType Directory -Force -Path $catInstallDir | Out-Null
 & $packTest $catInstallDir $luckyCatPack
