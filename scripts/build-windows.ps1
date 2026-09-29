@@ -31,6 +31,7 @@ $batchArchive = Join-Path $fixtureDir "two-packs.nmgpacks"
 if (Test-Path $batchArchive) { Remove-Item $batchArchive -Force }
 Compress-Archive -Path (Join-Path $batchSource "*.nmgpack") -DestinationPath $batchZip -Force
 Move-Item $batchZip $batchArchive -Force
+python -c "import zipfile,sys; print('BATCH_ENTRIES=' + ','.join(zipfile.ZipFile(sys.argv[1]).namelist()))" $batchArchive
 
 cmake -S $repoRoot -B $BuildDir -G $gen -A x64
 if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }

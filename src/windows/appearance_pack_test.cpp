@@ -66,12 +66,22 @@ int wmain(int argc, wchar_t** argv) {
   }
   if (ok && argc == 4) {
     std::vector<std::string> importedIds;
-    ok = catalog.InstallBatch(argv[3], directory, &importedIds, &error);
-    ok = ok && importedIds.size() == 2 && catalog.packs().size() == 2;
+    const bool firstBatch = catalog.InstallBatch(argv[3], directory, &importedIds, &error);
+    ok = firstBatch && importedIds.size() == 2 && catalog.packs().size() == 2;
+    if (!ok) {
+      std::cerr << "BATCH_FIRST result=" << firstBatch
+                << " imported=" << importedIds.size()
+                << " installed=" << catalog.packs().size() << "\n";
+    }
     if (ok) {
       importedIds.clear();
-      ok = catalog.InstallBatch(argv[3], directory, &importedIds, &error);
-      ok = ok && importedIds.size() == 2 && catalog.packs().size() == 2;
+      const bool again = catalog.InstallBatch(argv[3], directory, &importedIds, &error);
+      ok = again && importedIds.size() == 2 && catalog.packs().size() == 2;
+      if (!ok) {
+        std::cerr << "BATCH_REIMPORT result=" << again
+                  << " imported=" << importedIds.size()
+                  << " installed=" << catalog.packs().size() << "\n";
+      }
     }
   }
   ok = ok && catalog.Delete(firstId, &error) &&
