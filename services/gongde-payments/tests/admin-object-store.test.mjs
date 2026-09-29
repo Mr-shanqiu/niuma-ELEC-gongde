@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { AdminObjectStore, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "../dist/admin/object-store.js";
@@ -34,6 +35,12 @@ class MemoryCos {
   deleteObject(params, callback) {
     this.objects.delete(params.Key);
     callback(null, {});
+  }
+
+  getObject(params, callback) {
+    const object = this.objects.get(params.Key);
+    if (!object) return callback(new Error("NoSuchKey"), {});
+    callback(null, { Body: Buffer.from(object.body) });
   }
 }
 
@@ -123,4 +130,29 @@ test("download events remain hidden from installer listings and summarize by tim
     { fileName: "niuma-merit-macos-0.8.0.dmg", total: 2, period: 1 },
     { fileName: "niuma-merit-windows-0.8.0-setup.exe", total: 1, period: 1 }
   ]);
+});
+
+test("release manifest is calculated from two existing installers, never supplied hashes", async () => {
+  const { cos, store } = fixture();
+  const macName = "niuma-merit-macos-0.8.2.dmg";
+  const winName = "niuma-merit-windows-0.8.2-setup.exe";
+  const mac = Buffer.from("mac-installer");
+  const win = Buffer.from("windows-installer");
+  await store.put("installer", macName, mac, "application/x-apple-diskimage");
+  await assert.rejects(() => store.publishInstallerManifest("0.8.2"), /NoSuchKey/u);
+  assert.equal(cos.objects.has("DOWNLOADS.json"), false);
+  await store.put("installer", winName, win, "application/vnd.microsoft.portable-executable");
+  await assert.rejects(() => store.publishInstallerManifest("../0.8.2"), /admin_release_version_invalid/u);
+  const summary = await store.publishInstallerManifest("0.8.2");
+  const macSha = createHash("sha256").update(mac).digest("hex");
+  const winSha = createHash("sha256").update(win).digest("hex");
+  assert.deepEqual(summary.files, [
+    { name: macName, bytes: mac.length, sha256: macSha },
+    { name: winName, bytes: win.length, sha256: winSha }
+  ]);
+  const manifest = JSON.parse(cos.objects.get("DOWNLOADS.json").body.toString());
+  assert.deepEqual(manifest.files.map(({ name, bytes, sha256 }) => ({ name, bytes, sha256 })), summary.files);
+  assert.equal(cos.objects.get("SHA256SUMS.txt").body.toString(),
+    `${macSha}  ${macName}\n${winSha}  ${winName}\n`);
+  assert.equal(cos.objects.get("DOWNLOADS.json").contentType, "application/json; charset=utf-8");
 });

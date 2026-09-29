@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import COS from "cos-nodejs-sdk-v5";
 import { loadRuntimeSecret } from "../payments/runtime-secret.js";
 
@@ -17,6 +17,11 @@ export interface AdminDownloadSummary {
   total: number;
   period: number;
   byFile: Array<{ fileName: string; total: number; period: number }>;
+}
+
+export interface InstallerManifestSummary {
+  version: string;
+  files: Array<{ name: string; bytes: number; sha256: string }>;
 }
 
 type CosClient = Pick<COS, "getBucket" | "putObject" | "deleteObject"> & {
@@ -160,6 +165,54 @@ export class AdminObjectStore {
         Key: `${prefixes[kind]}${name}`
       }, (error) => error ? reject(error) : resolve());
     });
+  }
+
+  async publishInstallerManifest(version: string): Promise<InstallerManifestSummary> {
+    if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error("admin_release_version_invalid");
+    const definitions = [
+      { name: `niuma-merit-macos-${version}.dmg`, type: "application/x-apple-diskimage",
+        platform: "macOS", architecture: "universal2-arm64-x86_64", notarization: "not-notarized" },
+      { name: `niuma-merit-windows-${version}-setup.exe`, type: "application/vnd.microsoft.portable-executable",
+        platform: "Windows", architecture: "x86_64", notarization: "not-applicable" }
+    ] as const;
+    const files = await Promise.all(definitions.map(async (definition) => {
+      const object = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
+        this.#cos.getObject({
+          Bucket: this.configuration.bucket,
+          Region: this.configuration.region,
+          Key: definition.name
+        }, (error, data) => error ? reject(error) : resolve(data));
+      });
+      const body = Buffer.isBuffer(object.Body) ? object.Body : Buffer.from(object.Body ?? "");
+      if (body.length === 0 || body.length > 80 * 1024 * 1024) throw new Error("admin_installer_invalid");
+      return {
+        ...definition,
+        bytes: body.length,
+        sha256: createHash("sha256").update(body).digest("hex"),
+        version,
+        signature: "unsigned",
+        url: this.publicUrl("installer", definition.name)
+      };
+    }));
+    const checksum = Buffer.from(files.map((file) => `${file.sha256}  ${file.name}`).join("\n") + "\n");
+    const manifest = Buffer.from(JSON.stringify({
+      baseUrl: `${this.configuration.publicBaseUrl}/`,
+      generatedAt: new Date().toISOString(),
+      files
+    }, null, 2) + "\n");
+    const putMetadata = (name: string, body: Buffer, contentType: string) => new Promise<void>((resolve, reject) => {
+      this.#cos.putObject({
+        Bucket: this.configuration.bucket,
+        Region: this.configuration.region,
+        Key: name,
+        Body: body,
+        ContentLength: body.length,
+        ContentType: contentType
+      }, (error) => error ? reject(error) : resolve());
+    });
+    await putMetadata("SHA256SUMS.txt", checksum, "text/plain; charset=utf-8");
+    await putMetadata("DOWNLOADS.json", manifest, "application/json; charset=utf-8");
+    return { version, files: files.map(({ name, bytes, sha256 }) => ({ name, bytes, sha256 })) };
   }
 
   async publishedAssetIds(defaultIds: readonly string[]): Promise<string[]> {

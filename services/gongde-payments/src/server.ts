@@ -345,6 +345,15 @@ const server = createServer(async (request, response) => {
       }
       return json(response, 405, { error: "method_not_allowed" });
     }
+    if (request.method === "POST" && url.pathname === "/api/gongde/admin/download-manifest") {
+      requireAdmin(request);
+      if (!adminObjectStore) return json(response, 503, { error: "admin_object_store_not_enabled" });
+      const version = url.searchParams.get("version") ?? "";
+      if (!/^\d+\.\d+\.\d+$/u.test(version)) return json(response, 400, { error: "admin_release_version_invalid" });
+      const data = await adminObjectStore.publishInstallerManifest(version);
+      audit("download_manifest_published", { version });
+      return json(response, 200, { data });
+    }
     const publicDownloadMatch = url.pathname.match(/^\/api\/gongde\/downloads\/([A-Za-z0-9][A-Za-z0-9._-]{0,119})$/u);
     if (request.method === "GET" && publicDownloadMatch) {
       if (!adminObjectStore) return json(response, 503, { error: "download_store_not_enabled" });
