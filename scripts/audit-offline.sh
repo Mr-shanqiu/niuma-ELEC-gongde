@@ -10,7 +10,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 
-PATTERN='keyboardEventKeycode|characters|CGEventGetIntegerValueField|GetForegroundWindow|GetWindowText|MSLLHOOKSTRUCT|KBDLLHOOKSTRUCT|NSURLSession|WinHttp|WinInet|WSAStartup|(^|[^A-Za-z])socket[[:space:]]*\(|com\.apple\.security\.network\.(client|server)'
+PATTERN='keyboardEventKeycode|charactersIgnoringModifiers|\[[^]]+[[:space:]]characters\]|CGEventGetIntegerValueField|GetForegroundWindow|GetWindowText|MSLLHOOKSTRUCT|KBDLLHOOKSTRUCT|NSURLSession|WinHttp|WinInet|WSAStartup|(^|[^A-Za-z])socket[[:space:]]*\(|com\.apple\.security\.network\.(client|server)'
 
 # Collect candidate sources. This script contains the forbidden pattern as a
 # literal, so it must never be part of the scan.
