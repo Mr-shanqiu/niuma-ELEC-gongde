@@ -1174,6 +1174,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [alert addButtonWithTitle:UiText(@"确认", @"Confirm")];
     [alert addButtonWithTitle:UiText(@"取消", @"Cancel")];
     [alert addButtonWithTitle:UiText(@"删除所选本地形象", @"Remove Selected Pack")];
+    [alert addButtonWithTitle:UiText(@"去官网查看更多形象", @"See More Appearances Online")];
     NSModalResponse response = [alert runModal];
     if (response == NSAlertFirstButtonReturn) {
       [self applyAppearanceId:self.pendingAppearanceId];
@@ -1183,6 +1184,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       return;
     }
     if (response == NSAlertSecondButtonReturn) return;
+    if (response == NSAlertThirdButtonReturn + 1) {
+      [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://gongde.zqscreen.cn/#characters"]];
+      continue;
+    }
     NMAppearancePack *pack = [self appearancePackWithId:self.pendingAppearanceId];
     if (!pack) {
       NSBeep();

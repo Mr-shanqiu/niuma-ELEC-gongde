@@ -971,6 +971,7 @@ void ShowMeritCalendar(HWND owner) {
 }
 
 constexpr int kPickerDeleteButton = 1001;
+constexpr int kPickerWebsiteButton = 1002;
 
 int PickerItemCount() {
   return 1 + static_cast<int>(gAppearanceCatalog.packs().size());
@@ -1066,17 +1067,22 @@ LRESULT CALLBACK PickerWindowProcedure(
   switch (message) {
     case WM_CREATE: {
       const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+      CreateWindowW(L"BUTTON", UiText(L"去官网查看更多形象", L"See More Appearances Online"),
+          WS_CHILD | WS_VISIBLE,
+          ScaleDip(16, dpi), ScaleDip(456, dpi), ScaleDip(328, dpi), ScaleDip(30, dpi),
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPickerWebsiteButton)),
+          GetModuleHandleW(nullptr), nullptr);
       CreateWindowW(L"BUTTON", UiText(L"删除所选", L"Delete Selected"),
           WS_CHILD | WS_VISIBLE,
-          ScaleDip(16, dpi), ScaleDip(456, dpi), ScaleDip(112, dpi), ScaleDip(30, dpi),
+          ScaleDip(16, dpi), ScaleDip(492, dpi), ScaleDip(112, dpi), ScaleDip(30, dpi),
           window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPickerDeleteButton)),
           GetModuleHandleW(nullptr), nullptr);
       CreateWindowW(L"BUTTON", UiText(L"确认", L"Confirm"), WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-          ScaleDip(188, dpi), ScaleDip(456, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
+          ScaleDip(188, dpi), ScaleDip(492, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
           window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
           GetModuleHandleW(nullptr), nullptr);
       CreateWindowW(L"BUTTON", UiText(L"取消", L"Cancel"), WS_CHILD | WS_VISIBLE,
-          ScaleDip(272, dpi), ScaleDip(456, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
+          ScaleDip(272, dpi), ScaleDip(492, dpi), ScaleDip(72, dpi), ScaleDip(30, dpi),
           window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
           GetModuleHandleW(nullptr), nullptr);
       return 0;
@@ -1106,6 +1112,11 @@ LRESULT CALLBACK PickerWindowProcedure(
       return 0;
     }
     case WM_COMMAND:
+      if (LOWORD(wParam) == kPickerWebsiteButton) {
+        ShellExecuteW(window, L"open", L"https://gongde.zqscreen.cn/#characters",
+            nullptr, nullptr, SW_SHOWNORMAL);
+        return 0;
+      }
       if (LOWORD(wParam) == kPickerDeleteButton) {
         if (gPicker.pendingIndex == 0) {
           MessageBoxW(window,
@@ -1158,7 +1169,7 @@ void ShowAppearancePicker(HWND owner) {
   gPicker.scrollRow = std::max(0, gPicker.pendingIndex / 2 - 2);
   gPicker.confirmed = false;
   const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
-  RECT desired = {0, 0, ScaleDip(360, dpi), ScaleDip(502, dpi)};
+  RECT desired = {0, 0, ScaleDip(360, dpi), ScaleDip(538, dpi)};
   AdjustWindowRectEx(&desired, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_TOOLWINDOW);
   const int width = desired.right - desired.left;
   const int height = desired.bottom - desired.top;
