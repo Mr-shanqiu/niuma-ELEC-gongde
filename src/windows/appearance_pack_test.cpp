@@ -99,6 +99,10 @@ int wmain(int argc, wchar_t** argv) {
     if (!ok) std::cerr << "FINAL_DELETE result=" << deleted
                        << " installed=" << catalog.packs().size() << "\n";
   }
+  if (ok && argc == 4) {
+    const std::string remainingId = catalog.packs().front()->id;
+    ok = catalog.Delete(remainingId, &error) && catalog.packs().empty();
+  }
   if (!ok) std::wcerr << L"Appearance pack test failed: " << error << L"\n";
   if (ok) std::cout << "PASS " << firstId << " install/reimport/render/clip/delete\n";
   Gdiplus::GdiplusShutdown(token);
