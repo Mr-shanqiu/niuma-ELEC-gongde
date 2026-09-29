@@ -93,8 +93,12 @@ int wmain(int argc, wchar_t** argv) {
       }
     }
   }
-  ok = ok && catalog.Delete(firstId, &error) &&
-      catalog.packs().size() == (argc == 4 ? 1u : 0u);
+  if (ok) {
+    const bool deleted = catalog.Delete(firstId, &error);
+    ok = deleted && catalog.packs().size() == (argc == 4 ? 1u : 0u);
+    if (!ok) std::cerr << "FINAL_DELETE result=" << deleted
+                       << " installed=" << catalog.packs().size() << "\n";
+  }
   if (!ok) std::wcerr << L"Appearance pack test failed: " << error << L"\n";
   if (ok) std::cout << "PASS " << firstId << " install/reimport/render/clip/delete\n";
   Gdiplus::GdiplusShutdown(token);

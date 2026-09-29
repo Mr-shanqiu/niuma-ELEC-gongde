@@ -1067,6 +1067,7 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
       }
       return false;
     }
+    if (!Reload(directory, error)) return false;
     installedIds->push_back(installedId);
   }
   return true;
