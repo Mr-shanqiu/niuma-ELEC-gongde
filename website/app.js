@@ -161,6 +161,17 @@ function closeModal(modal, returnFocus) {
   returnFocus.focus();
 }
 
+function pendingCheckout() {
+  try { return JSON.parse(sessionStorage.getItem('niuma-pending-checkout') || 'null'); }
+  catch { return null; }
+}
+
+function abandonPendingCheckout(statusNode, message) {
+  if (!pendingCheckout()) return;
+  sessionStorage.removeItem('niuma-pending-checkout');
+  statusNode.textContent = message;
+}
+
 function enablePaymentChannels() {
   paymentChannels.forEach((item) => { item.disabled = false; });
   purchaseTotal.textContent = accessMode === 'existing' ? '¥0.20' : '¥1.00';
@@ -225,7 +236,10 @@ packChoices.forEach((choice) => choice.addEventListener('change', () => {
   updatePackSelection();
 }));
 updatePackSelection();
-paymentModal.querySelectorAll('[data-payment-close]').forEach((node) => node.addEventListener('click', () => closeModal(paymentModal, purchaseButton)));
+paymentModal.querySelectorAll('[data-payment-close]').forEach((node) => node.addEventListener('click', () => {
+  sessionStorage.removeItem('niuma-pending-checkout');
+  closeModal(paymentModal, purchaseButton);
+}));
 
 accessNew.addEventListener('click', () => selectAccessMode('new'));
 accessRestore.addEventListener('click', async () => {
@@ -324,6 +338,8 @@ accessHistory.addEventListener('click', async () => {
 
 async function pollOrder(pending, statusNode) {
   for (let attempt = 0; attempt < 300; attempt += 1) {
+    const currentPending = pendingCheckout();
+    if (!currentPending || currentPending.orderNo !== pending.orderNo) return;
     await new Promise((resolve) => setTimeout(resolve, 3000));
     try {
       const result = await api(`/api/gongde/orders/${pending.orderNo}`, { headers: { authorization: `Bearer ${pending.buyerToken}` } });
@@ -380,7 +396,10 @@ async function startCheckout({ channel, purchaseKind, amountFen, statusNode }) {
     buyerToken: checkout.buyerToken,
     accessCode: checkout.accessCode || null,
     purchaseKind,
-    assetIds: checkout.assetIds
+    assetIds: checkout.assetIds,
+    amountFen: amountFen || checkout.amountFen,
+    checkoutKind: checkout.checkout.kind,
+    createdAt: Date.now()
   };
   sessionStorage.setItem('niuma-pending-checkout', JSON.stringify(pending));
   if (checkout.checkout.kind === 'alipay-page') {
@@ -442,13 +461,19 @@ supportOpen.addEventListener('click', () => {
   supportAmounts[0].focus();
   supportChannels.forEach((item) => { item.disabled = false; });
 });
-supportModal.querySelectorAll('[data-support-close]').forEach((node) => node.addEventListener('click', () => closeModal(supportModal, supportOpen)));
+supportModal.querySelectorAll('[data-support-close]').forEach((node) => node.addEventListener('click', () => {
+  sessionStorage.removeItem('niuma-pending-checkout');
+  closeModal(supportModal, supportOpen);
+}));
 supportAmounts.forEach((button) => button.addEventListener('click', () => {
   supportAmount = Number(button.dataset.supportAmount);
   supportAmounts.forEach((item) => item.classList.toggle('selected', item === button));
   document.querySelector('#support-total').textContent = `¥${(supportAmount / 100).toFixed(2)}`;
+  abandonPendingCheckout(supportStatus, localize(`已切换为 ¥${(supportAmount / 100).toFixed(2)}，请重新确认赞赏。`, `Amount changed to ¥${(supportAmount / 100).toFixed(2)}. Confirm again to create a new QR code.`));
+  supportSubmit.disabled = !supportChannel;
 }));
 supportChannels.forEach((button) => button.addEventListener('click', () => {
+  abandonPendingCheckout(supportStatus, localize('支付方式已切换，请重新确认赞赏。', 'Payment method changed. Confirm again to create a new payment order.'));
   supportChannel = button.dataset.supportChannel;
   supportChannels.forEach((item) => item.classList.toggle('selected', item === button));
   supportSubmit.disabled = false;
@@ -481,14 +506,18 @@ if (paymentTestMode) {
 
 if (!paymentTestMode) {
   try {
-    const pending = JSON.parse(sessionStorage.getItem('niuma-pending-checkout') || 'null');
+    const pending = pendingCheckout();
     if (pending?.orderNo && pending?.buyerToken) {
-      const statusNode = pending.purchaseKind === 'support' ? supportStatus : paymentStatus;
-      const modal = pending.purchaseKind === 'support' ? supportModal : paymentModal;
-      modal.hidden = false;
-      document.body.classList.add('modal-open');
-      statusNode.textContent = localize('正在查询刚才的订单…', 'Checking your recent order…');
-      void pollOrder(pending, statusNode);
+      if (pending.checkoutKind === 'alipay-page') {
+        const statusNode = pending.purchaseKind === 'support' ? supportStatus : paymentStatus;
+        const modal = pending.purchaseKind === 'support' ? supportModal : paymentModal;
+        modal.hidden = false;
+        document.body.classList.add('modal-open');
+        statusNode.textContent = localize('正在查询支付宝订单…', 'Checking your Alipay order…');
+        void pollOrder(pending, statusNode);
+      } else {
+        sessionStorage.removeItem('niuma-pending-checkout');
+      }
     }
   } catch {
     sessionStorage.removeItem('niuma-pending-checkout');
