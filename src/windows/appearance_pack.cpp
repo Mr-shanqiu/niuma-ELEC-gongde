@@ -1038,7 +1038,14 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
       SetError(error, L"无法创建批次临时文件。");
       return false;
     }
-    HANDLE file = CreateFileW(temporary, GENERIC_WRITE, 0, nullptr,
+    const std::wstring packTemporary = std::wstring(temporary) + L".nmgpack";
+    if (!MoveFileW(temporary, packTemporary.c_str())) {
+      DeleteFileW(temporary);
+      mz_free(bytes);
+      SetError(error, L"无法准备批次临时形象包。");
+      return false;
+    }
+    HANDLE file = CreateFileW(packTemporary.c_str(), GENERIC_WRITE, 0, nullptr,
                               TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     DWORD written = 0;
     const BOOL saved = file != INVALID_HANDLE_VALUE &&
@@ -1046,13 +1053,13 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
     mz_free(bytes);
     if (!saved || written != extractedSize) {
-      DeleteFileW(temporary);
+      DeleteFileW(packTemporary.c_str());
       SetError(error, L"无法保存批次中的临时形象包。");
       return false;
     }
     std::string installedId;
-    const bool installed = Install(temporary, directory, &installedId, error);
-    DeleteFileW(temporary);
+    const bool installed = Install(packTemporary, directory, &installedId, error);
+    DeleteFileW(packTemporary.c_str());
     if (!installed) {
       if (error != nullptr && !installedIds->empty()) {
         *error = L"已导入 " + std::to_wstring(installedIds->size()) +
