@@ -762,12 +762,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)application:(NSApplication *)application openFiles:(NSArray<NSString *> *)filenames {
   NSString *installedId = nil;
+  NSUInteger installedCount = 0;
   for (NSString *filename in filenames) {
     NSError *error = nil;
-    NMAppearancePack *pack = [NMAppearancePackStore
-        installArchiveAtURL:[NSURL fileURLWithPath:filename]
-                      error:&error];
-    if (!pack) {
+    NSURL *source = [NSURL fileURLWithPath:filename];
+    NSArray<NMAppearancePack *> *imported = nil;
+    if ([[source.pathExtension lowercaseString] isEqualToString:@"nmgpacks"]) {
+      imported = [NMAppearancePackStore installBatchArchiveAtURL:source error:&error];
+    } else {
+      NMAppearancePack *pack = [NMAppearancePackStore installArchiveAtURL:source error:&error];
+      if (pack) imported = @[pack];
+    }
+    if (!imported.count) {
       NSAlert *alert = [[NSAlert alloc] init];
       alert.alertStyle = NSAlertStyleWarning;
       alert.messageText = UiText(@"无法导入形象包", @"Unable to Import Appearance Pack");
@@ -776,10 +782,20 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       [application replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
       return;
     }
-    installedId = pack.identifier;
+    installedCount += imported.count;
+    installedId = imported.lastObject.identifier;
   }
   [application replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
   [self reloadAppearancePacks];
+  if (installedCount > 1) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = UiText(@"整批形象已导入", @"Appearance Batch Imported");
+    alert.informativeText = [NSString stringWithFormat:
+        UiText(@"已导入 %lu 个形象。现在可以选择要显示的小伙伴。",
+               @"Imported %lu packs. Choose the companion to display."),
+        (unsigned long)installedCount];
+    [alert runModal];
+  }
   if (installedId.length) {
     self.suggestedAppearanceId = installedId;
     [self showAppearancePicker:nil];
@@ -1218,13 +1234,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
   alert.informativeText = UiText(
-      @"版本 0.8.1\n\n"
+      @"版本 0.8.2\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"官方网站：\n"
        @"https://gongde.zqscreen.cn/",
-      @"Version 0.8.1\n\n"
+      @"Version 0.8.2\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"

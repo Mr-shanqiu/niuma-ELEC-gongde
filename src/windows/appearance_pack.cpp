@@ -24,6 +24,8 @@ namespace niuma {
 namespace {
 
 constexpr ULONGLONG kMaximumPackBytes = 50ULL * 1024ULL * 1024ULL;
+constexpr ULONGLONG kMaximumBatchBytes = 100ULL * 1024ULL * 1024ULL;
+constexpr mz_uint kMaximumBatchCount = 10;
 constexpr size_t kMaximumManifestBytes = 64ULL * 1024ULL;
 constexpr size_t kMaximumPngBytes = 32ULL * 1024ULL * 1024ULL;
 constexpr size_t kMaximumFiles = 8;
@@ -946,6 +948,123 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
   return Reload(directory, error);
 }
 
+bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
+                                     const std::wstring& directory,
+                                     std::vector<std::string>* installedIds,
+                                     std::wstring* error) {
+  if (installedIds == nullptr || !IsAppearanceBatchPath(sourcePath)) {
+    SetError(error, L"请选择 .nmgpacks 批次文件。");
+    return false;
+  }
+  installedIds->clear();
+  WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+  if (!GetFileAttributesExW(sourcePath.c_str(), GetFileExInfoStandard, &attributes) ||
+      (attributes.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+    SetError(error, L"批次文件无效。");
+    return false;
+  }
+  const ULONGLONG size =
+      (static_cast<ULONGLONG>(attributes.nFileSizeHigh) << 32) | attributes.nFileSizeLow;
+  if (size == 0 || size > kMaximumBatchBytes) {
+    SetError(error, L"批次文件不能超过 100MB。");
+    return false;
+  }
+  const std::string utf8Path = WideToUtf8(sourcePath);
+  mz_zip_archive archive = {};
+  if (utf8Path.empty() || !mz_zip_reader_init_file(&archive, utf8Path.c_str(), 0)) {
+    SetError(error, L"批次文件不是有效的压缩文件。");
+    return false;
+  }
+  struct BatchArchiveGuard {
+    mz_zip_archive* archive;
+    ~BatchArchiveGuard() { mz_zip_reader_end(archive); }
+  } guard{&archive};
+  if (archive.m_total_files < 2 || archive.m_total_files > kMaximumBatchCount ||
+      !mz_zip_validate_archive(&archive, 0)) {
+    SetError(error, L"批次必须包含 2 至 10 个有效形象包。");
+    return false;
+  }
+  std::set<std::string> seen;
+  mz_uint64 totalUncompressed = 0;
+  for (mz_uint index = 0; index < archive.m_total_files; ++index) {
+    mz_zip_archive_file_stat stat = {};
+    if (!mz_zip_reader_file_stat(&archive, index, &stat) || stat.m_is_directory ||
+        stat.m_uncomp_size == 0 || stat.m_uncomp_size > kMaximumPackBytes) {
+      SetError(error, L"批次中的形象包文件无效。");
+      return false;
+    }
+    const std::string name(stat.m_filename);
+    const mz_uint32 unixMode = stat.m_external_attr >> 16;
+    if (name.size() < 9 || name.size() > 180 ||
+        name.substr(name.size() - 8) != ".nmgpack" ||
+        name.front() == '.' || name.find("..") != std::string::npos ||
+        (unixMode & 0170000U) == 0120000U ||
+        !std::all_of(name.begin(), name.end(), [](unsigned char ch) {
+          return std::isalnum(ch) || ch == '.' || ch == '_' || ch == '-';
+        })) {
+      SetError(error, L"批次包含危险路径或不支持的文件。");
+      return false;
+    }
+    std::string lowerName = name;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (!seen.insert(lowerName).second) {
+      SetError(error, L"批次包含重复形象包文件。");
+      return false;
+    }
+    totalUncompressed += stat.m_uncomp_size;
+    if (totalUncompressed > kMaximumBatchBytes) {
+      SetError(error, L"批次解压数据超过 100MB。");
+      return false;
+    }
+  }
+  CreateDirectoryW(directory.c_str(), nullptr);
+  for (mz_uint index = 0; index < archive.m_total_files; ++index) {
+    mz_zip_archive_file_stat stat = {};
+    if (!mz_zip_reader_file_stat(&archive, index, &stat)) {
+      SetError(error, L"无法读取批次形象包。");
+      return false;
+    }
+    size_t extractedSize = 0;
+    void* bytes = mz_zip_reader_extract_to_heap(&archive, index, &extractedSize, 0);
+    if (bytes == nullptr || extractedSize != stat.m_uncomp_size) {
+      if (bytes != nullptr) mz_free(bytes);
+      SetError(error, L"批次形象包解压失败。");
+      return false;
+    }
+    wchar_t temporary[MAX_PATH] = {};
+    if (!GetTempFileNameW(directory.c_str(), L"nmb", 0, temporary)) {
+      mz_free(bytes);
+      SetError(error, L"无法创建批次临时文件。");
+      return false;
+    }
+    HANDLE file = CreateFileW(temporary, GENERIC_WRITE, 0, nullptr,
+                              TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    DWORD written = 0;
+    const BOOL saved = file != INVALID_HANDLE_VALUE &&
+        WriteFile(file, bytes, static_cast<DWORD>(extractedSize), &written, nullptr);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    mz_free(bytes);
+    if (!saved || written != extractedSize) {
+      DeleteFileW(temporary);
+      SetError(error, L"无法保存批次中的临时形象包。");
+      return false;
+    }
+    std::string installedId;
+    const bool installed = Install(temporary, directory, &installedId, error);
+    DeleteFileW(temporary);
+    if (!installed) {
+      if (error != nullptr && !installedIds->empty()) {
+        *error = L"已导入 " + std::to_wstring(installedIds->size()) +
+                 L" 个形象，其余未完成：" + *error;
+      }
+      return false;
+    }
+    installedIds->push_back(installedId);
+  }
+  return true;
+}
+
 bool AppearanceCatalog::Delete(const std::string& id, std::wstring* error) {
   AppearancePack* pack = Find(id);
   if (pack == nullptr) return true;
@@ -976,12 +1095,24 @@ bool IsAppearancePackPath(const std::wstring& path) {
   return extension == L".nmgpack";
 }
 
+bool IsAppearanceBatchPath(const std::wstring& path) {
+  if (path.size() < 9) return false;
+  std::wstring extension = path.substr(path.size() - 9);
+  std::transform(extension.begin(), extension.end(), extension.begin(),
+                 [](wchar_t character) { return std::towlower(character); });
+  return extension == L".nmgpacks";
+}
+
 bool RegisterAppearancePackAssociation(const std::wstring& executable,
                                        std::wstring* error) {
   const wchar_t* extensionKey = L"Software\\Classes\\.nmgpack";
   const wchar_t* classKey = L"Software\\Classes\\NiuMaMerit.AppearancePack";
   const wchar_t* commandKey =
       L"Software\\Classes\\NiuMaMerit.AppearancePack\\shell\\open\\command";
+  const wchar_t* batchExtensionKey = L"Software\\Classes\\.nmgpacks";
+  const wchar_t* batchClassKey = L"Software\\Classes\\NiuMaMerit.AppearanceBatch";
+  const wchar_t* batchCommandKey =
+      L"Software\\Classes\\NiuMaMerit.AppearanceBatch\\shell\\open\\command";
   HKEY key = nullptr;
   auto writeDefault = [&](const wchar_t* path, const std::wstring& value) {
     if (RegCreateKeyExW(HKEY_CURRENT_USER, path, 0, nullptr, 0, KEY_SET_VALUE,
@@ -996,7 +1127,10 @@ bool RegisterAppearancePackAssociation(const std::wstring& executable,
   const std::wstring command = L"\"" + executable + L"\" \"%1\"";
   if (!writeDefault(extensionKey, L"NiuMaMerit.AppearancePack") ||
       !writeDefault(classKey, L"NiuMa Merit Appearance Pack") ||
-      !writeDefault(commandKey, command)) {
+      !writeDefault(commandKey, command) ||
+      !writeDefault(batchExtensionKey, L"NiuMaMerit.AppearanceBatch") ||
+      !writeDefault(batchClassKey, L"NiuMa Merit Appearance Batch") ||
+      !writeDefault(batchCommandKey, command)) {
     if (key != nullptr) RegCloseKey(key);
     SetError(error, L"无法注册形象包文件类型。");
     return false;

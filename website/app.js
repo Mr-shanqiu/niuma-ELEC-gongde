@@ -86,7 +86,9 @@ const paymentSubmit = paymentModal.querySelector('.payment-submit');
 const paymentChannels = [...paymentModal.querySelectorAll('[data-channel]')];
 const purchaseTotal = document.querySelector('#purchase-total');
 const packChoices = [...document.querySelectorAll('[data-asset-id]')];
+const maxPacksPerBatch = 5;
 const selectedPackCount = document.querySelector('#selected-pack-count');
+const selectionFeedback = document.querySelector('#selection-feedback');
 const modalSelectedCount = document.querySelector('#modal-selected-count');
 const selectedPackList = document.querySelector('#selected-pack-list');
 const accessCodeInput = paymentModal.querySelector('.access-code-input');
@@ -108,7 +110,7 @@ function selectedAssetIds() {
 function updatePackSelection() {
   const selected = packChoices.filter((choice) => choice.checked);
   if (selectedPackCount) selectedPackCount.textContent = String(selected.length);
-  if (modalSelectedCount) modalSelectedCount.textContent = localize(`已选择 ${selected.length} / 10`, `${selected.length} / 10 selected`);
+  if (modalSelectedCount) modalSelectedCount.textContent = localize(`已选择 ${selected.length} / ${maxPacksPerBatch}`, `${selected.length} / ${maxPacksPerBatch} selected`);
   if (selectedPackList) selectedPackList.replaceChildren(...selected.map((choice) => {
     const item = document.createElement('li');
     const heading = choice.closest('.character-card')?.querySelector('h3');
@@ -202,7 +204,7 @@ async function restoreAccess(code, quiet = false) {
   accessNew.classList.remove('selected');
   accessRestore.classList.add('selected');
   enablePaymentChannels();
-  if (!quiet) paymentStatus.textContent = localize('权益已恢复。本批最多 10 个形象包，整批 ¥0.20。', 'Access restored. This batch of up to 10 packs costs ¥0.20.');
+  if (!quiet) paymentStatus.textContent = localize('权益已恢复。本批最多 5 个形象包，整批 ¥0.20。', 'Access restored. This batch of up to 5 packs costs ¥0.20.');
   return result;
 }
 
@@ -232,7 +234,12 @@ async function openPaymentModal() {
 const purchaseButton = document.querySelector('.purchase-button');
 purchaseButton.addEventListener('click', openPaymentModal);
 packChoices.forEach((choice) => choice.addEventListener('change', () => {
-  if (selectedAssetIds().length > 10) choice.checked = false;
+  if (selectedAssetIds().length > maxPacksPerBatch) {
+    choice.checked = false;
+    selectionFeedback.textContent = localize('每批最多 5 个。请先取消一个再选择。', 'Up to 5 per batch. Remove one before choosing another.');
+  } else {
+    selectionFeedback.textContent = '';
+  }
   updatePackSelection();
 }));
 updatePackSelection();
@@ -273,14 +280,14 @@ async function downloadPack(pending, accessCode = '') {
   const headers = accessCode
     ? { 'x-gongde-access-code': accessCode }
     : { authorization: `Bearer ${pending.buyerToken}` };
-  const response = await fetch(`/api/gongde/orders/${pending.orderNo}/package`, { headers });
+  const response = await fetch(`/api/gongde/orders/${pending.orderNo}/package?format=batch`, { headers });
   if (!response.ok) throw new Error('pack_download_failed');
   const blob = await response.blob();
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   const disposition = response.headers.get('content-disposition') || '';
   const filename = disposition.match(/filename="([^"]+)"/i)?.[1];
-  link.download = filename || (Number(response.headers.get('x-gongde-pack-count') || '1') > 1 ? '牛马电子功德形象包.zip' : '牛马电子功德形象包.nmgpack');
+  link.download = filename || (Number(response.headers.get('x-gongde-pack-count') || '1') > 1 ? '牛马电子功德形象包.nmgpacks' : '牛马电子功德形象包.nmgpack');
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -371,7 +378,7 @@ async function pollOrder(pending, statusNode) {
 
 async function startCheckout({ channel, purchaseKind, amountFen, statusNode }) {
   const assetIds = purchaseKind === 'support' ? [] : selectedAssetIds();
-  if (purchaseKind !== 'support' && (assetIds.length < 1 || assetIds.length > 10)) throw new Error('invalid_asset_selection');
+  if (purchaseKind !== 'support' && (assetIds.length < 1 || assetIds.length > maxPacksPerBatch)) throw new Error('invalid_asset_selection');
   const previewRevisions = purchaseKind === 'support' ? {} : await window.NiuMaAppearance.revisions(assetIds);
   if (purchaseKind !== 'support') {
     const current = await api('/api/gongde/appearance-revisions');

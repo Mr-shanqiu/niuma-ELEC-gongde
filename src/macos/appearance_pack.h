@@ -22,6 +22,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSURL *)packsDirectoryURL;
 + (NSArray<NMAppearancePack *> *)loadInstalledPacks:(NSError **)error;
 + (nullable NMAppearancePack *)installArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error;
++ (nullable NSArray<NMAppearancePack *> *)installBatchArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error;
 + (BOOL)removePack:(NMAppearancePack *)pack error:(NSError **)error;
 + (nullable NMAppearancePack *)validatePackDirectory:(NSURL *)directoryURL error:(NSError **)error;
 @end

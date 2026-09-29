@@ -5,6 +5,8 @@
 
 static NSString *const NMErrorDomain = @"cn.niuma.merit.appearance-pack";
 static const unsigned long long NMMaxArchiveBytes = 50ull * 1024ull * 1024ull;
+static const unsigned long long NMMaxBatchBytes = 100ull * 1024ull * 1024ull;
+static const NSUInteger NMMaxBatchCount = 10;
 static const unsigned long long NMMaxManifestBytes = 64ull * 1024ull;
 static const size_t NMMaxImageDimension = 2048;
 static const double NMArtworkTop = 170.0;
@@ -56,6 +58,71 @@ static BOOL NMIsSafeArchiveName(NSString *name) {
       [name containsString:@":"]) return NO;
   if ([name isEqualToString:@"manifest.json"]) return YES;
   return [[name.pathExtension lowercaseString] isEqualToString:@"png"];
+}
+
+static BOOL NMIsSafeBatchName(NSString *name) {
+  if (name.length < 10 || name.length > 180 || [name hasPrefix:@"."] ||
+      [name containsString:@".."] ||
+      ![[name.pathExtension lowercaseString] isEqualToString:@"nmgpack"]) return NO;
+  static NSCharacterSet *forbidden;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    forbidden = [[NSCharacterSet characterSetWithCharactersInString:
+        @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"] invertedSet];
+  });
+  return [name rangeOfCharacterFromSet:forbidden].location == NSNotFound;
+}
+
+static BOOL NMExtractBatchEntry(NSURL *archiveURL, NSString *name, NSURL *destination,
+                                NSError **error) {
+  NSFileManager *fm = [NSFileManager defaultManager];
+  if (![fm createFileAtPath:destination.path contents:nil attributes:nil]) {
+    if (error) *error = NMError(60, @"无法创建批次中的临时形象包");
+    return NO;
+  }
+  NSFileHandle *writer = [NSFileHandle fileHandleForWritingToURL:destination error:error];
+  if (!writer) {
+    [fm removeItemAtURL:destination error:nil];
+    return NO;
+  }
+  NSTask *task = [[NSTask alloc] init];
+  NSPipe *output = [NSPipe pipe];
+  task.launchPath = @"/usr/bin/unzip";
+  task.arguments = @[@"-p", archiveURL.path, name];
+  task.standardOutput = output;
+  task.standardError = [NSFileHandle fileHandleWithNullDevice];
+  BOOL launched = NO;
+  BOOL complete = YES;
+  unsigned long long bytes = 0;
+  @try {
+    [task launch];
+    launched = YES;
+    while (YES) {
+      NSData *chunk = [[output fileHandleForReading] readDataOfLength:65536];
+      if (!chunk.length) break;
+      bytes += chunk.length;
+      if (bytes > NMMaxArchiveBytes) {
+        complete = NO;
+        if (error) *error = NMError(61, @"批次中的单个形象包不能超过 50MB");
+        break;
+      }
+      [writer writeData:chunk];
+    }
+  } @catch (NSException *exception) {
+    complete = NO;
+    if (error) *error = NMError(62, exception.reason ?: @"形象包解压失败");
+  }
+  [writer closeFile];
+  if (launched) {
+    if (!complete && task.isRunning) [task terminate];
+    [task waitUntilExit];
+  }
+  if (!complete || !launched || task.terminationStatus != 0 || bytes == 0) {
+    if (complete && error) *error = NMError(63, @"批次中的形象包解压失败");
+    [fm removeItemAtURL:destination error:nil];
+    return NO;
+  }
+  return YES;
 }
 
 static BOOL NMExactKeys(NSDictionary *dictionary, NSSet<NSString *> *allowed) {
@@ -520,6 +587,78 @@ invalidLayers:
   }
   if (hadOld) [fm removeItemAtURL:backup error:nil];
   return [self validatePackDirectory:destination error:error];
+}
+
++ (NSArray<NMAppearancePack *> *)installBatchArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error {
+  NSNumber *size = nil, *regular = nil, *symbolic = nil;
+  [archiveURL getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
+  [archiveURL getResourceValue:&regular forKey:NSURLIsRegularFileKey error:nil];
+  [archiveURL getResourceValue:&symbolic forKey:NSURLIsSymbolicLinkKey error:nil];
+  if (!regular.boolValue || symbolic.boolValue || size.unsignedLongLongValue == 0 ||
+      size.unsignedLongLongValue > NMMaxBatchBytes ||
+      ![[archiveURL.pathExtension lowercaseString] isEqualToString:@"nmgpacks"]) {
+    if (error) *error = NMError(64, @"请选择不超过 100MB 的 .nmgpacks 批次文件");
+    return nil;
+  }
+  NSData *listingData = nil;
+  if (!NMRun(@"/usr/bin/unzip", @[@"-Z1", archiveURL.path], &listingData, error)) return nil;
+  NSString *listing = [[NSString alloc] initWithData:listingData encoding:NSUTF8StringEncoding];
+  NSMutableArray<NSString *> *names = [NSMutableArray array];
+  NSMutableSet<NSString *> *seen = [NSMutableSet set];
+  for (NSString *name in [listing componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+    if (!name.length) continue;
+    if (!NMIsSafeBatchName(name) || [seen containsObject:name.lowercaseString]) {
+      if (error) *error = NMError(65, @"批次包含重复文件或危险路径");
+      return nil;
+    }
+    [names addObject:name];
+    [seen addObject:name.lowercaseString];
+  }
+  if (names.count < 2 || names.count > NMMaxBatchCount) {
+    if (error) *error = NMError(66, @"批次必须包含 2 至 10 个独立形象包");
+    return nil;
+  }
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSURL *root = [self packsDirectoryURL];
+  if (![fm createDirectoryAtURL:root withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+  NSURL *stage = [root URLByAppendingPathComponent:
+      [NSString stringWithFormat:@".batch-%@", NSUUID.UUID.UUIDString] isDirectory:YES];
+  if (![fm createDirectoryAtURL:stage withIntermediateDirectories:NO attributes:nil error:error]) return nil;
+  NSMutableArray<NSURL *> *extracted = [NSMutableArray array];
+  unsigned long long totalBytes = 0;
+  for (NSString *name in names) {
+    NSURL *file = [stage URLByAppendingPathComponent:name];
+    if (!NMExtractBatchEntry(archiveURL, name, file, error)) {
+      [fm removeItemAtURL:stage error:nil];
+      return nil;
+    }
+    NSNumber *fileSize = nil, *fileRegular = nil, *fileSymbolic = nil;
+    [file getResourceValue:&fileSize forKey:NSURLFileSizeKey error:nil];
+    [file getResourceValue:&fileRegular forKey:NSURLIsRegularFileKey error:nil];
+    [file getResourceValue:&fileSymbolic forKey:NSURLIsSymbolicLinkKey error:nil];
+    totalBytes += fileSize.unsignedLongLongValue;
+    if (!fileRegular.boolValue || fileSymbolic.boolValue || totalBytes > NMMaxBatchBytes) {
+      if (error) *error = NMError(67, @"批次解压数据超过 100MB");
+      [fm removeItemAtURL:stage error:nil];
+      return nil;
+    }
+    [extracted addObject:file];
+  }
+  NSMutableArray<NMAppearancePack *> *installed = [NSMutableArray array];
+  for (NSURL *file in extracted) {
+    NSError *packError = nil;
+    NMAppearancePack *pack = [self installArchiveAtURL:file error:&packError];
+    if (!pack) {
+      if (error) *error = NMError(68, [NSString stringWithFormat:
+          @"已导入 %lu 个形象，其余未完成：%@", (unsigned long)installed.count,
+          packError.localizedDescription ?: @"形象包无效"]);
+      [fm removeItemAtURL:stage error:nil];
+      return nil;
+    }
+    [installed addObject:pack];
+  }
+  [fm removeItemAtURL:stage error:nil];
+  return installed;
 }
 
 + (BOOL)removePack:(NMAppearancePack *)pack error:(NSError **)error {

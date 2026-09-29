@@ -5,9 +5,10 @@
 #include <iostream>
 #include <string>
 #include <array>
+#include <vector>
 
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 3) return 2;
+  if (argc != 3 && argc != 4) return 2;
   Gdiplus::GdiplusStartupInput input;
   ULONG_PTR token = 0;
   if (Gdiplus::GdiplusStartup(&token, &input, nullptr) != Gdiplus::Ok) return 3;
@@ -63,7 +64,18 @@ int wmain(int argc, wchar_t** argv) {
               << " counter_clear=" << clearCounterRegion << "\n";
     }
   }
-  ok = ok && catalog.Delete(firstId, &error) && catalog.packs().empty();
+  if (ok && argc == 4) {
+    std::vector<std::string> importedIds;
+    ok = catalog.InstallBatch(argv[3], directory, &importedIds, &error);
+    ok = ok && importedIds.size() == 2 && catalog.packs().size() == 2;
+    if (ok) {
+      importedIds.clear();
+      ok = catalog.InstallBatch(argv[3], directory, &importedIds, &error);
+      ok = ok && importedIds.size() == 2 && catalog.packs().size() == 2;
+    }
+  }
+  ok = ok && catalog.Delete(firstId, &error) &&
+      catalog.packs().size() == (argc == 4 ? 1u : 0u);
   if (!ok) std::wcerr << L"Appearance pack test failed: " << error << L"\n";
   if (ok) std::cout << "PASS " << firstId << " install/reimport/render/clip/delete\n";
   Gdiplus::GdiplusShutdown(token);

@@ -13,7 +13,7 @@ export const OFFICIAL_ASSET_DELIVERY = Object.freeze({
   version: 1,
   nameZh: "官方形象包生成与下载",
   nameEn: "Official Character Pack Delivery",
-  descriptionZh: "为已获得官方形象通行证的手机号一次生成最多10个、24小时内可首次导入的形象包。",
+  descriptionZh: "为已获得官方形象库资格的用户一次生成最多5个、24小时内可首次导入的形象包。",
   amountFen: 20,
   currency: "CNY" as const
 });
@@ -71,4 +71,4 @@ export const OFFICIAL_ASSET_NAMES_ZH: Readonly<Record<string, string>> = Object.
   "zqscreen.zhuan-yun-bead": "转运珠",
   "zqscreen.treasure-basin": "聚宝盆"
 });
-export const MAX_ASSETS_PER_DELIVERY = 10;
+export const MAX_ASSETS_PER_DELIVERY = 5;

@@ -827,7 +827,7 @@ void ShowPrivacyNotice(HWND owner) {
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.8.1";
+  const std::wstring version = L"0.8.2";
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
@@ -1237,7 +1237,8 @@ std::wstring AppearancePackArgument() {
   std::wstring result;
   for (int index = 1; index < argumentCount; ++index) {
     const std::wstring argument(arguments[index]);
-    if (niuma::IsAppearancePackPath(argument)) {
+    if (niuma::IsAppearancePackPath(argument) ||
+        niuma::IsAppearanceBatchPath(argument)) {
       result = argument;
       break;
     }
@@ -1249,14 +1250,24 @@ std::wstring AppearancePackArgument() {
 void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
                           bool showSuccess) {
   std::wstring error;
-  std::string installedId;
-  if (!gAppearanceCatalog.Install(
-          sourcePath, AppearanceDirectory(), &installedId, &error)) {
+  std::vector<std::string> installedIds;
+  bool installed = false;
+  if (niuma::IsAppearanceBatchPath(sourcePath)) {
+    installed = gAppearanceCatalog.InstallBatch(
+        sourcePath, AppearanceDirectory(), &installedIds, &error);
+  } else {
+    std::string id;
+    installed = gAppearanceCatalog.Install(
+        sourcePath, AppearanceDirectory(), &id, &error);
+    if (installed) installedIds.push_back(id);
+  }
+  if (!installed) {
     MessageBoxW(owner, error.c_str(),
                 UiText(L"形象包导入失败", L"Appearance Pack Import Failed"),
                 MB_OK | MB_ICONERROR);
     return;
   }
+  const std::string& installedId = installedIds.back();
   if (gAppearanceCatalog.Find(installedId) == nullptr) {
     MessageBoxW(owner,
         UiText(L"形象包导入后无法重新读取。",
@@ -1270,10 +1281,13 @@ void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
   SaveState();
   RenderLayeredWindow(GetTickCount64());
   if (showSuccess) {
-    MessageBoxW(owner,
-        UiText(L"形象包已安全导入并启用。",
-               L"The appearance pack was safely imported and enabled."),
-        WindowTitle(), MB_OK | MB_ICONINFORMATION);
+    const std::wstring message = installedIds.size() > 1
+        ? std::to_wstring(installedIds.size()) +
+          UiText(L" 个形象已导入。可在“更换形象”中切换。",
+                 L" packs imported. Switch between them in Change Appearance.")
+        : UiText(L"形象包已安全导入并启用。",
+                 L"The appearance pack was safely imported and enabled.");
+    MessageBoxW(owner, message.c_str(), WindowTitle(), MB_OK | MB_ICONINFORMATION);
   }
 }
 
@@ -1404,7 +1418,8 @@ LRESULT CALLBACK WindowProcedure(
       const size_t codeUnits = copy->cbData / sizeof(wchar_t);
       if (path[codeUnits - 1] != L'\0') return FALSE;
       const std::wstring sourcePath(path);
-      if (!niuma::IsAppearancePackPath(sourcePath)) return FALSE;
+      if (!niuma::IsAppearancePackPath(sourcePath) &&
+          !niuma::IsAppearanceBatchPath(sourcePath)) return FALSE;
       ImportAppearancePack(window, sourcePath, true);
       return TRUE;
     }

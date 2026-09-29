@@ -23,6 +23,13 @@
       <key>LSHandlerRank</key><string>Owner</string>
       <key>LSItemContentTypes</key><array><string>cn.niuma.appearance-pack</string></array>
     </dict>
+    <dict>
+      <key>CFBundleTypeExtensions</key><array><string>nmgpacks</string></array>
+      <key>CFBundleTypeName</key><string>NiuMa Merit Appearance Batch</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSItemContentTypes</key><array><string>cn.niuma.appearance-batch</string></array>
+    </dict>
   </array>
   <key>UTExportedTypeDeclarations</key>
   <array>
@@ -34,6 +41,16 @@
       <dict>
         <key>public.filename-extension</key><array><string>nmgpack</string></array>
         <key>public.mime-type</key><string>application/x-niuma-appearance-pack</string>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeConformsTo</key><array><string>public.zip-archive</string></array>
+      <key>UTTypeDescription</key><string>NiuMa Merit Appearance Batch</string>
+      <key>UTTypeIdentifier</key><string>cn.niuma.appearance-batch</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>nmgpacks</string></array>
+        <key>public.mime-type</key><string>application/x-niuma-appearance-batch</string>
       </dict>
     </dict>
   </array>

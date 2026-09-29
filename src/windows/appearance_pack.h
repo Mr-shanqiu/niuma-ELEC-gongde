@@ -66,6 +66,10 @@ class AppearanceCatalog {
                const std::wstring& directory,
                std::string* installedId,
                std::wstring* error);
+  bool InstallBatch(const std::wstring& sourcePath,
+                    const std::wstring& directory,
+                    std::vector<std::string>* installedIds,
+                    std::wstring* error);
   bool Delete(const std::string& id, std::wstring* error);
   AppearancePack* Find(const std::string& id) const;
   const std::vector<std::unique_ptr<AppearancePack>>& packs() const {
@@ -77,6 +81,7 @@ class AppearanceCatalog {
 };
 
 bool IsAppearancePackPath(const std::wstring& path);
+bool IsAppearanceBatchPath(const std::wstring& path);
 bool RegisterAppearancePackAssociation(const std::wstring& executable,
                                        std::wstring* error);
 void DrawAppearancePack(Gdiplus::Graphics& graphics,

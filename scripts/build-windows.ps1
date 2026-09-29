@@ -22,6 +22,15 @@ $luckyCatPack = Join-Path $fixtureDir "lucky-cat-schema3.nmgpack"
 python (Join-Path $repoRoot "scripts\appearance-pack.py") build `
   (Join-Path $repoRoot "assets\appearance-packs\lucky-cat") $luckyCatPack
 if ($LASTEXITCODE -ne 0) { throw "Could not build schema-3 lucky cat fixture" }
+$batchSource = Join-Path $fixtureDir "batch-source"
+New-Item -ItemType Directory -Force -Path $batchSource | Out-Null
+Copy-Item $fixturePack (Join-Path $batchSource "woodfish-sample.nmgpack") -Force
+Copy-Item $luckyCatPack (Join-Path $batchSource "lucky-cat.nmgpack") -Force
+$batchZip = Join-Path $fixtureDir "two-packs.zip"
+$batchArchive = Join-Path $fixtureDir "two-packs.nmgpacks"
+if (Test-Path $batchArchive) { Remove-Item $batchArchive -Force }
+Compress-Archive -Path (Join-Path $batchSource "*.nmgpack") -DestinationPath $batchZip -Force
+Move-Item $batchZip $batchArchive -Force
 
 cmake -S $repoRoot -B $BuildDir -G $gen -A x64
 if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
@@ -35,7 +44,7 @@ if (-not (Test-Path $packTest)) {
 if (-not (Test-Path $packTest)) { throw "Could not locate appearance pack test" }
 $testInstallDir = Join-Path $fixtureDir "installed"
 New-Item -ItemType Directory -Force -Path $testInstallDir | Out-Null
-& $packTest $testInstallDir $fixturePack
+& $packTest $testInstallDir $fixturePack $batchArchive
 if ($LASTEXITCODE -ne 0) { throw "Appearance pack runtime test failed" }
 $catInstallDir = Join-Path $fixtureDir "installed-lucky-cat"
 New-Item -ItemType Directory -Force -Path $catInstallDir | Out-Null
@@ -72,4 +81,5 @@ if ((Get-Item $distExe).Length -ge $maximumBaseBytes -or
 "EXE_BYTES=$( (Get-Item $distExe).Length )"
 "ZIP_BYTES=$( (Get-Item $zipPath).Length )"
 "APPEARANCE_PACK_TEST=PASS"
+"APPEARANCE_BATCH_TEST=PASS"
 "LUCKY_CAT_SCHEMA3_TEST=PASS"

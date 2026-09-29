@@ -17,7 +17,7 @@ import { zipSync } from "fflate";
 import { AdminAuthService, loadAdminAuthConfiguration } from "./admin/auth.js";
 import { AdminObjectStore, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "./admin/object-store.js";
 import type { GongdeEntitlement, GongdeOrder, OrderState } from "./domain/types.js";
-import { OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH } from "./domain/catalog.js";
+import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH } from "./domain/catalog.js";
 
 const mode = process.env.GONGDE_PAYMENT_MODE ?? "disabled";
 if (!new Set(["disabled", "mock", "live"]).has(mode)) throw new Error("invalid_payment_mode");
@@ -373,7 +373,7 @@ const server = createServer(async (request, response) => {
         const ids = Array.isArray(body.assetIds) ? body.assetIds : [];
         const expected = body.previewRevisions;
         const revisions = await availableAppearanceRevisions();
-        if (ids.length < 1 || ids.length > 10 || !expected || typeof expected !== "object" ||
+        if (ids.length < 1 || ids.length > MAX_ASSETS_PER_DELIVERY || !expected || typeof expected !== "object" ||
             ids.some((id) => typeof id !== "string" || !revisions[id] ||
               (expected as Record<string, unknown>)[id] !== revisions[id])) {
           return json(response, 409, { error: "appearance_preview_outdated" });
@@ -462,7 +462,10 @@ const server = createServer(async (request, response) => {
       const content = multiple
         ? Buffer.from(zipSync(Object.fromEntries(packs.map((pack) => [pack.filename, pack.content])), { level: 0 }))
         : packs[0].content;
-      const filename = multiple ? `niuma-appearance-packs-${packMatch[1]}.zip` : packs[0].filename;
+      const oneClickBatch = url.searchParams.get("format") === "batch";
+      const filename = multiple
+        ? `niuma-appearance-packs-${packMatch[1]}.${oneClickBatch ? "nmgpacks" : "zip"}`
+        : packs[0].filename;
       const importBefore = deliveries.reduce((earliest, item) => item.expiresAt! < earliest ? item.expiresAt! : earliest, deliveries[0].expiresAt!);
       response.writeHead(200, {
         "content-type": multiple ? "application/zip" : "application/octet-stream",
