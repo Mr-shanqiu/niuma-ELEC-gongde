@@ -18,12 +18,21 @@ int wmain(int argc, wchar_t** argv) {
   std::wstring error;
   std::string firstId;
   std::string secondId;
-  bool ok = catalog.Install(argv[2], directory, &firstId, &error);
-  ok = ok && catalog.packs().size() == 1 && !firstId.empty();
-  ok = ok && catalog.Install(argv[2], directory, &secondId, &error);
-  ok = ok && firstId == secondId && catalog.packs().size() == 1;
+  const bool firstInstall = catalog.Install(argv[2], directory, &firstId, &error);
+  bool ok = firstInstall && catalog.packs().size() == 1 && !firstId.empty();
+  if (!ok) std::cerr << "SINGLE_FIRST result=" << firstInstall
+                     << " installed=" << catalog.packs().size()
+                     << " id_empty=" << firstId.empty() << "\n";
+  if (ok) {
+    const bool secondInstall = catalog.Install(argv[2], directory, &secondId, &error);
+    ok = secondInstall && firstId == secondId && catalog.packs().size() == 1;
+    if (!ok) std::cerr << "SINGLE_REIMPORT result=" << secondInstall
+                       << " installed=" << catalog.packs().size()
+                       << " id_match=" << (firstId == secondId) << "\n";
+  }
   niuma::AppearancePack* pack = catalog.Find(firstId);
   ok = ok && pack != nullptr && pack->plusY == 174 && !pack->layers.empty();
+  if (!ok && firstInstall) std::cerr << "SINGLE_METADATA pack_found=" << (pack != nullptr) << "\n";
   if (ok && firstId == "official.lucky-cat") {
     ok = pack->layers.size() == 2;
     if (ok) {
