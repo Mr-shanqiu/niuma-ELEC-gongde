@@ -11,6 +11,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <cstdlib>
 #include <cstring>
@@ -19,6 +20,15 @@
 #include <iterator>
 #include <set>
 #include <utility>
+
+#if defined(NIUMA_BATCH_DIAGNOSTICS)
+#define NM_BATCH_TRACE(label, index) do { \
+  std::fprintf(stderr, "BATCH_TRACE=%s index=%u\n", label, static_cast<unsigned>(index)); \
+  std::fflush(stderr); \
+} while (false)
+#else
+#define NM_BATCH_TRACE(label, index) do {} while (false)
+#endif
 
 namespace niuma {
 namespace {
@@ -952,6 +962,7 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
                                      const std::wstring& directory,
                                      std::vector<std::string>* installedIds,
                                      std::wstring* error) {
+  NM_BATCH_TRACE("start", 0);
   if (installedIds == nullptr || !IsAppearanceBatchPath(sourcePath)) {
     SetError(error, L"请选择 .nmgpacks 批次文件。");
     return false;
@@ -979,14 +990,17 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     mz_zip_archive* archive;
     ~BatchArchiveGuard() { mz_zip_reader_end(archive); }
   } guard{&archive};
+  NM_BATCH_TRACE("opened", 0);
   if (archive.m_total_files < 2 || archive.m_total_files > kMaximumBatchCount ||
       !mz_zip_validate_archive(&archive, 0)) {
     SetError(error, L"批次必须包含 2 至 10 个有效形象包。");
     return false;
   }
+  NM_BATCH_TRACE("validated", archive.m_total_files);
   std::set<std::string> seen;
   mz_uint64 totalUncompressed = 0;
   for (mz_uint index = 0; index < archive.m_total_files; ++index) {
+    NM_BATCH_TRACE("metadata", index);
     mz_zip_archive_file_stat stat = {};
     if (!mz_zip_reader_file_stat(&archive, index, &stat) || stat.m_is_directory ||
         stat.m_uncomp_size == 0 || stat.m_uncomp_size > kMaximumPackBytes) {
@@ -1020,6 +1034,7 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
   }
   CreateDirectoryW(directory.c_str(), nullptr);
   for (mz_uint index = 0; index < archive.m_total_files; ++index) {
+    NM_BATCH_TRACE("extract", index);
     mz_zip_archive_file_stat stat = {};
     if (!mz_zip_reader_file_stat(&archive, index, &stat)) {
       SetError(error, L"无法读取批次形象包。");
@@ -1027,6 +1042,7 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     }
     size_t extractedSize = 0;
     void* bytes = mz_zip_reader_extract_to_heap(&archive, index, &extractedSize, 0);
+    NM_BATCH_TRACE("extracted", index);
     if (bytes == nullptr || extractedSize != stat.m_uncomp_size) {
       if (bytes != nullptr) mz_free(bytes);
       SetError(error, L"批次形象包解压失败。");
@@ -1050,6 +1066,7 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     DWORD written = 0;
     const BOOL saved = file != INVALID_HANDLE_VALUE &&
         WriteFile(file, bytes, static_cast<DWORD>(extractedSize), &written, nullptr);
+    NM_BATCH_TRACE("saved", index);
     if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
     mz_free(bytes);
     if (!saved || written != extractedSize) {
@@ -1058,7 +1075,9 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
       return false;
     }
     std::string installedId;
+    NM_BATCH_TRACE("install", index);
     const bool installed = Install(packTemporary, directory, &installedId, error);
+    NM_BATCH_TRACE("installed", index);
     DeleteFileW(packTemporary.c_str());
     if (!installed) {
       if (error != nullptr && !installedIds->empty()) {
@@ -1068,6 +1087,7 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
       return false;
     }
     if (!Reload(directory, error)) return false;
+    NM_BATCH_TRACE("reloaded", index);
     installedIds->push_back(installedId);
   }
   return true;
