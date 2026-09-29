@@ -18,7 +18,7 @@
     <nav aria-label="主要导航">
       <a href="#characters" data-zh="形象" data-en="Characters">形象</a>
       <a href="#privacy" data-zh="隐私" data-en="Privacy">隐私</a>
-      <a href="#download" data-zh="下载" data-en="Download">下载</a>
+      <a href="#characters" data-zh="选择与下载" data-en="Choose & download">选择与下载</a>
       <a href="#support" data-zh="赞赏" data-en="Support">赞赏</a>
       <button class="language" type="button" aria-label="Switch language">EN</button>
     </nav>
@@ -37,7 +37,7 @@
         </div>
         <div class="hero-actions">
           <a class="button primary" href="#characters" data-zh="看看有哪些桌面小伙伴" data-en="Meet the desktop companions">看看有哪些桌面小伙伴</a>
-          <a class="button text-button" href="#download" data-zh="直接下载免费木鱼" data-en="Download the free woodfish">直接下载免费木鱼</a>
+          <a class="button text-button" href="#characters" data-zh="先选形象，再下载" data-en="Choose a companion first">先选形象，再下载</a>
         </div>
         <p class="microcopy" data-zh="基础木鱼免费 · 无需登录 · 支持 Mac / Windows" data-en="Free base woodfish · No login needed · Mac / Windows">基础木鱼免费 · 无需登录 · 支持 Mac / Windows</p>
       </div>
@@ -209,7 +209,10 @@
       </div>
       <div class="pack-purchase-bar reveal">
         <span><strong id="selected-pack-count">4</strong> / 10 <span data-zh="个形象包已选择" data-en="packs selected">个形象包已选择</span></span>
-        <button class="button primary purchase-button" type="button" data-zh="获取形象包" data-en="Get appearance packs">获取形象包</button>
+        <div class="hero-actions">
+          <button class="button primary purchase-button" type="button" data-zh="获取已选形象包" data-en="Get selected packs">获取已选形象包</button>
+          <a class="button text-button" href="#download" data-zh="只下载免费木鱼" data-en="Continue with free woodfish">只下载免费木鱼</a>
+        </div>
       </div>
     </section>
 
@@ -235,8 +238,8 @@
     <section class="download section" id="download">
       <div class="download-intro reveal">
         <p class="eyebrow" data-zh="把它带回桌面" data-en="Bring one home">把它带回桌面</p>
-        <h2 data-zh="先免费领一只木鱼。" data-en="Start with a free woodfish.">先免费领一只木鱼。</h2>
-        <p data-zh="选你的电脑版本，下载后按安装说明打开即可。基础木鱼免费，不用注册，也不用付款。" data-en="Choose your computer's version, download it, and follow the setup guide. The base woodfish is free, with no signup or payment required.">选你的电脑版本，下载后按安装说明打开即可。基础木鱼免费，不用注册，也不用付款。</p>
+        <h2 data-zh="选好之后，下载客户端。" data-en="Chosen one? Download the app.">选好之后，下载客户端。</h2>
+        <p data-zh="选择你的电脑版本，下载后按安装说明打开即可。没有购买其他形象也没关系，基础木鱼永久免费，不用注册，也不用付款。" data-en="Choose your computer version and follow the setup guide. You can continue without buying another character: the base woodfish is always free, with no signup or payment required.">选择你的电脑版本，下载后按安装说明打开即可。没有购买其他形象也没关系，基础木鱼永久免费，不用注册，也不用付款。</p>
         <p data-zh="Mac 首次使用需要开启「输入监控」，这样你在其他软件里打字时，木鱼也能跟着敲。Windows 通常没有这一步。安装手册会带你完成设置。" data-en="On Mac, first-time setup requires Input Monitoring so the woodfish can respond while you type in other apps. Windows usually has no equivalent permission step. The guide walks you through setup.">Mac 首次使用需要开启「输入监控」，这样你在其他软件里打字时，木鱼也能跟着敲。Windows 通常没有这一步。安装手册会带你完成设置。</p>
         <p data-zh="当前为免签名公开测试版，系统可能显示未知发布者或安全提醒。请只从本站下载，并在运行前核对下方公布的文件名、大小和 SHA-256。" data-en="This is an unsigned public preview. Your system may show an unknown-publisher or security warning. Download only here, then verify the filename, size, and SHA-256 shown below before running it.">当前为免签名公开测试版，系统可能显示未知发布者或安全提醒。请只从本站下载，并在运行前核对下方公布的文件名、大小和 SHA-256。</p>
         <a class="manual-link" href="install.html" data-zh="第一次安装？跟着步骤来" data-en="First time? Follow the setup guide">第一次安装？跟着步骤来</a>
