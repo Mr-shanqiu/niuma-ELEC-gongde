@@ -36,7 +36,7 @@ interface Configuration {
 
 const prefixes: Record<AdminFileKind, string> = {
   appearance: "appearance-packs/",
-  installer: "installers/"
+  installer: ""
 };
 const appearanceCatalogStateKey = `${prefixes.appearance}catalog-state.json`;
 

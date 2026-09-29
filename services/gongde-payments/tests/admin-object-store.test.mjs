@@ -95,9 +95,15 @@ test("admin object store uploads, paginates, lists and deletes only managed file
 });
 
 test("download events remain hidden from installer listings and summarize by time and file", async () => {
-  const { store } = fixture();
+  const { cos, store } = fixture();
   await store.put("installer", "niuma-merit-macos-0.8.0.dmg", Buffer.from("mac"), "application/x-apple-diskimage");
   await store.put("installer", "niuma-merit-windows-0.8.0-setup.exe", Buffer.from("win"), "application/vnd.microsoft.portable-executable");
+  cos.objects.set("DOWNLOADS.json", {
+    body: Buffer.from("{}"), contentType: "application/json", lastModified: new Date().toISOString()
+  });
+  cos.objects.set("appearance-packs/lucky-cat.nmgpack", {
+    body: Buffer.from("cat"), contentType: "application/zip", lastModified: new Date().toISOString()
+  });
 
   await store.recordDownload("niuma-merit-macos-0.8.0.dmg", "macos", new Date("2026-09-28T23:59:59.000Z"));
   await store.recordDownload("niuma-merit-macos-0.8.0.dmg", "macos", new Date("2026-09-29T08:00:00.000Z"));
@@ -105,6 +111,7 @@ test("download events remain hidden from installer listings and summarize by tim
 
   const files = await store.list("installer");
   assert.deepEqual(files.map((file) => file.name), ["niuma-merit-macos-0.8.0.dmg", "niuma-merit-windows-0.8.0-setup.exe"]);
+  assert.equal(files[0].url, "https://download.gongde.zqscreen.cn/niuma-merit-macos-0.8.0.dmg");
 
   const summary = await store.summarizeDownloads(
     new Date("2026-09-29T00:00:00.000Z"),

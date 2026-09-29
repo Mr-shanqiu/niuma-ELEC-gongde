@@ -102,11 +102,11 @@ WIN_SETUP_SHA=$(shasum -a 256 "$DOWNLOAD_DIR/$WIN_SETUP" | awk '{print $1}')
 
 cat > "$DOWNLOAD_DIR/DOWNLOADS.json" <<EOF
 {
-  "baseUrl": "https://download.gongde.zqscreen.cn/installers/",
+  "baseUrl": "https://download.gongde.zqscreen.cn/",
   "generatedAt": "$BUILD_TIME",
   "files": [
-    {"name":"$MAC_DMG","type":"application/x-apple-diskimage","platform":"macOS","architecture":"universal2-arm64-x86_64","version":"$VERSION","bytes":$MAC_DMG_BYTES,"sha256":"$MAC_DMG_SHA","signature":"unsigned","notarization":"not-notarized","url":"https://download.gongde.zqscreen.cn/installers/$MAC_DMG"},
-    {"name":"$WIN_SETUP","type":"application/vnd.microsoft.portable-executable","platform":"Windows","architecture":"x86_64","version":"$VERSION","bytes":$WIN_SETUP_BYTES,"sha256":"$WIN_SETUP_SHA","signature":"unsigned","notarization":"not-applicable","url":"https://download.gongde.zqscreen.cn/installers/$WIN_SETUP"}
+    {"name":"$MAC_DMG","type":"application/x-apple-diskimage","platform":"macOS","architecture":"universal2-arm64-x86_64","version":"$VERSION","bytes":$MAC_DMG_BYTES,"sha256":"$MAC_DMG_SHA","signature":"unsigned","notarization":"not-notarized","url":"https://download.gongde.zqscreen.cn/$MAC_DMG"},
+    {"name":"$WIN_SETUP","type":"application/vnd.microsoft.portable-executable","platform":"Windows","architecture":"x86_64","version":"$VERSION","bytes":$WIN_SETUP_BYTES,"sha256":"$WIN_SETUP_SHA","signature":"unsigned","notarization":"not-applicable","url":"https://download.gongde.zqscreen.cn/$WIN_SETUP"}
   ]
 }
 EOF
