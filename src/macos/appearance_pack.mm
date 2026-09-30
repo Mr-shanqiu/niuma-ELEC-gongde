@@ -20,6 +20,16 @@ static const unsigned char NMPublicKey[] = {
   0xd9, 0xdc, 0xc1, 0xb3, 0xb8, 0x99, 0x87, 0x62, 0x22, 0xb7
 };
 
+// Keep the previous key for packs issued before the production signer changed.
+static const unsigned char NMCurrentPublicKey[] = {
+  0x04, 0x24, 0x52, 0xb3, 0xdb, 0xef, 0xcf, 0x06, 0x4c, 0x4c, 0xf2,
+  0x02, 0x22, 0x96, 0xd3, 0x6b, 0x22, 0x99, 0xac, 0x61, 0x2e, 0x42,
+  0xeb, 0x26, 0x7c, 0x55, 0x49, 0x42, 0xdf, 0xc5, 0x79, 0xb2, 0x69,
+  0x21, 0xff, 0xf4, 0x90, 0x10, 0xdc, 0x6f, 0xd0, 0xff, 0xde, 0xa4,
+  0xdf, 0x2a, 0x51, 0x7d, 0x72, 0xd1, 0x7a, 0x3b, 0xa8, 0x31, 0x7c,
+  0xdd, 0x0a, 0xfc, 0xe2, 0xbd, 0x03, 0xae, 0xf2, 0x72, 0x7c
+};
+
 static NSError *NMError(NSInteger code, NSString *message) {
   return [NSError errorWithDomain:NMErrorDomain code:code
                          userInfo:@{NSLocalizedDescriptionKey: message}];
@@ -207,24 +217,28 @@ static BOOL NMVerifyLicense(NSString *message, NSString *signatureHex) {
   NSData *rawSignature = NMDataFromHex(signatureHex);
   NSData *derSignature = NMDERSignatureFromRaw(rawSignature);
   if (!derSignature) return NO;
-  NSData *keyData = [NSData dataWithBytes:NMPublicKey length:sizeof(NMPublicKey)];
   NSDictionary *attributes = @{
     (__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
     (__bridge id)kSecAttrKeyClass: (__bridge id)kSecAttrKeyClassPublic,
     (__bridge id)kSecAttrKeySizeInBits: @256
   };
-  SecKeyRef key = SecKeyCreateWithData((__bridge CFDataRef)keyData,
-                                       (__bridge CFDictionaryRef)attributes, NULL);
-  if (!key) return NO;
   NSData *messageData = [message dataUsingEncoding:NSUTF8StringEncoding];
   unsigned char digest[CC_SHA256_DIGEST_LENGTH];
   CC_SHA256(messageData.bytes, (CC_LONG)messageData.length, digest);
   NSData *digestData = [NSData dataWithBytes:digest length:sizeof(digest)];
-  BOOL valid = SecKeyVerifySignature(key,
-      kSecKeyAlgorithmECDSASignatureDigestX962SHA256,
-      (__bridge CFDataRef)digestData, (__bridge CFDataRef)derSignature, NULL);
-  CFRelease(key);
-  return valid;
+  const unsigned char *trustedKeys[] = {NMPublicKey, NMCurrentPublicKey};
+  for (const unsigned char *publicKey : trustedKeys) {
+    NSData *keyData = [NSData dataWithBytes:publicKey length:sizeof(NMPublicKey)];
+    SecKeyRef key = SecKeyCreateWithData((__bridge CFDataRef)keyData,
+                                         (__bridge CFDictionaryRef)attributes, NULL);
+    if (!key) continue;
+    BOOL valid = SecKeyVerifySignature(key,
+        kSecKeyAlgorithmECDSASignatureDigestX962SHA256,
+        (__bridge CFDataRef)digestData, (__bridge CFDataRef)derSignature, NULL);
+    CFRelease(key);
+    if (valid) return YES;
+  }
+  return NO;
 }
 
 static NSImage *NMLoadPNG(NSURL *url, NSError **error) {
