@@ -50,6 +50,17 @@ constexpr unsigned char kPublicY[32] = {
     0xaf, 0x21, 0xb8, 0x17, 0xa2, 0x2c, 0x9e, 0x05, 0x1d, 0xf6, 0x17,
     0xd9, 0xdc, 0xc1, 0xb3, 0xb8, 0x99, 0x87, 0x62, 0x22, 0xb7};
 
+constexpr unsigned char kCurrentPublicX[32] = {
+    0x24, 0x52, 0xb3, 0xdb, 0xef, 0xcf, 0x06, 0x4c, 0x4c, 0xf2, 0x02,
+    0x22, 0x96, 0xd3, 0x6b, 0x22, 0x99, 0xac, 0x61, 0x2e, 0x42, 0xeb,
+    0x26, 0x7c, 0x55, 0x49, 0x42, 0xdf, 0xc5, 0x79, 0xb2, 0x69
+};
+constexpr unsigned char kCurrentPublicY[32] = {
+    0x21, 0xff, 0xf4, 0x90, 0x10, 0xdc, 0x6f, 0xd0, 0xff, 0xde, 0xa4,
+    0xdf, 0x2a, 0x51, 0x7d, 0x72, 0xd1, 0x7a, 0x3b, 0xa8, 0x31, 0x7c,
+    0xdd, 0x0a, 0xfc, 0xe2, 0xbd, 0x03, 0xae, 0xf2, 0x72, 0x7c
+};
+
 struct JsonValue {
   enum class Kind { Null, Boolean, Number, String, Array, Object };
   Kind kind = Kind::Null;
@@ -497,7 +508,6 @@ bool VerifyLicenseSignature(const std::string& message,
   std::array<unsigned char, 32> digest = {};
   if (!Sha256(parts, &digest)) return false;
   BCRYPT_ALG_HANDLE algorithm = nullptr;
-  BCRYPT_KEY_HANDLE key = nullptr;
   struct PublicBlob {
     BCRYPT_ECCKEY_BLOB header;
     unsigned char x[32];
@@ -505,16 +515,24 @@ bool VerifyLicenseSignature(const std::string& message,
   } blob = {};
   blob.header.dwMagic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
   blob.header.cbKey = 32;
-  std::copy(std::begin(kPublicX), std::end(kPublicX), blob.x);
-  std::copy(std::begin(kPublicY), std::end(kPublicY), blob.y);
-  bool valid = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_ECDSA_P256_ALGORITHM,
-                                            nullptr, 0) >= 0 &&
-      BCryptImportKeyPair(algorithm, nullptr, BCRYPT_ECCPUBLIC_BLOB, &key,
-          reinterpret_cast<PUCHAR>(&blob), sizeof(blob), 0) >= 0 &&
-      BCryptVerifySignature(key, nullptr, digest.data(),
-          static_cast<ULONG>(digest.size()), signature.data(),
-          static_cast<ULONG>(signature.size()), 0) >= 0;
-  if (key != nullptr) BCryptDestroyKey(key);
+  bool valid = false;
+  if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_ECDSA_P256_ALGORITHM,
+                                   nullptr, 0) >= 0) {
+    const unsigned char *trustedX[] = {kPublicX, kCurrentPublicX};
+    const unsigned char *trustedY[] = {kPublicY, kCurrentPublicY};
+    for (size_t index = 0; index < 2 && !valid; ++index) {
+      std::copy(trustedX[index], trustedX[index] + 32, blob.x);
+      std::copy(trustedY[index], trustedY[index] + 32, blob.y);
+      BCRYPT_KEY_HANDLE key = nullptr;
+      if (BCryptImportKeyPair(algorithm, nullptr, BCRYPT_ECCPUBLIC_BLOB, &key,
+              reinterpret_cast<PUCHAR>(&blob), sizeof(blob), 0) >= 0) {
+        valid = BCryptVerifySignature(key, nullptr, digest.data(),
+            static_cast<ULONG>(digest.size()), signature.data(),
+            static_cast<ULONG>(signature.size()), 0) >= 0;
+      }
+      if (key != nullptr) BCryptDestroyKey(key);
+    }
+  }
   if (algorithm != nullptr) BCryptCloseAlgorithmProvider(algorithm, 0);
   return valid;
 }
