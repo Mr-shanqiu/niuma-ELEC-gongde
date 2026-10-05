@@ -1,0 +1,195 @@
+# Authorized frozen-source private manual build; binary output is CANDIDATE.
+# Receiver code is independently pinned, never substituted for candidate source.
+name: Windows frozen private source candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gongde-windows-frozen-source-0029f5e9
+  cancel-in-progress: false
+jobs:
+  frozen-source-build-accept:
+    if: github.repository == 'Mr-shanqiu/niuma-ELEC-gongde' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Require explicit owner receiver-code and source binding
+        env:
+          RECEIVER_REF: ${{ vars.GONGDE_WINDOWS_RECEIVER_CODE_REF }}
+          BINDING_SHA: ${{ vars.GONGDE_WINDOWS_SOURCE_OWNER_BINDING_SHA256 }}
+          SOURCE_IDENTITY: ${{ vars.GONGDE_WINDOWS_SOURCE_IDENTITY }}
+          APPROVAL_ID: ${{ vars.GONGDE_WINDOWS_SOURCE_APPROVAL_ID }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:RECEIVER_REF -cnotmatch '\A[a-f0-9]{40}\z' -or
+              $env:BINDING_SHA -cnotmatch '\A[a-f0-9]{64}\z' -or
+              $env:SOURCE_IDENTITY -cnotmatch '\A[A-Za-z0-9._:-]{1,128}\z' -or
+              $env:APPROVAL_ID -cnotmatch '\A[A-Za-z0-9._:-]{1,128}\z') {
+            throw 'Owner must explicitly bind receiver code and independent private source input.'
+          }
+      - name: Check out reviewed receiver code ONLY (not candidate source)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ vars.GONGDE_WINDOWS_RECEIVER_CODE_REF }}
+          persist-credentials: false
+          sparse-checkout: ci/windows-source-receiver
+          sparse-checkout-cone-mode: false
+      - name: Parse receiver scripts before any private source use
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:GITHUB_WORKSPACE 'ci/windows-source-receiver'
+          foreach ($name in @('Receiver.Common.ps1','Receive-WindowsSource.ps1',
+              'Receive-OriginalSdkPrivateInput.ps1','Export-NativeEvidence.ps1','Export-CandidateBinary.ps1')) {
+            $tokens=$null; $errors=$null
+            [Management.Automation.Language.Parser]::ParseFile((Join-Path $root $name),[ref]$tokens,[ref]$errors) | Out-Null
+            if (@($errors).Count) {throw 'Receiver PowerShell parser failed; do not print private data or retry.'}
+          }
+      - name: Receive independently approved source-only temporary secret chunks
+        id: receive
+        env:
+          OWNER_BINDING_JSON: ${{ secrets.GONGDE_WINDOWS_SOURCE_OWNER_BINDING_JSON }}
+          BINDING_SHA: ${{ vars.GONGDE_WINDOWS_SOURCE_OWNER_BINDING_SHA256 }}
+          SOURCE_IDENTITY: ${{ vars.GONGDE_WINDOWS_SOURCE_IDENTITY }}
+          APPROVAL_ID: ${{ vars.GONGDE_WINDOWS_SOURCE_APPROVAL_ID }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_01: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_01 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_02: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_02 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_03: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_03 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_04: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_04 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_05: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_05 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_06: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_06 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_07: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_07 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_08: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_08 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_09: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_09 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_10: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_10 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_11: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_11 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_12: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_12 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_13: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_13 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_14: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_14 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_15: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_15 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_16: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_16 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_17: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_17 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_18: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_18 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_19: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_19 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_20: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_20 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_21: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_21 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_22: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_22 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_23: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_23 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_24: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_24 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_25: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_25 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_26: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_26 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_27: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_27 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_28: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_28 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_29: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_29 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_30: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_30 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_31: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_31 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_32: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_32 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_33: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_33 }}
+          GONGDE_WINDOWS_SOURCE_084_20261006_34: ${{ secrets.GONGDE_WINDOWS_SOURCE_084_20261006_34 }}
+        run: |
+          $code=Join-Path $env:GITHUB_WORKSPACE 'ci/windows-source-receiver'
+          . (Join-Path $code 'Receiver.Common.ps1')
+          Assert-RealWindowsRunner
+          Initialize-ReceiverTypes
+          $owner=$null
+          try {
+            if (-not $env:OWNER_BINDING_JSON -or $env:OWNER_BINDING_JSON.Length -gt 16384) {
+              throw 'Independent source owner binding absent.'
+            }
+            $ownerRoot=Get-RunnerLocalPath (Join-Path $env:RUNNER_TEMP ('source-owner-'+[Guid]::NewGuid().ToString('N'))) -Fresh
+            $owner=[GongdeSourceReceiver.DirectoryLease]::CreateExclusive($ownerRoot)
+            $owner.WriteNew('owner-binding.json',[Text.UTF8Encoding]::new($false).GetBytes($env:OWNER_BINDING_JSON))
+            $sourceRoot=Join-Path $env:RUNNER_TEMP ('frozen-source-'+[Guid]::NewGuid().ToString('N'))
+            $arguments=@{
+              OwnerBindingPath=(Join-Path $ownerRoot 'owner-binding.json')
+              ExpectedOwnerBindingSha256=$env:BINDING_SHA
+              ExpectedSourceIdentity=$env:SOURCE_IDENTITY
+              ExpectedOwnerApprovalId=$env:APPROVAL_ID
+              DestinationRoot=$sourceRoot
+            }
+            $received=& (Join-Path $code 'Receive-WindowsSource.ps1') @arguments
+            ('source_root='+$received.SourceRoot) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            ('receiver_receipt='+$received.ReceiptPath) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } finally {
+            $env:OWNER_BINDING_JSON=$null
+            for ($index=1; $index -le 34; $index++) {
+              [Environment]::SetEnvironmentVariable('GONGDE_WINDOWS_SOURCE_084_20261006_'+$index.ToString('00'),$null)
+            }
+            if ($owner) {$owner.Dispose()}
+          }
+      - name: Receive ONLY existing approved original SDK private input
+        id: sdk
+        env:
+          SDK_PRIVATE_INPUT: ${{ secrets.GONGDE_ORIGINAL_SDK_084_QA_20261005_019FE783 }}
+          SOURCE_ROOT: ${{ steps.receive.outputs.source_root }}
+        run: |
+          $code=Join-Path $env:GITHUB_WORKSPACE 'ci/windows-source-receiver'
+          try {
+            $sdkRoot=Join-Path $env:RUNNER_TEMP ('original-sdk-'+[Guid]::NewGuid().ToString('N'))
+            $arguments=@{SourceRoot=$env:SOURCE_ROOT;PrivatePayloadJson=$env:SDK_PRIVATE_INPUT;DestinationRoot=$sdkRoot}
+            $received=& (Join-Path $code 'Receive-OriginalSdkPrivateInput.ps1') @arguments
+            ('sdk_root='+$received.SdkDirectory) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } finally {$env:SDK_PRIVATE_INPUT=$null}
+      - name: Invoke the pinned unchanged frozen native build-and-accept ONCE
+        env:
+          SOURCE_ROOT: ${{ steps.receive.outputs.source_root }}
+          SDK_ROOT: ${{ steps.sdk.outputs.sdk_root }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $launcher=Join-Path $env:SOURCE_ROOT 'handoff/build-and-accept.ps1'
+          if ((Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+              '69bf3302414dd83926ca5b8a35221dc39aa9d448ed6dc336b0a022e83e44504d') {
+            throw 'Frozen launcher byte binding failed.'
+          }
+          & $launcher -ExpectedSourceManifestSha256 'c02e32da628429414382efdf4b60c3b79bfdd518e257558db9d026231d80000a' -SdkDirectory $env:SDK_ROOT
+      - name: Export current-source binaries only (not native acceptance)
+        if: always() && steps.receive.outputs.source_root != ''
+        id: binaries
+        env:
+          SOURCE_ROOT: ${{ steps.receive.outputs.source_root }}
+          RECEIVER_RECEIPT: ${{ steps.receive.outputs.receiver_receipt }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $binding=Join-Path $env:SOURCE_ROOT 'native-build-evidence/candidate-binding.json'
+          if (Test-Path -LiteralPath $binding -PathType Leaf) {
+            $code=Join-Path $env:GITHUB_WORKSPACE 'ci/windows-source-receiver'
+            $out=Join-Path $env:RUNNER_TEMP ('candidate-binaries-'+[Guid]::NewGuid().ToString('N'))
+            $arguments=@{SourceRoot=$env:SOURCE_ROOT;SourceReceiverReceiptPath=$env:RECEIVER_RECEIPT;OutputDirectory=$out}
+            $export=& (Join-Path $code 'Export-CandidateBinary.ps1') @arguments
+            ('binary_dir='+$export.BinaryDirectory) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            'No current-source binary binding was produced; no installer artifact is available.' | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+      - name: Retain binary-only candidate for human Win11 acceptance
+        if: always() && steps.binaries.outputs.binary_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-current-source-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.binaries.outputs.binary_dir }}
+          retention-days: 3
+          include-hidden-files: false
+          if-no-files-found: error
+      - name: Export exact native receipt/screenshot whitelist only
+        if: always() && steps.receive.outputs.source_root != ''
+        id: evidence
+        env:
+          SOURCE_ROOT: ${{ steps.receive.outputs.source_root }}
+          RECEIVER_RECEIPT: ${{ steps.receive.outputs.receiver_receipt }}
+        run: |
+          $code=Join-Path $env:GITHUB_WORKSPACE 'ci/windows-source-receiver'
+          $out=Join-Path $env:RUNNER_TEMP ('native-evidence-export-'+[Guid]::NewGuid().ToString('N'))
+          $arguments=@{SourceRoot=$env:SOURCE_ROOT;SourceReceiverReceiptPath=$env:RECEIVER_RECEIPT;OutputDirectory=$out}
+          $export=& (Join-Path $code 'Export-NativeEvidence.ps1') @arguments
+          ('evidence_dir='+$export.EvidenceDirectory) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Retain whitelist evidence, never source, SDK or raw logs
+        if: always() && steps.evidence.outputs.evidence_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-frozen-native-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.evidence.outputs.evidence_dir }}
+          retention-days: 3
+          include-hidden-files: false
+          if-no-files-found: error
