@@ -123,6 +123,8 @@ $outputRoot = $null
 $outputDirectoryOwned = $false
 $receiptSequence = 0
 $installDir = $null
+$installDirectoryOwned = $false
+$ownedInstallDirectory = $null
 $clientPath = $null
 $dataRoot = $null
 $catalogDir = $null
@@ -422,7 +424,7 @@ function Get-RunValue([string]$Hive) {
 
 function Assert-NoForeignClient {
   foreach ($process in @(Get-Process -Name 'niuma-merit' -ErrorAction SilentlyContinue)) {
-    $ours = @($ownedProcesses.ToArray() | Where-Object { $_.handle.Id -eq $process.Id -and -not $_.handle.HasExited })
+    $ours = @($ownedProcesses.ToArray() | Where-Object { $_.evidence.pid -eq $process.Id -and -not $_.evidence.waitCompleted })
     Assert-Condition ($ours.Count -eq 1) 'Another NiuMa Merit process exists; it will not be closed.'
   }
 }
@@ -441,46 +443,103 @@ function Start-OwnedProcess([string]$Path, [string]$Arguments, [string]$Role) {
   $evidence = [ordered]@{
     role = $Role; pid = $process.Id; path = $start.FileName; arguments = $Arguments
     startedAt = [DateTime]::UtcNow.ToString('o'); waitCompleted = $false
-    exitCode = $null; forcedTermination = $false; parentPid = $null
+    exitCode = $null; exitCodeStatus = 'pending'; exitCodeSource = $null
+    exitCodeQueryError = $null; nativeHandleRetained = $false
+    forcedTermination = $false; parentPid = $null
   }
-  $owned = [pscustomobject]@{ handle = $process; evidence = $evidence; rootPid = $process.Id }
+  $owned = [pscustomobject]@{
+    handle = $process; processHandle = $null; handlesReleased = $false
+    creationTimeUtc = $null; evidence = $evidence; rootPid = $process.Id
+  }
   $ownedProcesses.Add($owned)
   $report.processes.Add($evidence)
+  # Acquire and retain the actual OS handle before polling or inspecting the
+  # image. This keeps exit status queryable after the PID disappears/recycles.
+  $owned.processHandle = $process.SafeHandle
+  Assert-Condition (-not $owned.processHandle.IsInvalid -and -not $owned.processHandle.IsClosed) `
+    "Could not retain the owned root process handle: $Role"
+  $owned.creationTimeUtc = $process.StartTime.ToUniversalTime()
+  $evidence.nativeHandleRetained = $true
   return $owned
 }
 
 function Observe-OwnedChildren {
   # Keep handles for observed installer descendants. Never use name-based kills.
   foreach ($parent in $ownedProcesses.ToArray()) {
-    if ($parent.handle.HasExited) { continue }
+    if ($parent.evidence.waitCompleted -or $parent.handlesReleased -or $parent.handle.HasExited) { continue }
     foreach ($child in @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($parent.handle.Id)")) {
-      if (@($ownedProcesses.ToArray() | Where-Object { $_.handle.Id -eq $child.ProcessId }).Count) { continue }
+      if (@($ownedProcesses.ToArray() | Where-Object { $_.evidence.pid -eq $child.ProcessId }).Count) { continue }
       try { $handle = [Diagnostics.Process]::GetProcessById([int]$child.ProcessId) }
       catch [ArgumentException] { continue }
       try {
-        if ($handle.HasExited -or $handle.StartTime.ToUniversalTime() -lt $parent.handle.StartTime.ToUniversalTime()) {
+        $processHandle = $handle.SafeHandle
+        Assert-Condition (-not $processHandle.IsInvalid -and -not $processHandle.IsClosed) `
+          'Could not retain the observed child process handle.'
+        $creationTime = $handle.StartTime.ToUniversalTime()
+        if ($creationTime -lt $parent.creationTimeUtc -or
+            $child.CreationDate -isnot [DateTime] -or
+            [Math]::Abs(($creationTime - $child.CreationDate.ToUniversalTime()).TotalMilliseconds) -gt 1) {
           $handle.Dispose(); continue
         }
-        $image = $handle.MainModule.FileName
+        $image = [string]$child.ExecutablePath
+        if ([string]::IsNullOrWhiteSpace($image) -and -not $handle.HasExited) {
+          $image = $handle.MainModule.FileName
+        }
       } catch { $handle.Dispose(); throw }
       $evidence = [ordered]@{
         role = $parent.evidence.role + '-child'; pid = $handle.Id; path = $image
-        arguments = $null; startedAt = $handle.StartTime.ToUniversalTime().ToString('o')
-        waitCompleted = $false; exitCode = $null; forcedTermination = $false
+        arguments = $null; startedAt = $creationTime.ToString('o')
+        waitCompleted = $false; exitCode = $null; exitCodeStatus = 'pending'
+        exitCodeSource = $null; exitCodeQueryError = $null; nativeHandleRetained = $true
+        forcedTermination = $false
         parentPid = $parent.handle.Id
       }
-      $ownedProcesses.Add([pscustomobject]@{ handle = $handle; evidence = $evidence; rootPid = $parent.rootPid })
+      $ownedProcesses.Add([pscustomobject]@{
+        handle = $handle; processHandle = $processHandle; handlesReleased = $false
+        creationTimeUtc = $creationTime; evidence = $evidence; rootPid = $parent.rootPid
+      })
       $report.processes.Add($evidence)
     }
   }
 }
 
 function Record-Exit($Owned) {
-  if ($Owned.evidence.waitCompleted) { return }
+  if ($Owned.handlesReleased -or
+      ($Owned.evidence.waitCompleted -and $Owned.evidence.exitCodeStatus -eq 'known')) { return }
   if ($Owned.handle.WaitForExit(0)) {
-    $Owned.evidence.waitCompleted = $true
-    $Owned.evidence.exitCode = $Owned.handle.ExitCode
-    $Owned.evidence['exitedAt'] = [DateTime]::UtcNow.ToString('o')
+    if (-not $Owned.evidence.waitCompleted) {
+      $Owned.evidence.waitCompleted = $true
+      $Owned.evidence['exitedAt'] = [DateTime]::UtcNow.ToString('o')
+    }
+    [uint32]$nativeCode = 0
+    if ($null -ne $Owned.processHandle -and -not $Owned.processHandle.IsClosed -and
+        -not $Owned.processHandle.IsInvalid -and
+        [NmgGuiObserver]::GetExitCodeProcess($Owned.processHandle, [ref]$nativeCode)) {
+      $Owned.evidence.exitCode = [long]$nativeCode
+      $Owned.evidence.exitCodeStatus = 'known'
+      $Owned.evidence.exitCodeSource = 'GetExitCodeProcess on retained native process handle after completed wait'
+      $Owned.evidence.exitCodeQueryError = $null
+      return
+    }
+    $nativeError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    $queryError = "Native exit query unavailable (Win32 $nativeError)."
+    try {
+      $managedCode = $Owned.handle.ExitCode
+      if ($null -ne $managedCode -and ($managedCode -is [int] -or $managedCode -is [long])) {
+        $Owned.evidence.exitCode = $managedCode
+        $Owned.evidence.exitCodeStatus = 'known'
+        $Owned.evidence.exitCodeSource = 'Process.ExitCode after completed wait'
+        $Owned.evidence.exitCodeQueryError = $queryError
+        return
+      }
+      $queryError += ' Process.ExitCode returned no numeric status.'
+    } catch { $queryError += ' ' + $_.Exception.Message }
+    # A completed wait proves termination, not a successful exit. Preserve the
+    # unavailable status as unknown; never replace a null status with zero.
+    $Owned.evidence.exitCode = $null
+    $Owned.evidence.exitCodeStatus = 'unknown'
+    $Owned.evidence.exitCodeSource = 'Unavailable after completed process wait'
+    $Owned.evidence.exitCodeQueryError = $queryError
   }
 }
 
@@ -495,8 +554,16 @@ function Wait-OwnedProcess($Owned, [int]$TimeoutMs = 25000) {
     $members = @($ownedProcesses.ToArray() | Where-Object { $_.rootPid -eq $Owned.rootPid })
     foreach ($member in $members) { Record-Exit $member }
     if (@($members | Where-Object { -not $_.evidence.waitCompleted }).Count -eq 0) {
+      Assert-Condition ($Owned.evidence.exitCodeStatus -eq 'known' -and
+        $null -ne $Owned.evidence.exitCode -and $Owned.evidence.exitCode -eq 0) `
+        "Owned root process must have a real zero exit code: $($Owned.evidence.role), status $($Owned.evidence.exitCodeStatus), code $($Owned.evidence.exitCode)"
       foreach ($member in $members) {
-        Assert-Condition ($member.evidence.exitCode -eq 0) `
+        if ($null -ne $member.evidence.parentPid -and $member.evidence.exitCodeStatus -eq 'unknown') {
+          $member.evidence['exitCodeValidation'] = 'Unknown exited child status; neither success nor failure asserted'
+          continue
+        }
+        Assert-Condition ($member.evidence.exitCodeStatus -eq 'known' -and
+          $null -ne $member.evidence.exitCode -and $member.evidence.exitCode -eq 0) `
           "Owned process exited unsuccessfully: $($member.evidence.role), code $($member.evidence.exitCode)"
       }
       return
@@ -512,7 +579,7 @@ function Stop-OwnedProcesses {
   [array]::Reverse($members)
   foreach ($owned in $members) {
     try {
-      if (-not $owned.handle.HasExited) {
+      if (-not $owned.handlesReleased -and -not $owned.evidence.waitCompleted -and -not $owned.handle.HasExited) {
         foreach ($window in [NmgGuiObserver]::Windows($owned.handle.Id)) {
           [NmgGuiObserver]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
@@ -521,6 +588,7 @@ function Stop-OwnedProcesses {
   }
   foreach ($owned in $members) {
     try {
+      if ($owned.handlesReleased) { continue }
       $remaining = [Math]::Max(0, 3000 - [int]$timer.ElapsedMilliseconds)
       if (-not $owned.handle.WaitForExit($remaining)) {
         $owned.evidence.forcedTermination = $true
@@ -531,6 +599,105 @@ function Stop-OwnedProcesses {
       Record-Exit $owned
     } catch { $cleanupErrors.Add("Owned process cleanup failed: $($_.Exception.Message)") }
   }
+}
+
+function Assert-OwnedProcessesExited {
+  foreach ($owned in $ownedProcesses.ToArray()) {
+    if (-not $owned.handlesReleased) {
+      Assert-Condition ($owned.handle.WaitForExit(0)) 'An owned process is still running; preserving installed artifacts.'
+      Record-Exit $owned
+    }
+    Assert-Condition ($owned.evidence.waitCompleted) 'Owned process exit is not confirmed; preserving installed artifacts.'
+  }
+}
+
+function Release-ExitedProcessHandles {
+  Assert-OwnedProcessesExited
+  foreach ($owned in $ownedProcesses.ToArray()) {
+    if (-not $owned.handlesReleased) {
+      # Query status before release. Close only these already-exited processes'
+      # handles, so installer/uninstaller image resources do not impede cleanup.
+      Record-Exit $owned
+      $owned.handle.Dispose()
+      if ($null -ne $owned.processHandle) { $owned.processHandle.Dispose() }
+      $owned.handlesReleased = $true
+    }
+  }
+}
+
+function Remove-OwnedInstallDirectory {
+  Assert-Condition ($outputDirectoryOwned -and $isolationEstablished -and
+    $installDirectoryOwned -and -not [string]::IsNullOrWhiteSpace($ownedInstallDirectory)) `
+    'Installation directory is not exclusively owned by this run.'
+  Assert-OwnedProcessesExited
+  Assert-NoForeignClient
+  $safeOutput = (Get-SafePath $outputRoot).TrimEnd('\')
+  $root = (Get-SafePath $ownedInstallDirectory).TrimEnd('\')
+  $expectedRoot = (Get-SafePath (Join-Path $safeOutput 'installed')).TrimEnd('\')
+  Assert-Condition ($root -ieq $expectedRoot -and $root -ieq (Get-SafePath $installDir).TrimEnd('\') -and
+    $safeOutput.StartsWith($runnerTemp.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) `
+    'Refusing cleanup outside the exact run-owned installation directory.'
+  try { $rootAttributes = [IO.File]::GetAttributes($root) }
+  catch [IO.FileNotFoundException] { return }
+  catch [IO.DirectoryNotFoundException] { return }
+  Assert-Condition (($rootAttributes -band [IO.FileAttributes]::Directory) -ne 0 -and
+    ($rootAttributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'Owned installation root is not an ordinary directory.'
+  $timer = [Diagnostics.Stopwatch]::StartNew()
+  $pending = [Collections.Generic.Queue[string]]::new()
+  $files = [Collections.Generic.List[string]]::new()
+  $directories = [Collections.Generic.List[string]]::new()
+  $inventory = [Collections.Generic.List[object]]::new()
+  $pending.Enqueue($root)
+  $directories.Add($root)
+  # First inspect the complete bounded tree without following links. Reject any
+  # reparse point before deleting any leftovers; no recursive Delete(true).
+  while ($pending.Count -gt 0) {
+    Assert-Condition ($timer.ElapsedMilliseconds -lt 25000 -and
+      $files.Count + $directories.Count -le 2048) 'Owned installation cleanup inventory exceeded its bound.'
+    $directory = Get-SafePath ($pending.Dequeue())
+    foreach ($item in @(Get-ChildItem -LiteralPath $directory -Force)) {
+      $path = Get-SafePath $item.FullName
+      Assert-Condition ($path.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) 'Cleanup entry escapes its exact owned root.'
+      $attributes = [IO.File]::GetAttributes($path)
+      Assert-Condition (($attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'Linked installation leftover is preserved; no target is traversed.'
+      $isDirectory = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+      $inventory.Add([ordered]@{ path = $path; kind = $(if ($isDirectory) { 'directory' } else { 'file' }) })
+      if ($isDirectory) { $directories.Add($path); $pending.Enqueue($path) }
+      else { $files.Add($path) }
+    }
+  }
+  $report.cleanup['ownedInstallLeftovers'] = $inventory.ToArray()
+  $deletePaths = [Collections.Generic.List[string]]::new()
+  foreach ($file in $files) { $deletePaths.Add($file) }
+  $directoryPaths = $directories.ToArray()
+  [array]::Reverse($directoryPaths)
+  foreach ($directory in $directoryPaths) { $deletePaths.Add($directory) }
+  foreach ($path in $deletePaths) {
+    while ($true) {
+      Assert-Condition ($timer.ElapsedMilliseconds -lt 25000) 'Owned installation cleanup exceeded its 25-second bound.'
+      Assert-OwnedProcessesExited
+      Get-SafePath $safeOutput | Out-Null
+      $safe = Get-SafePath $path
+      Assert-Condition ($safe -ieq $root -or $safe.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) `
+        'Cleanup deletion escapes its exact owned root.'
+      try {
+        $attributes = [IO.File]::GetAttributes($safe)
+      } catch [IO.FileNotFoundException] { break }
+      catch [IO.DirectoryNotFoundException] { break }
+      Assert-Condition (($attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'Cleanup path became a link; preserving it.'
+      try {
+        if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) { [IO.Directory]::Delete($safe, $false) }
+        else { [IO.File]::Delete($safe) }
+        break
+      } catch [IO.IOException] {
+        # Inno may briefly retain a deletion/image resource after exit. Retry
+        # only this exact owned entry; never clear policy, attributes or locks.
+        if ($timer.ElapsedMilliseconds -ge 25000) { throw }
+        Start-Sleep -Milliseconds 150
+      }
+    }
+  }
+  $report.cleanup['ownedInstallDirectoryRemoved'] = $true
 }
 
 function Capture-Observation($Case, $Main, $Dialog, [string]$Name) {
@@ -996,6 +1163,7 @@ public static class NmgGuiObserver {
   [DllImport("user32.dll")] private static extern bool CloseDesktop(IntPtr desktop);
   [DllImport("user32.dll")] private static extern IntPtr GetThreadDesktop(uint thread);
   [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+  [DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetExitCodeProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process, out uint exitCode);
   [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint bytes, out uint needed);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] private static extern uint GetPrivateProfileString(string section, string key, string fallback, StringBuilder value, uint size, string path);
   private static string Class(IntPtr window) {
@@ -1116,6 +1284,15 @@ public static class NmgGuiObserver {
   Write-Receipt
 
   $phase = 'silent-install'
+  Assert-Condition ($outputDirectoryOwned -and $isolationEstablished) 'Exclusive output/isolation ownership is required before installation.'
+  $ownedInstallDirectory = Get-SafePath (Join-Path $outputRoot 'installed')
+  Assert-Condition ($ownedInstallDirectory -ieq (Get-SafePath $installDir)) 'Installation target does not equal the exact isolated directory.'
+  if (-not [NmgExclusiveOutputDirectory]::CreateDirectory($ownedInstallDirectory, [IntPtr]::Zero)) {
+    throw [ComponentModel.Win32Exception]::new([Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+      'Installation directory exclusive creation failed; this run does not own it.')
+  }
+  $installDirectoryOwned = $true
+  $report.isolation['installDirectoryExclusivelyCreated'] = $true
   $installLog = Join-Path $outputRoot 'installer.log'
   $arguments = '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /CURRENTUSER /NOICONS /TASKS="" /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS ' +
     '/DIR="' + $installDir + '" /GROUP="NmgAcceptance-' + $runId + '" /LOG="' + $installLog + '"'
@@ -1139,19 +1316,23 @@ public static class NmgGuiObserver {
   $failure = $_.Exception.Message
   $report.failure = [ordered]@{ phase = $phase; message = $failure; observedAt = [DateTime]::UtcNow.ToString('o') }
 } finally {
-  $report.cleanup.attempted = $isolationEstablished -and $installAttempted
+  $report.cleanup.attempted = $isolationEstablished -and ($installAttempted -or $installDirectoryOwned)
   if ($ownedProcesses.Count -gt 0) { Stop-OwnedProcesses }
   foreach ($stream in $locks.ToArray()) { $stream.Dispose() }
   $locks.Clear()
-  if ($isolationEstablished -and $installAttempted) {
+  if ($isolationEstablished -and ($installAttempted -or $installDirectoryOwned)) {
     try {
-      Assert-Condition (@($ownedProcesses.ToArray() | Where-Object { -not $_.evidence.waitCompleted }).Count -eq 0) `
-        'Owned process exit is not confirmed; preserving install and catalog.'
+      Assert-OwnedProcessesExited
+      Release-ExitedProcessHandles
       Assert-NoForeignClient
       $runValue = Get-RunValue 'HKCU:'
       Assert-Condition ($null -eq $runValue -or $runValue -ieq ('"' + $clientPath + '" --autostart')) `
         'Startup ownership changed; uninstall would affect an unowned value.'
       if ([IO.Directory]::Exists($installDir)) {
+        Assert-Condition ($outputDirectoryOwned -and $installDirectoryOwned -and
+          (Get-SafePath $installDir) -ieq $ownedInstallDirectory -and
+          $ownedInstallDirectory -ieq (Get-SafePath (Join-Path $outputRoot 'installed'))) `
+          'Refusing uninstall or deletion of an installation directory not exclusively created by this run.'
         $uninstallerPath = Join-Path $installDir 'unins000.exe'
         if ([IO.File]::Exists($uninstallerPath)) {
           $registration = Get-ItemProperty -LiteralPath ('HKCU:\' + $uninstallRelative)
@@ -1170,11 +1351,12 @@ public static class NmgGuiObserver {
             ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="' + $uninstallLog + '"') 'uninstaller'
           Wait-OwnedProcess $uninstaller
           Assert-Condition ([IO.File]::Exists($uninstallLog)) 'Real Inno uninstallation log is missing.'
+          Release-ExitedProcessHandles
         } else {
           Assert-Condition (-not [IO.File]::Exists($clientPath)) 'Own installation has no uninstaller; preserving it.'
         }
-        if ([IO.Directory]::Exists($installDir)) { [IO.Directory]::Delete((Get-SafePath $installDir), $false) }
       }
+      if ($installDirectoryOwned) { Remove-OwnedInstallDirectory }
       Cleanup-AppArtifacts
       $report.cleanup.complete = $true
     } catch { $cleanupErrors.Add($_.Exception.Message) }
