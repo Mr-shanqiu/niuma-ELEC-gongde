@@ -927,7 +927,7 @@ public static class NmgExclusiveOutputDirectory {
             ($guiReferencePaths.ContainsKey($dependency.Name) -and -not $privateWindowsFamily)) { continue }
         $allowedDrawingDependency = $privateWindowsFamily -or $dependency.Name -cin @(
           'System.Drawing.Common', 'System.Drawing', 'System.Drawing.Primitives',
-          'System.Windows.Extensions', 'Microsoft.Win32.SystemEvents')
+          'System.Windows.Extensions', 'Microsoft.Win32.SystemEvents', 'System.Formats.Nrbf')
         Assert-Condition $allowedDrawingDependency `
           "Drawing dependency is outside the supplied ref pack and approved Windows/Drawing family: $($dependency.FullName)"
         if ($drawingDependencyIdentities.ContainsKey($dependency.Name)) {
