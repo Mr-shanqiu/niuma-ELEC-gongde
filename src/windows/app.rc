@@ -15,8 +15,9 @@
 // Win32 resource type 1 is RT_CURSOR, not an application icon.
 103 ICON "appicon.ico"
 
-// VS_VERSION_INFO = 16
-VS_VERSION_INFO VERSIONINFO
+// RT_VERSION = 16; the VERSIONINFO resource identifier must be numeric 1.
+// No Windows headers are included here, so VS_VERSION_INFO is not a macro.
+1 VERSIONINFO
   FILEVERSION 0,8,4,0
   PRODUCTVERSION 0,8,4,0
   FILEFLAGSMASK 0x3F
