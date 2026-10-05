@@ -84,18 +84,37 @@ try {
     $testArguments = @($installDir, (Join-Path $communityDir $case.Single))
     if ($case.Batch) { $testArguments += Join-Path $communityDir $case.Batch }
     $quotedArguments = $testArguments | ForEach-Object { '"' + $_ + '"' }
-    $child = Start-Process -FilePath $packTest -ArgumentList $quotedArguments -NoNewWindow `
-      -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
-    $completed = $child.WaitForExit(30000)
-    if (-not $completed) {
-      $child.Kill()
-      $child.WaitForExit(5000) | Out-Null
-      $communityResults.Add(@{ case = $case.Name; result = "TIMEOUT" })
-      throw "Community native test exceeded its 30-second bound"
-    }
-    $child.WaitForExit()
-    $exit = $child.ExitCode
-    $output = (Get-Content $stdout -Raw) + (Get-Content $stderr -Raw)
+    # Own the process handle from Start(), including fast-exiting native tests.
+    # Drain both redirected streams asynchronously so neither pipe can block.
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $packTest
+    $startInfo.Arguments = $quotedArguments -join " "
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $child = New-Object System.Diagnostics.Process
+    $child.StartInfo = $startInfo
+    try {
+      if (-not $child.Start()) { throw "Could not start community native test" }
+      $stdoutRead = $child.StandardOutput.ReadToEndAsync()
+      $stderrRead = $child.StandardError.ReadToEndAsync()
+      $completed = $child.WaitForExit(30000)
+      if (-not $completed) {
+        $child.Kill()
+        $child.WaitForExit(5000) | Out-Null
+        $communityResults.Add(@{ case = $case.Name; result = "TIMEOUT" })
+        throw "Community native test exceeded its 30-second bound"
+      }
+      $child.WaitForExit()
+      $exit = $child.ExitCode
+      $stdoutText = $stdoutRead.GetAwaiter().GetResult()
+      $stderrText = $stderrRead.GetAwaiter().GetResult()
+      $encoding = New-Object System.Text.UTF8Encoding($false)
+      [System.IO.File]::WriteAllText($stdout, $stdoutText, $encoding)
+      [System.IO.File]::WriteAllText($stderr, $stderrText, $encoding)
+      $output = $stdoutText + $stderrText
+    } finally { $child.Dispose() }
     Write-Host $output
     # A later render failure is not proof that the importer rejected the input.
     $passed = if ($case.Reject) {
