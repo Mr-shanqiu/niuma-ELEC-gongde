@@ -58,6 +58,68 @@ New-Item -ItemType Directory -Force -Path $catInstallDir | Out-Null
 & $packTest $catInstallDir $luckyCatPack
 if ($LASTEXITCODE -ne 0) { throw "Schema-3 lucky cat runtime test failed" }
 
+# Exercise the same production importer with free-community formats on Windows.
+# These are explicitly synthetic fixtures, not a production moderation receipt.
+$communityRun = "windows-" + [Guid]::NewGuid().ToString("N")
+$communityDir = Join-Path $fixtureDir ("community-runtime-" + $communityRun)
+python (Join-Path $repoRoot "scripts\generate-free-community-runtime-fixtures.py") `
+  --output-dir $communityDir --run-id $communityRun
+if ($LASTEXITCODE -ne 0) { throw "Could not prepare community runtime fixtures" }
+$communityResults = New-Object System.Collections.Generic.List[object]
+$communityReport = Join-Path $communityDir "runtime-results.json"
+$communityCases = @(
+  @{ Name = "schema1"; Single = "community-schema1.nmgpack"; Batch = $null; Reject = $false },
+  @{ Name = "schema3"; Single = "community-schema3.nmgpack"; Batch = $null; Reject = $false },
+  @{ Name = "two-works"; Single = "community-schema1.nmgpack"; Batch = "community-two-works.nmgpacks"; Reject = $false },
+  @{ Name = "reserved-identity"; Single = "negative-reserved-identity.nmgpack"; Batch = $null; Reject = $true },
+  @{ Name = "pending-review"; Single = "negative-pending-review.nmgpack"; Batch = $null; Reject = $true },
+  @{ Name = "invalid-png"; Single = "negative-invalid-png.nmgpack"; Batch = $null; Reject = $true }
+)
+try {
+  foreach ($case in $communityCases) {
+    $installDir = Join-Path $communityDir ("installed-" + $case.Name)
+    New-Item -ItemType Directory -Path $installDir | Out-Null
+    $stdout = Join-Path $communityDir ($case.Name + ".stdout.log")
+    $stderr = Join-Path $communityDir ($case.Name + ".stderr.log")
+    $testArguments = @($installDir, (Join-Path $communityDir $case.Single))
+    if ($case.Batch) { $testArguments += Join-Path $communityDir $case.Batch }
+    $quotedArguments = $testArguments | ForEach-Object { '"' + $_ + '"' }
+    $child = Start-Process -FilePath $packTest -ArgumentList $quotedArguments -NoNewWindow `
+      -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    $completed = $child.WaitForExit(30000)
+    if (-not $completed) {
+      $child.Kill()
+      $child.WaitForExit(5000) | Out-Null
+      $communityResults.Add(@{ case = $case.Name; result = "TIMEOUT" })
+      throw "Community native test exceeded its 30-second bound"
+    }
+    $child.WaitForExit()
+    $exit = $child.ExitCode
+    $output = (Get-Content $stdout -Raw) + (Get-Content $stderr -Raw)
+    Write-Host $output
+    # A later render failure is not proof that the importer rejected the input.
+    $passed = if ($case.Reject) {
+      $exit -eq 1 -and $output -match "SINGLE_FIRST result=0 installed=0 id_empty=1"
+    } else {
+      $exit -eq 0 -and $output -match "PASS "
+    }
+    $communityResults.Add(@{ case = $case.Name; result = $(if ($passed) { "PASS" } else { "FAIL" });
+      exitCode = $exit; expectedInitialRejection = $case.Reject;
+      inputSha256 = (Get-FileHash (Join-Path $communityDir $case.Single) -Algorithm SHA256).Hash.ToLowerInvariant();
+      stdout = $stdout; stderr = $stderr })
+    if (-not $passed) { throw "Community native runtime case failed: $($case.Name)" }
+  }
+} finally {
+  $report = @{ schema = "gongde-free-community-windows-runtime.v1"; version = $version;
+    importer = "Actual Windows AppearanceCatalog/GDI+ production sources";
+    scope = "Synthetic community native import/reimport/render/rejection; not production submission or GUI/installer acceptance";
+    expectedCases = $communityCases.Count; executedCases = $communityResults.Count; cases = @($communityResults.ToArray()) }
+  [System.IO.File]::WriteAllText($communityReport, ($report | ConvertTo-Json -Depth 8),
+    (New-Object System.Text.UTF8Encoding($false)))
+}
+"COMMUNITY_NATIVE_TEST=PASS cases=$($communityResults.Count)"
+"COMMUNITY_NATIVE_REPORT=$communityReport"
+
 $srcExe = Join-Path $repoRoot "$BuildDir\$Config\niuma-merit.exe"
 if (-not (Test-Path $srcExe)) {
   $srcExe = Join-Path $repoRoot "$BuildDir\src\windows\$Config\niuma-merit.exe"
@@ -72,6 +134,21 @@ if (-not (Test-Path $srcExe)) {
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 $distExe = Join-Path $distDir $exeName
 Copy-Item $srcExe $distExe -Force
+
+$releaseEvidenceDir = Join-Path $repoRoot ("$BuildDir\release-evidence-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $releaseEvidenceDir | Out-Null
+$artifactArguments = @{
+  ExecutablePath = $distExe
+  ExpectedVersion = $version
+  ArtifactKind = 'client'
+  Configuration = $Config
+  ReceiptPath = Join-Path $releaseEvidenceDir 'client-artifact.json'
+}
+& (Join-Path $repoRoot 'scripts\verify-windows-artifact.ps1') @artifactArguments
+if ($env:GITHUB_ENV) {
+  Add-Content -LiteralPath $env:GITHUB_ENV -Value "WINDOWS_RELEASE_EVIDENCE=$releaseEvidenceDir" -Encoding utf8
+}
+"WINDOWS_RELEASE_EVIDENCE=$releaseEvidenceDir"
 
 $zipPath = Join-Path $distDir $zipName
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

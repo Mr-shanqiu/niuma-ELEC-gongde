@@ -394,6 +394,30 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
     if (error) *error = NMError(33, @"形象包基础字段无效");
     return nil;
   }
+  // Preserve the real issuers of existing official packs, not synthetic test labels.
+  NSString *publisher = json[@"publisher"];
+  if (([identifier hasPrefix:@"official."] && ![publisher isEqualToString:@"NiuMa Merit"]) ||
+      ([identifier hasPrefix:@"zqscreen."] && ![publisher isEqualToString:@"zqscreen"])) {
+    if (error) *error = NMError(33, @"非官方形象包不能使用官方标识，请使用自己的形象包标识");
+    return nil;
+  }
+  // The platform namespace is reserved for reviewed community deliveries.
+  // Ordinary non-platform DIY packages retain their existing import contract.
+  if ([identifier hasPrefix:@"creator."]) {
+    NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:
+        @"^creator\\.[a-f0-9]{32}\\.[a-z0-9-]{1,32}$" options:0 error:NULL];
+    NSString *reviewID = json[@"review_id"];
+    NSCharacterSet *nonHex = [[NSCharacterSet characterSetWithCharactersInString:
+        @"0123456789abcdef"] invertedSet];
+    if (![json[@"publisher"] isEqualToString:@"community"] ||
+        [pattern numberOfMatchesInString:identifier options:0
+                                  range:NSMakeRange(0, identifier.length)] != 1 ||
+        reviewID.length != 32 ||
+        [reviewID rangeOfCharacterFromSet:nonHex].location != NSNotFound) {
+      if (error) *error = NMError(33, @"社区形象包标识或审核信息无效，请从官网重新下载");
+      return nil;
+    }
+  }
   NSString *previewName = json[@"preview"];
   NSArray *layers = json[@"layers"];
   if (![previewName isKindOfClass:[NSString class]] || !NMIsSafeArchiveName(previewName) ||
@@ -514,6 +538,7 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
     pack.nameZH = json[@"name_zh"];
     pack.nameEN = json[@"name_en"];
     pack.author = json[@"author"];
+    pack.publisher = json[@"publisher"];
     pack.reviewID = json[@"review_id"];
     pack.directoryURL = directoryURL;
     pack.previewImage = images[previewName];
@@ -591,6 +616,14 @@ invalidLayers:
   NSURL *destination = [root URLByAppendingPathComponent:[pack.identifier stringByAppendingPathExtension:@"nmgpackdata"] isDirectory:YES];
   NSURL *backup = [root URLByAppendingPathComponent:[NSString stringWithFormat:@".backup-%@", NSUUID.UUID.UUIDString] isDirectory:YES];
   BOOL hadOld = [fm fileExistsAtPath:destination.path];
+  if (hadOld) {
+    NMAppearancePack *existing = [self validatePackDirectory:destination error:nil];
+    if (!existing || ![existing.publisher isEqualToString:pack.publisher]) {
+      if (error) *error = NMError(43, @"同名形象包的来源不一致或原包无法校验，不能覆盖原有形象包");
+      [fm removeItemAtURL:stage error:nil];
+      return nil;
+    }
+  }
   if (hadOld && ![fm moveItemAtURL:destination toURL:backup error:error]) {
     [fm removeItemAtURL:stage error:nil];
     return nil;

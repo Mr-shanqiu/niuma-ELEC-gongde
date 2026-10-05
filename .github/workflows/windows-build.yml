@@ -41,6 +41,17 @@ jobs:
             throw "Inno Setup compiler was not found"
           }
           & $iscc "/DMyAppVersion=$env:VERSION" "installer\windows\niuma-merit.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
+          if (-not $env:WINDOWS_RELEASE_EVIDENCE) {
+            throw "The client artifact binding directory is missing"
+          }
+          $artifactArguments = @{
+            ExecutablePath = "dist\niuma-merit-windows-$env:VERSION-setup.exe"
+            ExpectedVersion = $env:VERSION
+            ArtifactKind = 'installer'
+            ReceiptPath = Join-Path $env:WINDOWS_RELEASE_EVIDENCE 'installer-artifact.json'
+          }
+          & ./scripts/verify-windows-artifact.ps1 @artifactArguments
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
@@ -48,4 +59,26 @@ jobs:
           name: niuma-merit-windows-${{ env.VERSION }}-setup
           path: dist/niuma-merit-windows-${{ env.VERSION }}-setup.exe
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Retain Windows artifact version and byte bindings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifact-bindings-${{ github.run_id }}
+          path: build-windows/release-evidence-*/*.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Retain free-community native runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: free-community-windows-runtime-${{ github.run_id }}
+          path: |
+            build-windows/pack-fixtures/community-runtime-*/fixture-receipt.json
+            build-windows/pack-fixtures/community-runtime-*/runtime-results.json
+            build-windows/pack-fixtures/community-runtime-*/*.stdout.log
+            build-windows/pack-fixtures/community-runtime-*/*.stderr.log
+          if-no-files-found: ignore
           retention-days: 14

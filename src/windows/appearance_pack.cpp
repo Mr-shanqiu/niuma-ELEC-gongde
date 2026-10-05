@@ -576,6 +576,30 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     SetError(error, L"形象包元数据不符合 1.0 规范。");
     return false;
   }
+  // Existing official sources use these actual issuer strings.
+  if ((pack->id.compare(0, 9, "official.") == 0 && publisher != "NiuMa Merit") ||
+      (pack->id.compare(0, 9, "zqscreen.") == 0 && publisher != "zqscreen")) {
+    SetError(error, L"非官方形象包不能使用官方标识，请使用自己的形象包标识。");
+    return false;
+  }
+  // Only the platform creator namespace requires the reviewed-delivery format.
+  if (pack->id.compare(0, 8, "creator.") == 0) {
+    const auto lowerHex = [](unsigned char ch) {
+      return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+    };
+    const auto slugCharacter = [](unsigned char ch) {
+      return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || ch == '-';
+    };
+    if (publisher != "community" || pack->id.size() < 42 || pack->id.size() > 73 ||
+        pack->id[40] != '.' ||
+        !std::all_of(pack->id.begin() + 8, pack->id.begin() + 40, lowerHex) ||
+        !std::all_of(pack->id.begin() + 41, pack->id.end(), slugCharacter) ||
+        pack->reviewId.size() != 32 ||
+        !std::all_of(pack->reviewId.begin(), pack->reviewId.end(), lowerHex)) {
+      SetError(error, L"社区形象包标识或审核信息无效，请从官网重新下载。");
+      return false;
+    }
+  }
   pack->nameZh = Utf8ToWide(nameZh);
   pack->nameEn = Utf8ToWide(nameEn);
   pack->author = Utf8ToWide(author);
@@ -956,6 +980,22 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
   CreateDirectoryW(directory.c_str(), nullptr);
   const std::wstring destination =
       directory + L"\\" + FileNameForId(validated->id);
+  const DWORD destinationAttributes = GetFileAttributesW(destination.c_str());
+  if (destinationAttributes != INVALID_FILE_ATTRIBUTES) {
+    std::unique_ptr<AppearancePack> existing;
+    if ((destinationAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+        !LoadAppearancePackFile(destination, false, &existing, error) ||
+        existing->publisher != validated->publisher) {
+      SetError(error, L"同名形象包的来源不一致或原包无法校验，不能覆盖原有形象包。");
+      return false;
+    }
+  } else {
+    const DWORD destinationError = GetLastError();
+    if (destinationError != ERROR_FILE_NOT_FOUND && destinationError != ERROR_PATH_NOT_FOUND) {
+      SetError(error, L"无法检查原有形象包，未执行覆盖。");
+      return false;
+    }
+  }
   const std::wstring temporary = destination + L".incoming";
   DeleteFileW(temporary.c_str());
   if (!CopyFileW(sourcePath.c_str(), temporary.c_str(), FALSE)) {
@@ -964,7 +1004,7 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
   }
   std::unique_ptr<AppearancePack> copied;
   if (!LoadAppearancePackFile(temporary, true, &copied, error) ||
-      copied->id != validated->id ||
+      copied->id != validated->id || copied->publisher != validated->publisher ||
       !MoveFileExW(temporary.c_str(), destination.c_str(),
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
     DeleteFileW(temporary.c_str());

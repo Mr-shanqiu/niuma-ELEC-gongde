@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy) NSString *nameZH;
 @property(nonatomic, copy) NSString *nameEN;
 @property(nonatomic, copy) NSString *author;
+@property(nonatomic, copy) NSString *publisher;
 @property(nonatomic, copy) NSString *reviewID;
 @property(nonatomic, strong) NSURL *directoryURL;
 @property(nonatomic, strong) NSImage *previewImage;
