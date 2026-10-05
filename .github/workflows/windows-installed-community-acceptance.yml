@@ -20,7 +20,7 @@ jobs:
       run:
         shell: pwsh
     env:
-      ACCEPTANCE_ROOT: ${{ runner.temp }}/gongde-win084-${{ github.run_id }}-${{ github.run_attempt }}
+      ACCEPTANCE_LEAF: gongde-win084-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out the acceptance helper only
         uses: actions/checkout@v4
@@ -34,6 +34,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:ACCEPTANCE_ROOT = Join-Path $env:RUNNER_TEMP $env:ACCEPTANCE_LEAF
+          "ACCEPTANCE_ROOT=$env:ACCEPTANCE_ROOT" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           if ($env:GITHUB_REPOSITORY -cne 'Mr-shanqiu/niuma-ELEC-gongde') { throw 'Unexpected repository.' }
           if (Test-Path -LiteralPath $env:ACCEPTANCE_ROOT) { throw 'Acceptance directory already exists.' }
           [IO.Directory]::CreateDirectory($env:ACCEPTANCE_ROOT) | Out-Null
