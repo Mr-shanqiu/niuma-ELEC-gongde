@@ -890,6 +890,70 @@ public static class NmgExclusiveOutputDirectory {
   Assert-Condition (-not [string]::IsNullOrWhiteSpace($drawingAssembly.Location)) `
     'The installed drawing implementation has no usable assembly reference.'
   $guiReferencePaths[$drawingAssembly.GetName().Name] = $drawingAssembly.Location
+  if ($PSVersionTable.PSEdition -eq 'Core') {
+    # .NET 10 exposes Bitmap/Image contracts through private Windows framework
+    # assemblies (including GdiPlus and Core). Walk the actual implementation's
+    # declared dependency graph so another member of that family is not omitted.
+    # Never enumerate arbitrary implementation DLLs or replace standard ref-pack
+    # BCL assemblies with System.Private.CoreLib/runtime implementation copies.
+    $drawingPath = Get-SafePath $drawingAssembly.Location
+    $drawingFrameworkDirectory = [IO.Path]::GetDirectoryName($drawingPath)
+    $pwshFrameworkDirectory = (Get-SafePath $PSHOME).TrimEnd('\')
+    $bundledDrawingFramework = $drawingFrameworkDirectory.TrimEnd('\') -ieq $pwshFrameworkDirectory
+    $trustedPlatformPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $platformAssemblyPaths = [string][AppContext]::GetData('TRUSTED_PLATFORM_ASSEMBLIES')
+    foreach ($platformPath in @($platformAssemblyPaths.Split([IO.Path]::PathSeparator))) {
+      if (-not [string]::IsNullOrWhiteSpace($platformPath)) {
+        $trustedPlatformPaths.Add([IO.Path]::GetFullPath($platformPath)) | Out-Null
+      }
+    }
+    Assert-Condition ($bundledDrawingFramework -or $trustedPlatformPaths.Contains($drawingPath)) `
+      'Bitmap implementation is not in the installed pwsh framework or declared trusted platform set.'
+    $drawingDependencies = [Collections.Generic.Queue[Reflection.Assembly]]::new()
+    $drawingDependencies.Enqueue($drawingAssembly)
+    $visitedDrawingAssemblies = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $drawingDependencyIdentities = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $drawingDependencyTimer = [Diagnostics.Stopwatch]::StartNew()
+    while ($drawingDependencies.Count -gt 0) {
+      Assert-Condition ($drawingDependencyTimer.ElapsedMilliseconds -lt 25000 -and
+        $visitedDrawingAssemblies.Count -lt 64) 'Drawing dependency resolution exceeded its bounded framework closure.'
+      $parentAssembly = $drawingDependencies.Dequeue()
+      if (-not $visitedDrawingAssemblies.Add($parentAssembly.FullName)) { continue }
+      foreach ($dependency in $parentAssembly.GetReferencedAssemblies()) {
+        $privateWindowsFamily = $dependency.Name -cmatch '\ASystem\.Private\.Windows\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*\z'
+        # Keep already supplied standard references. CoreLib is represented by
+        # the installed reference pack, not an extra implementation reference.
+        if ($dependency.Name -ceq 'System.Private.CoreLib' -or
+            ($guiReferencePaths.ContainsKey($dependency.Name) -and -not $privateWindowsFamily)) { continue }
+        $allowedDrawingDependency = $privateWindowsFamily -or $dependency.Name -cin @(
+          'System.Drawing.Common', 'System.Drawing', 'System.Drawing.Primitives',
+          'System.Windows.Extensions', 'Microsoft.Win32.SystemEvents')
+        Assert-Condition $allowedDrawingDependency `
+          "Drawing dependency is outside the supplied ref pack and approved Windows/Drawing family: $($dependency.FullName)"
+        if ($drawingDependencyIdentities.ContainsKey($dependency.Name)) {
+          Assert-Condition ($drawingDependencyIdentities[$dependency.Name] -ieq $dependency.FullName) `
+            "Conflicting Drawing framework dependency identity: $($dependency.Name)"
+          continue
+        }
+        # Resolve only the exact sibling of the actual trusted Bitmap assembly.
+        # There is no working-directory, SDK-directory or external-path fallback.
+        $dependencyPath = Get-SafePath (Join-Path $drawingFrameworkDirectory ($dependency.Name + '.dll'))
+        Assert-Condition ([IO.File]::Exists($dependencyPath) -and
+          ($bundledDrawingFramework -or $trustedPlatformPaths.Contains($dependencyPath))) `
+          "Required Drawing dependency is missing from its trusted framework location: $($dependency.FullName)"
+        $fileIdentity = [Reflection.AssemblyName]::GetAssemblyName($dependencyPath)
+        Assert-Condition ($fileIdentity.FullName -ieq $dependency.FullName) `
+          "Drawing dependency version/culture/public-key identity mismatch: $($dependency.Name)"
+        $dependencyAssembly = [Reflection.Assembly]::LoadFrom($dependencyPath)
+        Assert-Condition ($dependencyAssembly.FullName -ieq $dependency.FullName -and
+          (Get-SafePath $dependencyAssembly.Location) -ieq $dependencyPath) `
+          "Drawing dependency resolved outside its exact trusted framework image: $($dependency.Name)"
+        $drawingDependencyIdentities[$dependency.Name] = $dependency.FullName
+        $guiReferencePaths[$dependency.Name] = $dependencyPath
+        $drawingDependencies.Enqueue($dependencyAssembly)
+      }
+    }
+  }
   Add-Type -ReferencedAssemblies ([string[]]@($guiReferencePaths.Values)) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
