@@ -7,7 +7,21 @@
 
 - GitHub Releases：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases>
 - [免签名安装、升级与卸载指南](docs/INSTALL_UNSIGNED.md)
-- 本项目当前长期采用免签名分发；Windows 的“未知发布者”和 macOS 的安全提示属于预期现象。
+- 本项目当前采用免签名分发；Windows 的“未知发布者”和 macOS 的安全提示属于预期现象。
+
+## Code signing policy
+
+**Status: application in progress; not yet approved.** We are applying to the SignPath Foundation for free code signing of the Windows desktop client. Current downloads remain unsigned. No current release is represented as signed or endorsed by SignPath.
+
+If approved and integrated, the attribution for signed Windows releases will be: “Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).” This attribution describes the intended service, not an existing approval.
+
+- Committer and reviewer: [Yue Wang / Mr-shanqiu](https://github.com/Mr-shanqiu).
+- Signing approver: [Yue Wang / Mr-shanqiu](https://github.com/Mr-shanqiu).
+- Signing scope: the project's own Windows desktop client and installer, built from the public repository through GitHub Actions. Signing integration is pending approval; each signing request will require manual maintainer approval. It does not cover the website, payment service, third-party applications, or macOS Developer ID signing and notarization.
+- Changes from external contributors require maintainer review. Source-repository and signing-service access must use multi-factor authentication before signing is enabled.
+- Privacy: the desktop client does not transfer information to networked systems. It counts input events without recording key contents, mouse coordinates, window titles or clipboard contents; counts and settings remain local. See the [privacy policy](https://gongde.zqscreen.cn/privacy.html) for the separate website and service data practices.
+
+中文说明：目前正在申请 SignPath Foundation 的 Windows 代码签名支持，尚未获批或接入；现有下载仍为免签名版本。维护、代码审查和签名审批由 Yue Wang（GitHub：Mr-shanqiu）负责。获批后仅对可追溯到公开源码和自动构建的本项目 Windows 客户端及安装程序发起签名，并由维护者逐次审批。
 
 ## 什么是本软件
 
