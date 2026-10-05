@@ -1,0 +1,195 @@
+name: Windows installed 0.8.4 original SDK acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: gongde-windows-installed-original-sdk-084
+  cancel-in-progress: false
+
+jobs:
+  installed-original-sdk:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      ACCEPTANCE_ROOT: ${{ runner.temp }}/gongde-win084-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out the acceptance helper only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/test-windows-installed-community-gui.ps1
+          sparse-checkout-cone-mode: false
+
+      - name: Confirm the frozen successful build and exact artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REPOSITORY -cne 'Mr-shanqiu/niuma-ELEC-gongde') { throw 'Unexpected repository.' }
+          if (Test-Path -LiteralPath $env:ACCEPTANCE_ROOT) { throw 'Acceptance directory already exists.' }
+          [IO.Directory]::CreateDirectory($env:ACCEPTANCE_ROOT) | Out-Null
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $base = 'https://api.github.com/repos/Mr-shanqiu/niuma-ELEC-gongde/actions'
+          $run = Invoke-RestMethod -Uri "$base/runs/37268177950" -Headers $headers
+          if ($run.status -cne 'completed' -or $run.conclusion -cne 'success' -or
+              $run.head_sha -cne '92b04bad1b8e12779a96b49de299f74791542934') { throw 'Frozen build identity does not match.' }
+          $artifact = Invoke-RestMethod -Uri "$base/artifacts/11326958410" -Headers $headers
+          if ($artifact.id -ne 11326958410 -or $artifact.expired -or
+              $artifact.size_in_bytes -ne 2282280 -or
+              $artifact.workflow_run.id -ne 37268177950 -or
+              $artifact.workflow_run.head_sha -cne $run.head_sha -or
+              $artifact.digest -cne 'sha256:60df985c3ebb41b4b8c52527739d4f90ce63a5fee40d1fe99e6fd833d98872a7') {
+            throw 'Frozen installer artifact identity does not match.'
+          }
+          $record = @{ schema = 'gongde-installed-ci-frozen-artifact.v1'; runId = $run.id; sourceRef = $run.head_sha; artifactId = $artifact.id; artifactDigest = $artifact.digest; rebuilt = $false }
+          $path = Join-Path $env:ACCEPTANCE_ROOT 'frozen-artifact-binding.json'
+          $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+          try { $bytes = [Text.Encoding]::UTF8.GetBytes(($record | ConvertTo-Json) + "`n"); $stream.Write($bytes, 0, $bytes.Length) }
+          finally { $stream.Dispose() }
+
+      - name: Download the existing installer without rebuilding it
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: '11326958410'
+          run-id: '37268177950'
+          repository: Mr-shanqiu/niuma-ELEC-gongde
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: ${{ env.ACCEPTANCE_ROOT }}/frozen
+
+      - name: Receive exactly the approved originals through private temporary input
+        env:
+          SDK_PRIVATE_INPUT: ${{ secrets.GONGDE_ORIGINAL_SDK_084_QA_20261005_019FE783 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:SDK_PRIVATE_INPUT)) { throw 'Approved private SDK input is absent.' }
+          $input = $env:SDK_PRIVATE_INPUT | ConvertFrom-Json
+          if ($input.schema -cne 'gongde-frozen-sdk-private-ci-inputs.v1' -or @($input.cases).Count -ne 3) { throw 'Unexpected private input contract.' }
+          $root = Join-Path $env:ACCEPTANCE_ROOT 'inputs'
+          if (Test-Path -LiteralPath $root) { throw 'SDK input directory already exists.' }
+          [IO.Directory]::CreateDirectory($root) | Out-Null
+          $utf8 = [Text.UTF8Encoding]::new($false)
+          function Write-NewBytes([string]$Path, [byte[]]$Bytes) {
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try { $stream.Write($Bytes, 0, $Bytes.Length) } finally { $stream.Dispose() }
+          }
+          $amber = [ordered]@{
+            id = 'creator.25e87fe4266be12e737f029367ea9b41.accept-amber'; version = '1.0.0'
+            reviewId = '8a0b766886e89707c1b1ff69e80fe285'; schema = 1
+            sdkArchiveSha256 = '72357f2b68b0807edb68aad817fa3df4d0bf0f97fa7816a52526d65df8c026c2'; sdkArchiveBytes = 1116
+            producerVersionId = '51f65e718216d11f38d2a7fb705f8ce2'
+            sourceRevision = '7faf42908436fde2545cf418f1763929d2bef53a096773ae13ff324ec79e41e4'
+            sourceArchiveSha256 = '5c9ec2bf97c61dbe6e3e88aeb878c8a56ed7959832ac810714ef0ee3b6cfa14f'; sourceArchiveBytes = 820
+          }
+          $green = [ordered]@{
+            id = 'creator.7672096b44ca35887c061df50eeb0649.community-qa-green'; version = '1.0.0'
+            reviewId = '74225811126af6bcabb619658772a46f'; schema = 3
+            sdkArchiveSha256 = '552157a2793b85622b08744271d8041796d26b73ae14e8911f06ebf8d2ca37fb'; sdkArchiveBytes = 1187
+            producerVersionId = 'cfd82375bb8af46efddc621f5321c69e'
+            sourceRevision = '8ca7f474f9223c6cd67ccaf91bc8abb6a0862947b913f18989b7de3c98b25a9d'
+            sourceArchiveSha256 = '5fb48dee28c2f83400d00ba798c163d899cd70ed9609f373b6f7eeca28f43276'; sourceArchiveBytes = 934
+          }
+          $pins = @(
+            @{ name = 'amber'; fileName = 'original-amber-schema1.nmgpack'; bytes = 1116; sha256 = $amber.sdkArchiveSha256; schema = 1; expectedImportedCount = 1; sourceRecords = @($amber) },
+            @{ name = 'green'; fileName = 'original-green-schema3.nmgpack'; bytes = 1187; sha256 = $green.sdkArchiveSha256; schema = 3; expectedImportedCount = 1; sourceRecords = @($green) },
+            @{ name = 'pair'; fileName = 'original-amber-green-pair.nmgpacks'; bytes = 2557; sha256 = '857681c49a5dc2e43a94c89ce26eddfd2f5a5bcab1d1b4371dc835bc1db25e7b'; schema = @(1, 3); expectedImportedCount = 2; sourceRecords = @($amber, $green) }
+          )
+          $cases = foreach ($pin in $pins) {
+            $provided = @($input.cases | Where-Object { $_.name -ceq $pin.name })
+            if ($provided.Count -ne 1 -or $provided[0].fileName -cne $pin.fileName -or
+                $provided[0].bytes -ne $pin.bytes -or $provided[0].sha256 -cne $pin.sha256) { throw 'Private input identity mismatch.' }
+            $bytes = [Convert]::FromBase64String($provided[0].payloadBase64)
+            $hasher = [Security.Cryptography.SHA256]::Create()
+            try { $sha = ([BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() }
+            finally { $hasher.Dispose() }
+            if ($bytes.Length -ne $pin.bytes -or $sha -cne $pin.sha256) { throw 'Private input byte binding failed.' }
+            $path = Join-Path $root $pin.fileName
+            Write-NewBytes $path $bytes
+            [ordered]@{ name = $pin.name; path = $path; bytes = $pin.bytes; sha256 = $pin.sha256; schema = $pin.schema; expectedImportedCount = $pin.expectedImportedCount; sourceRecords = $pin.sourceRecords }
+          }
+          $manifest = [ordered]@{
+            schema = 'gongde-original-sdk-inputs.v2'; cases = @($cases)
+            classification = 'Existing synthetic QA provider compatibility samples, not anonymous HTTP delivery'
+            providerReleaseRef = '5bc2b2fe20667db97a204da73eddf6fd63e320fc5fcc690a20d113a20a34a126'
+            providerImageDigest = 'sha256:96bfceb56dc42acf62e9b037be70d4bcbd9f91ca29217050afb084cdf286a19b'
+            producerMetadataSource = 'Previously observed SDK stdout metadata and reviewed source records; revisions are not embedded SDK manifest fields'
+            producerSourceArchiveReadByRunner = $false; sdkInvokedByRunner = $false; anonymousHttpDeliveryObserved = $false
+          }
+          Write-NewBytes (Join-Path $root 'sdk-manifest.json') ($utf8.GetBytes(($manifest | ConvertTo-Json -Depth 16) + "`n"))
+          $env:SDK_PRIVATE_INPUT = $null
+          Write-Output 'Three frozen SDK inputs received privately; payloads are not logged or uploaded.'
+
+      - name: Parse helper and test rejection of an existing output directory
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $helper = Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-installed-community-gui.ps1'
+          $tokens = $null; $errors = $null
+          [Management.Automation.Language.Parser]::ParseFile($helper, [ref]$tokens, [ref]$errors) | Out-Null
+          if (@($errors).Count -ne 0) { throw 'Acceptance helper has PowerShell parser errors.' }
+          $negative = Join-Path $env:ACCEPTANCE_ROOT 'existing-output-negative'
+          [IO.Directory]::CreateDirectory($negative) | Out-Null
+          $sentinel = Join-Path $negative 'keep.txt'
+          [IO.File]::WriteAllText($sentinel, 'Existing output must remain unchanged.')
+          $before = (Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash
+          $caught = $null
+          try {
+            & $helper -InstallerPath (Join-Path $env:ACCEPTANCE_ROOT 'frozen/niuma-merit-windows-0.8.4-setup.exe') `
+              -ExpectedInstallerSha256 'b3ff17d49a8d6b4eba43fd136d45b563fd5bd8ecb8fa3c4ac9d061acd3173ec4' `
+              -ExpectedClientSha256 'b4c1c8e3b9e3130402446b88f9455cfe780c86e0dfb9135b0008e1af7ec14761' `
+              -SdkManifestPath (Join-Path $env:ACCEPTANCE_ROOT 'inputs/sdk-manifest.json') -OutputDirectory $negative
+          } catch { $caught = $_.Exception.Message }
+          $after = (Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash
+          if (-not $caught -or $caught -notmatch '(?i)(output|directory).*(exist|owned|fresh)|already.*exist' -or
+              $before -cne $after -or @(Get-ChildItem -LiteralPath $negative -Force).Count -ne 1) { throw 'Existing-output no-clobber rejection failed.' }
+          $record = @{ schema = 'gongde-installed-ci-preflight.v1'; parserPassed = $true; existingOutputRejected = $true; existingOutputUnchanged = $true }
+          $path = Join-Path $env:ACCEPTANCE_ROOT 'preflight-actual.json'
+          $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+          try { $bytes = [Text.Encoding]::UTF8.GetBytes(($record | ConvertTo-Json) + "`n"); $stream.Write($bytes, 0, $bytes.Length) }
+          finally { $stream.Dispose() }
+
+      - name: Install the frozen client and observe native original SDK imports
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./scripts/test-windows-installed-community-gui.ps1 `
+            -InstallerPath (Join-Path $env:ACCEPTANCE_ROOT 'frozen/niuma-merit-windows-0.8.4-setup.exe') `
+            -ExpectedInstallerSha256 'b3ff17d49a8d6b4eba43fd136d45b563fd5bd8ecb8fa3c4ac9d061acd3173ec4' `
+            -ExpectedClientSha256 'b4c1c8e3b9e3130402446b88f9455cfe780c86e0dfb9135b0008e1af7ec14761' `
+            -SdkManifestPath (Join-Path $env:ACCEPTANCE_ROOT 'inputs/sdk-manifest.json') `
+            -OutputDirectory (Join-Path $env:ACCEPTANCE_ROOT 'installed-gui')
+
+      - name: Retain receipts and observed GUI only, never raw SDK payloads
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-084-installed-original-sdk-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ env.ACCEPTANCE_ROOT }}/frozen-artifact-binding.json
+            ${{ env.ACCEPTANCE_ROOT }}/preflight-actual.json
+            ${{ env.ACCEPTANCE_ROOT }}/installed-gui/receipt*.json
+            ${{ env.ACCEPTANCE_ROOT }}/installed-gui/*.png
+
+      - name: Remove only the temporary runner SDK input files
+        if: always()
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $inputRoot = Join-Path $env:ACCEPTANCE_ROOT 'inputs'
+          if (Test-Path -LiteralPath $inputRoot) {
+            $expected = @('original-amber-schema1.nmgpack', 'original-green-schema3.nmgpack', 'original-amber-green-pair.nmgpacks', 'sdk-manifest.json')
+            foreach ($name in $expected) {
+              $path = Join-Path $inputRoot $name
+              if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path }
+            }
+            if (@(Get-ChildItem -LiteralPath $inputRoot -Force).Count -ne 0) { throw 'Unexpected runner input files; directory was not removed.' }
+            Remove-Item -LiteralPath $inputRoot
+          }
