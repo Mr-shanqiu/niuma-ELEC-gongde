@@ -859,7 +859,38 @@ public static class NmgExclusiveOutputDirectory {
 
   # This helper observes actual native windows and storage. It has no importer,
   # fake app, fixture generator, replacement renderer or production test hook.
-  Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+  # In pwsh, an explicit ReferencedAssemblies list replaces the default .NET
+  # reference set. System.Drawing alone therefore omits System.Collections
+  # (List<T>) and dependencies of the other existing observer types. Use this
+  # runtime's bundled reference assemblies, not mismatched implementation BCL
+  # assemblies such as System.Private.CoreLib alongside reference System.Runtime.
+  $guiReferencePaths = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+  if ($PSVersionTable.PSEdition -eq 'Core') {
+    $referenceDirectory = Join-Path $PSHOME 'ref'
+    Assert-Condition ([IO.Directory]::Exists($referenceDirectory)) 'The installed pwsh .NET reference directory is missing.'
+    foreach ($reference in @(Get-ChildItem -LiteralPath $referenceDirectory -Filter '*.dll' -File)) {
+      $guiReferencePaths[$reference.BaseName] = $reference.FullName
+    }
+    Assert-Condition ($guiReferencePaths.ContainsKey('System.Collections') -and
+      $guiReferencePaths.ContainsKey('System.Runtime') -and
+      $guiReferencePaths.ContainsKey('System.Drawing.Primitives')) `
+      'The installed pwsh reference set lacks required collection/runtime/drawing types.'
+  } else {
+    # Preserve Windows PowerShell compatibility using its loaded framework types.
+    foreach ($type in @([object], [Collections.Generic.List[object]],
+      [ComponentModel.Win32Exception], [Diagnostics.Process], [Drawing.Size],
+      [Runtime.InteropServices.Marshal], [Text.StringBuilder])) {
+      $assembly = $type.Assembly
+      $guiReferencePaths[$assembly.GetName().Name] = $assembly.Location
+    }
+  }
+  # Bitmap/ImageFormat live in System.Drawing.Common on pwsh Windows, outside
+  # the standard .NET reference pack. Reuse the already available implementation.
+  $drawingAssembly = [Drawing.Bitmap].Assembly
+  Assert-Condition (-not [string]::IsNullOrWhiteSpace($drawingAssembly.Location)) `
+    'The installed drawing implementation has no usable assembly reference.'
+  $guiReferencePaths[$drawingAssembly.GetName().Name] = $drawingAssembly.Location
+  Add-Type -ReferencedAssemblies ([string[]]@($guiReferencePaths.Values)) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
