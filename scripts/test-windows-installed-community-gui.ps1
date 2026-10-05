@@ -731,6 +731,61 @@ function Get-CatalogSnapshot {
   return ,$items.ToArray()
 }
 
+function Confirm-OwnedDialog($Case, $App, $Main, $Dialog, [string]$Stage) {
+  $Case.guiPhase = $Stage + ':inspect-controls'
+  $App.evidence['lastGuiPhase'] = $Case.guiPhase
+  $snapshot = [NmgGuiObserver]::InspectOkDialog($Dialog.Handle, $App.evidence.pid, $Main.Handle)
+  $event = [ordered]@{
+    stage = $Stage; inspectedAt = [DateTime]::UtcNow.ToString('o')
+    controls = $snapshot; message = 'BM_CLICK'; timeoutMs = 1500
+    dispatch = $null; dialogDismissedObserved = $false
+    windowsAfter = @(); catalogAfter = @(); failure = $null
+  }
+  $Case.controlEvents.Add($event)
+  Write-Receipt
+  try {
+    $Case.guiPhase = $Stage + ':dispatch-click'
+    $App.evidence['lastGuiPhase'] = $Case.guiPhase
+    Write-Receipt
+    $event.dispatch = [NmgGuiObserver]::ClickOk($snapshot)
+    Write-Receipt
+    Assert-Condition ($event.dispatch.Completed) `
+      "Owned IDOK BM_CLICK dispatch failed: Win32 $($event.dispatch.Win32Error), result $($event.dispatch.MessageResult). See recorded controls; this is not proof the button is absent."
+    $Case.guiPhase = $Stage + ':observe-dismissal'
+    $App.evidence['lastGuiPhase'] = $Case.guiPhase
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    while ($timer.ElapsedMilliseconds -lt 3000) {
+      [NmgGuiObserver]::CheckDesktop()
+      if ($App.handle.HasExited) {
+        Record-Exit $App
+        throw "App exited during $Stage confirmation: real exit code $($App.evidence.exitCode), status $($App.evidence.exitCodeStatus)."
+      }
+      if (-not [NmgGuiObserver]::DialogExistsForProcess($Dialog.Handle, $App.evidence.pid)) {
+        $event.dialogDismissedObserved = $true
+        $event['dismissalObservedAt'] = [DateTime]::UtcNow.ToString('o')
+        $event.windowsAfter = @([NmgGuiObserver]::Windows($App.evidence.pid))
+        $event.catalogAfter = Get-CatalogSnapshot
+        $Case.guiPhase = $Stage + ':dismissal-observed'
+        $App.evidence['lastGuiPhase'] = $Case.guiPhase
+        Write-Receipt
+        return
+      }
+      Start-Sleep -Milliseconds 100
+    }
+    throw "Owned $Stage dialog did not disappear within the bounded post-click observation."
+  } catch {
+    $event.failure = $_.Exception.Message
+    $event['failurePhase'] = $Case.guiPhase
+    try {
+      Record-Exit $App
+      if (-not $App.handle.HasExited) { $event.windowsAfter = @([NmgGuiObserver]::Windows($App.evidence.pid)) }
+      $event.catalogAfter = Get-CatalogSnapshot
+    } catch { $event['diagnosticObservationError'] = $_.Exception.Message }
+    Write-Receipt
+    throw
+  }
+}
+
 function Invoke-GuiCase($InputCase) {
   Assert-NoForeignClient
   $case = [ordered]@{
@@ -740,14 +795,23 @@ function Invoke-GuiCase($InputCase) {
     successDialogObserved = $false; dialogImportedCount = $null
     actualImportedCount = 0; countEvidence = $null; selectedPackId = $null
     catalogBefore = Get-CatalogSnapshot; catalogAfter = @()
-    observations = [Collections.Generic.List[object]]::new(); failure = $null
+    observations = [Collections.Generic.List[object]]::new()
+    controlEvents = [Collections.Generic.List[object]]::new()
+    guiPhase = 'launch'; failurePhase = $null; appProcess = $null; failure = $null
+    exitDiagnosticScope = 'Real app exit status is retained, including access violations; fault origin is not attributed to client, automation or cleanup without evidence'
   }
   $report.cases.Add($case)
   Write-Receipt
+  $app = $null
   try {
     # No existing instance is allowed: a launcher forwarding to somebody else's
     # window must never be confused with the installed app under test.
     $app = Start-OwnedProcess $clientPath ('"' + $InputCase.binding.path + '"') ('app-' + $InputCase.name)
+    # Keep the same live evidence object so a later cleanup-time AV remains in
+    # this case's final receipt, rather than disappearing behind the click error.
+    $case.appProcess = $app.evidence
+    $case.guiPhase = 'await-import-or-privacy-dialog'
+    $app.evidence['lastGuiPhase'] = $case.guiPhase
     $script:clientStarted = $true
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $privacySeen = $false
@@ -769,8 +833,9 @@ function Invoke-GuiCase($InputCase) {
         Assert-Condition (-not $privacySeen) 'Unexpected repeated privacy dialog.'
         Capture-Observation $case $main[0] $dialog 'privacy'
         $privacySeen = $true
-        [NmgGuiObserver]::ClickOk($dialog.Handle)
-        Start-Sleep -Milliseconds 150
+        Confirm-OwnedDialog $case $app $main[0] $dialog 'privacy-confirmation'
+        $case.guiPhase = 'await-import-success-dialog'
+        $app.evidence['lastGuiPhase'] = $case.guiPhase
         continue
       }
       Capture-Observation $case $main[0] $dialog 'import-dialog'
@@ -803,7 +868,7 @@ function Invoke-GuiCase($InputCase) {
       $case.selectedPackId = [NmgGuiObserver]::SelectedPack((Join-Path $dataRoot 'data.ini'))
       Assert-Condition (@($InputCase.packs | Where-Object { $_.id -ceq $case.selectedPackId }).Count -eq 1) `
         'Actual app storage does not show an imported pack enabled.'
-      [NmgGuiObserver]::ClickOk($dialog.Handle)
+      Confirm-OwnedDialog $case $app $main[0] $dialog 'import-success-confirmation'
       $success = $true
       break
     }
@@ -811,6 +876,8 @@ function Invoke-GuiCase($InputCase) {
     # The app installs its ordinary input hooks after dismissing import success.
     # Observe a stable normal window rather than closing before startup can fail.
     $settle = [Diagnostics.Stopwatch]::StartNew()
+    $case.guiPhase = 'observe-normal-app-after-import'
+    $app.evidence['lastGuiPhase'] = $case.guiPhase
     do {
       Assert-Condition (-not $app.handle.HasExited) 'Normal app exited immediately after import.'
       $windows = @([NmgGuiObserver]::Windows($app.handle.Id))
@@ -824,6 +891,8 @@ function Invoke-GuiCase($InputCase) {
     } while ($settle.ElapsedMilliseconds -lt 1000)
     Assert-Condition ($main.Count -eq 1) 'Normal app GUI disappeared after import.'
     Capture-Observation $case $main[0] $null 'normal-app'
+    $case.guiPhase = 'request-normal-app-close'
+    $app.evidence['lastGuiPhase'] = $case.guiPhase
     Assert-Condition ([NmgGuiObserver]::PostMessage($main[0].Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) `
       'Could not request normal closure of the owned app window.'
     Wait-OwnedProcess $app 10000
@@ -831,9 +900,20 @@ function Invoke-GuiCase($InputCase) {
     $case.actualGuiObserved = $true
     $case.normalGuiImportObserved = $true
     $case.result = 'PASS'
+    $case.guiPhase = 'normal-app-exited-zero'
+    $app.evidence['lastGuiPhase'] = $case.guiPhase
     $report.normalGuiImportObserved = $true
     Write-Receipt
-  } catch { $case.failure = $_.Exception.Message; Write-Receipt; throw }
+  } catch {
+    $case.failure = $_.Exception.Message
+    $case.failurePhase = $case.guiPhase
+    if ($null -ne $app) {
+      $app.evidence['guiFailurePhase'] = $case.failurePhase
+      try { Record-Exit $app } catch { $case['exitDiagnosticError'] = $_.Exception.Message }
+    }
+    Write-Receipt
+    throw
+  }
 }
 
 function Cleanup-AppArtifacts {
@@ -1140,6 +1220,52 @@ public sealed class NmgWindow {
   public int Right { get; set; }
   public int Bottom { get; set; }
 }
+public sealed class NmgControlInspection {
+  public IntPtr Handle { get; set; }
+  public IntPtr Parent { get; set; }
+  public IntPtr Root { get; set; }
+  public uint ProcessId { get; set; }
+  public int ControlId { get; set; }
+  public string ClassName { get; set; }
+  public string Text { get; set; }
+  public string TextError { get; set; }
+  public bool Exists { get; set; }
+  public bool Visible { get; set; }
+  public bool Enabled { get; set; }
+  public bool RectangleObserved { get; set; }
+  public int Left { get; set; }
+  public int Top { get; set; }
+  public int Right { get; set; }
+  public int Bottom { get; set; }
+}
+public sealed class NmgDialogInspection {
+  public IntPtr Dialog { get; set; }
+  public IntPtr Owner { get; set; }
+  public IntPtr ExpectedOwner { get; set; }
+  public uint ProcessId { get; set; }
+  public int ExpectedProcessId { get; set; }
+  public bool Exists { get; set; }
+  public bool Visible { get; set; }
+  public bool Enabled { get; set; }
+  public string ClassName { get; set; }
+  public string Title { get; set; }
+  public IntPtr DirectIdOkHandle { get; set; }
+  public string Resolution { get; set; }
+  public string InspectionError { get; set; }
+  public bool ControlsTruncated { get; set; }
+  public NmgControlInspection[] Controls { get; set; }
+  public NmgControlInspection Button { get; set; }
+}
+public sealed class NmgButtonDispatch {
+  public bool Completed { get; set; }
+  public int Win32Error { get; set; }
+  public long MessageResult { get; set; }
+  public uint TimeoutMs { get; set; }
+  public IntPtr Button { get; set; }
+  public IntPtr ForegroundBefore { get; set; }
+  public IntPtr ForegroundAfter { get; set; }
+  public bool ForegroundRequestSucceeded { get; set; }
+}
 public static class NmgGuiObserver {
   private delegate bool EnumProc(IntPtr window, IntPtr parameter);
   [StructLayout(LayoutKind.Sequential)] private struct Rect { public int L,T,R,B; }
@@ -1150,14 +1276,22 @@ public static class NmgGuiObserver {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int size);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int size);
   [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wparam, StringBuilder text, uint flags, uint timeout, out IntPtr result);
+  [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", ExactSpelling=true, SetLastError=true)] private static extern IntPtr SendButtonMessageTimeout(IntPtr window, uint message, IntPtr wparam, IntPtr lparam, uint flags, uint timeout, out IntPtr result);
   [DllImport("user32.dll", SetLastError=true)] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
   [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
+  [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
+  [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
+  [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr window);
+  [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr window);
+  [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
   [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect rect);
   [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
   [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
   [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
-  [DllImport("user32.dll")] private static extern IntPtr GetDlgItem(IntPtr dialog, int id);
+  [DllImport("user32.dll", EntryPoint="GetDlgItem", ExactSpelling=true)] private static extern IntPtr GetDlgItem(IntPtr dialog, int id);
   [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll", SetLastError=true)] private static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
   [DllImport("user32.dll")] private static extern bool CloseDesktop(IntPtr desktop);
@@ -1222,10 +1356,105 @@ public static class NmgGuiObserver {
     }
     return false;
   }
-  public static void ClickOk(IntPtr dialog) {
-    var button=GetDlgItem(dialog,1);
-    if(button==IntPtr.Zero || !IsWindowVisible(button) || !PostMessage(button,0x00F5,IntPtr.Zero,IntPtr.Zero))
-      throw new InvalidOperationException("Actual owned dialog has no observable OK button.");
+  private static uint WindowProcessId(IntPtr window) {
+    uint pid; GetWindowThreadProcessId(window,out pid); return pid;
+  }
+  private static NmgControlInspection ReadControl(IntPtr window) {
+    Rect rect;
+    bool rectangle=GetWindowRect(window,out rect);
+    var item=new NmgControlInspection {Handle=window,Parent=GetParent(window),Root=GetAncestor(window,2),
+      ProcessId=WindowProcessId(window),ControlId=GetDlgCtrlID(window),ClassName=Class(window),
+      Exists=IsWindow(window),Visible=IsWindowVisible(window),Enabled=IsWindowEnabled(window),
+      RectangleObserved=rectangle,Left=rect.L,Top=rect.T,Right=rect.R,Bottom=rect.B};
+    try { item.Text=ControlText(window); } catch(Exception ex) { item.TextError=ex.Message; }
+    return item;
+  }
+  private static bool IsStandardIdOk(NmgControlInspection item,IntPtr dialog,int processId) {
+    return item!=null && item.Exists && item.ControlId==1 && item.Parent==dialog && item.Root==dialog &&
+      item.ProcessId==(uint)processId && String.Equals(item.ClassName,"Button",StringComparison.OrdinalIgnoreCase);
+  }
+  public static NmgDialogInspection InspectOkDialog(IntPtr dialog,int processId,IntPtr expectedOwner) {
+    var title=new StringBuilder(1024); GetWindowText(dialog,title,title.Capacity);
+    var snapshot=new NmgDialogInspection {Dialog=dialog,Owner=GetWindow(dialog,4),ExpectedOwner=expectedOwner,
+      ProcessId=WindowProcessId(dialog),ExpectedProcessId=processId,Exists=IsWindow(dialog),
+      Visible=IsWindowVisible(dialog),Enabled=IsWindowEnabled(dialog),ClassName=Class(dialog),Title=title.ToString(),
+      Controls=new NmgControlInspection[0],Resolution="unresolved"};
+    if(!snapshot.Exists || snapshot.ProcessId!=(uint)processId || snapshot.Owner!=expectedOwner ||
+       !IsWindow(expectedOwner) || WindowProcessId(expectedOwner)!=(uint)processId ||
+       Class(expectedOwner)!="NiuMaMeritWindow" || snapshot.ClassName!="#32770") {
+      snapshot.InspectionError="Dialog/owner identity is not the tracked normal app.";
+      return snapshot;
+    }
+    snapshot.DirectIdOkHandle=GetDlgItem(dialog,1);
+    var controls=new List<NmgControlInspection>();
+    EnumChildWindows(dialog,delegate(IntPtr child,IntPtr unused) {
+      if(controls.Count>=64) { snapshot.ControlsTruncated=true; return false; }
+      controls.Add(ReadControl(child)); return true;
+    },IntPtr.Zero);
+    snapshot.Controls=controls.ToArray();
+    if(snapshot.DirectIdOkHandle!=IntPtr.Zero) {
+      var direct=ReadControl(snapshot.DirectIdOkHandle);
+      if(IsStandardIdOk(direct,dialog,processId)) {
+        snapshot.Button=direct; snapshot.Resolution="GetDlgItem(IDOK)";
+      }
+    }
+    if(snapshot.Button==null) {
+      foreach(var item in controls) if(IsStandardIdOk(item,dialog,processId)) {
+        if(snapshot.Button!=null) {
+          snapshot.Button=null; snapshot.InspectionError="Ambiguous enumerated standard IDOK controls."; return snapshot;
+        }
+        snapshot.Button=item; snapshot.Resolution="EnumChildWindows/GetDlgCtrlID(IDOK)";
+      }
+    }
+    if(snapshot.Button==null) snapshot.InspectionError="Neither direct lookup nor owned standard-control enumeration resolved IDOK; inspect recorded controls.";
+    return snapshot;
+  }
+  private static bool ButtonObservable(NmgControlInspection button,IntPtr dialog) {
+    if(!button.RectangleObserved || button.Right<=button.Left || button.Bottom<=button.Top) return false;
+    // These coordinates come only from the actual control rectangle and are
+    // used for read-only visibility hit-testing, never coordinate input.
+    for(int y=1;y<=3;y++) for(int x=1;x<=3;x++) {
+      var point=new Point {X=button.Left+(button.Right-button.Left)*x/4,Y=button.Top+(button.Bottom-button.Top)*y/4};
+      var hit=WindowFromPoint(point);
+      if((hit==button.Handle || IsChild(button.Handle,hit)) && GetAncestor(hit,2)==dialog) return true;
+    }
+    return false;
+  }
+  public static NmgButtonDispatch ClickOk(NmgDialogInspection snapshot) {
+    CheckDesktop();
+    if(snapshot==null || snapshot.InspectionError!=null || snapshot.ControlsTruncated)
+      throw new InvalidOperationException("IDOK control inspection failed: "+(snapshot==null?"no snapshot":snapshot.InspectionError));
+    IntPtr dialog=snapshot.Dialog;
+    if(!DialogExistsForProcess(dialog,snapshot.ExpectedProcessId) || Class(dialog)!="#32770" ||
+       GetWindow(dialog,4)!=snapshot.ExpectedOwner || !IsWindow(snapshot.ExpectedOwner) ||
+       WindowProcessId(snapshot.ExpectedOwner)!=(uint)snapshot.ExpectedProcessId ||
+       Class(snapshot.ExpectedOwner)!="NiuMaMeritWindow")
+      throw new InvalidOperationException("Target dialog/owner identity changed before IDOK dispatch.");
+    if(snapshot.Button==null) throw new InvalidOperationException("No verified standard IDOK control; see recorded enumeration.");
+    var button=ReadControl(snapshot.Button.Handle);
+    if(!IsStandardIdOk(button,dialog,snapshot.ExpectedProcessId))
+      throw new InvalidOperationException("IDOK control ID/class/parent/process identity changed before dispatch.");
+    if(!IsWindowVisible(dialog) || !IsWindowEnabled(dialog) || !button.Visible || !button.Enabled)
+      throw new InvalidOperationException("Verified IDOK control or target dialog is hidden/disabled; not a missing-button assertion.");
+    if(!Observable(dialog) || !ButtonObservable(button,dialog))
+      throw new InvalidOperationException("Verified IDOK control is not observable on the actual input desktop.");
+    var dispatch=new NmgButtonDispatch {Button=button.Handle,TimeoutMs=1500,ForegroundBefore=GetForegroundWindow()};
+    // Only the verified owned dialog may be foregrounded. No global keys,
+    // coordinates, WM_COMMAND shortcut, message filter or trust-policy change.
+    dispatch.ForegroundRequestSucceeded=SetForegroundWindow(dialog);
+    dispatch.ForegroundAfter=GetForegroundWindow();
+    IntPtr result;
+    // BM_CLICK's LRESULT is normally zero. The API return, not that LRESULT,
+    // says whether dispatch completed. Do not use SMTO_ERRORONEXIT: destroying
+    // the clicked button/dialog is the expected action, not a dispatch failure.
+    var completed=SendButtonMessageTimeout(button.Handle,0x00F5,IntPtr.Zero,IntPtr.Zero,2,1500,out result);
+    dispatch.Win32Error=completed==IntPtr.Zero?Marshal.GetLastWin32Error():0;
+    dispatch.Completed=completed!=IntPtr.Zero;
+    dispatch.MessageResult=result.ToInt64();
+    return dispatch;
+  }
+  public static bool DialogExistsForProcess(IntPtr dialog,int processId) {
+    return IsWindow(dialog) && WindowProcessId(dialog)==(uint)processId;
   }
   public static string SelectedPack(string path) {
     var value=new StringBuilder(128); GetPrivateProfileString("state","selected_pack_id","",value,128,path); return value.ToString();
@@ -1316,6 +1545,8 @@ public static class NmgGuiObserver {
   $failure = $_.Exception.Message
   $report.failure = [ordered]@{ phase = $phase; message = $failure; observedAt = [DateTime]::UtcNow.ToString('o') }
 } finally {
+  $report.cleanup['startedAt'] = [DateTime]::UtcNow.ToString('o')
+  $report.cleanup['phaseBeforeCleanup'] = $phase
   $report.cleanup.attempted = $isolationEstablished -and ($installAttempted -or $installDirectoryOwned)
   if ($ownedProcesses.Count -gt 0) { Stop-OwnedProcesses }
   foreach ($stream in $locks.ToArray()) { $stream.Dispose() }
