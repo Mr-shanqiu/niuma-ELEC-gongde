@@ -94,6 +94,7 @@ namespace GongdeSourceReceiver {
   windowsGuardInvoked=$false;pinvokeInvoked=$false;fullReceiverExecuted=$false;
   privateInputRead=$false;nativeCandidateBuilt=$false} | ConvertTo-Json -Depth 8 -Compress
  if (-not $passed) {exit 1}
+ exit 0
 } catch {
  $category=if ($stage -eq 'DATE_COMPARISON') {'DATE'} else {'FIXTURE'}
  [pscustomobject]@{passed=$false;failureCategory=$category;stage=$stage;
