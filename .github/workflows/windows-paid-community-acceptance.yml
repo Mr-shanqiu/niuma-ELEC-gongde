@@ -1,0 +1,211 @@
+name: Windows current public 0.8.4 paid community acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Fixed current public installer and private licensed cases, no rebuild
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gongde-windows-paid-community-current084
+  cancel-in-progress: false
+
+jobs:
+  paid-community:
+    if: github.repository == 'Mr-shanqiu/niuma-ELEC-gongde' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out only the independent acceptance helper
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/test-windows-paid-community-gui.ps1
+          sparse-checkout-cone-mode: false
+
+      - name: Bind the current public installer in a fresh owned root
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $stage='confirmation'
+          try {
+            if ($env:CONFIRM -cne 'true') {throw 'PAID_CONFIRM_REQUIRED'}
+            $now=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            if ($now -lt 1791318267 -or $now -gt 1791404667) {throw 'PAID_LICENSE_REAL_CLOCK_OUTSIDE_WINDOW'}
+            $stage='owned-root'
+            $leaf='paid-current084-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT
+            $root=[IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP $leaf))
+            if (-not $root.StartsWith([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) {throw 'PAID_ROOT_SCOPE'}
+            $cursor=$root
+            while ($cursor) {
+              if ((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'PAID_ROOT_REPARSE'}
+              $cursor=[IO.Path]::GetDirectoryName($cursor)
+            }
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class PaidWorkflowDirectory {
+            [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+            public static extern bool CreateDirectory(string path, IntPtr attributes);
+          }
+          '@
+            if (-not [PaidWorkflowDirectory]::CreateDirectory($root,[IntPtr]::Zero)) {throw 'PAID_ROOT_NO_CLOBBER'}
+            "PAID_ROOT=$root" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+            $stage='current-public-installer'
+            $url='https://download.gongde.zqscreen.cn/niuma-merit-windows-0.8.4-setup.exe'
+            $sha='817b55b91a3283a699c1f901eccfbec4c4ee7149b720b6f53a6ca08f69e5ee06'
+            $handler=[Net.Http.HttpClientHandler]::new();$handler.AllowAutoRedirect=$false
+            $http=[Net.Http.HttpClient]::new($handler);$http.Timeout=[TimeSpan]::FromSeconds(30)
+            $response=$null;$stream=$null;$destination=$null
+            try {
+              $response=$http.GetAsync($url,[Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+              if ([int]$response.StatusCode -ne 200) {throw 'PAID_PUBLIC_HTTP_NOT_200'}
+              if ($null -ne $response.Content.Headers.ContentLength -and $response.Content.Headers.ContentLength -ne 2838381) {throw 'PAID_PUBLIC_LENGTH'}
+              $path=Join-Path $root 'niuma-merit-windows-0.8.4-setup.exe'
+              $destination=[IO.File]::Open($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+              $stream=$response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+              $buffer=[byte[]]::new(65536);$total=0L
+              $timer=[Diagnostics.Stopwatch]::StartNew();$cancel=[Threading.CancellationTokenSource]::new(30000)
+              try {
+                while (($read=$stream.ReadAsync($buffer,0,$buffer.Length,$cancel.Token).GetAwaiter().GetResult()) -gt 0) {
+                  $total+=$read
+                  if ($total -gt 2838381 -or $timer.ElapsedMilliseconds -gt 30000) {throw 'PAID_PUBLIC_BOUNDED_READ'}
+                  $destination.Write($buffer,0,$read)
+                }
+              } finally {$cancel.Dispose()}
+              if ($total -ne 2838381) {throw 'PAID_PUBLIC_BYTES'}
+            } finally {
+              if ($destination) {$destination.Dispose()}
+              if ($stream) {$stream.Dispose()}
+              if ($response) {$response.Dispose()}
+              $http.Dispose();$handler.Dispose()
+            }
+            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha) {throw 'PAID_PUBLIC_SHA'}
+            $binding=[ordered]@{schema='gongde-current-public-installer-binding.v1';url=$url
+              bytes=2838381;sha256=$sha;redirectsAllowed=$false;SourceCommitNotVerified=$true
+              acceptanceToolRef=$env:GITHUB_SHA;clientShaMeasuredAfterInstallation=$true;rebuilt=$false}
+            $destination=[IO.File]::Open((Join-Path $root 'installer-binding.json'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            try {$bytes=[Text.UTF8Encoding]::new($false).GetBytes(($binding | ConvertTo-Json)+[char]10);$destination.Write($bytes,0,$bytes.Length)}
+            finally {$destination.Dispose()}
+          } catch {
+            $code='PAID_PREPARE_INTERNAL'
+            if ($_.Exception.Message -cmatch '\APAID_[A-Z0-9_]+\z') {$code=$_.Exception.Message}
+            Write-Output ('PAID_PREPARE_STAGE='+$stage)
+            Write-Output ('PAID_PREPARE_CODE='+$code)
+            Write-Output ('PAID_PREPARE_TYPE='+$_.Exception.GetType().FullName)
+            throw 'PAID_CURRENT_INSTALLER_PREPARE_FAILED'
+          }
+
+      - name: Receive only the three fixed synthetic cases through private input
+        env:
+          PRIVATE_CASES: ${{ secrets.GONGDE_PAID_COMMUNITY_084_QA_20261007 }}
+        run: |
+          $ErrorActionPreference='Stop'
+          try {
+            if ([string]::IsNullOrWhiteSpace($env:PRIVATE_CASES) -or $env:PRIVATE_CASES.Length -gt 16384) {throw 'PAID_PRIVATE_INPUT_SIZE'}
+            $input=$env:PRIVATE_CASES | ConvertFrom-Json
+            if ($input.schema -cne 'gongde-paid-community-private-ci-inputs.v1' -or @($input.cases).Count -ne 3) {throw 'PAID_PRIVATE_INPUT_SCHEMA'}
+            $pins=@(
+              @{name='licensed';fileName='signed-schema3.nmgpack';bytes=1646;sha256='0e622724aad2c98f57e6c50c91a980fa5f74ee667e8c3c3927fd90cca83e89a7'},
+              @{name='invalid-signature';fileName='invalid-signature.nmgpack';bytes=984;sha256='824c4c70919a15b8b5da2f52a33434d6176f009452abd5f45230130f49ba94a1'},
+              @{name='mixed';fileName='mixed-licensed-schema3-plus-synthetic-schema1.nmgpacks';bytes=1897;sha256='b8304f78d676a7b6a715460c77710e41a05d0710e97788d46aba96cac4f788c0'}
+            )
+            $root=Join-Path $env:PAID_ROOT 'inputs'
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class PaidInputDirectory {
+            [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+            public static extern bool CreateDirectory(string path, IntPtr attributes);
+          }
+          '@
+            if (-not [PaidInputDirectory]::CreateDirectory($root,[IntPtr]::Zero)) {throw 'PAID_PRIVATE_INPUT_NO_CLOBBER'}
+            "PAID_INPUTS_OWNED=true" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+            foreach ($pin in $pins) {
+              $provided=@($input.cases | Where-Object {$_.name -ceq $pin.name})
+              if ($provided.Count -ne 1 -or $provided[0].fileName -cne $pin.fileName -or
+                $provided[0].bytes -ne $pin.bytes -or $provided[0].sha256 -cne $pin.sha256) {throw 'PAID_PRIVATE_INPUT_IDENTITY'}
+              $bytes=[Convert]::FromBase64String([string]$provided[0].payloadBase64)
+              $hasher=[Security.Cryptography.SHA256]::Create()
+              try {$actual=([BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}
+              finally {$hasher.Dispose()}
+              if ($bytes.Length -ne $pin.bytes -or $actual -cne $pin.sha256) {throw 'PAID_PRIVATE_INPUT_BYTES'}
+              $stream=[IO.File]::Open((Join-Path $root $pin.fileName),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+              try {$stream.Write($bytes,0,$bytes.Length)} finally {$stream.Dispose()}
+            }
+            Write-Output 'PAID_PRIVATE_INPUT=THREE_FIXED_SYNTHETIC_CASES_VERIFIED'
+          } catch {
+            $code='PAID_PRIVATE_INPUT_INTERNAL'
+            if ($_.Exception.Message -cmatch '\APAID_[A-Z0-9_]+\z') {$code=$_.Exception.Message}
+            Write-Output ('PAID_INTAKE_CODE='+$code)
+            Write-Output ('PAID_INTAKE_TYPE='+$_.Exception.GetType().FullName)
+            throw 'PAID_PRIVATE_INPUT_FAILED'
+          } finally {$env:PRIVATE_CASES=$null;$input=$null;$bytes=$null}
+
+      - name: Parse helper and observe the actual installed GUI
+        run: |
+          $ErrorActionPreference='Stop'
+          $helper=Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-paid-community-gui.ps1'
+          $tokens=$null;$errors=$null
+          [Management.Automation.Language.Parser]::ParseFile($helper,[ref]$tokens,[ref]$errors) | Out-Null
+          if (@($errors).Count) {throw 'PAID_HELPER_POWERSHELL_PARSE_FAILED'}
+          & $helper -InstallerPath (Join-Path $env:PAID_ROOT 'niuma-merit-windows-0.8.4-setup.exe') -InputDirectory (Join-Path $env:PAID_ROOT 'inputs') -OutputDirectory (Join-Path $env:PAID_ROOT 'gui')
+
+      - name: Remove exact owned runner inputs, never repository settings via API
+        if: always()
+        run: |
+          $ErrorActionPreference='Stop'
+          $clean=$false;$code=$null
+          try {
+            if ($env:PAID_INPUTS_OWNED -ceq 'true') {
+              $root=[IO.Path]::GetFullPath((Join-Path $env:PAID_ROOT 'inputs'))
+              $expected=[IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP ('paid-current084-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT+'\inputs')))
+              if ($root -ine $expected) {throw 'PAID_CLEANUP_SCOPE'}
+              $cursor=$root
+              while ($cursor) {
+                if ((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'PAID_CLEANUP_REPARSE'}
+                $cursor=[IO.Path]::GetDirectoryName($cursor)
+              }
+              $files=@(Get-ChildItem -LiteralPath $root -Force)
+              $names=@('signed-schema3.nmgpack','invalid-signature.nmgpack','mixed-licensed-schema3-plus-synthetic-schema1.nmgpacks')
+              if (@($files | Where-Object {$_ -isnot [IO.FileInfo] -or $_.Name -cnotin $names}).Count) {throw 'PAID_CLEANUP_UNOWNED_FILE'}
+              foreach ($name in $names) {
+                $path=Join-Path $root $name
+                if ([IO.File]::Exists($path)) {[IO.File]::Delete($path)}
+              }
+              [IO.Directory]::Delete($root,$false)
+            }
+            $clean=$true
+          } catch {$code='PAID_OWNED_INPUT_CLEANUP_FAILED'}
+          if ($env:PAID_ROOT) {
+            $receipt=[ordered]@{schema='gongde-paid-ci-input-cleanup.v1';runnerInputsCleaned=$clean;code=$code
+              repoSecretDeletedByWorkflow=$false;repoSecretCleanup='DISPATCH_OWNER_MUST_REMOVE_EXACT_OWNED_TEMPORARY_SECRET'
+              rawPayloadLoggedOrUploaded=$false}
+            $stream=[IO.File]::Open((Join-Path $env:PAID_ROOT 'input-cleanup.json'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            try {$bytes=[Text.UTF8Encoding]::new($false).GetBytes(($receipt | ConvertTo-Json)+[char]10);$stream.Write($bytes,0,$bytes.Length)}
+            finally {$stream.Dispose()}
+          }
+          if (-not $clean) {throw 'PAID_OWNED_INPUT_CLEANUP_FAILED'}
+
+      - name: Retain sanitized receipts and cropped owned synthetic GUI only
+        if: always() && env.PAID_ROOT != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-current084-paid-community-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            ${{ env.PAID_ROOT }}/installer-binding.json
+            ${{ env.PAID_ROOT }}/input-cleanup.json
+            ${{ env.PAID_ROOT }}/gui/receipt*.json
+            ${{ env.PAID_ROOT }}/gui/*.png
