@@ -18,8 +18,8 @@
 // RT_VERSION = 16; the VERSIONINFO resource identifier must be numeric 1.
 // No Windows headers are included here, so VS_VERSION_INFO is not a macro.
 1 VERSIONINFO
-  FILEVERSION 0,8,4,0
-  PRODUCTVERSION 0,8,4,0
+  FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+  PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
   FILEFLAGSMASK 0x3F
   FILEFLAGS 0x0
   FILEOS 0x40004
@@ -32,12 +32,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Mr-shanqiu"
       VALUE "FileDescription", "NiuMa Merit"
-      VALUE "FileVersion", "0.8.4"
+      VALUE "FileVersion", "@PROJECT_VERSION@"
       VALUE "InternalName", "niuma-merit"
       VALUE "LegalCopyright", "Copyright (c) 2026 Mr-shanqiu"
       VALUE "OriginalFilename", "niuma-merit.exe"
       VALUE "ProductName", "NiuMa Merit"
-      VALUE "ProductVersion", "0.8.4"
+      VALUE "ProductVersion", "@PROJECT_VERSION@"
     END
   END
   BLOCK "VarFileInfo"

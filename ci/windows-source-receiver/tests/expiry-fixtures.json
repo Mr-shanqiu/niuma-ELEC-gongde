@@ -1,0 +1,179 @@
+{
+  "cases": [
+    {
+      "name": "future-one-day",
+      "raw": "{\"expiresAtUtc\": \"2026-10-07T12:00:00Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": true,
+      "text": "2026-10-07T12:00:00Z"
+    },
+    {
+      "name": "fraction-text-preserved",
+      "raw": "{\"expiresAtUtc\": \"2026-10-07T12:00:00.1234567Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": true,
+      "text": "2026-10-07T12:00:00.1234567Z"
+    },
+    {
+      "name": "seven-days-inclusive",
+      "raw": "{\"expiresAtUtc\": \"2026-10-13T12:00:00Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": true,
+      "text": "2026-10-13T12:00:00Z"
+    },
+    {
+      "name": "seven-days-minus-one-tick",
+      "raw": "{\"expiresAtUtc\": \"2026-10-13T11:59:59.9999999Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": true,
+      "text": "2026-10-13T11:59:59.9999999Z"
+    },
+    {
+      "name": "seven-days-plus-one-tick",
+      "raw": "{\"expiresAtUtc\": \"2026-10-13T12:00:00.0000001Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "now-rejected",
+      "raw": "{\"expiresAtUtc\": \"2026-10-06T12:00:00Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "now-plus-one-tick",
+      "raw": "{\"expiresAtUtc\": \"2026-10-06T12:00:00.0000001Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": true,
+      "text": "2026-10-06T12:00:00.0000001Z"
+    },
+    {
+      "name": "now-minus-one-tick",
+      "raw": "{\"expiresAtUtc\": \"2026-10-06T11:59:59.9999999Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "expired",
+      "raw": "{\"expiresAtUtc\": \"2026-10-05T12:00:00Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "eight-days",
+      "raw": "{\"expiresAtUtc\": \"2026-10-14T12:00:00Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "lowercase-z",
+      "raw": "{\"expiresAtUtc\": \"2026-10-07T12:00:00z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "offset-not-z",
+      "raw": "{\"expiresAtUtc\": \"2026-10-07T12:00:00+00:00\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "no-zone",
+      "raw": "{\"expiresAtUtc\": \"2026-10-07T12:00:00\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "leading-space",
+      "raw": "{\"expiresAtUtc\": \" 2026-10-07T12:00:00Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "trailing-newline",
+      "raw": "{\"expiresAtUtc\": \"2026-10-07T12:00:00Z\\n\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "invalid-month",
+      "raw": "{\"expiresAtUtc\": \"2026-13-07T12:00:00Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "invalid-calendar-date",
+      "raw": "{\"expiresAtUtc\": \"2026-02-29T12:00:00Z\"}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "leap-date-valid",
+      "raw": "{\"expiresAtUtc\": \"2024-02-29T12:00:00Z\"}",
+      "now": "2024-02-28T12:00:00Z",
+      "accepted": true,
+      "text": "2024-02-29T12:00:00Z"
+    },
+    {
+      "name": "null",
+      "raw": "{\"expiresAtUtc\": null}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "number",
+      "raw": "{\"expiresAtUtc\": 1791262800}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "boolean",
+      "raw": "{\"expiresAtUtc\": true}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "array",
+      "raw": "{\"expiresAtUtc\": [\"2026-10-06T12:00:00Z\"]}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "object",
+      "raw": "{\"expiresAtUtc\": {\"date\": \"2026-10-06T12:00:00Z\"}}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "missing-property",
+      "raw": "{}",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    },
+    {
+      "name": "malformed-json",
+      "raw": "{",
+      "now": "2026-10-06T12:00:00Z",
+      "accepted": false,
+      "text": null
+    }
+  ]
+}

@@ -14,6 +14,7 @@
 #include <bcrypt.h>
 
 #include "appearance_pack.h"
+#include "app_version.h"
 
 #include <algorithm>
 #include <cmath>
@@ -505,6 +506,9 @@ void ReleasePngResource(PngResource& resource) {
 }
 
 void ReleaseAllPngResources() {
+  // The catalog also owns GDI+ images. Release it before GDI+ or COM stops,
+  // including on the startup-failure paths that share this cleanup function.
+  gAppearanceCatalog = niuma::AppearanceCatalog{};
   ReleasePngResource(gHamsterActor);
   ReleasePngResource(gHamsterHabitat);
   ReleasePngResource(gSeaLionFlipper);
@@ -812,8 +816,12 @@ LRESULT CALLBACK MouseHook(
   return CallNextHookEx(gState.mouseHook, code, message, data);
 }
 
-void ShowPrivacyNotice(HWND owner) {
-  MessageBoxW(
+bool IsMainWindowAlive(HWND owner) {
+  return owner != nullptr && gState.window == owner && IsWindow(owner);
+}
+
+bool ShowPrivacyNotice(HWND owner) {
+  return MessageBoxW(
       owner,
       UiText(
           L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
@@ -823,11 +831,11 @@ void ShowPrivacyNotice(HWND owner) {
           L"and scroll gestures.\n\nIt does not read, save, or upload key content, "
           L"mouse positions, the current app, clipboard data, or screen content. "
           L"The app has no network features."),
-      UiText(L"隐私说明", L"Privacy"), MB_OK | MB_ICONINFORMATION);
+      UiText(L"隐私说明", L"Privacy"), MB_OK | MB_ICONINFORMATION) == IDOK;
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.8.2";
+  const std::wstring version = NIUMA_APP_VERSION_W;
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
@@ -1291,16 +1299,30 @@ void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
   }
 }
 
-void ShowPrivacyNoticeIfNeeded(HWND owner) {
+bool ShowPrivacyNoticeIfNeeded(HWND owner) {
+  if (!IsMainWindowAlive(owner)) return false;
   const std::wstring path = DataPath();
-  if (path.empty() ||
+  if (!path.empty() &&
       GetPrivateProfileIntW(L"state", L"privacy_shown", 0, path.c_str()) == 1) {
-    return;
+    return true;
   }
 
-  ShowPrivacyNotice(owner);
-  WritePrivateProfileStringW(
-      L"state", L"privacy_shown", L"1", path.c_str());
+  if (!ShowPrivacyNotice(owner) || !IsMainWindowAlive(owner)) return false;
+  if (!path.empty()) {
+    WritePrivateProfileStringW(
+        L"state", L"privacy_shown", L"1", path.c_str());
+  }
+  return true;
+}
+
+bool PrepareClientStartup(HWND owner, const std::wstring& pendingAppearancePack) {
+  if (!IsMainWindowAlive(owner)) return false;
+  if (!StartedAutomatically() && !ShowPrivacyNoticeIfNeeded(owner)) return false;
+  if (!IsMainWindowAlive(owner)) return false;
+  if (!pendingAppearancePack.empty()) {
+    ImportAppearancePack(owner, pendingAppearancePack, true);
+  }
+  return IsMainWindowAlive(owner);
 }
 
 void ClampWindowToWorkArea() {
@@ -1700,29 +1722,28 @@ int WINAPI wWinMain(
   }
 
   ConfigureLaunchAtLogin();
-  if (!StartedAutomatically()) {
-    ShowPrivacyNoticeIfNeeded(window);
-  }
-  if (!pendingAppearancePack.empty()) {
-    ImportAppearancePack(window, pendingAppearancePack, true);
-  }
-
-  gState.keyboardHook =
-      SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
-  gState.mouseHook =
-      SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
-  if (gState.keyboardHook == nullptr || gState.mouseHook == nullptr) {
-    MessageBoxW(
-        window, UiText(L"无法启动全局键盘或鼠标计数。",
-                       L"Unable to start global keyboard or mouse counting."), WindowTitle(),
-        MB_OK | MB_ICONERROR);
+  if (PrepareClientStartup(window, pendingAppearancePack)) {
+    gState.keyboardHook =
+        SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
+    gState.mouseHook =
+        SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
+    if (gState.keyboardHook == nullptr || gState.mouseHook == nullptr) {
+      MessageBoxW(
+          window, UiText(L"无法启动全局键盘或鼠标计数。",
+                         L"Unable to start global keyboard or mouse counting."), WindowTitle(),
+          MB_OK | MB_ICONERROR);
+      if (IsMainWindowAlive(window)) DestroyWindow(window);
+    }
+  } else if (IsMainWindowAlive(window)) {
     DestroyWindow(window);
   }
 
   MSG message = {};
-  while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-    TranslateMessage(&message);
-    DispatchMessageW(&message);
+  if (IsMainWindowAlive(window)) {
+    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
   }
 
   if (gState.keyboardHook != nullptr) {

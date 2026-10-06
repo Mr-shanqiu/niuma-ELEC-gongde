@@ -26,6 +26,16 @@ jobs:
         shell: powershell
         run: ./scripts/build-windows.ps1
 
+      - name: Verify controlled source expiry regression
+        shell: pwsh
+        run: |
+          & ./scripts/test-windows-owner-expiry.ps1 `
+            -ReceiverPath ./ci/windows-source-receiver/Receive-WindowsSource.ps1 `
+            -FixturesPath ./ci/windows-source-receiver/tests/expiry-fixtures.json `
+            -OriginalBlockPath ./ci/windows-source-receiver/tests/original-date-block.ps1 |
+            Tee-Object -FilePath build-windows/expiry-regression.json
+          if ($LASTEXITCODE -ne 0) { throw "Controlled source expiry regression failed" }
+
       - name: Verify offline-only client
         shell: bash
         run: ./scripts/audit-offline.sh
@@ -66,7 +76,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-artifact-bindings-${{ github.run_id }}
-          path: build-windows/release-evidence-*/*.json
+          path: |
+            build-windows/release-evidence-*/*.json
+            build-windows/expiry-regression.json
           if-no-files-found: ignore
           retention-days: 14
 

@@ -1,6 +1,7 @@
 param(
   [string]$BuildDir = "build-windows",
-  [string]$Config = "Release"
+  [string]$Config = "Release",
+  [switch]$ClientOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,9 @@ $version = (Get-Content (Join-Path $repoRoot "VERSION") -Raw).Trim()
 $zipName = "niuma-merit-windows-$version-$Config.zip"
 $gen = "Visual Studio 17 2022"
 
+# ClientOnly compiles the normal GUI target without generating/importing fixtures.
+# Delivery callers must use a fresh byte-frozen source root.
+if (-not $ClientOnly) {
 $fixtureDir = Join-Path $repoRoot "$BuildDir\pack-fixtures"
 New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
 $fixturePack = Join-Path $fixtureDir "woodfish-sample.nmgpack"
@@ -33,11 +37,18 @@ Compress-Archive -Path (Join-Path $batchSource "*.nmgpack") -DestinationPath $ba
 Move-Item $batchZip $batchArchive -Force
 python -c "import zipfile,sys; print('BATCH_ENTRIES=' + ','.join(zipfile.ZipFile(sys.argv[1]).namelist()))" $batchArchive
 
+}
+
 cmake -S $repoRoot -B $BuildDir -G $gen -A x64
 if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
-cmake --build $BuildDir --config $Config
+if ($ClientOnly) {
+  cmake --build $BuildDir --config $Config --target niuma-merit
+} else {
+  cmake --build $BuildDir --config $Config
+}
 if ($LASTEXITCODE -ne 0) { throw "Windows compilation failed" }
 
+if (-not $ClientOnly) {
 $packTest = Join-Path $repoRoot "$BuildDir\$Config\niuma-pack-test.exe"
 if (-not (Test-Path $packTest)) {
   $packTest = Join-Path $repoRoot "$BuildDir\src\windows\$Config\niuma-pack-test.exe"
@@ -138,6 +149,7 @@ try {
 }
 "COMMUNITY_NATIVE_TEST=PASS cases=$($communityResults.Count)"
 "COMMUNITY_NATIVE_REPORT=$communityReport"
+}
 
 $srcExe = Join-Path $repoRoot "$BuildDir\$Config\niuma-merit.exe"
 if (-not (Test-Path $srcExe)) {
@@ -183,6 +195,12 @@ if ((Get-Item $distExe).Length -ge $maximumBaseBytes -or
 "ZIP=$zipPath"
 "EXE_BYTES=$( (Get-Item $distExe).Length )"
 "ZIP_BYTES=$( (Get-Item $zipPath).Length )"
-"APPEARANCE_PACK_TEST=PASS"
-"APPEARANCE_BATCH_TEST=PASS"
-"LUCKY_CAT_SCHEMA3_TEST=PASS"
+if ($ClientOnly) {
+  "NORMAL_GUI_CLIENT_BUILD=PASS scope=compile-and-artifact-metadata-only"
+  "IMPORTER_FIXTURES=NOT_RUN"
+  "INSTALLED_NORMAL_GUI_ACCEPTANCE=NOT_RUN"
+} else {
+  "APPEARANCE_PACK_TEST=PASS"
+  "APPEARANCE_BATCH_TEST=PASS"
+  "LUCKY_CAT_SCHEMA3_TEST=PASS"
+}

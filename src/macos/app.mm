@@ -858,6 +858,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)application:(NSApplication *)application openFiles:(NSArray<NSString *> *)filenames {
   NSString *installedId = nil;
   NSUInteger installedCount = 0;
+  NSMutableArray<NSString *> *importedIds = [NSMutableArray array];
   for (NSString *filename in filenames) {
     NSError *error = nil;
     NSURL *source = [NSURL fileURLWithPath:filename];
@@ -878,10 +879,28 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       return;
     }
     installedCount += imported.count;
+    for (NMAppearancePack *pack in imported) [importedIds addObject:pack.identifier];
     installedId = imported.lastObject.identifier;
   }
+  NSError *loadError = nil;
+  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&loadError];
+  NSMutableArray<NSString *> *unavailableIds = [NSMutableArray array];
+  for (NSString *identifier in importedIds) {
+    if (![self appearancePackWithId:identifier]) [unavailableIds addObject:identifier];
+  }
+  if (unavailableIds.count) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleWarning;
+    alert.messageText = UiText(@"形象已保存，但未能加载", @"Packs Saved but Not Loaded");
+    alert.informativeText = loadError.localizedDescription ?: [NSString stringWithFormat:
+        UiText(@"这些形象还未进入可选列表：%@。原文件仍保留，请勿重复付款。",
+               @"These packs are not available in the picker: %@. Their files are preserved; do not pay again."),
+        [unavailableIds componentsJoinedByString:@", "]];
+    [alert runModal];
+    [application replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
+    return;
+  }
   [application replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
-  [self reloadAppearancePacks];
   if (installedCount > 1) {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = UiText(@"整批形象已导入", @"Appearance Batch Imported");
@@ -1204,7 +1223,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)reloadAppearancePacks {
-  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:nil];
+  NSError *error = nil;
+  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&error];
+  if (error && self.window) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleWarning;
+    alert.messageText = UiText(@"本地形象加载失败", @"Unable to Load Local Packs");
+    alert.informativeText = error.localizedDescription;
+    [alert runModal];
+  }
 }
 
 - (NMAppearancePack *)appearancePackWithId:(NSString *)identifier {
@@ -1335,20 +1362,21 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)sender;
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
-  alert.informativeText = UiText(
-      @"版本 0.8.2\n\n"
+  NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?";
+  alert.informativeText = [NSString stringWithFormat:UiText(
+      @"版本 %@\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"官方网站：\n"
        @"https://gongde.zqscreen.cn/",
-      @"Version 0.8.2\n\n"
+      @"Version %@\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"
        @"Client source code is available under GPLv3.\n\n"
        @"Official website:\n"
-       @"https://gongde.zqscreen.cn/");
+       @"https://gongde.zqscreen.cn/"), version];
   [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
   if (!self.inputMonitoringAuthorized && !gIsolatedAcceptance) {
     [alert addButtonWithTitle:UiText(@"开启输入监控", @"Enable Input Monitoring")];

@@ -13,9 +13,13 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 PATTERN='keyboardEventKeycode|charactersIgnoringModifiers|\[[^]]+[[:space:]]characters\]|CGEventGetIntegerValueField|GetForegroundWindow|GetWindowText|MSLLHOOKSTRUCT|KBDLLHOOKSTRUCT|NSURLSession|WinHttp|WinInet|WSAStartup|(^|[^A-Za-z])socket[[:space:]]*\(|com\.apple\.security\.network\.(client|server)'
 
 # Collect candidate sources. This script contains the forbidden pattern as a
-# literal, so it must never be part of the scan.
+# literal, so it must never be part of the scan. The installed-GUI acceptance
+# harness observes test windows, not user input collected by the application.
+# Exclude that exact test-only file; retain all client sources, build scripts,
+# workflows and CMake in the privacy boundary scan.
 FILES=$(find "$ROOT_DIR/src" "$ROOT_DIR/scripts" "$ROOT_DIR/.github" \
-  -type f ! -name 'audit-offline.sh' | sort)
+  -type f ! -name 'audit-offline.sh' \
+  ! -path "$ROOT_DIR/scripts/test-windows-installed-community-gui.ps1" | sort)
 FILES="$FILES
 $ROOT_DIR/CMakeLists.txt"
 

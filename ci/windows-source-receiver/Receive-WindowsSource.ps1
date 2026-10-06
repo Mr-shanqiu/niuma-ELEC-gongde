@@ -63,9 +63,18 @@ try {
       $binding.sourceZipBytes -ne 760923) {
     throw [GongdeSourceReceiver.ReceiverFault]::new('OWNER_BINDING_CONTRACT')
   }
+  # Read expiry from the verified JSON string, not ConvertFrom-Json date coercion.
+  $expiryDocument=[Text.Json.JsonDocument]::Parse($utf8.GetString($raw),[Text.Json.JsonDocumentOptions]::new())
+  try {
+    $expiryElement=$expiryDocument.RootElement.GetProperty('expiresAtUtc')
+    if ($expiryElement.ValueKind -ne [Text.Json.JsonValueKind]::String) {
+      throw [GongdeSourceReceiver.ReceiverFault]::new('OWNER_BINDING_EXPIRED')
+    }
+    $expiryText=$expiryElement.GetString()
+  } finally {$expiryDocument.Dispose()}
   $expires=[DateTimeOffset]::MinValue
-  if ($binding.expiresAtUtc -cnotmatch '\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\z' -or
-      -not [DateTimeOffset]::TryParse($binding.expiresAtUtc,[Globalization.CultureInfo]::InvariantCulture,
+  if ($expiryText -cnotmatch '\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\z' -or
+      -not [DateTimeOffset]::TryParse($expiryText,[Globalization.CultureInfo]::InvariantCulture,
         [Globalization.DateTimeStyles]::AssumeUniversal,[ref]$expires) -or
       $expires -le [DateTimeOffset]::UtcNow -or $expires -gt [DateTimeOffset]::UtcNow.AddDays(7)) {
     throw [GongdeSourceReceiver.ReceiverFault]::new('OWNER_BINDING_EXPIRED')

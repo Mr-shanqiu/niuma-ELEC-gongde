@@ -553,22 +553,47 @@ invalidLayers:
 }
 
 + (NSArray<NMAppearancePack *> *)loadInstalledPacks:(NSError **)error {
+  if (error) *error = nil;
   NSFileManager *fm = [NSFileManager defaultManager];
   NSURL *root = [self packsDirectoryURL];
   if (![fm createDirectoryAtURL:root withIntermediateDirectories:YES attributes:nil error:error]) return @[];
   NSArray<NSURL *> *directories = [fm contentsOfDirectoryAtURL:root includingPropertiesForKeys:@[NSURLIsDirectoryKey]
                                                         options:NSDirectoryEnumerationSkipsHiddenFiles error:error];
+  if (!directories) return @[];
   NSMutableArray *packs = [NSMutableArray array];
+  NSMutableArray<NSString *> *failures = [NSMutableArray array];
+  NSError *firstFailure = nil;
   for (NSURL *directory in directories) {
     NSNumber *isDirectory = nil;
     [directory getResourceValue:&isDirectory forKey:NSURLIsDirectoryKey error:nil];
     if (!isDirectory.boolValue || ![directory.pathExtension isEqualToString:@"nmgpackdata"]) continue;
-    NMAppearancePack *pack = [self validatePackDirectory:directory error:nil];
-    if (pack) [packs addObject:pack];
+    NSError *packError = nil;
+    // Already installed packs remain usable offline after their first-import deadline.
+    // This still verifies their manifest, images, content hash, and license signature.
+    NMAppearancePack *pack = [self validatePackDirectory:directory
+                                enforceImportDeadline:NO error:&packError];
+    if (pack) {
+      [packs addObject:pack];
+    } else {
+      if (!firstFailure) firstFailure = packError;
+      [failures addObject:[NSString stringWithFormat:@"%@：%@",
+          directory.lastPathComponent.stringByDeletingPathExtension,
+          packError.localizedDescription ?: @"无法读取形象包"]];
+    }
   }
   [packs sortUsingComparator:^NSComparisonResult(NMAppearancePack *a, NMAppearancePack *b) {
     return [[a localizedName] localizedCaseInsensitiveCompare:[b localizedName]];
   }];
+  if (failures.count && error) {
+    NSMutableDictionary *info = [@{
+      NSLocalizedDescriptionKey: [NSString stringWithFormat:
+          @"以下本地形象未能加载，原文件仍保留，请勿重复付款：\n%@",
+          [failures componentsJoinedByString:@"\n"]]
+    } mutableCopy];
+    if (firstFailure) info[NSUnderlyingErrorKey] = firstFailure;
+    *error = [NSError errorWithDomain:@"cn.niuma.merit.appearance-load"
+                                code:1 userInfo:info];
+  }
   return packs;
 }
 
