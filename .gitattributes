@@ -1,0 +1,5 @@
+# Preserve the frozen receiver bytes on Windows checkouts.
+/ci/windows-source-receiver/Receive-WindowsSource.ps1 text eol=lf
+/ci/windows-source-receiver/tests/expiry-fixtures.json text eol=lf
+/ci/windows-source-receiver/tests/original-date-block.ps1 text eol=lf
+/scripts/test-windows-owner-expiry.ps1 text eol=lf

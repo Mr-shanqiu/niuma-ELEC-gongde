@@ -7,17 +7,22 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $stage='FULL_RECEIVER_PARSE'
+$faultCode='SOURCE_READ_FAILED'
+$sourceSha=$null
 try {
  $utf8=[Text.UTF8Encoding]::new($false,$true)
  $sourceBytes=[IO.File]::ReadAllBytes($ReceiverPath)
  $sourceSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($sourceBytes)).ToLowerInvariant()
  if ($sourceSha -cne '0bd6cdd90f1891051d7f51693d7251434059b32c4dfd131aec3bedfc63184b0b') {
+  $faultCode='RECEIVER_IDENTITY_DRIFT'
   throw 'Receiver identity drift.'
  }
+ $faultCode='RECEIVER_SYNTAX_FAILED'
  $source=$utf8.GetString($sourceBytes)
  $tokens=$null; $errors=$null
  [Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors) | Out-Null
  if (@($errors).Count) {throw 'Full receiver syntax failed.'}
+ $faultCode='DATE_BLOCK_MARKERS_MISSING'
  $start=$source.IndexOf('  # Read expiry from the verified JSON string')
  $end=$source.IndexOf('  $text=[Text.StringBuilder]::new(1014564)')
  if ($start -lt 0 -or $end -le $start) {throw 'Date block markers missing.'}
@@ -26,6 +31,7 @@ try {
  $fixedBlock=$fixedBlock.Replace('[DateTimeOffset]::UtcNow','$fixtureNow')
  $originalBlock=$originalBlock.Replace('[DateTimeOffset]::UtcNow','$fixtureNow')
  $stage='FIXTURE_SETUP'
+ $faultCode='FIXTURE_SETUP_FAILED'
  Add-Type -TypeDefinition @'
 namespace GongdeSourceReceiver {
  public sealed class ReceiverFault : System.Exception {
@@ -58,6 +64,7 @@ namespace GongdeSourceReceiver {
   $probe=$cases[0].GetProperty('raw').GetString() | ConvertFrom-Json
   $convertedType=$probe.expiresAtUtc.GetType().FullName
   $stage='DATE_COMPARISON'
+  $faultCode='DATE_COMPARISON_FAILED'
   foreach ($item in $cases.EnumerateArray()) {
    $name=$item.GetProperty('name').GetString()
    $raw=$utf8.GetBytes($item.GetProperty('raw').GetString())
@@ -90,8 +97,8 @@ namespace GongdeSourceReceiver {
 } catch {
  $category=if ($stage -eq 'DATE_COMPARISON') {'DATE'} else {'FIXTURE'}
  [pscustomobject]@{passed=$false;failureCategory=$category;stage=$stage;
+  faultCode=$faultCode;receiverSha256=$sourceSha;
   exceptionType=$_.Exception.GetType().FullName;version=$PSVersionTable.PSVersion.ToString();
   windowsGuardInvoked=$false;pinvokeInvoked=$false;privateInputRead=$false} | ConvertTo-Json -Compress
  exit 2
 }
-
