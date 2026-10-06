@@ -1,140 +1,75 @@
 # 牛马电子功德
 
-仓库：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde>
-许可证：[GPL v3](LICENSE) — 任何人可以自由使用、修改和分发，但如果分发衍生作品（包括商用），必须以相同许可证开源全部代码。
+仓库：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde>  
+许可证：[GPL v3](LICENSE)。任何人可以自由使用、修改和分发；分发衍生作品（包括商用）时，须遵守 GPLv3 的相同许可证要求。
 
-## 下载
+## 版本与下载状态
 
-- GitHub Releases：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases>
-- [免签名安装、升级与卸载指南](docs/INSTALL_UNSIGNED.md)
-- 本项目当前采用免签名分发；Windows 的“未知发布者”和 macOS 的安全提示属于预期现象。
+- 当前源码版本：`0.8.4`（见 [VERSION](VERSION)）。
+- GitHub Releases 当前公开的安装包：`0.6.0` 免签名预发布版，见 [Releases](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases)。
+- `0.8.4` 尚未作为正式安装包发布；源码版本号不代表该版本已完成平台验收或可供下载。请以 Releases 中实际列出的文件为准。
+- 社区投稿、审核和免费分享目前仍在验收中，尚未开放线上服务。
 
-## Code signing policy
+## 代码签名状态
 
-**Status: application in progress; not yet approved.** We are applying to the SignPath Foundation for free code signing of the Windows desktop client. Current downloads remain unsigned. No current release is represented as signed or endorsed by SignPath.
+目前正在申请 SignPath Foundation 的 Windows 代码签名支持，尚未获批或接入；当前下载仍为免签名版本。没有任何当前版本被表示为已获 SignPath 签名或认可。
 
-If approved and integrated, the attribution for signed Windows releases will be: “Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).” This attribution describes the intended service, not an existing approval.
+若申请获批并完成集成，Windows 签名版本将使用归属说明：“Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).”这描述的是预期服务，不代表当前已获批。
 
-- Committer and reviewer: [Yue Wang / Mr-shanqiu](https://github.com/Mr-shanqiu).
-- Signing approver: [Yue Wang / Mr-shanqiu](https://github.com/Mr-shanqiu).
-- Signing scope: the project's own Windows desktop client and installer, built from the public repository through GitHub Actions. Signing integration is pending approval; each signing request will require manual maintainer approval. It does not cover the website, payment service, third-party applications, or macOS Developer ID signing and notarization.
-- Changes from external contributors require maintainer review. Source-repository and signing-service access must use multi-factor authentication before signing is enabled.
-- Privacy: the desktop client does not transfer information to networked systems. It counts input events without recording key contents, mouse coordinates, window titles or clipboard contents; counts and settings remain local. See the [privacy policy](https://gongde.zqscreen.cn/privacy.html) for the separate website and service data practices.
+- 维护、代码审查和签名审批：Yue Wang（[Mr-shanqiu](https://github.com/Mr-shanqiu)）。
+- 计划签名范围：来自公开仓库并通过 GitHub Actions 构建的本项目 Windows 客户端和安装程序；签名集成待审批，且每次签名均需维护者人工批准。
+- 外部贡献需经维护者审查。启用签名前，源码仓库和签名服务访问需使用多重身份验证。
+- 签名申请不覆盖网站、支付服务、第三方应用或 macOS Developer ID 签名与公证。
 
-中文说明：目前正在申请 SignPath Foundation 的 Windows 代码签名支持，尚未获批或接入；现有下载仍为免签名版本。维护、代码审查和签名审批由 Yue Wang（GitHub：Mr-shanqiu）负责。获批后仅对可追溯到公开源码和自动构建的本项目 Windows 客户端及安装程序发起签名，并由维护者逐次审批。
+## 产品说明
 
-## 什么是本软件
+这是一个无音效、低干扰的原生桌面木鱼，支持 Windows 和 macOS。应用只统计系统范围内的键盘按下、鼠标按键和滚轮手势次数，不读取具体按键内容、鼠标坐标、窗口名称或剪贴板内容。
 
-这是一个无音效、低干扰的原生桌面木鱼，目标支持 Windows 与 macOS。软件在系统范围内监听键盘按下和全部鼠标按键，并将连续滚轮事件合并为一次滚动手势；只统计操作次数，不读取按键内容、鼠标坐标、窗口名称或剪贴板内容。
+客户端离线运行，不包含联网、广告、遥测、账号、支付或自动更新。功德数和设置保存在本机。macOS 需要用户授予“输入监控”权限以进行全局计数；权限用于接收输入事件，应用不读取事件内容。
 
-- 首次运行默认开启“登录后自动启动”，右键菜单可随时关闭或重新开启
-- 右键菜单支持：关于、登录后自动启动、更换形象、功德日历、退出
-- 仅展示总数和实时 `+1` 动画，不展示品牌文案、广告位或排行榜
-- 使用本地透明 PNG 绘制形象，不包含音频、WebView 或远程资源
-- macOS 0.7.0 与 Windows 0.7.1 支持双击导入纯数据 `.nmgpack`，可在一个窗口内预览、选择、更新和删除本地形象
-- 完全本地持久化（总数、窗口位置、隐私说明确认状态和自启动设置）
+形象包是受严格校验的本地数据文件，只包含图片和动画参数，不能修改客户端功能、权限或系统设置。macOS `0.7.0` 与 Windows `0.7.1` 源码已实现形象包导入和管理；这不代表对应版本已作为 GitHub Release 发布。
 
-## 隐私与离线边界
+## 安装安全
 
-- 客户端不联网，不包含网络框架与遥测/更新/广告 SDK。
-- macOS 为支持系统级 `CGEventTap` 不启用 App Sandbox；源码不调用网络 API，构建时执行离线审计。
-- 可下载官方发布页时统计下载请求，但不能得出真实安装量、启动量、活跃量或卸载量。
-- 用户转发安装包不会被官方下载统计追踪。
-- 形象包只包含严格校验的 JSON、PNG 和关键帧数据，不能修改应用功能；未来用户作品须经运营方审核后才可在官网上架。
-- macOS 需要用户授予“输入监控”权限后才能全局计数。
-- 自动启动仅在用户登录电脑后运行；不会联网，也不会请求管理员权限。
+本项目当前采用免签名分发。Windows 可能显示“未知发布者”或 SmartScreen 提示；macOS 可能阻止首次打开。请仅从本仓库的 [Releases](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases) 获取实际公开的安装包，并按[免签名安装、升级与卸载指南](docs/INSTALL_UNSIGNED.md)操作。需要时核对发布页提供的 SHA-256。不要为了运行本软件而全局关闭系统安全防护。
 
 ## 构建
 
-### macOS（推荐）
+macOS：
 
 ```bash
 ./scripts/build-macos.sh
-```
-
-构建脚本会输出当前产物的实际尺寸：
-
-- `APP`：`.app` 路径
-- `ZIP`：压缩包路径
-- `BINARY_BYTES`：通用二进制字节数
-- `APP_KB`：完整 `.app` 大小（KB）
-- `ZIP_BYTES`：压缩包字节数
-- `BASE_APP_ZIP_BYTES`：不含独立形象包的基础应用压缩包大小，必须小于 10MB
-- `SAMPLE_PACK_BYTES`：单独生成的示例形象包大小，不计入基础应用上限
-
-生成演示 DMG：
-
-```bash
 ./scripts/package-macos-dmg.sh
-```
-
-执行离线与隐私静态审计：
-
-```bash
 ./scripts/audit-offline.sh
 ```
 
-### 通用构建（CMake）
+Windows：
+
+```powershell
+./scripts/build-windows.ps1
+```
+
+通用 CMake 构建：
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-### Windows
+本机构建环境可能缺少 CMake；请使用各平台构建脚本或 GitHub Actions。
 
-```powershell
-./scripts/build-windows.ps1
-```
+## 历史验收记录
 
-## 免签名发布说明
+以下数据是 `0.6.0` 的历史记录，不代表 `0.8.4` 已验收：
 
-- Windows 版不做代码签名，因此系统可能显示“未知发布者”，SmartScreen 或安全软件也可能拦截。
-- macOS 版没有 Developer ID 分发签名和苹果公证，首次打开可能需要在 Finder 或“隐私与安全性”中手动允许。
-- 这些系统提示无法通过官网、开源或说明文档消除。请只从本仓库的 Releases 下载，并在需要时核对 SHA-256。
-- 不建议为运行本软件而全局关闭操作系统或杀毒软件的安全防护。
+- Windows `0.6.0` 曾在 GitHub Actions 的 `windows-2022` runner 上使用 MSVC Release 构建，并在一台真实 Windows 电脑上完成基础运行及海狮 `.nmgpack` 导入验收。
+- macOS `0.6.0` 曾完成 Universal 2 构建、离线审计、DMG 完整性检查和本机运行检查。
+- 这些记录不代表覆盖所有 Windows/macOS 版本、Intel Mac 真机、多显示器组合或所有权限恢复场景。
 
-## 实测记录
+## 尚未完成的验收
 
-### Windows 0.6.0（云端真实构建 + 用户真机验收）
-
-- GitHub Actions 已在真实 `windows-2022` runner 上用 MSVC Release 构建成功（`Visual Studio 17 2022`，x64）。
-- 正式主分支构建记录：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde/actions/runs/34935403077>。
-- 产物：`niuma-merit.exe` 约 `2.27MB`，ZIP 约 `2.03MB`，低于不含形象包的 `10MB` 上限。
-- 静态链接 C/C++ Runtime，用户无需安装 VC 运行库。
-- 用户已在**一台真实 Windows 电脑**上确认 0.6.0 全局输入计数、基本界面和海狮 `.nmgpack` 导入正常。
-- 真机结论只覆盖“单台机器 + 基础运行”，不等于 Windows 7 / 10 / 11 全版本兼容，也不替代逐项输入行为、自启动和性能测试。
-
-### macOS（本机构建与运行）
-
-- 本地构建脚本 `./scripts/build-macos.sh` 成功。
-- `lipo -info`：`x86_64 arm64`（Universal 2）。
-- `codesign -d --entitlements -` 不包含 App Sandbox 或网络 entitlement。
-- 0.6.0 `.app` 约 `4.19MB`，ZIP 约 `4.04MB`，DMG 约 `4.44MB`；基础应用压缩包不超过 `10MB`，下载形象包单独计算。
-- 演示 DMG 已通过 `hdiutil verify` 完整性校验。
-- 启动 8 秒后实测：RSS 约 `35MB~46MB`，空闲 CPU 长时均值接近 `0%`。
-- 登录后自启动 LaunchAgent 已实现并被 macOS 接受。
-
-### 静态离线审计
-
-- `./scripts/audit-offline.sh` 会扫描 `src/`、`scripts/`、`.github/` 与 `CMakeLists.txt`，确认不存在读取键码、鼠标坐标、窗口信息或联网能力的代码。
-- 未安装 `rg` 时脚本自动降级为 `grep`；任一工具执行出错会被判定为审计失败，不会误报通过。
-
-## 尚未验收（不声称已完成）
-
-- Windows：系统版本兼容性矩阵（Windows 7 SP1 / Windows 10 22H2 / 当前 Windows 11）、多显示器混合 DPI、100%/125%/150%/200% 缩放、长时间高频输入、CPU 与内存实测。
-- macOS：干净环境首次权限引导流程、Intel Mac 真机运行、权限被系统撤销后的恢复、Developer ID 签名、苹果公证与 staple、Gatekeeper 验证。
-- 两个平台：多台普通用户电脑的免签名下载、安全提示处理与升级流程验收。
-
-## 环境说明
-
-- 本机（macOS 开发机）未安装 `cmake`，通用 CMake 构建路径无法在本机复现；macOS 直接使用 `scripts/build-macos.sh`，Windows 使用 `scripts/build-windows.ps1` 或 GitHub Actions。
-
-## 本地形象包（macOS 0.7.0 / Windows 0.7.1）
-
-- 双击 `.nmgpack` 即可导入；同一形象 ID 再次导入会在完整校验后安全更新。
-- “更换形象”直接展示全部内置形象和本机已安装形象，确认后立即切换；本地形象可删除，功德数据不受影响。
-- 形象包只能包含 JSON 动画参数和 PNG，不能修改计数、权限、菜单或任何客户端功能。
-- 基础应用 ZIP 上限为 `10MB`；单独下载的 `.nmgpack` 不计入基础应用体积。
-- 制作和校验命令：`./scripts/appearance-pack.py build|validate`。
-- 示例包输出：`dist/sample-packs/woodfish-sample.nmgpack`。
+- `0.8.4` Windows 与 macOS 安装包的正式验收和发布。
+- Windows 系统版本、混合 DPI、多显示器、高频输入及长时间运行兼容性矩阵。
+- macOS 干净环境首次权限引导、Intel Mac 真机、权限撤销恢复、Developer ID 签名、公证和 Gatekeeper 验证。
+- 多台普通用户电脑上的下载、安全提示处理及升级流程。
+- 免费创作者社区完整线上闭环验收。
