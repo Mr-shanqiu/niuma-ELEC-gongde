@@ -39,6 +39,7 @@ $locks=[Collections.Generic.List[IO.FileStream]]::new()
 $ownedProcesses=[Collections.Generic.List[object]]::new()
 $inputs=[Collections.Generic.List[object]]::new()
 $cleanupErrors=[Collections.Generic.List[string]]::new()
+$cleanupFailures=[Collections.Generic.List[object]]::new()
 $runId=[Guid]::NewGuid().ToString('N')
 $outputRoot=$null;$outputDirectoryOwned=$false;$receiptSequence=0
 $installDir=$null;$installDirectoryOwned=$false;$ownedInstallDirectory=$null
@@ -57,7 +58,8 @@ $report=[ordered]@{
   processes=[Collections.Generic.List[object]]::new()
   clockChecks=[Collections.Generic.List[object]]::new()
   invalidSignature=$null
-  cleanup=[ordered]@{attempted=$false;complete=$false;errors=@()}
+  cleanup=[ordered]@{attempted=$false;complete=$false;errors=@();phase='not-started'
+    failurePhase=$null;failureType=$null;errorCode=$null}
   failure=$null
 }
 function Assert-Condition([bool]$Condition, [string]$Message) {
@@ -202,6 +204,112 @@ function Get-PeEvidence($Binding, [string]$Kind) {
 }
 
 
+function Get-SafeFailureType($Record) {
+  $name=$Record.Exception.GetType().FullName
+  $allowed=@(
+    'System.Management.Automation.RuntimeException',
+    'System.Management.Automation.MethodInvocationException',
+    'System.Management.Automation.PropertyNotFoundException',
+    'System.Management.Automation.PSArgumentException',
+    'System.Management.Automation.PSInvalidOperationException',
+    'System.InvalidOperationException','System.IO.IOException',
+    'System.IO.FileNotFoundException','System.IO.DirectoryNotFoundException',
+    'System.UnauthorizedAccessException','System.ObjectDisposedException',
+    'System.ArgumentException','System.ComponentModel.Win32Exception',
+    'System.TimeoutException'
+  )
+  if ($name -cin $allowed) {return $name}
+  return 'OTHER_EXCEPTION'
+}
+function Get-SafeFailureCode($Record) {
+  # Exact literals only. Never export an arbitrary exception Message.
+  $allowed=@(
+    'PAID_GUI_REQUIRES_FRESH_GITHUB_HOSTED_WINDOWS',
+    'PAID_LICENSE_REAL_CLOCK_OUTSIDE_WINDOW',
+    'PAID_GUI_CASE_FAILED',
+    'PAID_MAIN_NOT_OBSERVABLE',
+    'PAID_TEST_UI_NOT_OBSERVABLE',
+    'PAID_PACK_ENTRY_COUNT',
+    'PAID_PACK_UNSAFE_ENTRY',
+    'PAID_PACK_SIZE',
+    'PAID_PACK_MANIFEST',
+    'PAID_PACK_ID',
+    'PAID_PACK_IDENTITY',
+    'PAID_PACK_LICENSED_ID',
+    'PAID_PACK_LICENSE_TIME_PIN',
+    'PAID_PACK_CONTROL',
+    'PAID_CATALOG_CHANGED_UNEXPECTEDLY',
+    'PAID_REJECTION_APP_EXITED_BEFORE_DIALOG',
+    'PAID_REJECTION_UNKNOWN_DIALOG',
+    'PAID_REJECTION_WRONG_ERROR',
+    'PAID_REJECTION_NO_NATIVE_DIALOG',
+    'PAID_REJECTION_CHANGED_SELECTION',
+    'PAID_REJECTION_FORCED_EXIT',
+    'PAID_OWNED_PROCESS_IMAGE_DRIFT',
+    'PAID_INSTALLED_CLIENT_IMAGE_DRIFT',
+    'PAID_CATALOG_CARDINALITY',
+    'PAID_PATH_SCOPE',
+    'PAID_OUTPUT_NO_CLOBBER',
+    'PAID_OUTPUT_NOT_EXCLUSIVELY_CREATED',
+    'PAID_INPUT_FILE_SET',
+    'PAID_MIXED_ENTRY_SET',
+    'PAID_MIXED_INNER_BYTES',
+    'PAID_MIXED_DISTINCT_ID',
+    'PAID_INSTALLED_CLIENT_PATH_NOT_UNIQUE',
+    'PAID_INITIAL_CATALOG_NOT_EMPTY',
+    'PAID_GUI_STAGE_FAILED',
+    'PAID_FINAL_RECEIPT_FAILED',
+    'PAID_COMMUNITY_WINDOWS2022_GUI_FAILED_SEE_SANITIZED_RECEIPT',
+    'PAID_MAIN_IDENTITY_CHANGED',
+    'PAID_CAPTURE_TARGET_IDENTITY_CHANGED',
+    'PAID_CAPTURE_TARGET_OWNER_CHANGED',
+    'PAID_MODAL_OWNER_NOT_VERIFIED',
+    'PAID_CLEANUP_PHASE_FAILED'
+  )
+  if ($Record.Exception.Message -cin $allowed) {return $Record.Exception.Message}
+  return 'PAID_GUI_STAGE_FAILED'
+}
+$cleanupPhaseCodes=@{
+  'not-started'='NOT_STARTED'
+  'stop-owned-close'='OWNED_CLOSE_FAILED'
+  'stop-owned-wait'='OWNED_STOP_WAIT_FAILED'
+  'dispose-input-locks'='INPUT_LOCK_RELEASE_FAILED'
+  'assert-exit'='OWNED_EXIT_ASSERT_FAILED'
+  'release-handles'='OWNED_HANDLE_RELEASE_FAILED'
+  'foreign-client'='FOREIGN_CLIENT_CHECK_FAILED'
+  'startup-binding'='STARTUP_BINDING_FAILED'
+  'uninstall-binding'='UNINSTALL_BINDING_FAILED'
+  'uninstaller-start'='UNINSTALLER_START_FAILED'
+  'uninstaller-wait'='UNINSTALLER_WAIT_FAILED'
+  'uninstall-log'='UNINSTALL_LOG_CHECK_FAILED'
+  'release-uninstaller-handles'='UNINSTALLER_HANDLE_RELEASE_FAILED'
+  'remove-install-directory'='OWNED_INSTALL_DIRECTORY_REMOVE_FAILED'
+  'cleanup-app-artifacts'='APP_ARTIFACT_CLEANUP_FAILED'
+  'final-stop-owned-processes'='FINAL_OWNED_STOP_FAILED'
+  'dispose-final-locks'='FINAL_LOCK_RELEASE_FAILED'
+  'final-exit-record'='FINAL_EXIT_RECORD_FAILED'
+  'final-handle-dispose'='FINAL_HANDLE_DISPOSE_FAILED'
+  'complete'='NONE'
+  'not-required'='NONE'
+}
+function Set-CleanupPhase([string]$Stage) {
+  Assert-Condition ($cleanupPhaseCodes.ContainsKey($Stage)) 'PAID_CLEANUP_PHASE_FAILED'
+  $report.cleanup.phase=$Stage
+}
+function Add-CleanupFailure([string]$Stage,$Record) {
+  Assert-Condition ($cleanupPhaseCodes.ContainsKey($Stage)) 'PAID_CLEANUP_PHASE_FAILED'
+  $code=$cleanupPhaseCodes[$Stage]
+  $type=Get-SafeFailureType $Record
+  $cleanupErrors.Add($code)
+  $cleanupFailures.Add([ordered]@{phase=$Stage;failureType=$type;errorCode=$code})
+  if ($null -eq $report.cleanup.errorCode) {
+    $report.cleanup.failurePhase=$Stage
+    $report.cleanup.failureType=$type
+    $report.cleanup.errorCode=$code
+  }
+  $report.cleanup.complete=$false
+}
+
 function Assert-LiveLicenseWindow {
   $now=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
   $report.clockChecks.Add([ordered]@{unix=$now;issuedAt=$issuedAt;importBefore=$importBefore;phase=$phase})
@@ -259,7 +367,9 @@ function Write-Receipt([switch]$Final) {
       established=$isolationEstablished;outputExclusivelyOwned=$outputDirectoryOwned
       installationExclusivelyOwned=$installDirectoryOwned}
     cleanup=[ordered]@{attempted=$report.cleanup.attempted;complete=$report.cleanup.complete
-      errorCount=$cleanupErrors.Count;errorCode=$(if ($cleanupErrors.Count) {'OWNED_CLEANUP_INCOMPLETE'} else {$null})}
+      phase=$report.cleanup.phase;failurePhase=$report.cleanup.failurePhase
+      failureType=$report.cleanup.failureType;errorCount=$cleanupErrors.Count
+      errorCode=$report.cleanup.errorCode;failures=$cleanupFailures.ToArray()}
     failure=$report.failure
     boundaries=[ordered]@{Windows11HumanAcceptance=$false;SourceCommitNotVerified=$true
       rebuiltClient=$false;signingKeyPresent=$false;productionStateChanged=$false;originalSdkChanged=$false
@@ -273,15 +383,20 @@ function Write-Receipt([switch]$Final) {
   finally {$stream.Dispose()}
   Write-Output ('PAID_GUI_CHECKPOINT='+$leaf)
 }
-function Capture-Observation($Case,$Main,$Dialog,[string]$Name) {
+function Capture-Observation($Case,$Main,$Dialog,[string]$Name,[int]$ObservedProcessId = 0) {
   [NmgGuiObserver]::CheckDesktop()
-  Assert-Condition ([NmgGuiObserver]::Observable($Main.Handle)) 'PAID_MAIN_NOT_OBSERVABLE'
+  if ($ObservedProcessId -eq 0) { $ObservedProcessId = [int]$Case.appProcess.pid }
+  Assert-Condition ($ObservedProcessId -gt 0) 'PAID_CAPTURE_TARGET_IDENTITY_CHANGED'
   $leaf=$null;$sha=$null
   if ($Dialog) {
+    [NmgGuiObserver]::AssertCaptureContext($Main.Handle,$Dialog.Handle,$ObservedProcessId,$Dialog.ClassName,$Dialog.Owner)
     Assert-Condition ([NmgGuiObserver]::Observable($Dialog.Handle)) 'PAID_TEST_UI_NOT_OBSERVABLE'
     $leaf=$Case.name+'-'+$Name+'.png'
-    [NmgGuiObserver]::CaptureOwnedOpaque((Join-Path $outputRoot $leaf),$Dialog.Handle,[int]$Case.appProcess.pid)
+    [NmgGuiObserver]::CaptureOwnedOpaque((Join-Path $outputRoot $leaf),$Dialog.Handle,$ObservedProcessId)
+    [NmgGuiObserver]::AssertCaptureContext($Main.Handle,$Dialog.Handle,$ObservedProcessId,$Dialog.ClassName,$Dialog.Owner)
     $sha=(Get-FileHash -LiteralPath (Join-Path $outputRoot $leaf) -Algorithm SHA256).Hash.ToLowerInvariant()
+  } else {
+    [NmgGuiObserver]::AssertCaptureContext($Main.Handle,[IntPtr]::Zero,$ObservedProcessId,'',[IntPtr]::Zero)
   }
   # No transparent pet-window/full-desktop screenshots. Only opaque owned
   # test dialog/picker/menu surfaces are cropped, with foreign pixels masked.
@@ -538,7 +653,7 @@ function Stop-OwnedProcesses {
           [NmgGuiObserver]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
       }
-    } catch { $cleanupErrors.Add("Owned close request failed: $($_.Exception.Message)") }
+    } catch { Add-CleanupFailure 'stop-owned-close' $_ }
   }
   foreach ($owned in $members) {
     try {
@@ -551,7 +666,7 @@ function Stop-OwnedProcesses {
         Assert-Condition ($owned.handle.WaitForExit($remaining)) 'Owned process did not exit after bounded termination.'
       }
       Record-Exit $owned
-    } catch { $cleanupErrors.Add("Owned process cleanup failed: $($_.Exception.Message)") }
+    } catch { Add-CleanupFailure 'stop-owned-wait' $_ }
   }
 }
 
@@ -820,7 +935,7 @@ function Invoke-RestartSelectionCheck($Case) {
   Assert-Condition ($Case.restartSelectedPackId -ceq $expected -and
     [NmgGuiObserver]::PrivacyShown((Join-Path $dataRoot 'data.ini')) -ceq '1') `
     'Restart did not preserve GUI selection/privacy flag.'
-  Capture-Observation $Case $main $null 'restart-rendered'
+  Capture-Observation $Case $main $null 'restart-rendered' ([int]$restart.evidence.pid)
   Assert-Condition ([NmgGuiObserver]::PostMessage($main.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) `
     'Could not request owned restart closure.'
   Wait-OwnedProcess $restart 10000
@@ -886,7 +1001,6 @@ function Invoke-GuiCase($InputCase) {
         $app.evidence['lastGuiPhase'] = $case.guiPhase
         continue
       }
-      Capture-Observation $case $main[0] $dialog 'import-dialog'
       $expectedCount = $InputCase.evidence.expectedImportedCount
       $text = $dialog.Text.Trim()
       if ($expectedCount -eq 1) {
@@ -903,6 +1017,7 @@ function Invoke-GuiCase($InputCase) {
         $case.dialogImportedCount = [int]$match.Groups[1].Value
         $case.countEvidence = 'Numeric count in the exact production batch success dialog plus matching original catalog bytes'
       }
+      Capture-Observation $case $main[0] $dialog 'import-dialog'
       $case.successDialogObserved = $true
       $case.catalogAfter = Get-CatalogSnapshot
     Assert-Condition ($case.catalogAfter.Count -eq $InputCase.evidence.expectedCatalogCount) 'PAID_CATALOG_CARDINALITY'
@@ -1567,6 +1682,33 @@ public static class NmgGuiObserver {
     dispatch.Completed=completed!=IntPtr.Zero; dispatch.Win32Error=completed==IntPtr.Zero?Marshal.GetLastWin32Error():0;
     dispatch.MessageResult=result.ToInt64(); return dispatch;
   }
+  public static void AssertCaptureContext(IntPtr main,IntPtr target,int processId,string expectedClass,IntPtr expectedOwner) {
+    CheckDesktop();
+    if(!IsWindow(main)||WindowProcessId(main)!=(uint)processId||
+       Class(main)!="NiuMaMeritWindow"||!IsWindowVisible(main)||IsIconic(main))
+      throw new InvalidOperationException("PAID_MAIN_IDENTITY_CHANGED");
+    if(target==IntPtr.Zero) {
+      if(!Observable(main)) throw new InvalidOperationException("PAID_MAIN_NOT_OBSERVABLE");
+      return;
+    }
+    if(!IsWindow(target)||WindowProcessId(target)!=(uint)processId||
+       Class(target)!=expectedClass||!IsWindowVisible(target)||IsIconic(target)||
+       (expectedClass!="#32770"&&expectedClass!="#32768"&&expectedClass!="NiuMaMeritAppearancePicker"))
+      throw new InvalidOperationException("PAID_CAPTURE_TARGET_IDENTITY_CHANGED");
+    if(GetWindow(target,4)!=expectedOwner)
+      throw new InvalidOperationException("PAID_CAPTURE_TARGET_OWNER_CHANGED");
+    bool ownedModal=expectedOwner==main&&!IsWindowEnabled(main)&&
+      (expectedClass=="#32770"||expectedClass=="NiuMaMeritAppearancePicker");
+    if((expectedClass=="#32770"&&!ownedModal)||
+       (expectedClass=="NiuMaMeritAppearancePicker"&&expectedOwner!=main))
+      throw new InvalidOperationException("PAID_MODAL_OWNER_NOT_VERIFIED");
+    // Only a live, identity-bound owned modal with its owner disabled may
+    // obscure Main. A menu/modeless/foreign occluder grants no exemption.
+    if(!ownedModal&&!Observable(main))
+      throw new InvalidOperationException("PAID_MAIN_NOT_OBSERVABLE");
+    if(!Observable(target))
+      throw new InvalidOperationException("PAID_TEST_UI_NOT_OBSERVABLE");
+  }
   public static void CaptureOwnedOpaque(string path,IntPtr window,int processId) {
     CheckDesktop();
     string cls=Class(window);
@@ -1671,23 +1813,30 @@ public static class NmgGuiObserver {
   $phase='invalid-signature';Invoke-SignatureRejection $bad
   $phase='mixed-two-packs';Invoke-GuiCase $mixed
 } catch {
-  $failure='PAID_GUI_STAGE_FAILED'
-  if ($_.Exception.Message -cmatch '\APAID_[A-Z0-9_]+\z') {$failure=$_.Exception.Message}
-  $report.failure=[ordered]@{code=$failure;phase=$phase;type=$_.Exception.GetType().FullName}
+  $failure=Get-SafeFailureCode $_
+  $report.failure=[ordered]@{code=$failure;phase=$phase;type=(Get-SafeFailureType $_)}
 } finally {
   $report.cleanup.attempted=$isolationEstablished -and ($installAttempted -or $installDirectoryOwned)
   if ($ownedProcesses.Count -gt 0) { Stop-OwnedProcesses }
-  foreach ($stream in $locks.ToArray()) { $stream.Dispose() }
+  Set-CleanupPhase 'dispose-input-locks'
+  foreach ($stream in $locks.ToArray()) {
+    try {$stream.Dispose()} catch {Add-CleanupFailure 'dispose-input-locks' $_}
+  }
   $locks.Clear()
   if ($isolationEstablished -and ($installAttempted -or $installDirectoryOwned)) {
     try {
+      Set-CleanupPhase 'assert-exit'
       Assert-OwnedProcessesExited
+      Set-CleanupPhase 'release-handles'
       Release-ExitedProcessHandles
+      Set-CleanupPhase 'foreign-client'
       Assert-NoForeignClient
+      Set-CleanupPhase 'startup-binding'
       $runValue = Get-RunValue 'HKCU:'
       Assert-Condition ($null -eq $runValue -or $runValue -ieq ('"' + $clientPath + '" --autostart')) `
         'Startup ownership changed; uninstall would affect an unowned value.'
       if ([IO.Directory]::Exists($installDir)) {
+        Set-CleanupPhase 'uninstall-binding'
         Assert-Condition ($outputDirectoryOwned -and $installDirectoryOwned -and
           (Get-SafePath $installDir) -ieq $ownedInstallDirectory -and
           $ownedInstallDirectory -ieq (Get-SafePath (Join-Path $outputRoot 'installed'))) `
@@ -1706,26 +1855,45 @@ public static class NmgGuiObserver {
           $report.cleanup['uninstallerSha256'] = $boundUninstaller.sha256
           # Release the image handle before Inno removes its own executable.
           $boundUninstaller.stream.Dispose()
+          Set-CleanupPhase 'uninstaller-start'
           $uninstaller = Start-OwnedProcess $uninstallerPath `
             ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="' + $uninstallLog + '"') 'uninstaller'
+          Set-CleanupPhase 'uninstaller-wait'
           Wait-OwnedProcess $uninstaller
+          Set-CleanupPhase 'uninstall-log'
           Assert-Condition ([IO.File]::Exists($uninstallLog)) 'Real Inno uninstallation log is missing.'
+          Set-CleanupPhase 'release-uninstaller-handles'
           Release-ExitedProcessHandles
         } else {
           Assert-Condition (-not [IO.File]::Exists($clientPath)) 'Own installation has no uninstaller; preserving it.'
         }
       }
+      Set-CleanupPhase 'remove-install-directory'
       if ($installDirectoryOwned) { Remove-OwnedInstallDirectory }
+      Set-CleanupPhase 'cleanup-app-artifacts'
       Cleanup-AppArtifacts
-      $report.cleanup.complete = $true
-    } catch { $cleanupErrors.Add($_.Exception.Message) }
+      $report.cleanup.complete = ($cleanupErrors.Count -eq 0)
+    } catch { Add-CleanupFailure $report.cleanup.phase $_ }
+    Set-CleanupPhase 'final-stop-owned-processes'
     if ($ownedProcesses.Count -gt 0) { Stop-OwnedProcesses }
-  } else { $report.cleanup.complete = $true }
-  foreach ($stream in $locks.ToArray()) { $stream.Dispose() }
-  foreach ($owned in $ownedProcesses.ToArray()) {
-    try { Record-Exit $owned } catch { $cleanupErrors.Add($_.Exception.Message) }
-    $owned.handle.Dispose()
+  } else {
+    Set-CleanupPhase 'not-required'
+    $report.cleanup.complete = ($cleanupErrors.Count -eq 0)
   }
+  Set-CleanupPhase 'dispose-final-locks'
+  foreach ($stream in $locks.ToArray()) {
+    try {$stream.Dispose()} catch {Add-CleanupFailure 'dispose-final-locks' $_}
+  }
+  foreach ($owned in $ownedProcesses.ToArray()) {
+    Set-CleanupPhase 'final-exit-record'
+    try { Record-Exit $owned } catch { Add-CleanupFailure 'final-exit-record' $_ }
+    Set-CleanupPhase 'final-handle-dispose'
+    try {$owned.handle.Dispose()} catch {Add-CleanupFailure 'final-handle-dispose' $_}
+  }
+  if ($cleanupErrors.Count -gt 0) {
+    $report.cleanup.complete=$false
+    $report.cleanup.phase=$report.cleanup.failurePhase
+  } elseif ($report.cleanup.complete) {Set-CleanupPhase 'complete'}
 
   if (-not $failure -and $cleanupErrors.Count -eq 0 -and $report.cleanup.complete -and $report.cases.Count -eq 3 -and
       @($report.cases.ToArray() | Where-Object {$_.result -ne 'PASS' -or -not $_.switchingObserved -or -not $_.restartSelectionObserved}).Count -eq 0 -and
@@ -1734,8 +1902,23 @@ public static class NmgGuiObserver {
     $report.result='PASS';$report.guiAcceptancePassed=$true;$report.switchingChecksPassed=$true
   }
   try {Write-Receipt -Final}
-  catch {$failure='PAID_FINAL_RECEIPT_FAILED';$report.result='FAIL';[Console]::Error.WriteLine('PAID_FINAL_RECEIPT_FAILED')}
+  catch {
+    $failure='PAID_FINAL_RECEIPT_FAILED';$report.result='FAIL';$report.guiAcceptancePassed=$false
+    if ($null -eq $report.failure) {
+      $report.failure=[ordered]@{code=$failure;phase=$phase;type=(Get-SafeFailureType $_)}
+    }
+    [Console]::Error.WriteLine('PAID_FINAL_RECEIPT_FAILED')
+  }
 }
-if ($report.result -ne 'PASS' -or $failure) {throw 'PAID_COMMUNITY_WINDOWS2022_GUI_FAILED_SEE_SANITIZED_RECEIPT'}
+if ($report.result -ne 'PASS' -or $failure) {
+  $diagnostic=[ordered]@{phase=$phase;failure=$report.failure
+    cleanupPhase=$report.cleanup.phase;cleanupFailurePhase=$report.cleanup.failurePhase
+    cleanupCode=$report.cleanup.errorCode;cleanupType=$report.cleanup.failureType
+    cleanupErrorCount=$cleanupErrors.Count
+    cases=@($report.cases.ToArray() | ForEach-Object {
+      [ordered]@{name=$_.name;guiPhase=$_.guiPhase;failurePhase=$_.failurePhase}
+    })}
+  Write-Output ('PAID_GUI_FAILURE='+($diagnostic | ConvertTo-Json -Depth 6 -Compress))
+  throw 'PAID_COMMUNITY_WINDOWS2022_GUI_FAILED_SEE_SANITIZED_RECEIPT'
+}
 Write-Output 'PAID_COMMUNITY_WINDOWS2022_GUI=PASS SOURCE_COMMIT_NOT_VERIFIED=true WIN11_HUMAN_ACCEPTANCE=false'
-
