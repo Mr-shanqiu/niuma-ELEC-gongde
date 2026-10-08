@@ -2019,3 +2019,13 @@ Windows实际选择显示结果 blocked 审计：官方thread当前确认最近�
 ### 全屏隐藏开关的有界补齐
 
 `src/macos/app.mm` 已增加「全屏时暂时隐藏」菜单项，默认勾选，切换即更新已有偏好与窗口的全屏辅助行为；隔离验收模式禁用该项并防止写入真实偏好。仅使用本机 Apple 编译器对 Mac 客户端编译与链接，通过；一个原有 macOS 14 激活 API 弃用警告保留，不为修补脚本扩大修改。候选位于 `.local-work/candidates/fullscreen-toggle-20261009/`，未签名、未安装、未替换正式 0.9.0，也未宣称实际全屏 GUI 验收已通过。仍需版本化打包及真实菜单操作验证。
+
+### 2026-10-09: same-certificate 0.9.1 candidate and source synchronization
+
+- GitHub source synchronization succeeded: `codex/free-distribution-090` advanced from `142c7e0` to `c7820b3`. The existing local system proxy was reused command-locally; no network settings or credentials changed. This does not mean the default branch or public installers were updated.
+- `VERSION` is now `0.9.1`. The Windows release workflow accepts formal `0.9.x` versions instead of hard-coding `0.9.0`; frozen native fixture and permanent-package compatibility gates remain intact.
+- A private macOS 0.9.1 universal DMG was built under `.local-work/candidates/macos-091-fullscreen-20261009`. Architectures: arm64 and x86_64. SHA-256: `69c93f1e45164d424103e3f1b4a0ecaa5c2bdad4b2f60f3f8f71f1492274f4bc`. Signature verification passed; its leaf signing certificate is byte-identical to the previously installed official 0.9.0 certificate. This is not Developer ID notarization.
+- The verified candidate replaced only the local application bundle. The previous 0.9.0 application was preserved privately; no user appearance files, preferences or counters were deleted. Normal launch visibly retained the selected 转运珠 and count 3869.
+- Native menu acceptance remains unproven: computer control reads the borderless pet window screenshot but rejects coordinate clicks with `noWindowsAvailable`, and the app is absent from its normal app inventory. No repeated identical click attempts or alternative input-injection workaround were used. Input Monitoring was not newly granted; global counting is not marked passed.
+- Windows 0.9.0 installed through its Simplified Chinese installer, but normal launch was blocked by application-control error 4551. The exact enforcing policy is not yet identified. Protection was not disabled; Windows native import/switch/global-count acceptance is still open.
+- Public 0.9.1 publication is not asserted. Next bounded actions: build the version-bound Windows candidate using the unchanged compatibility gates; investigate the two distinct native acceptance blockers without broadening the test matrix.

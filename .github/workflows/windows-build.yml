@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       require_signed_fixtures:
-        description: Require signed importer evidence for a formal 0.9.0 installer
+        description: Require signed importer evidence for a formal 0.9.x installer
         type: boolean
         default: true
       run_legacy_expiry:
@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           version=$(tr -d '[:space:]' < VERSION)
-          test "$version" = "0.9.0" || { echo "Expected formal version 0.9.0"; exit 1; }
+          [[ "$version" =~ ^0\.9\.[0-9]+$ ]] || { echo "Expected formal version in the 0.9.x series"; exit 1; }
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Set up fixture archive dependency
@@ -69,7 +69,7 @@ jobs:
         shell: powershell
         run: |
           if ($env:WINDOWS_PERPETUAL_STATUS -ne 'PASS') {
-            throw "Client compiled, but formal 0.9.0 release is blocked: supply frozen signed perpetual/expired fixtures covering both production public keys. No private signing key belongs in this workflow."
+            throw "Client compiled, but formal 0.9.x release is blocked: supply frozen signed perpetual/expired fixtures covering both production public keys. No private signing key belongs in this workflow."
           }
 
       - name: Build Windows installer
