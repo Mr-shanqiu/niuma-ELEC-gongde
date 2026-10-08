@@ -837,7 +837,252 @@ bool ShowPrivacyNotice(HWND owner) {
 struct AboutDialogState {
   std::wstring text;
   PngResource douyin;
+  HWND viewport = nullptr;
+  HFONT font = nullptr;
+  WNDPROC buttonProcedure = nullptr;
+  int padding = 16;
+  int lineHeight = 16;
+  int textHeight = 0;
+  int imageWidth = 260;
+  int imageHeight = 260;
+  int contentWidth = 0;
+  int contentHeight = 0;
+  int viewportWidth = 0;
+  int viewportHeight = 0;
+  int scrollX = 0;
+  int scrollY = 0;
+  int wheelDelta = 0;
+  int horizontalWheelDelta = 0;
 };
+
+void ScrollAboutContent(AboutDialogState& state, int x, int y) {
+  state.scrollX = std::clamp(x, 0,
+      std::max(0, state.contentWidth - state.viewportWidth));
+  state.scrollY = std::clamp(y, 0,
+      std::max(0, state.contentHeight - state.viewportHeight));
+  SCROLLINFO info = {};
+  info.cbSize = sizeof(info);
+  info.fMask = SIF_POS;
+  info.nPos = state.scrollX;
+  SetScrollInfo(state.viewport, SB_HORZ, &info, TRUE);
+  info.nPos = state.scrollY;
+  SetScrollInfo(state.viewport, SB_VERT, &info, TRUE);
+  InvalidateRect(state.viewport, nullptr, FALSE);
+}
+
+void MeasureAboutContent(AboutDialogState& state) {
+  RECT client = {};
+  GetClientRect(state.viewport, &client);
+  state.viewportWidth = static_cast<int>(client.right);
+  state.viewportHeight = static_cast<int>(client.bottom);
+  // Keep the image size independent of the viewport. Narrow work areas scroll
+  // horizontally rather than downscaling the original embedded image again.
+  state.contentWidth = std::max(state.viewportWidth,
+                               state.imageWidth + state.padding * 2);
+  RECT measured = {0, 0, state.contentWidth - state.padding * 2, 0};
+  HDC dc = GetDC(state.viewport);
+  HGDIOBJ oldFont = SelectObject(dc, state.font);
+  DrawTextW(dc, state.text.c_str(), -1, &measured,
+            DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+  TEXTMETRICW metrics = {};
+  GetTextMetricsW(dc, &metrics);
+  state.lineHeight = std::max(1, static_cast<int>(metrics.tmHeight +
+                                               metrics.tmExternalLeading));
+  SelectObject(dc, oldFont);
+  ReleaseDC(state.viewport, dc);
+  state.textHeight = static_cast<int>(measured.bottom) + 4;
+  state.contentHeight = state.padding * 3 + state.textHeight + state.imageHeight;
+
+  SCROLLINFO info = {};
+  info.cbSize = sizeof(info);
+  // Reserve both native scrollbars even when disabled, keeping text wrapping
+  // stable as the viewport changes and avoiding scrollbar/layout oscillation.
+  info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
+  info.nMax = std::max(0, state.contentWidth - 1);
+  info.nPage = static_cast<UINT>(state.viewportWidth);
+  info.nPos = state.scrollX;
+  SetScrollInfo(state.viewport, SB_HORZ, &info, TRUE);
+  info.nMax = std::max(0, state.contentHeight - 1);
+  info.nPage = static_cast<UINT>(state.viewportHeight);
+  info.nPos = state.scrollY;
+  SetScrollInfo(state.viewport, SB_VERT, &info, TRUE);
+  ScrollAboutContent(state, state.scrollX, state.scrollY);
+}
+
+bool IsAboutScrollKey(WPARAM key) {
+  return key == VK_UP || key == VK_DOWN || key == VK_LEFT || key == VK_RIGHT ||
+         key == VK_PRIOR || key == VK_NEXT || key == VK_HOME || key == VK_END;
+}
+
+LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
+                                       WPARAM wParam, LPARAM lParam) {
+  auto* state = reinterpret_cast<AboutDialogState*>(
+      GetWindowLongPtrW(window, GWLP_USERDATA));
+  if (message == WM_NCCREATE) {
+    state = static_cast<AboutDialogState*>(
+        reinterpret_cast<const CREATESTRUCTW*>(lParam)->lpCreateParams);
+    SetWindowLongPtrW(window, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(state));
+    state->viewport = window;
+  }
+  if (!state) return DefWindowProcW(window, message, wParam, lParam);
+  switch (message) {
+    case WM_SIZE:
+      MeasureAboutContent(*state);
+      return 0;
+    case WM_SETFONT:
+      state->font = wParam ? reinterpret_cast<HFONT>(wParam)
+          : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+      MeasureAboutContent(*state);
+      return 0;
+    case WM_GETFONT:
+      return reinterpret_cast<LRESULT>(state->font);
+    case WM_GETDLGCODE:
+      // Tab, Enter and Escape remain owned by the modal dialog manager.
+      return IsAboutScrollKey(wParam) ? DLGC_WANTMESSAGE : 0;
+    case WM_LBUTTONDOWN:
+      SetFocus(window);
+      return 0;
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+      InvalidateRect(window, nullptr, FALSE);
+      return 0;
+    case WM_KEYDOWN: {
+      int x = state->scrollX, y = state->scrollY;
+      const int page = std::max(state->lineHeight,
+                               state->viewportHeight - state->lineHeight);
+      switch (wParam) {
+        case VK_UP: y -= state->lineHeight; break;
+        case VK_DOWN: y += state->lineHeight; break;
+        case VK_LEFT: x -= state->lineHeight; break;
+        case VK_RIGHT: x += state->lineHeight; break;
+        case VK_PRIOR: y -= page; break;
+        case VK_NEXT: y += page; break;
+        case VK_HOME: x = 0; y = 0; break;
+        case VK_END: y = state->contentHeight; break;
+        default: return DefWindowProcW(window, message, wParam, lParam);
+      }
+      ScrollAboutContent(*state, x, y);
+      return 0;
+    }
+    case WM_VSCROLL:
+    case WM_HSCROLL: {
+      const bool vertical = message == WM_VSCROLL;
+      int position = vertical ? state->scrollY : state->scrollX;
+      const int page = vertical ? state->viewportHeight : state->viewportWidth;
+      SCROLLINFO info = {};
+      info.cbSize = sizeof(info);
+      info.fMask = SIF_TRACKPOS;
+      GetScrollInfo(window, vertical ? SB_VERT : SB_HORZ, &info);
+      switch (LOWORD(wParam)) {
+        case SB_LINEUP: position -= state->lineHeight; break;
+        case SB_LINEDOWN: position += state->lineHeight; break;
+        case SB_PAGEUP: position -= page; break;
+        case SB_PAGEDOWN: position += page; break;
+        case SB_TOP: position = 0; break;
+        case SB_BOTTOM:
+          position = vertical ? state->contentHeight : state->contentWidth;
+          break;
+        case SB_THUMBTRACK:
+        case SB_THUMBPOSITION: position = info.nTrackPos; break;
+        default: return 0;
+      }
+      ScrollAboutContent(*state, vertical ? state->scrollX : position,
+                         vertical ? position : state->scrollY);
+      return 0;
+    }
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL: {
+      const bool horizontal = message == WM_MOUSEHWHEEL ||
+                              (LOWORD(wParam) & MK_SHIFT) != 0;
+      int& remainder = horizontal ? state->horizontalWheelDelta : state->wheelDelta;
+      remainder += static_cast<short>(HIWORD(wParam));
+      const int steps = remainder / WHEEL_DELTA;
+      remainder %= WHEEL_DELTA;
+      UINT lines = 3;
+      SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+      const int distance = lines == WHEEL_PAGESCROLL
+          ? (horizontal ? state->viewportWidth : state->viewportHeight)
+          : static_cast<int>(lines) * state->lineHeight;
+      const int movement = steps * distance * (message == WM_MOUSEHWHEEL ? 1 : -1);
+      ScrollAboutContent(*state, state->scrollX + (horizontal ? movement : 0),
+                         state->scrollY + (horizontal ? 0 : movement));
+      return 0;
+    }
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_PAINT: {
+      PAINTSTRUCT paint = {};
+      HDC dc = BeginPaint(window, &paint);
+      RECT client = {};
+      GetClientRect(window, &client);
+      FillRect(dc, &client, GetSysColorBrush(COLOR_3DFACE));
+      HGDIOBJ oldFont = SelectObject(dc, state->font);
+      SetBkMode(dc, TRANSPARENT);
+      SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+      RECT text = {state->padding - state->scrollX,
+                   state->padding - state->scrollY,
+                   state->contentWidth - state->padding - state->scrollX,
+                   state->padding + state->textHeight - state->scrollY};
+      DrawTextW(dc, state->text.c_str(), -1, &text,
+                DT_WORDBREAK | DT_NOPREFIX);
+      SelectObject(dc, oldFont);
+      if (state->douyin.image && state->douyin.image->GetWidth() != 0 &&
+          state->douyin.image->GetHeight() != 0) {
+        Gdiplus::Graphics graphics(dc);
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        graphics.DrawImage(state->douyin.image.get(), Gdiplus::RectF(
+            static_cast<float>((state->contentWidth - state->imageWidth) / 2 -
+                               state->scrollX),
+            static_cast<float>(state->padding * 2 + state->textHeight -
+                               state->scrollY),
+            static_cast<float>(state->imageWidth),
+            static_cast<float>(state->imageHeight)));
+      }
+      if (GetFocus() == window) DrawFocusRect(dc, &client);
+      EndPaint(window, &paint);
+      return 0;
+    }
+  }
+  return DefWindowProcW(window, message, wParam, lParam);
+}
+
+LRESULT CALLBACK AboutButtonProcedure(HWND window, UINT message,
+                                      WPARAM wParam, LPARAM lParam) {
+  auto* state = reinterpret_cast<AboutDialogState*>(
+      GetWindowLongPtrW(GetParent(window), DWLP_USER));
+  if (!state || !state->buttonProcedure)
+    return DefWindowProcW(window, message, wParam, lParam);
+  // The initial OK focus still allows keyboard/wheel scrolling, without
+  // intercepting its default-button behavior or the dialog's Escape handling.
+  if (message == WM_GETDLGCODE && IsAboutScrollKey(wParam)) {
+    return CallWindowProcW(state->buttonProcedure, window, message, wParam, lParam)
+           | DLGC_WANTMESSAGE;
+  }
+  if ((message == WM_KEYDOWN && IsAboutScrollKey(wParam)) ||
+      message == WM_MOUSEWHEEL || message == WM_MOUSEHWHEEL) {
+    return SendMessageW(state->viewport, message, wParam, lParam);
+  }
+  return CallWindowProcW(state->buttonProcedure, window, message, wParam, lParam);
+}
+
+void LayoutAboutDialog(HWND window, AboutDialogState& state) {
+  RECT client = {};
+  GetClientRect(window, &client);
+  const int width = static_cast<int>(client.right);
+  const int height = static_cast<int>(client.bottom);
+  const int buttonHeight = std::min(MulDiv(28, gState.dpi, 96), height);
+  const int padding = std::min(state.padding,
+      std::min(std::max(0, (height - buttonHeight) / 3), width / 4));
+  const int viewportHeight = std::max(0, height - buttonHeight - padding * 3);
+  MoveWindow(state.viewport, padding, padding, std::max(1, width - padding * 2),
+             viewportHeight, TRUE);
+  ShowWindow(state.viewport, viewportHeight > 0 ? SW_SHOW : SW_HIDE);
+  const int buttonWidth = std::min(MulDiv(92, gState.dpi, 96),
+                                  std::max(1, width - padding * 2));
+  MoveWindow(GetDlgItem(window, IDOK), width - padding - buttonWidth,
+             height - padding - buttonHeight, buttonWidth, buttonHeight, TRUE);
+}
 
 INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
                                       WPARAM wParam, LPARAM lParam) {
@@ -860,42 +1105,64 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
       } else {
         SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
       }
+      if (work.right <= work.left || work.bottom <= work.top) {
+        EndDialog(window, -1);
+        return TRUE;
+      }
       RECT outer = {}, client = {};
       GetWindowRect(window, &outer);
       GetClientRect(window, &client);
       const int borderHeight = outer.bottom - outer.top - client.bottom;
       const int borderWidth = outer.right - outer.left - client.right;
-      const int width = std::min(static_cast<int>(outer.right - outer.left),
-                                static_cast<int>(work.right - work.left) - 32);
-      const int clientWidth = width - borderWidth;
-      const int padding = MulDiv(16, gState.dpi, 96);
-      const int textWidth = clientWidth - padding * 2;
-      RECT measured = {0, 0, textWidth, 0};
+      state->padding = std::max(1, MulDiv(16, gState.dpi, 96));
+      state->imageHeight = std::max(1, MulDiv(260, gState.dpi, 96));
+      state->imageWidth = state->imageHeight;
+      if (state->douyin.image && state->douyin.image->GetHeight() != 0 &&
+          state->douyin.image->GetWidth() != 0) {
+        state->imageWidth = std::max(1, static_cast<int>(std::lround(
+            static_cast<double>(state->imageHeight) * state->douyin.image->GetWidth()
+            / state->douyin.image->GetHeight())));
+      }
       const HWND textControl = GetDlgItem(window, 3001);
-      HDC dc = GetDC(textControl);
-      const HFONT font = reinterpret_cast<HFONT>(
+      state->font = reinterpret_cast<HFONT>(
           SendMessageW(textControl, WM_GETFONT, 0, 0));
-      HGDIOBJ oldFont = font ? SelectObject(dc, font) : nullptr;
-      DrawTextW(dc, state->text.c_str(), -1, &measured,
-                DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-      if (oldFont) SelectObject(dc, oldFont);
-      ReleaseDC(textControl, dc);
-      const int textHeight = measured.bottom + MulDiv(4, gState.dpi, 96);
-      const int buttonHeight = MulDiv(28, gState.dpi, 96);
-      const int imageTop = padding + textHeight + padding;
-      const int availableImageHeight = static_cast<int>(work.bottom - work.top)
-          - borderHeight - imageTop - buttonHeight - padding * 3;
-      const int imageHeight = std::max(1, std::min(MulDiv(260, gState.dpi, 96),
-                                                  availableImageHeight));
-      const int buttonTop = imageTop + imageHeight + padding;
-      const int clientHeight = buttonTop + buttonHeight + padding;
-      MoveWindow(textControl, padding, padding, textWidth, textHeight, TRUE);
-      MoveWindow(GetDlgItem(window, 3002), padding, imageTop,
-                 textWidth, imageHeight, TRUE);
-      const int buttonWidth = MulDiv(92, gState.dpi, 96);
-      MoveWindow(GetDlgItem(window, IDOK), clientWidth - padding - buttonWidth,
-                 buttonTop, buttonWidth, buttonHeight, TRUE);
-      const int height = clientHeight + borderHeight;
+      if (!state->font)
+        state->font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+      const HINSTANCE instance = GetModuleHandleW(nullptr);
+      WNDCLASSW contentClass = {};
+      contentClass.lpfnWndProc = AboutContentProcedure;
+      contentClass.hInstance = instance;
+      contentClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+      contentClass.lpszClassName = L"NiuMaMeritAboutContent";
+      if (!RegisterClassW(&contentClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        EndDialog(window, -1);
+        return TRUE;
+      }
+      if (!CreateWindowExW(0, contentClass.lpszClassName, state->text.c_str(),
+                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_HSCROLL,
+                           0, 0, 1, 1, window, nullptr, instance, state)) {
+        EndDialog(window, -1);
+        return TRUE;
+      }
+      ShowWindow(textControl, SW_HIDE);
+      ShowWindow(GetDlgItem(window, 3002), SW_HIDE);
+      state->buttonProcedure = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
+          GetDlgItem(window, IDOK), GWLP_WNDPROC,
+          reinterpret_cast<LONG_PTR>(AboutButtonProcedure)));
+      const int margin = std::min(state->padding,
+          std::min(static_cast<int>(work.right - work.left) / 8,
+                   static_cast<int>(work.bottom - work.top) / 8));
+      const int width = std::min(static_cast<int>(outer.right - outer.left),
+                                static_cast<int>(work.right - work.left) - margin * 2);
+      const int maxHeight = static_cast<int>(work.bottom - work.top) - margin * 2;
+      // Set a work-area-bounded provisional size before measuring the viewport.
+      SetWindowPos(window, nullptr, work.left + margin, work.top + margin,
+                   width, std::min(static_cast<int>(outer.bottom - outer.top), maxHeight),
+                   SWP_NOZORDER | SWP_NOACTIVATE);
+      LayoutAboutDialog(window, *state);
+      const int height = std::min(maxHeight,
+          borderHeight + state->contentHeight + MulDiv(28, gState.dpi, 96)
+          + state->padding * 3 + GetSystemMetrics(SM_CYHSCROLL));
       SetWindowPos(window, nullptr,
                    work.left + (work.right - work.left - width) / 2,
                    work.top + (work.bottom - work.top - height) / 2,
@@ -903,30 +1170,19 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
       SetFocus(GetDlgItem(window, IDOK));
       return FALSE;
     }
-    case WM_DRAWITEM: {
-      if (wParam != 3002 || !state) return FALSE;
-      const auto* item = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
-      FillRect(item->hDC, &item->rcItem, GetSysColorBrush(COLOR_3DFACE));
-      if (state->douyin.image && state->douyin.image->GetWidth() != 0 &&
-          state->douyin.image->GetHeight() != 0) {
-        const float availableWidth = static_cast<float>(
-            item->rcItem.right - item->rcItem.left);
-        const float availableHeight = static_cast<float>(
-            item->rcItem.bottom - item->rcItem.top);
-        const float scale = std::min(
-            availableWidth / state->douyin.image->GetWidth(),
-            availableHeight / state->douyin.image->GetHeight());
-        const float width = state->douyin.image->GetWidth() * scale;
-        const float height = state->douyin.image->GetHeight() * scale;
-        Gdiplus::Graphics graphics(item->hDC);
-        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-        graphics.DrawImage(state->douyin.image.get(), Gdiplus::RectF(
-            item->rcItem.left + (availableWidth - width) / 2.0f,
-            item->rcItem.top + (availableHeight - height) / 2.0f,
-            width, height));
+    case WM_SIZE:
+      if (state && state->viewport) {
+        LayoutAboutDialog(window, *state);
+        return TRUE;
       }
-      return TRUE;
-    }
+      break;
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+      if (state && state->viewport) {
+        SendMessageW(state->viewport, message, wParam, lParam);
+        return TRUE;
+      }
+      break;
     case WM_COMMAND:
       if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
         EndDialog(window, LOWORD(wParam));

@@ -1390,7 +1390,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
   NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?";
-  alert.informativeText = [NSString stringWithFormat:UiText(
+  NSString *aboutText = [NSString stringWithFormat:UiText(
       @"版本 %@\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
@@ -1410,22 +1410,64 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
        @"@Shanqiu / Douyin ID: 1872941388"), version];
   NSString *douyinPath = [NSBundle.mainBundle pathForResource:@"developer-douyin" ofType:@"png"];
   NSImage *douyinImage = douyinPath ? [[NSImage alloc] initWithContentsOfFile:douyinPath] : nil;
+  NSScreen *screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;
+  NSRect visibleFrame = screen ? screen.visibleFrame : NSMakeRect(0, 0, 800, 600);
+  CGFloat scrollerWidth = [NSScroller scrollerWidthForControlSize:NSControlSizeRegular
+                                                  scrollerStyle:NSScrollerStyleLegacy];
+  CGFloat contentWidth = MAX(240.0, MIN(340.0, NSWidth(visibleFrame) - 64.0 - scrollerWidth));
+  NSFont *bodyFont = [NSFont systemFontOfSize:NSFont.systemFontSize];
+  NSAttributedString *bodyText = [[NSAttributedString alloc] initWithString:aboutText
+      attributes:@{NSFontAttributeName: bodyFont, NSForegroundColorAttributeName: NSColor.labelColor}];
+  CGFloat textHeight = ceil([bodyText boundingRectWithSize:NSMakeSize(contentWidth, CGFLOAT_MAX)
+      options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading].size.height) + 4.0;
+  CGFloat contentHeight = textHeight + 16.0 + (douyinImage ? 276.0 : 0.0);
+  NSView *content = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, contentWidth, contentHeight)];
+  NSTextField *body = [[NSTextField alloc] initWithFrame:
+      NSMakeRect(0, contentHeight - 8.0 - textHeight, contentWidth, textHeight)];
+  body.editable = NO;
+  body.selectable = YES;
+  body.bordered = NO;
+  body.drawsBackground = NO;
+  body.usesSingleLineMode = NO;
+  body.cell.wraps = YES;
+  body.cell.scrollable = NO;
+  body.lineBreakMode = NSLineBreakByWordWrapping;
+  body.attributedStringValue = bodyText;
+  [content addSubview:body];
   if (douyinImage) {
-    NSView *accessory = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 260)];
-    NSImageView *code = [[NSImageView alloc] initWithFrame:NSMakeRect(30, 0, 240, 260)];
+    NSImageView *code = [[NSImageView alloc] initWithFrame:
+        NSMakeRect((contentWidth - 240.0) / 2.0, 8, 240, 260)];
     code.image = douyinImage;
     code.imageScaling = NSImageScaleProportionallyUpOrDown;
     code.imageAlignment = NSImageAlignCenter;
     code.toolTip = UiText(@"使用抖音扫一扫，关注开发者山丘", @"Scan with Douyin to find the developer");
     code.accessibilityLabel = UiText(@"开发者山丘的抖音码，抖音号 1872941388",
                                      @"Developer Douyin code, ID 1872941388");
-    [accessory addSubview:code];
-    alert.accessoryView = accessory;
+    [content addSubview:code];
   }
+  NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:
+      NSMakeRect(0, 0, contentWidth + scrollerWidth, MIN(contentHeight, 120.0))];
+  scroll.borderType = NSNoBorder;
+  scroll.drawsBackground = NO;
+  scroll.hasVerticalScroller = YES;
+  scroll.hasHorizontalScroller = NO;
+  scroll.autohidesScrollers = NO;
+  scroll.scrollerStyle = NSScrollerStyleLegacy;
+  scroll.documentView = content;
+  scroll.accessibilityLabel = UiText(@"关于牛马电子功德", @"About NiuMa Merit");
+  alert.informativeText = @"";
+  alert.accessoryView = scroll;
   [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
   if (!self.inputMonitoringAuthorized && !gIsolatedAcceptance) {
     [alert addButtonWithTitle:UiText(@"开启输入监控", @"Enable Input Monitoring")];
   }
+  // Keep the native alert buttons outside the scroll area, reserving their actual layout height.
+  [alert layout];
+  CGFloat chromeHeight = NSHeight(alert.window.frame) - NSHeight(scroll.frame);
+  CGFloat availableHeight = MAX(1.0, NSHeight(visibleFrame) - 40.0 - chromeHeight);
+  [scroll setFrameSize:NSMakeSize(NSWidth(scroll.frame), MIN(contentHeight, availableHeight))];
+  [alert layout];
+  [content scrollPoint:NSMakePoint(0, MAX(0.0, contentHeight - scroll.contentSize.height))];
   NSModalResponse response = [alert runModal];
   if (!self.inputMonitoringAuthorized && response == NSAlertSecondButtonReturn) {
     [self requestListenPermission];
