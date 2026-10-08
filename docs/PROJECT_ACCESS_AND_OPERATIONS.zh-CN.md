@@ -185,3 +185,9 @@ GONGDE_PRIVATE_COS_SECRET_KEY_FILE=/run/secrets/gongde_private_cos_secret_key
 - 私有桶新前缀 PUT、GET、桶/对象私有 ACL 及自有探针 DeleteObject/Head404 均已实际通过。使用原私有凭据和批准别名；不要求重新提供密钥、不重建桶、不切换公共安装产物身份。
 - 新免费专用 secret 只在 `/var/lib/gongde-api-deploy/secrets/gongde_free_distribution_secret`，root600，映射容器 FILE 路径；不要记录值、复制到本机/Git，或使用旧付款/群码密钥替代。
 - 正式网关 HTTP + 真实私有 COS 单包/双包领取已通过，原键幂等、权限不消耗、永久无导入到期、7天重下均已确认。不能将此称为浏览器 GUI 或用户验收。
+
+### 后续确认
+
+2026-10-09 已沿正常 HTTPS 把本地免费版提交 c9e42d6 推送到 `codex/free-distribution-090`。此前 GitHub 连接错误已恢复，不需要更换 Git 凭据或远端。
+
+同日使用用户主动提供的旧 GD 权益，经正式网关与原认证头只读确认：旧官方权益仍有效，原账户两笔订单可查询，用户20260930原订单仍为FULFILLED。仅保存脱敏元数据；不在文档、Git或回执中保存权益码，不触发付款。没有把无授权403或不存在订单404称为成功履行。

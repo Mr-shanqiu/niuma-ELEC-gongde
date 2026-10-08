@@ -1972,3 +1972,16 @@ Windows实际选择显示结果 blocked 审计：官方thread当前确认最近�
 - 实际领取回执 `.local-work/acceptance/free-090-production/actual-claim-output.jsonl`；后续只做刚下载文件的正式导入检查、必要闭环缺口和精确 Git 同步，不扩大测试。长期目标现已 active；未标记整体完成。
 - 同一批真实下载文件经正式 Mac 导入器：单包导入/安装扫描/渲染/重导入通过；双包整批导入/扫描/逐项渲染/重导入通过。只用独立目录，不重装或重签用户现有程序，不更改其权限。日志 `.local-work/acceptance/free-090-production/mac-single.log` 与 `mac-batch.log`；此证据仍不是正常安装 GUI。
 - 正式网关新 checkout 返回410 `paid_flow_retired`；不存在的历史订单返回404 `order_not_found`，旧权益无授权401 `access_code_invalid`。仅证明历史路由未整体退役，不冒充某笔真实历史订单恢复成功；不调用付款或伪造回调。
+- 服务/官网/后台及必要依赖精确163文件已提交 `c9e42d6`；本地检查仅发现 `website/creator.js` 一处末尾空格，不影响产品或冻结产物，没有为格式重新构建/部署。私钥/AKID/API key 字面量预检未发现匹配，仍不声称全面秘密审计。
+- GitHub HTTPS 推送未获成功结果：HTTP2 framing error；正常 HTTP1.1 远端读取 empty reply，随后推送连接443超时。没有强制推送、改远端或导出凭据；不将本地提交称为远端同步。后续先确认远端状态，不盲目重放。
+- 独立最终清单 `.local-work/acceptance/free-090-production/closure-audit.md`：目前本轮真实官方群码交付已通过；当前真实共创新作→贡献自然增长→作者码被他人领取闭环证据仍需补足。浏览器GUI、最终双端正常使用与真实历史履行证据分开，不重跑已经通过的协议、IAM和迁移脚本。
+
+## 2026-10-09 后续有界收尾
+
+- 上一目标轮为实际进展，而非等待或状态复述：部署和真实群码交付完成。本轮正常 HTTPS 先确认远端仍为601707b，再成功推送至c9e42d6；不强推，不替换凭据。
+- 使用用户此前主动提供的旧 GD 权益，通过正式网关和原认证头只读访问。`/api/gongde/access` 200、ownsOfficialPass=true；`/access/orders` 200，2个订单，用户20260930原订单仍FULFILLED。仅将脱敏元数据保存在 `.local-work/acceptance/free-090-production/owned-historical-authenticated.jsonl`，未保存权益码、会话或私钥，不触发订单、付款或回调。此前无授权的403不能冒充此成功认证。
+- 发现仓库制作指南仍有旧收费/限时导入正文，而实际指南ZIP的README与AI-PROMPT已是免费规则且含Schema1保留区域限制。仅同步 `docs/CREATOR_PACK_GUIDE.zh-CN.md`，不重建或重部署既有ZIP，不以迁移注释掩盖矛盾规则。
+- 独立审视未确认可合法复用的正常作者登录 FILE 引用；管理员、Mock/合成账户不能替代真实作者。后续真实作者投稿、授权确认与作者码领取需要正常创作者身份，不能直接伪造贡献。
+- 已用用户保留的真实原始资料 `/Users/yue/Desktop/下班按钮-源文件与验证.zip` 准备 `.local-work/candidates/real-creator-submission-20261009/下班按钮-共创投稿.nmgpack`。只读取source中的manifest及4张PNG，不执行ZIP内Python/JS或其他程序；只改manifest的id/publisher/review_id为通用待审模板身份，原图字节、动画及其他字段不变。当前社区源包校验通过，1844270字节，SHA256 `5c0bc5ae021249f31af68208152bada3bf928b2d0276bc70c0b5262e74e16ddd`。未投稿、上架或计贡献，不推断用户已经接受新免费及AI授权，不将素材上传Git或公开。
+- 已向用户收集正常投稿后的作品编号：用户无需重新制作，只需正常手机号登录、上传已准备文件、确认真实权利及授权并送审。没有请求密码、验证码或cookie，没有以管理员伪造作者身份。此用户输入请求不是一个正在运行的验证进程，不能描述成已验证等待或投稿已完成。
+- 14天引用清理收尾：实际正式容器中加载部署清理函数，以正常应用身份连真实Gongde数据库。先断言符合14天条件的对象为0，随后执行一次限20/30秒的空扫描，status=completed、scanned/deleted/deleteCalls均0、metadataDeleted=0、真实耗时4ms。回调禁止任何实际COS删除；未改时钟、未造到期记录。实际部署runtime的15分钟定时钩子存在；回执 `.local-work/acceptance/free-090-production/retention-current-production.json`。不把空扫描说成14天真实删除验收或浏览器结果。
