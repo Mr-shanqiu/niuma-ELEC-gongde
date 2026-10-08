@@ -1,6 +1,6 @@
 # 牛马电子功德：访问、凭据引用与运维入口
 
-更新日期：2026-10-08。所有日期与结果均是对应记录的观察时间，不代表永久有效。
+更新日期：2026-10-09。所有日期与结果均是对应记录的观察时间，不代表永久有效。
 
 ## 1. 使用规则
 
@@ -191,3 +191,37 @@ GONGDE_PRIVATE_COS_SECRET_KEY_FILE=/run/secrets/gongde_private_cos_secret_key
 2026-10-09 已沿正常 HTTPS 把本地免费版提交 c9e42d6 推送到 `codex/free-distribution-090`。此前 GitHub 连接错误已恢复，不需要更换 Git 凭据或远端。
 
 同日使用用户主动提供的旧 GD 权益，经正式网关与原认证头只读确认：旧官方权益仍有效，原账户两笔订单可查询，用户20260930原订单仍为FULFILLED。仅保存脱敏元数据；不在文档、Git或回执中保存权益码，不触发付款。没有把无授权403或不存在订单404称为成功履行。
+
+## 2026-10-09 补记：当前官网、审核投影与真实作品投产
+
+本节按主控已完成的真实投产事实更新当前状态；上文 image c7 与早期候选描述保留为历史记录。本次文档补记不代表重新执行发布或验收，不记录任何码值、手机号、cookie、签名 URL、密码或密钥值。
+
+### 官网实际材料
+
+- 当前官网 release：`/opt/zqscreen/app/releases/gongde-site-43fe1e5b2f01-20261008T194553Z-40842`。
+- 实际 `creator.js` SHA-256：`867466e8e598b8ab583907e0b5c311f45c1e284966eaa01cd5347399983f0759`。
+- `creator.html` 使用查询串 `creator.js?v=free-v2-20261009-867466e8`，对应上述实际脚本材料；不把查询串本身当成内容摘要或完整 GUI 验收。
+
+### API 管理投影修正与镜像切换
+
+API 源包仍为 `2d23d7eb8441490b3761bf91cda345db137e64bb347e13c10a922040717b4fc0`，未另行改变业务源包。仅 root 管理的 entrypoint 投影修正以下三项已启用审核设置：
+
+```text
+GONGDE_CREATOR_REVIEW_API_URL=https://api.deepseek.com/chat/completions
+GONGDE_CREATOR_REVIEW_MODEL=deepseek-flash
+GONGDE_CREATOR_REVIEW_SUPPORTS_IMAGES=true
+```
+
+- 旧 image：`sha256:c7a5fcce514e301032f92c2b3a6ebd9580f78bdb7a123617b16d66469c858617`。
+- 当前新 image：`sha256:bc4522b17c1e69af7277c3602d4aa94bf22ecac0cd2143a93d1bcd376ad7f982`。
+- 两镜像 compiled dist 清单摘要相同：`b4b4449f5794317c458a950176485b83030d13a0870b6c37a6e16c02ecb190c1`。这证明所登记编译材料清单一致，不表示两个镜像整体字节相同。
+- 原 guarded switch 已成功，旧容器保留；本次没有 SQL、IAM 或密钥变更。原独立审核 key 与日限 20 继续复用，不重新索取凭据或扩大预算。
+- 原 native receipts 继承其原产物与证据范围，不声称针对新 image 重跑客户端 GUI，也不把镜像切换成功当作双端安装验收。
+
+### 真实共创与作者码领取结果
+
+真实作品“下班按钮”，作品编号 `100024`，作者展示编号 `C100004`，已有正常用户上传与明确授权。实际 AI 自动审核结果为 `APPROVED`，attempts=1，decided=`2026-10-08T20:22:12.615Z`，作品已 `PUBLISHED`。有效贡献 N=1，作者码每批权限 maxItems=3；不是管理员造作者身份、合成探针或人工复核冒充 AI 通过。
+
+该作者码在正常公开网页验证成功，领取状态为 `READY`；实际下载 2000931 bytes，SHA-256 `c9528e4422c3fe3646aed83c37d90f82cfadd64bf8562dfa7c12bd151bde17c0`。只登记作者/作品编号、状态、权限及文件摘要，不保存码值、登录信息或签名下载 URL。
+
+因此真实生产投稿、授权、自动审核、发布、首次贡献及作者码领取已有上述可核对结果，不能再仅用此前 Mock 或合成供应商探针描述当前进度。Mac/Windows 真实 GUI 验收仍由主控继续收口；本节不宣布 GUI 验收或 PRD 全目标完成。

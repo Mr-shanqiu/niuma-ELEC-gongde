@@ -7,7 +7,7 @@ const byId = id => document.getElementById(id);
 const states = { DRAFT: '草稿', READY: '可送审', PENDING_REVIEW: '审核中', APPROVED: '已通过',
   REJECTED: '已拒绝', PUBLISHED: '公开分享中', UNPUBLISHED: '已下架', SUSPENDED: '已暂停' };
 let account = null, work = null, versions = [], selectedVersion = null, player = null;
-let termsVersion = null, generation = 0, unsavedRecovery = false, available = false;
+let termsVersion = null, aiTermsVersion = null, generation = 0, unsavedRecovery = false, available = false;
 let reviewMode = 'disabled', reviewTimer = null, reviewWatch = 0;
 let phoneReady = false, termsReady = false, phoneTimer = null;
 let phoneChallenge = null, bindChallenge = null, phoneCooldownUntil = 0, bindCooldownUntil = 0;
@@ -21,7 +21,7 @@ function setStudioBusy(value) {
 }
 
 function canSubmitVersion(version) {
-  if (!termsReady) return false;
+  if (!termsReady || !aiTermsVersion) return false;
   return version?.state === 'READY' || version?.state === 'REJECTED' ||
     (version?.state === 'PENDING_REVIEW' && version.review?.acceptAiContentReview !== true);
 }
@@ -315,6 +315,7 @@ function drawVersions() {
 async function chooseVersion(version) {
   const stamp = ++generation;
   player?.destroy(); player = null; selectedVersion = null;
+  byId('creator-work-form').elements.acceptFreeDistribution.checked = false;
   toggle('creator-preview-stage', true); toggle('creator-preview-strike', false);
   byId('creator-preview-stage').textContent = '正在读取真实素材…';
   byId('creator-submit').disabled = true; byId('creator-submit-accept').checked = false; byId('creator-submit-ai').checked = false;
@@ -442,6 +443,7 @@ byId('creator-work-form').addEventListener('submit', event => {
   let validated;
   try { validated = metadata({ ...formValues(form), isUpdate: Boolean(work) }); } catch (error) { message(error.message, 'error'); return; }
   if (versions.some(version => version.state === 'PENDING_REVIEW')) { message('请先撤回待审版本，再修改并送审。', 'error'); return; }
+  const acceptedFreeDistribution = form.elements.acceptFreeDistribution.checked;
   void run(form, async fields => {
     setStudioBusy(true); stopReviewWatch();
     try {
@@ -465,7 +467,10 @@ byId('creator-work-form').addEventListener('submit', event => {
       await loadWork(workId);
       if (work?.workId !== workId) return;
       await chooseVersion(version);
-      message('文件已检查并保存。请确认真实预览，明确勾选免费分发与 AI 内容审核授权后再送审；新版本通过前，原公开版本保持不变。');
+      if (work?.workId !== workId || selectedVersion?.versionId !== version.versionId) return;
+      form.elements.acceptFreeDistribution.checked = acceptedFreeDistribution;
+      updateSubmitConsent();
+      message('文件已检查并保存，本版本的免费分发确认已保留。请确认真实预览并独立勾选 AI 内容审核授权后再送审；新版本通过前，原公开版本保持不变。');
     } catch (error) {
       if (work) {
         toggle('creator-upload-section', true);
@@ -516,7 +521,10 @@ byId('creator-submit').addEventListener('click', async () => {
     if (!work || !selectedVersion || !player || !byId('creator-submit-accept').checked || !byId('creator-submit-ai').checked || !byId('creator-work-form').elements.acceptFreeDistribution.checked) return;
     const workId = work.workId, versionId = selectedVersion.versionId;
     const result = await creatorRequest(`${base}/works/${encodeURIComponent(workId)}/submit`, { method: 'POST',
-      body: JSON.stringify({ versionId, acceptFreeDistribution: true, acceptAiContentReview: true, sharingTermsVersion: termsVersion, creatorDouyinNumber: work.metadata?.creatorDouyinNumber ?? null }) });
+      body: JSON.stringify({ versionId, previewRevision: selectedVersion.revision,
+        acceptFreeDistribution: true, acceptAiContentReview: true,
+        sharingTermsVersion: termsVersion, aiReviewTermsVersion: aiTermsVersion,
+        creatorDouyinNumber: work.metadata?.creatorDouyinNumber ?? null }) });
     if (typeof result.reviewMode === 'string') reviewMode = result.reviewMode;
     if (work?.workId !== workId) return;
     await loadWork(workId);
@@ -600,11 +608,14 @@ async function start() {
       if (typeof terms.version !== 'string' || !terms.version.trim() || typeof terms.text !== 'string' || !terms.text.trim()) {
         throw new Error('creator_paid_terms_unavailable');
       }
-      termsVersion = terms.version; termsReady = true;
+      if (typeof terms.aiVersion !== 'string' || !terms.aiVersion.trim() || typeof terms.aiText !== 'string' || !terms.aiText.trim()) {
+        throw new Error('creator_ai_review_acceptance_required');
+      }
       if (/收费|付费|统一价格/.test(terms.text)) throw new Error('creator_free_terms_unavailable');
+      termsVersion = terms.version; aiTermsVersion = terms.aiVersion; termsReady = true;
       byId('creator-terms').textContent = terms.text;
     } catch {
-      termsVersion = null; termsReady = false;
+      termsVersion = null; aiTermsVersion = null; termsReady = false;
       byId('creator-terms').textContent = '当前条款暂未读取成功，不能确认首次注册；已有账号登录不需要重新注册。';
 
     } finally {

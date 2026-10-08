@@ -48,6 +48,9 @@
 GONGDE_CREATOR_AUTO_REVIEW_ENABLED=true
 GONGDE_CREATOR_REVIEW_API_KEY_FILE=/run/secrets/gongde_creator_review_api_key
 GONGDE_CREATOR_REVIEW_DAILY_LIMIT=20
+GONGDE_CREATOR_REVIEW_API_URL=https://api.deepseek.com/chat/completions
+GONGDE_CREATOR_REVIEW_MODEL=deepseek-flash
+GONGDE_CREATOR_REVIEW_SUPPORTS_IMAGES=true
 ```
 
 生产使用独立的文件密钥入口，不借用其他项目凭据。具体模型标识、视觉能力、端点及配置结果由主任务核对并记录，不能以示例、密钥文件路径或页面文案推定可用。缺少配置时投稿保留待处理，不自动上架；不要为恢复审核重新开启新收费。
