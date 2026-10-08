@@ -1,0 +1,47 @@
+/* Free library and delivery reuse the warm desktop companion system. */
+[hidden] { display: none !important; }
+.flow-shell { width: min(1180px, calc(100% - 48px)); margin: auto; padding: 46px 0 80px; }
+.flow-shell h1 { font-size: clamp(36px, 5vw, 62px); line-height: 1.14; margin-bottom: 24px; }
+.flow-shell h2 { font-size: clamp(25px, 3vw, 36px); }
+.flow-panel { min-width: 0; padding: 26px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,250,241,.75); }
+.flow-layout { display: grid; grid-template-columns: minmax(0,1fr) minmax(300px,.7fr); gap: 24px; align-items: start; }
+.flow-status { min-height: 24px; color: var(--muted); overflow-wrap: anywhere; }
+.flow-status[data-tone=error] { color: var(--vermillion); }
+.flow-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-block: 20px; }
+.flow-shell button, .library-controls button { min-height: 42px; padding: 9px 18px; border: 1px solid var(--line); background: #fffaf1; color: var(--ink); font: inherit; cursor: pointer; }
+.flow-shell .primary, .library-controls .primary { background: var(--vermillion); color: #fff; border-color: var(--vermillion); }
+.flow-shell button:disabled { opacity: .5; cursor: not-allowed; }
+.flow-shell input:not([type=checkbox]), .flow-shell textarea, .flow-shell select, .library-controls input, .library-controls select { min-width: 0; padding: 10px 12px; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; background: #fffaf1; color: var(--ink); font: inherit; }
+.flow-form { display: grid; gap: 16px; }
+.flow-form label { display: grid; gap: 8px; }
+.library-controls { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 22px; align-items: end; }
+.library-controls label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+.library-controls input { max-width: 100%; }
+.library-controls input[type=search] { width: 320px; }
+.library-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; }
+.library-card { min-width: 0; display: flex; flex-direction: column; padding: 20px; border: 1px solid var(--line); background: rgba(255,250,241,.62); border-radius: 18px; }
+.library-card h3, .library-card p { overflow-wrap: anywhere; }
+.library-card p { font-size: 13px; color: var(--muted); }
+.library-card .flow-actions { margin-top: auto; }
+.library-preview { display: grid; place-items: center; min-height: 170px; overflow: hidden; margin-bottom: 14px; }
+.library-preview img { max-width: 100%; height: 170px; object-fit: contain; }
+.library-preview canvas { max-width: 100%; width: 240px; height: auto; }
+.library-pager { display: flex; gap: 16px; justify-content: flex-end; align-items: center; margin-top: 24px; }
+.library-author { padding: 0; border: 0; background: transparent; color: var(--forest); cursor: pointer; text-align: left; }
+.library-selection { display: flex; gap: 20px; justify-content: space-between; flex-wrap: wrap; padding: 20px; margin-top: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper-deep); }
+.flow-list { list-style: none; padding: 0; }
+.flow-list li { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.flow-note { padding: 20px; border-left: 4px solid var(--vermillion); background: rgba(230,167,47,.1); margin-block: 24px; }
+.flow-meta { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.flow-qr { display: block; width: min(280px,100%); height: auto; object-fit: contain; margin-block: 20px; border: 0; }
+.developer-entry { display: grid; grid-template-columns: minmax(0,1fr) 280px; gap: 36px; align-items: center; }
+.flow-shell :focus-visible, .characters :focus-visible { outline: 3px solid var(--forest); outline-offset: 4px; }
+.flow-nav { flex-wrap: wrap; height: auto; min-height: 74px; padding-block: 18px; gap: 20px; }
+.flow-nav nav { flex-wrap: wrap; gap: 18px; }
+.flow-nav nav a { display: inline-block; }
+.flow-download-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px; }
+.flow-shell code { overflow-wrap: anywhere; }
+.flow-shell pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 20px; background: var(--paper-deep); border-radius: 12px; font-size: 13px; }
+@media (max-width: 1000px) { .library-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media (max-width: 760px) { .flow-layout, .developer-entry, .flow-download-grid { grid-template-columns: 1fr; } .library-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .flow-shell { width: calc(100% - 28px); padding-top: 28px; } .flow-panel { padding: 20px; } .library-card { padding: 12px; } }
+@media (max-width: 430px) { .library-grid { grid-template-columns: 1fr; } }

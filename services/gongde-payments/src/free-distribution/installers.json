@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "platform": "macos",
+      "format": "dmg",
+      "releaseId": "niuma-merit-macos-0.9.0",
+      "version": "0.9.0",
+      "bytes": 3143825,
+      "sha256": "46abb7293592e24b1630d539825ef69f636e66f2e678e920c6e5e4d70b314ddc",
+      "publicDownloadUrl": "https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.0.dmg",
+      "perpetualCompatible": true
+    },
+    {
+      "platform": "windows",
+      "format": "exe",
+      "releaseId": "niuma-merit-windows-0.9.0-setup",
+      "version": "0.9.0",
+      "bytes": 3229050,
+      "sha256": "10203fe1e71c54ce19f4e24980dbefd14aafba0d10b8f5135c213dfa6184f4af",
+      "publicDownloadUrl": "https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.0-setup.exe",
+      "perpetualCompatible": true
+    }
+  ]
+}

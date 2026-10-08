@@ -1,7 +1,10 @@
+import { OFFICIAL_APPEARANCE_BATCH, MAX_LEGACY_ASSETS_PER_DELIVERY, appearanceBatchPriceFen } from "./catalog.js";
 import { createHash, randomBytes } from "node:crypto";
 import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_DELIVERY, OFFICIAL_CHARACTER_PASS, PROJECT_SUPPORT } from "./catalog.js";
 import type { PaymentStore } from "./store.js";
-import type { CheckoutResult, GongdeAccessAccount, GongdeEntitlement, GongdeOrder, PaymentChannel, PurchaseKind } from "./types.js";
+import type { CheckoutResult, GongdeAccessAccount, GongdeEntitlement, GongdeOrder, MarketOrderItemSnapshot, PaymentChannel, PurchaseKind } from "./types.js";
+
+export type MarketCheckoutItem = Omit<MarketOrderItemSnapshot, "amountFen" | "createdAt">;
 
 type CheckoutInput = {
   channel: PaymentChannel;
@@ -10,6 +13,8 @@ type CheckoutInput = {
   assetId?: string | null;
   assetIds?: string[];
   amountFen?: number;
+  // Resolved by the server from reviewed catalog records, never from HTTP JSON.
+  marketItems?: readonly MarketCheckoutItem[];
 };
 
 type LiveCheckout = Exclude<CheckoutResult["checkout"], { kind: "mock" }>;
@@ -46,7 +51,19 @@ function normalizeAssetIds(input: CheckoutInput): string[] {
   const assetIds = [...new Set(requested)];
   if (assetIds.length < 1) throw new Error("asset_ids_required");
   if (assetIds.length > MAX_ASSETS_PER_DELIVERY) throw new Error("asset_selection_limit_exceeded");
-  if (assetIds.some((assetId) => !OFFICIAL_ASSET_IDS.some((officialAssetId) => officialAssetId === assetId))) {
+  if (input.marketItems) {
+    if (input.purchaseKind !== "appearance-batch" || input.marketItems.length !== assetIds.length ||
+        input.marketItems.some((item, index) => item.assetId !== assetIds[index] || item.unitPriceFen !== 20 ||
+          !/^[a-f0-9]{64}$/u.test(item.sourceRevision) ||
+          (item.sourceKind === "official" ? !OFFICIAL_ASSET_IDS.includes(item.assetId) ||
+            item.creatorId !== null || item.workId !== null || item.versionId !== null :
+            item.sourceKind !== "community" || item.workId !== item.assetId ||
+            !/^creator\.[a-f0-9]{32}\.[a-z0-9][a-z0-9-]{0,31}$/u.test(item.assetId) ||
+            item.creatorId !== item.assetId.split(".")[1] || !/^[a-f0-9]{32}$/u.test(item.versionId ?? "") ||
+            !item.revenueRuleVersion))) {
+      throw new Error("market_catalog_snapshot_invalid");
+    }
+  } else if (assetIds.some((assetId) => !OFFICIAL_ASSET_IDS.some((officialAssetId) => officialAssetId === assetId))) {
     throw new Error("asset_id_not_available");
   }
   return assetIds;
@@ -62,7 +79,9 @@ export class GongdeOrderService {
     const { channel, purchaseKind } = input;
     let userId: string | null = null;
     let accessCode: string | null = null;
-    const assetIds = purchaseKind === "support" ? [] : normalizeAssetIds(input);
+    const marketItems = input.marketItems ? structuredClone(input.marketItems) : undefined;
+    if (marketItems && purchaseKind !== "appearance-batch") throw new Error("market_purchase_kind_invalid");
+    const assetIds = purchaseKind === "support" ? [] : normalizeAssetIds({ ...input, marketItems });
     const assetId = assetIds[0] ?? null;
     if (purchaseKind === "support" && input.accessCode) throw new Error("support_order_must_not_bind_access");
     if (purchaseKind === "official-pass") {
@@ -84,12 +103,12 @@ export class GongdeOrderService {
     if (purchaseKind === "asset-delivery") {
       if (!await this.store.findActiveEntitlement(userId!, "official-character-pass")) throw new Error("official_pass_required");
     }
-    const product = purchaseKind === "official-pass"
-      ? OFFICIAL_CHARACTER_PASS
-      : purchaseKind === "asset-delivery"
-        ? OFFICIAL_ASSET_DELIVERY
-        : PROJECT_SUPPORT;
-    const amountFen = purchaseKind === "support" ? input.amountFen : "amountFen" in product ? product.amountFen : undefined;
+    if ((purchaseKind === "official-pass" || purchaseKind === "asset-delivery") && assetIds.length > MAX_LEGACY_ASSETS_PER_DELIVERY) throw new Error("asset_selection_limit_exceeded");
+    const product = purchaseKind === "appearance-batch" ? OFFICIAL_APPEARANCE_BATCH
+      : purchaseKind === "official-pass" ? OFFICIAL_CHARACTER_PASS
+        : purchaseKind === "asset-delivery" ? OFFICIAL_ASSET_DELIVERY : PROJECT_SUPPORT;
+    const amountFen = purchaseKind === "appearance-batch" ? appearanceBatchPriceFen(assetIds.length)
+      : purchaseKind === "support" ? input.amountFen : "amountFen" in product ? product.amountFen : undefined;
     if (!amountFen || (purchaseKind === "support" && !PROJECT_SUPPORT.allowedAmountsFen.includes(amountFen))) {
       throw new Error("invalid_amount");
     }
@@ -115,7 +134,12 @@ export class GongdeOrderService {
       paidAt: null,
       fulfilledAt: null
     };
-    await this.store.insertOrder(order);
+    const snapshots: MarketOrderItemSnapshot[] = marketItems?.map((item, index) => ({
+      ...item,
+      amountFen: Math.floor(amountFen / assetIds.length) + (index < amountFen % assetIds.length ? 1 : 0),
+      createdAt
+    })) ?? [];
+    await this.store.insertOrder(order, snapshots);
     return { order, buyerToken, accessCode };
   }
 
@@ -210,7 +234,7 @@ export class GongdeOrderService {
           const entitlement: GongdeEntitlement = {
             id: `ent_${randomBytes(12).toString("hex")}`,
             orderNo: input.orderNo,
-            userId: order.userId!,
+            userId: order.userId ?? `order:${order.orderNo}`,
             productId: order.productId,
             scope: item.scope,
             assetId: item.assetId,

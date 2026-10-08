@@ -1,5 +1,5 @@
 export type PaymentChannel = "wechat" | "alipay";
-export type PurchaseKind = "official-pass" | "asset-delivery" | "support";
+export type PurchaseKind = "official-pass" | "asset-delivery" | "appearance-batch" | "support";
 export type OrderState =
   | "PENDING_PAYMENT"
   | "PAID"
@@ -39,6 +39,29 @@ export interface GongdeOrder {
   expiresAt: Date;
   paidAt: Date | null;
   fulfilledAt: Date | null;
+}
+
+export interface MarketOrderItemSnapshot {
+  sourceKind: "official" | "community";
+  assetId: string;
+  creatorId: string | null;
+  workId: string | null;
+  versionId: string | null;
+  versionLabel: string;
+  sourceRevision: string;
+  titleZh: string;
+  unitPriceFen: number;
+  amountFen: number;
+  revenueRuleVersion: string | null;
+  createdAt: Date;
+}
+
+export interface MarketOrderItem extends MarketOrderItemSnapshot {
+  orderNo: string;
+  lineNo: number;
+  creatorShareBps: number;
+  creatorAmountFen: number;
+  platformAmountFen: number;
 }
 
 export interface GongdeEntitlement {

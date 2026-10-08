@@ -167,13 +167,13 @@ export class AdminObjectStore {
     });
   }
 
-  async publishInstallerManifest(version: string): Promise<InstallerManifestSummary> {
-    if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error("admin_release_version_invalid");
+  async publishInstallerManifest(version: string, windowsVersion = version): Promise<InstallerManifestSummary> {
+    if (!/^\d+\.\d+\.\d+$/u.test(version) || !/^\d+\.\d+\.\d+$/u.test(windowsVersion)) throw new Error("admin_release_version_invalid");
     const definitions = [
       { name: `niuma-merit-macos-${version}.dmg`, type: "application/x-apple-diskimage",
-        platform: "macOS", architecture: "universal2-arm64-x86_64", notarization: "not-notarized" },
-      { name: `niuma-merit-windows-${version}-setup.exe`, type: "application/vnd.microsoft.portable-executable",
-        platform: "Windows", architecture: "x86_64", notarization: "not-applicable" }
+        platform: "macOS", architecture: "universal2-arm64-x86_64", notarization: "not-notarized", version },
+      { name: `niuma-merit-windows-${windowsVersion}-setup.exe`, type: "application/vnd.microsoft.portable-executable",
+        platform: "Windows", architecture: "x86_64", notarization: "not-applicable", version: windowsVersion }
     ] as const;
     const files = await Promise.all(definitions.map(async (definition) => {
       const object = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
@@ -189,7 +189,6 @@ export class AdminObjectStore {
         ...definition,
         bytes: body.length,
         sha256: createHash("sha256").update(body).digest("hex"),
-        version,
         signature: "unsigned",
         url: this.publicUrl("installer", definition.name)
       };
@@ -232,6 +231,21 @@ export class AdminObjectStore {
     } catch {
       return [...defaultIds];
     }
+  }
+
+  // Number lookup must never interpret a missing/invalid publication object as
+  // "all published". Keep the historic purchase API behavior separate.
+  async publishedAssetIdsStrict(defaultIds: readonly string[]): Promise<string[]> {
+    const result = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
+      this.#cos.getObject({ Bucket: this.configuration.bucket, Region: this.configuration.region,
+        Key: appearanceCatalogStateKey }, (error, data) => error ? reject(error) : resolve(data));
+    });
+    const raw = Buffer.isBuffer(result.Body) ? result.Body.toString("utf8") : String(result.Body ?? "");
+    const parsed: unknown = JSON.parse(raw);
+    const ids = (parsed as { publishedAssetIds?: unknown } | null)?.publishedAssetIds;
+    if (!Array.isArray(ids) || ids.some(item => typeof item !== "string")) throw new Error("appearance_publication_unavailable");
+    const allowed = new Set(defaultIds);
+    return [...new Set((ids as string[]).filter(item => allowed.has(item)))];
   }
 
   async writePublishedAssetIds(assetIds: readonly string[]): Promise<void> {

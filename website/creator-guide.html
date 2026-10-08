@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="免费共创指南：外部制作、手机号登录、20字名称、40字介绍、最多3个标签，可选本人抖音号。"><title>创作者制作指南｜牛马电子功德</title><link rel="icon" href="assets/woodfish.png"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="free-flow.css"></head>
+<body class="checkout-page"><header class="nav flow-nav"><a class="brand" href="index.html"><span class="brand-seal">功</span><span>牛马电子功德</span></a><nav><a href="creator.html">创作者中心</a><a href="index.html#characters">统一形象库</a><a href="download.html">免费下载客户端</a></nav></header>
+<main class="flow-shell"><p class="eyebrow">EXTERNAL TOOLS, FREE CO-CREATION</p><h1>先把指南交给 AI，做好再上传。</h1><p>无需登录、领取码或昵称。先完成外部制作，再使用手机号验证登录。平台不在网页内生成素材，不执行投稿代码，也不伪造审核或上架成功。</p><p><a class="button primary" href="assets/creator-guide.zip?v=free-v2-20261008" download>下载制作指南 ZIP</a> · <a href="creator.html">制作完成，开始投稿</a></p>
+<aside class="flow-note"><h2>0.9 永久交付与安装说明</h2><p>投稿源包与正式交付文件不同：审核通过后，官网签发 perpetual 文件。下载后可长期保存，随时首次导入，重装后再次导入，永久离线使用；7 天仅限制服务器重下载，不限制本地文件使用。导入请使用 0.9 兼容客户端或发布元数据规定的更新版本。</p><p>本轮 0.9 Mac 实际新构建使用 Apple Development 签名，非 Developer ID 分发签名，未完成 Apple 公证；仍可能遇到 Gatekeeper 提示或阻止打开，不宣称免安全提示。实际安装产物发布后，下载页才通过 v2 API 提供对应公开 URL、版本与摘要，不预填未发布的 GitHub 文件地址。</p><p><a href="download.html">查看实际发布的客户端下载元数据</a> · <a href="install.html">安装与系统权限说明</a></p></aside><section id="workflow"><h2>制作、投稿与免费分发</h2><pre>牛马电子功德 · 形象制作指南
+
+最简单的做法
+1. 将整个指南包交给你喜欢的 AI 工具，并让它阅读 AI-PROMPT.txt。
+2. 告诉 AI 想做什么形象，让它交付一个完整的 .nmgpack 文件。
+3. 使用手机号验证码登录官网创作者工作台，无需昵称，默认保持登录 30 天。选择“发布新作品”，上传这个文件，填写作品名称和一句话介绍。
+4. 查看真实预览、确认本作品的授权声明后提交审核。平台生成投稿编号，不需要你复制编号或修改打包参数。
+5. 修改已有作品时，从“我的作品”选择对应作品的更新入口，上传新版文件，不要重复发布成新作品。
+
+包内文件
+README.txt：这份说明。
+AI-PROMPT.txt：给其他 AI 工具的制作要求和完整格式。
+manifest.json、sample.png：可以替换素材的最小模板。
+example.nmgpack：已封装的琥珀豆示例，仅供学习和预览；原样示例不能公开或获得贡献。
+
+重要说明
+你可以在登录或创建作品之前完成制作。所有通用模板的 id 固定为 creator.template，上传后平台会安全绑定到你的作品。
+作品编号、上传记录、审核版本由平台管理。文件中的 review_id 必须保持 pending，不能自行声明已审核或添加授权签名。
+审核中的新版本不会直接替换已经上架的旧版本；通过并发布后才切换。历史合法订单继续按原版本履行；新版免费领取批次冻结领取时的版本。违规或被暂停的作品不适用正常分发。
+公开字段在网页填写：作品名称 1 至 20 个 Unicode 码点，一句话介绍 1 至 40 个，最多 3 个标签且每个 1 至 8 个。文字按 NFC 正规化后计数，不静默截断。
+我的抖音号选填，最多 32 位 ASCII 字母、数字、下划线、短横线或点；填写本人账号，不填昵称、链接或分享口令。不填不影响投稿或推广权限。更新可修改或清空，审核通过后才随本作品公开。
+抖音号字段 creatorDouyinNumber 只在网页元数据中填写，不要求放入源包，也不得添加到严格白名单 manifest。介绍、标签、联系方式、价格和手机号也不加入 manifest.json。
+用户可以免费发现和预览统一形象库；客户端下载与内置基础木鱼无需领取码，扩展形象凭群码或作者推广码免费领取，每批最多 10 个且最终文件不超过 16 MiB。
+首次独立新作品审核通过并发布获得 1 个有效贡献；作者只有一个逻辑推广码，每批权限 min(3 × 有效贡献数, 10)。码每三天更新，可反复使用，不扣次数、没有共享余额；同作品更新不增加贡献。
+正式交付一个 .nmgpack 或一个 .nmgpacks 批次文件。下载后可长期保存，随时导入，永久离线使用，没有首次导入期限。服务器重下载入口仅保留首次签发后 7 天，短时链接最长 5 分钟，均不使本地文件失效。
+提交必须分别主动确认真实素材授权、免费分发声明、AI 图片与公开文字审核授权，查看真实预览并确认正确。程序安全校验不能绕过；不确定或服务不可用保持待处理，不能伪造审核成功。
+修改已有作品时填写 1 至 80 个码点的更新说明；仅修改文字或抖音号可复用原素材，但仍需审核新快照。已有待审版本必须先撤回再修改。
+使用外部 AI 工具不自动等于拥有素材授权，也不保证作品一定通过审核。免费不转让版权，不自动授权用户转载或转售。
+本指南包供制作工具阅读；最终上传的是 .nmgpack，而不是这个指南 ZIP。
+</pre></section>
+<section id="template"><h2>最小模板与保留区</h2><p>画布 240 × 250，形象区域 y=0..170，plus_y=174，总数区从 y=210 开始。根目录 manifest.json 加 1 至 7 个已引用 PNG，总文件数不超过 8。8 MiB ZIP、12 MiB 展开、64 KiB manifest，所有 PNG 解码内存合计最多 64 MiB。</p><pre id="manifest">{
+  &quot;schema_version&quot;: 1,
+  &quot;id&quot;: &quot;creator.template&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;name_zh&quot;: &quot;琥珀豆示例&quot;,
+  &quot;name_en&quot;: &quot;Amber Bean Example&quot;,
+  &quot;author&quot;: &quot;创作者&quot;,
+  &quot;publisher&quot;: &quot;community&quot;,
+  &quot;review_id&quot;: &quot;pending&quot;,
+  &quot;canvas_width&quot;: 240,
+  &quot;canvas_height&quot;: 250,
+  &quot;preview&quot;: &quot;sample.png&quot;,
+  &quot;plus_y&quot;: 174,
+  &quot;layers&quot;: [
+    {
+      &quot;image&quot;: &quot;sample.png&quot;,
+      &quot;frame&quot;: [
+        0,
+        0,
+        180,
+        140
+      ],
+      &quot;anchor&quot;: [
+        0.5,
+        0.5
+      ],
+      &quot;keyframes&quot;: [
+        {
+          &quot;t&quot;: 0,
+          &quot;x&quot;: 0,
+          &quot;y&quot;: 0,
+          &quot;rotation&quot;: 0,
+          &quot;scale&quot;: 1,
+          &quot;alpha&quot;: 1
+        },
+        {
+          &quot;t&quot;: 0.5,
+          &quot;x&quot;: 0,
+          &quot;y&quot;: 3,
+          &quot;rotation&quot;: 2,
+          &quot;scale&quot;: 1,
+          &quot;alpha&quot;: 1
+        },
+        {
+          &quot;t&quot;: 1,
+          &quot;x&quot;: 0,
+          &quot;y&quot;: 0,
+          &quot;rotation&quot;: 0,
+          &quot;scale&quot;: 1,
+          &quot;alpha&quot;: 1
+        }
+      ]
+    }
+  ]
+}</pre></section>
+<section id="external-ai"><h2>交给外部 AI 的完整格式要求</h2><pre>请为牛马电子功德制作一个可上传的桌面形象包。
+先阅读 README.txt、manifest.json 和示例图片，在不执行任意外部代码的前提下按以下目标交付。
+
+我要的形象：【在这里描述你的创意】
+如果你无法生成或封装真实文件，请明确说明，不要伪造下载链接、审核结果或“制作成功”。
+
+最终交付
+交付一个普通 ZIP 格式、扩展名为 .nmgpack 的文件，根目录只包含 manifest.json 和它实际引用的 PNG 图片。
+不需要登录牛马、不需要投稿编号、不需要先访问任何账号。id 固定为 creator.template，由平台在上传时绑定。
+额外给用户一个最多 20 个 Unicode 码点的作品名称和一句最多 40 个码点的单行介绍供网页填写，可建议最多 3 个各 1 至 8 个码点的标签，不要将介绍或标签写入 manifest.json。
+本人抖音号是可选网页字段 creatorDouyinNumber，不要求 AI 获取账号，不要求写入源包，不添加 manifest 字段。
+不要添加收费参数、订单、权益码、授权签名、license、review.json、README、脚本、HTML、SVG、可执行文件、隐藏文件、子目录、链接文件或未引用图片。
+不要远程加载素材或把账号、手机号、密钥、网址等私人信息放进文件。
+
+容器与图片要求
+ZIP 大小不超过 8 MiB；解压总量不超过 12 MiB；总文件数 2 到 8 个。
+不加密、不使用 ZIP64、不加整个 ZIP 的注释；以可寻址的本地文件完成 ZIP 封装，避免流式 data descriptor。
+ZIP 支持 stored 或 deflate；所有文件名都是根目录的 ASCII 小写名称，不得重复。
+图片文件名符合 [a-z0-9][a-z0-9_-]{0,59}.png；JSON 固定叫 manifest.json，UTF-8 编码，不带注释。
+图片必须是 8 位 RGB 或 RGBA PNG，不交错；长宽各不超过 2048；透明背景建议 RGBA。
+不要 APNG、调色板 PNG、16 位 PNG、JPEG、GIF 或 SVG。预览与图层引用的 PNG 都必须真实存在，所有图片都必须被引用。
+源包不是平台正式交付包，用户不要直接导入这个待审核源包到客户端。
+
+manifest.json 格式
+请以包内 schema_version=1 的 manifest.json 为基础。仅允许下列字段，不能自行添加字段：
+schema_version：1。
+id：creator.template。
+version：字母或数字开头，后续仅字母、数字、点、下划线、连字符，长度 1 到 32；示例 1.0.0。
+name_zh、name_en、author：非空文字，各最多 80 字，不含控制字符；name_zh 为作品中文名称。
+publisher：community。
+review_id：pending。
+canvas_width：240；canvas_height：250；plus_y：174，三个数值固定。
+preview：用于预览的 PNG 文件名，建议引用主图层已有的图片。
+layers：1 到 6 个图层，每个图层仅允许 image、frame、anchor、keyframes。
+image：PNG 文件名。
+frame：[左、上、宽、高]；左的范围 -240 到 480，上的范围 -250 到 480，宽高范围 1 到 480。
+Schema 1 保留区域：每层 frame 的 y 必须不小于 0，且 y + height 不得大于 170；满足上述通用范围仍须满足此限制。
+anchor：[横向锚点、纵向锚点]，各在 0 到 1 之间。
+keyframes：每层 1 到 8 帧；按 t 递增排列，首帧 t=0，末帧 t=1；静态形象也请写两帧相同的起止状态。
+每帧仅允许 t、x、y、rotation、scale、alpha：
+t 在 0 到 1；x、y 在 -480 到 480；rotation 在 -180 到 180；scale 在 0.1 到 4；alpha 在 0 到 1。
+所有数值都必须有限。保持形象主体位于固定画布内，避免遮挡顶部计数和功德提示区域。
+动画通过图层与关键帧完成，不使用 JavaScript、表达式、外部插件、网页或其他运行时。
+
+验收与修改
+交付前检查 ZIP 根目录、字段白名单、引用图片、尺寸与透明通道，不要只把文件名改为 .nmgpack。
+用户会在牛马工作台看到真实预览，可以修改后重新上传；不需要用户编辑 JSON 或提供内部编号。
+审核结论只能由平台给出。不要声称本作品已经通过审核、已经上架或获得永久授权。
+</pre></section>
+<section id="errors"><h2>常见错误</h2><p>不要只改扩展名；不要上传整个指南 ZIP；不要夹带目录、脚本、隐藏文件、license 或自签授权。PNG 必须真实存在且被引用。源包是制作与审核材料，不是可以导入客户端的正式交付包。程序失败修正源包，审核待处理等待真实结果。</p></section>
+<section class="flow-panel"><h2>关注开发者抖音</h2><p>基础木鱼直接免费下载；加入开发者抖音粉丝群，获取更多形象的免费领取码。</p><img class="flow-qr" src="assets/developer-douyin.png" alt="开发者原始抖音码"><p>抖音号：<strong>1872941388</strong></p><button data-copy-developer type="button">复制抖音号</button><a data-developer-homepage hidden target="_blank" rel="noreferrer">开发者抖音主页</a></section>
+<footer class="legal-footer"><a href="privacy.html">隐私说明</a> · <a href="install.html#appearance-import">导入帮助</a> · 陕ICP备2026020359号</footer></main><script type="module">import { developer } from './free-flow.js'; developer();</script></body></html>

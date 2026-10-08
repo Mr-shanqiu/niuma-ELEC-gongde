@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,follow">
+  <meta name="description" content="牛马电子功德创作者工作台：使用自己的工具制作并封装形象包，上传、预览、审核后免费分发，审核后激活作者推广权限。">
+  <link rel="canonical" href="https://gongde.zqscreen.cn/creator.html">
+  <title>创作者投稿｜牛马电子功德</title>
+  <link rel="icon" type="image/png" href="assets/woodfish.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="creator-community.css?v=free-v2-20261008"></link>
+  <script type="module" src="creator.js?v=free-v2-20261008"></script>
+</head>
+<body>
+  <header class="nav community-nav">
+    <a class="brand" href="index.html"><span class="brand-seal">功</span><span>牛马电子功德</span></a>
+    <nav aria-label="投稿导航"><a href="community.html">形象社区</a><a href="creator-guide.html">封装指南</a><a href="install.html#community-import">导入帮助</a><a href="index.html">返回官网</a></nav>
+  </header>
+  <main class="community-shell">
+    <div class="community-heading"><div><p class="eyebrow">CREATOR STUDIO</p><h1>把你的灵感，<br>放到大家的桌面。</h1></div><p>用你熟悉的 AI 或绘图工具制作，再自行封装形象包。这里负责预览、审核和上架；作品审核通过后免费分发，新作品增加推广权限。平台不代做素材。</p></div>
+    <section class="community-panel creator-guide-panel" aria-labelledby="creator-guide-title">
+      <div><h2 id="creator-guide-title">先下载一份制作指南包</h2><p class="community-muted">无需登录或创建作品。把指南包交给自己的 AI 或制作工具，按说明制作 .nmgpack，再回来上传、校验并预览；不需要填写作品 ID。</p></div>
+      <div class="community-actions"><a id="creator-guide-download" class="community-button primary" href="./assets/creator-guide.zip?v=free-v2-20261008" download="牛马形象制作指南.zip">下载制作指南包</a></div>
+    </section>
+    <details class="community-panel"><summary>关注开发者，获取更多免费形象</summary><p>基础木鱼直接免费下载；加入开发者抖音粉丝群，获取更多形象的免费领取码。使用抖音扫描原始抖音码进入主页。</p><img src="assets/developer-douyin.png" alt="开发者原始抖音码" width="260" style="max-width:100%;height:auto"><p>抖音号：<strong>1872941388</strong></p><button class="community-button" type="button" data-copy-developer>复制抖音号</button><a data-developer-homepage hidden target="_blank" rel="noreferrer">开发者抖音主页</a></details>
+    <p id="creator-message" class="community-message" role="status" aria-live="polite">正在连接创作者工作台…</p>
+    <section id="creator-recovery" class="community-panel creator-recovery" hidden>
+      <p class="eyebrow">SAVE YOUR RECOVERY KEY</p><h2>先保存恢复码。</h2>
+      <p>忘记密码时，用用户名和恢复码找回账号。平台只在此时显示一次；请存入你自己的密码管理器或私密收藏，不要发给他人。</p>
+      <label for="creator-recovery-value">你的账号恢复码</label><textarea id="creator-recovery-value" class="community-code" rows="3" readonly spellcheck="false"></textarea>
+      <div class="community-actions"><button id="creator-recovery-copy" class="community-button">复制恢复码</button><button id="creator-recovery-export" class="community-button">下载账号恢复信息</button><button id="creator-recovery-saved" class="community-button primary">我已保存，继续</button></div>
+    </section>
+    <div id="creator-auth" class="creator-auth-stack" hidden>
+      <section class="community-panel">
+        <p class="eyebrow">CREATOR SIGN IN</p><h2>手机号验证码登录</h2>
+        <p class="community-muted">这是创作者账号入口，普通领取无需账号。手机号不随作品公开；验证手机号不代表签署版权或免费分发授权。</p>
+        <p id="creator-phone-status" class="community-message" role="status" aria-live="polite">正在确认短信登录是否开放；已有用户名账号入口仍保留。</p>
+        <form id="creator-phone-login" class="community-form"><fieldset>
+          <input id="creator-phone-mode" name="mode" type="hidden" value="new">
+          <p class="community-muted">新手机号自动建立作者身份，已有手机号进入同一工作台。无需昵称，手机号不公开；请确认账号协议与隐私，再获取验证码。</p>
+          <label>+86 手机号<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" required></label>
+          <div class="creator-phone-code-row"><label>短信验证码<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required></label><button id="creator-phone-send" class="community-button" type="button" disabled>获取验证码</button></div>
+          <div id="creator-phone-registration" hidden>
+            <p class="community-muted">首次注册后，系统自动生成作者编号作为作品展示名，无需填写公开昵称。</p>
+            <p id="creator-terms" class="community-terms">正在读取当前免费分发授权条款…</p>
+            <label class="community-check"><input name="acceptTerms" type="checkbox"><span>我已阅读账号使用协议与隐私说明，同意验证并登录；新手机号将建立作者身份。此确认不代替每件作品的免费分发与 AI 审核授权。</span></label>
+          </div>
+          <label class="community-check"><input name="rememberMe" type="checkbox" checked><span>保持登录 30 天；取消后使用浏览器会话，最多 8 小时。公共设备建议取消。</span></label>
+          <p class="community-muted">填入 6 位验证码后，点击下方按钮完成登录；不会仅因填写验证码就自动登录。</p>
+          <p id="creator-phone-message" class="community-message" role="status" aria-live="polite"></p>
+          <button id="creator-phone-submit" class="community-button primary" type="submit" disabled>验证并进入工作台</button>
+        </fieldset></form>
+      </section>
+      <details id="creator-legacy-entry" class="community-panel creator-legacy-entry"><summary>旧账号迁移：原用户名登录与恢复</summary>
+      <p class="community-muted">原账号和作品继续保留。短信未开放时仍可使用这里的账号入口，不会因手机号登录而自动合并或迁移作品。</p>
+      <div class="creator-auth-grid">
+      <section class="community-panel"><p class="eyebrow">WELCOME BACK</p><h2>登录创作者账号</h2>
+        <form id="creator-login" class="community-form"><fieldset>
+          <label>用户名<input name="username" pattern="[a-z0-9][a-z0-9_-]{2,31}" minlength="3" maxlength="32" autocomplete="username" required></label>
+          <label>密码<input name="password" type="password" autocomplete="current-password" maxlength="128" required></label>
+          <label class="community-check"><input name="rememberMe" type="checkbox" checked><span>保持登录 30 天；公共设备建议取消。</span></label>
+          <button class="community-button primary" type="submit">进入工作台</button>
+        </fieldset></form>
+        <details class="creator-step"><summary>忘记密码？使用恢复码</summary><form id="creator-recover" class="community-form"><fieldset>
+          <label>用户名<input name="username" pattern="[a-z0-9][a-z0-9_-]{2,31}" maxlength="32" autocomplete="username" required></label>
+          <label>恢复码<input name="recoveryKey" pattern="[a-f0-9]{64}" minlength="64" maxlength="64" autocomplete="off" spellcheck="false" required></label>
+          <label>新密码<input name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+          <button class="community-button" type="submit">重置密码并更换恢复码</button>
+        </fieldset></form><p class="community-muted">重置会退出全部旧会话，旧恢复码也会失效。恢复后请重新登录。</p></details>
+      </section>
+      </div></details>
+    </div>
+    <section id="creator-account-bar" class="community-panel" hidden>
+      <div class="community-actions" style="margin-top:0"><strong id="creator-account-name"></strong><span class="community-muted">作品免费分发，推广码可重复使用</span><button id="creator-logout" class="community-button">退出登录</button></div>
+      <details class="creator-step" hidden><summary>旧账号迁移：验证并绑定手机号</summary>
+        <p class="community-muted">需在当前账号登录状态下验证手机；保留原 creatorId 与作品，一手机号只能绑定一个账号，不自动合并账号。</p>
+        <p id="creator-phone-bind-status" class="community-muted" role="status">正在确认手机绑定是否开放。仅未绑定手机的旧账号显示；手机号登录者无需重复绑定。</p>
+        <form id="creator-phone-bind" class="community-form"><fieldset>
+          <label>要绑定的手机号<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" required></label>
+          <div class="creator-phone-code-row"><label>短信验证码<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="16" required></label><button id="creator-phone-bind-send" class="community-button" type="button" disabled>获取绑定验证码</button></div>
+          <button id="creator-phone-bind-submit" class="community-button" type="submit" disabled>显式绑定到当前账号</button>
+        </fieldset></form>
+      </details>
+    </section>
+    <section id="creator-promotion" class="community-panel" hidden><h2>我的唯一推广码</h2><p id="creator-promotion-state" role="status">正在等待服务端权限状态…</p><code id="creator-promotion-code"></code><p id="creator-promotion-details" class="community-muted"></p><textarea id="creator-promotion-share-text" class="community-code" rows="4" readonly hidden aria-label="可选择复制的推广分享文案"></textarea><div class="community-actions"><button id="creator-promotion-copy" class="community-button" type="button" disabled>复制当前推广码</button><button id="creator-promotion-share" class="community-button" type="button" disabled>复制分享文案</button><button id="creator-promotion-refresh" class="community-button" type="button">刷新推广权限</button></div></section><div id="creator-workspace" class="creator-workspace" style="margin-top:22px" hidden>
+      <aside class="community-panel creator-work-channels"><button id="creator-new-work" class="community-button primary" type="button">发布新作品</button><p class="eyebrow">YOUR WORKS</p><h2>我的作品</h2><p class="community-muted">选择已有作品，上传更新包。新版本通过审核前，原已审核公开版本保持不变。</p><div id="creator-work-list" class="creator-work-list"></div></aside>
+      <section class="community-panel">
+        <p class="eyebrow">01 / UPLOAD YOUR WORK</p><h2 id="creator-editor-title">发布新作品</h2>
+        <form id="creator-work-form" class="community-form"><fieldset>
+          <span id="creator-slug-label" hidden><input name="slug" type="hidden"></span>
+          <label>形象包文件<input id="creator-pack" name="pack" type="file" accept=".nmgpack" required><small class="community-muted">使用制作指南包封装的 .nmgpack，最多 8 MiB（8,388,608字节）；内容只包含声明过的 PNG 素材与 manifest.json，不含脚本、安装程序或子目录。无需手工填写作品 ID。</small></label>
+          <label>作品名称<input name="titleZh" required><small id="creator-title-count" class="community-muted">0/20</small></label>
+          <label>一句话介绍<input name="description" type="text" placeholder="例如：敲一下，快乐下班。" required><small id="creator-description-count" class="community-muted">0/40</small></label><label>我的抖音号（选填）<input name="creatorDouyinNumber" type="text" maxlength="32" autocomplete="off" spellcheck="false"><small class="community-muted">选填，审核通过后会随本作品公开，方便用户关注你；请填写你自己的抖音号。仅限字母、数字、下划线、短横线或点，不填昵称或主页链接，不要求放进源包。</small></label>
+          <label>标签<input name="tags" maxlength="90" placeholder="例如：动物，可爱，解压"><small class="community-muted">最多 3 个标签，用逗号分隔，每个 1 至 8 个字。</small></label>
+          <label id="creator-update-note" hidden>更新说明<input name="updateNote"><small class="community-muted">1 至 80 个字，仅作者和管理员查看；只改文字可复用原素材，仍须重新审核。</small></label><label class="community-check"><input name="acceptFreeDistribution" type="checkbox" required><span>素材归属合法；我授权平台免费分发本版本，用户下载后可长期保存，随时导入，永久离线使用。免费不代表素材可任意转载或转售；修改公开文字仍需审核。</span></label>
+          <button id="creator-work-save" class="community-button primary" type="submit">校验并预览</button>
+        </fieldset></form>
+        <div id="creator-upload-section" class="creator-step" hidden>
+          <p class="eyebrow">02 / PREVIEW</p><h2>查看真实预览</h2>
+          <p class="community-muted">校验通过后，在这里查看具体版本的动作、图片和审核状态。确认预览并明确授权后，再提交审核。</p>
+          <progress id="creator-upload-progress" class="creator-upload-progress" max="100" value="0" hidden></progress><p id="creator-upload-message" class="community-muted" role="status"></p>
+          <div id="creator-version-list"></div>
+          <div id="creator-preview-stage" class="creator-preview-stage" hidden></div>
+          <div class="community-actions"><button id="creator-preview-strike" class="community-button" hidden>播放动作</button></div>
+        </div>
+        <div id="creator-submit-section" class="creator-step" hidden><p class="eyebrow">03 / SUBMIT FOR REVIEW</p><h2>确认预览，提交审核</h2>
+          <p class="community-muted">请检查动作、图片和文字。程序安全检查与 AI 内容审核针对提交时的具体版本；通过后自动上架，暂时无法判断的作品不会直接放行。新版本通过前，旧的已审核版本仍可展示。</p>
+          <label class="community-check"><input id="creator-submit-accept" type="checkbox"><span>我确认预览正确。</span></label>
+          <label class="community-check"><input id="creator-submit-ai" type="checkbox"><span>我独立同意本版本图片与公开文字用于 AI 内容审核。</span></label><div class="community-actions"><button id="creator-submit" class="community-button primary" disabled>提交这个版本</button><button id="creator-unpublish" class="community-button danger" hidden>下架公开作品</button><button id="creator-republish" class="community-button" hidden>重新公开已审核版本</button><a id="creator-share" class="community-button" hidden>打开分享页面</a></div>
+          <div class="community-actions"><button id="creator-review-refresh" class="community-button" type="button">刷新审核结果</button></div>
+        </div>
+      </section>
+    </div>
+    <footer class="community-footer">投稿不转让版权，也不授权用户转载售卖。下架不回收已合法下载的离线文件。<a href="contact.html">联系项目</a> · <a href="privacy.html">隐私说明</a> · 陕ICP备2026020359号</footer>
+    <aside class="community-footer" aria-labelledby="creator-help-title">
+      <strong id="creator-help-title">投稿与封装帮助</strong>
+      <p>先下载上方制作指南包，用自己的外部 AI 或制作工具封装源包，再选择“发布新作品”上传。更新时从“我的作品”选择原作品，无需复制技术编号。不要向外部工具提供密码、恢复码或会话信息。</p>
+      <nav aria-label="创作者使用说明">
+        <a class="text-link" href="creator-guide.html#workflow">账号与投稿流程</a>
+        <span aria-hidden="true"> · </span>
+        <a class="text-link" href="creator-guide.html#manifest">源包字段与封装示例</a>
+        <span aria-hidden="true"> · </span>
+        <a class="text-link" href="creator-guide.html#external-ai">给外部 AI 的制作说明</a>
+        <span aria-hidden="true"> · </span>
+        <a class="text-link" href="install.html#community-import">形象包免费领取与导入方法</a>
+      </nav>
+    </aside>
+  </main>
+<script type="module">import { developer } from './free-flow.js'; developer();</script>
+</body>
+</html>

@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="牛马电子功德安装帮助：用图片一步步完成 macOS 与 Windows 安装。">
-  <title>安装帮助｜牛马电子功德</title>
+  <meta name="description" content="牛马电子功德官方安装图解：Windows EXE 与 Mac DMG、系统安全提示、开机启动，以及扩展形象免费领取后的整批导入说明。">
+  <title>Windows / Mac 安装与形象包导入图解｜牛马电子功德</title>
+  <link rel="canonical" href="https://gongde.zqscreen.cn/install.html">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body class="guide-page">
   <header class="guide-nav">
     <a class="guide-brand" href="./index.html">牛马电子功德</a>
-    <a class="text-link" href="./index.html#download">返回下载</a>
+    <a class="text-link" href="./download.html">返回下载</a>
   </header>
 
   <main class="guide-shell">
@@ -36,7 +37,7 @@
           <p class="eyebrow">macOS 安装</p>
           <h2>第一次会多一步系统确认</h2>
         </div>
-        <p>这是未签名测试版的正常提示。只要安装包来自官网，就按下面的步骤操作。</p>
+        <p>本轮 0.9 Mac 实际新构建使用 Apple Development 签名，不是 Developer ID 分发签名，且未完成 Apple 公证。第一次打开仍可能被 Gatekeeper 阻止或提示，不能据此宣传免安全提示或已获 Apple 分发认可。只有确认官方来源、文件未被修改，并愿意运行当前版本时，才按下面步骤进行单应用确认。</p>
       </div>
 
       <div class="step-grid">
@@ -80,7 +81,7 @@
             <rect x="204" y="122" width="96" height="28" rx="14" fill="#d6532d"/>
             <text x="222" y="141" font-size="12" fill="#fff">仍要打开</text>
           </svg>
-          <div class="step-copy"><h3>允许打开</h3><p>进入“系统设置 → 隐私与安全性”，找到提示并点击“仍要打开”。</p></div>
+          <div class="step-copy"><h3>确认后，仅允许本应用打开</h3><p>遇到“Apple 无法验证”提示时，先点“完成”，不要点“移到废纸篓”。确认文件来源后，进入“系统设置 → 隐私与安全性”，找到本应用并点“仍要打开”，再按系统提示确认。</p><p>这与下一步的“输入监控”授权不同，也不需要关闭全局安全检查。如果系统提示应用“将损坏你的电脑”或“已损坏”，请停止安装，不要绕过提示。可查看 <a href="https://support.apple.com/zh-cn/102445" target="_blank" rel="noopener noreferrer">Apple 官方说明</a>。</p></div>
         </article>
 
         <article class="step-card">
@@ -167,12 +168,7 @@
       </div>
     </section>
 
-    <section class="batch-import-note" id="appearance-import">
-      <p class="eyebrow">已购买形象包？</p>
-      <h2>下载一次，整批导入。</h2>
-      <p>先安装并打开最新版客户端，再从官网取得本批文件。选了多个形象时会下载一个 <b>.nmgpacks</b> 文件，直接双击它，客户端会逐个核验并导入整批；只选一个时下载 <b>.nmgpack</b>，同样直接双击即可。无需解压。</p>
-      <p>付款后请在 24 小时内完成首次导入。导入完成后，在桌面小伙伴的“更换形象”中选用你喜欢的形象；及时导入的形象以后可以离线使用。</p>
-    </section>
+    <section class="batch-import-note" id="appearance-import"><p class="eyebrow">免费领取的形象包</p><h2>下载一次，整批导入。</h2><p>基础木鱼随客户端直接免费下载，无需领取码。扩展形象在统一形象库凭群码或作者推广码免费领取，每批 1 至当前权限上限且最多 10 个，文件最多 16 MiB。</p><p>一个形象下载 .nmgpack，多个形象下载一个 .nmgpacks。先从客户端下载页取得 0.9 永久包兼容客户端或发布元数据规定的更新版本，再双击文件；无需解压。不要把旧 0.8.4 安装包当作支持永久交付。客户端核验签名并一次导入后，从“更换形象”选择。</p><p>安装产物实际发布后，下载页通过 v2 API 展示对应公开地址、版本、大小和 SHA-256；不预填尚未发布的 GitHub 文件 URL。<a href="download.html">查看正式客户端下载元数据</a>。</p><p><strong>下载后可长期保存，随时导入，永久离线使用。</strong>服务器仅保留首次成功签发后的 7 天重下载入口，换码和服务器入口到期不影响本地文件。没有首次导入倒计时，重装后仍可再次离线导入。</p></section><section class="batch-import-note" id="community-import"><h2>共创作品，也在同一个形象库。</h2><p>作品免费分发授权及审核通过后才开放领取。新作品首次发布增加作者推广权限，更新同一作品不增加贡献。投稿在外部完成制作，仅上传无 license 的源包；不要直接导入待审源包。</p><p>创作者使用手机号验证码登录，无需昵称。可选本人抖音号只在网页填写，不要求放入源包；审核通过后随本作品公开。</p><p><a href="index.html#characters">统一形象库</a> · <a href="creator.html">创作者中心</a> · <a href="creator-guide.html">制作指南</a> · <a href="checkout.html?history=1">恢复合法历史订单与原权益</a></p></section>
 
     <section class="autostart-note">
       <div>
@@ -186,6 +182,7 @@
       <summary>给熟悉电脑的用户：查看安装包校验值</summary>
       <p>普通用户不需要操作这一项。若你希望核对文件完整性，可查看官方 <a href="https://download.gongde.zqscreen.cn/SHA256SUMS.txt">SHA-256 清单</a>。</p>
     </details>
+    <p style="max-width:1180px;margin:32px auto;padding:0 24px;"><a href="faq.html">免费领取、历史订单与下载常见问题</a> · <a href="index.html#characters">返回官网选择形象</a></p>
   </main>
 
   <script>

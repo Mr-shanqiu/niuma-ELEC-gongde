@@ -1,8 +1,8 @@
 {
   "renderer": "native-woodfish-v1",
   "provenance": {
-    "macOS": "8ce2854d3e30db2be388350e36d7a303a0f6dbd081e076a48b48ab4cc7290f86",
-    "Windows": "6230a54ce92ad46e43ff9b102306131acbbb328702db2e62824ba3ccc2396b85"
+    "macOS": "be65fe96b6918cdaaceea1f9e41aa7eb4d798fa7d6df18a7ebd54b5d87320b35",
+    "Windows": "684de521f28d5d883a4495f2a465e45fb42df9097f6ea3ef6714cd6b27da15cb"
   },
   "macOS": {
     "scale": 0.88,

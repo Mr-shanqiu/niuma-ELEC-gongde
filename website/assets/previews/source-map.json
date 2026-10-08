@@ -16,20 +16,20 @@
   "packs": {
     "lucky-cat": {
       "id": "official.lucky-cat",
-      "version": "1.1.0",
-      "manifestSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
-      "assetSha256": "c0f469e8408bbbc08d8a56944996c066d580353f1c718e48e22c64b43df6e34b",
+      "version": "1.0.0",
+      "manifestSha256": "17ae24727859a3c250d72369a50f29e2054150457138dd6b7708f10cbc9cc4da",
+      "assetSha256": "e7d157f2aabc434e747fe3a624e37cc2f3110f68db0e2e46454ebb56f31e9489",
       "files": {
         "manifest.json": {
           "source": "assets/appearance-packs/lucky-cat/manifest.json",
-          "sourceSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
-          "projectedSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
+          "sourceSha256": "17ae24727859a3c250d72369a50f29e2054150457138dd6b7708f10cbc9cc4da",
+          "projectedSha256": "17ae24727859a3c250d72369a50f29e2054150457138dd6b7708f10cbc9cc4da",
           "projection": "exact-copy"
         },
         "preview.png": {
           "source": "assets/appearance-packs/lucky-cat/preview.png",
-          "sourceSha256": "5797f9123e6184b283618bb957f1212c6425b9b2f329c88359ad6cec31492f80",
-          "projectedSha256": "5797f9123e6184b283618bb957f1212c6425b9b2f329c88359ad6cec31492f80",
+          "sourceSha256": "5e523d329b0cfad4a270d2161899aa96e03131433165573c9c45540e65ffe555",
+          "projectedSha256": "5e523d329b0cfad4a270d2161899aa96e03131433165573c9c45540e65ffe555",
           "projection": "exact-copy"
         },
         "body.png": {
@@ -642,7 +642,7 @@
     },
     "woodfish": {
       "id": "builtin.woodfish",
-      "manifestSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
+      "manifestSha256": "a3b65976bb6b30140d1ea6e0b9fa3d028f5c58c6da877ef720de6b270971151c",
       "files": {
         "body.png": {
           "source": "assets/woodfish.png",
@@ -657,8 +657,8 @@
           "projection": "exact-copy"
         },
         "manifest.json": {
-          "sourceSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
-          "projectedSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
+          "sourceSha256": "a3b65976bb6b30140d1ea6e0b9fa3d028f5c58c6da877ef720de6b270971151c",
+          "projectedSha256": "a3b65976bb6b30140d1ea6e0b9fa3d028f5c58c6da877ef720de6b270971151c",
           "projection": "native-code-extraction"
         }
       }

@@ -6,6 +6,12 @@ SITE_DIR="$ROOT_DIR/website"
 OUT_DIR="$ROOT_DIR/dist/gongde-deploy"
 DOWNLOAD_DIR="$OUT_DIR/downloads"
 VERSION=$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")
+SITE_ONLY=false
+case "${1:-}" in
+  "") ;;
+  --site-only) SITE_ONLY=true ;;
+  *) echo "Usage: package-website.sh [--site-only]" >&2; exit 64 ;;
+esac
 STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/gongde-site.XXXXXX")
 SITE_STAGE="$STAGING_DIR/site"
 
@@ -15,17 +21,18 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 NODE_BIN=${NODE_BIN:-node}
-"$NODE_BIN" "$ROOT_DIR/scripts/generate-website-previews.mjs"
+if [ "$SITE_ONLY" = false ]; then
+  "$NODE_BIN" "$ROOT_DIR/scripts/generate-website-previews.mjs"
+fi
 (cd "$ROOT_DIR/admin-console" && npm run build)
 
-rm -rf "$DOWNLOAD_DIR"
-mkdir -p "$SITE_STAGE/assets" "$DOWNLOAD_DIR"
+mkdir -p "$SITE_STAGE/assets" "$OUT_DIR"
 
-for file in index.html install.html app.js pack-player.js styles.css healthz.txt privacy.html contact.html 404.html robots.txt; do
+for file in index.html install.html app.js pack-player.js styles.css healthz.txt privacy.html contact.html 404.html robots.txt sitemap.xml checkout.html checkout.js support.html support.js faq.html community.html community.js community-preview.js creator.html creator.js creator-api.js creator-community.css creator-guide.html creator-preview.html download.html appearance.html claim.html delivery.html free-api.js free-flow.js free-flow.css; do
   cp "$SITE_DIR/$file" "$SITE_STAGE/$file"
 done
 cp -R "$SITE_DIR/assets/." "$SITE_STAGE/assets/"
-cp -R "$SITE_DIR/admin" "$SITE_STAGE/admin"
+cp -R "$ROOT_DIR/admin-console/dist" "$SITE_STAGE/admin"
 
 if find "$SITE_STAGE" -type l | grep -q .; then
   echo "ERROR: site artifact contains a symbolic link" >&2
@@ -55,7 +62,7 @@ TREE_SHA=$(
 
 ARCHIVE_NAME="gongde-site-$TREE_SHA.tar.gz"
 ARCHIVE_PATH="$OUT_DIR/$ARCHIVE_NAME"
-tar -C "$SITE_STAGE" -czf "$ARCHIVE_PATH" .
+COPYFILE_DISABLE=1 tar -C "$SITE_STAGE" -czf "$ARCHIVE_PATH" .
 (cd "$OUT_DIR" && shasum -a 256 "$ARCHIVE_NAME" > "$ARCHIVE_NAME.sha256")
 
 SOURCE_FULL_SHA=${SOURCE_FULL_SHA:-unavailable}
@@ -81,6 +88,15 @@ memory_limit=64MiB
 read_only_filesystem_compatible=yes
 spa_fallback_paths=none
 EOF
+
+echo "SITE_ARCHIVE=$ARCHIVE_PATH"
+echo "SITE_SHA256_FILE=$ARCHIVE_PATH.sha256"
+echo "SITE_METADATA=$OUT_DIR/gongde-site-$TREE_SHA.metadata.txt"
+if [ "$SITE_ONLY" = true ]; then
+  exit 0
+fi
+rm -rf "$DOWNLOAD_DIR"
+mkdir -p "$DOWNLOAD_DIR"
 
 MAC_DMG="niuma-merit-macos-$VERSION.dmg"
 WIN_SETUP="niuma-merit-windows-$VERSION-setup.exe"
@@ -111,8 +127,5 @@ cat > "$DOWNLOAD_DIR/DOWNLOADS.json" <<EOF
 }
 EOF
 
-echo "SITE_ARCHIVE=$ARCHIVE_PATH"
-echo "SITE_SHA256_FILE=$ARCHIVE_PATH.sha256"
-echo "SITE_METADATA=$OUT_DIR/gongde-site-$TREE_SHA.metadata.txt"
 echo "DOWNLOAD_MANIFEST=$DOWNLOAD_DIR/DOWNLOADS.json"
 echo "DOWNLOAD_CHECKSUMS=$DOWNLOAD_DIR/SHA256SUMS.txt"

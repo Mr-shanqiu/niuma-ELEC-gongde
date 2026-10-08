@@ -1,13 +1,30 @@
 # 牛马电子功德
 
+> 当前业务以 [全免费领取与共创 PRD 1.1](docs/PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md) 为准。新领取全免费；旧收费、权益码和 24 小时首次导入规则已被替代，仅保留既有付费订单的历史履行与恢复。下文旧版本实测记录不是 0.9.0 的验收结果。
+
+## 0.9.0 发布与免费领取状态
+
+- macOS / Windows 0.9.0 客户端已发布；免费领取服务尚未部署、尚未启用，客户端发布不代表官网领取已经开放。
+- 基础木鱼和公开安装包免费，不需要领取码。扩展形象的新领取全免费，统一形象库按有效群码或创作者码范围授权，每批最多 10 个；码不作为付款凭证。
+- 新交付使用签名永久包，文件可永久导入并离线使用，没有 24 小时首次导入限制。0.9.0 客户端兼容验证历史 timed 包的原签名，不因旧首次导入日期已过而拒绝导入。
+- 免费领取服务启用后，同一批次在服务器签发后 7 日内可重新下载；超过 7 日不再保证服务器重下，不影响已保存文件的永久导入与本地使用。单个形象交付 `.nmgpack`，多个形象交付一个 `.nmgpacks` 批次文件。
+- 不再创建新收费订单；既有已付款订单仍按原订单上下文履行、恢复，不要求用户重复付款。
+
+## 项目资料入口
+
+源码、官网、管理后台和支付服务属于同一个项目，目录归属与资料导航统一查看 [PROJECT_HOME.md](PROJECT_HOME.md)。
+本文件负责产品介绍、下载与构建说明；任务执行记录查看 [WORK_PLAN.md](WORK_PLAN.md)，产品规划查看 [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md)。
+
 仓库：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde>
 许可证：[GPL v3](LICENSE) — 任何人可以自由使用、修改和分发，但如果分发衍生作品（包括商用），必须以相同许可证开源全部代码。
 
 ## 下载
 
-- GitHub Releases：<https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases>
+- [GitHub v0.9.0 发布页](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.0)
+- [macOS 0.9.0 DMG 国内下载](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.0.dmg)：`3143825` 字节；SHA-256：`46abb7293592e24b1630d539825ef69f636e66f2e678e920c6e5e4d70b314ddc`。
+- [Windows 0.9.0 安装程序国内下载](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.0-setup.exe)：`3229050` 字节；SHA-256：`10203fe1e71c54ce19f4e24980dbefd14aafba0d10b8f5135c213dfa6184f4af`。
 - [免签名安装、升级与卸载指南](docs/INSTALL_UNSIGNED.md)
-- 本项目当前长期采用免签名分发；Windows 的“未知发布者”和 macOS 的安全提示属于预期现象。
+- 此次 macOS 使用 Apple Development 签名，不是 Developer ID 分发签名，未公证；Windows 未签名。两端仍可能出现系统安全提示，不承诺无 Gatekeeper / SmartScreen 提示。
 
 ## 什么是本软件
 
@@ -73,14 +90,14 @@ cmake --build build --config Release
 ./scripts/build-windows.ps1
 ```
 
-## 免签名发布说明
+## 0.9.0 签名与安全提示
 
 - Windows 版不做代码签名，因此系统可能显示“未知发布者”，SmartScreen 或安全软件也可能拦截。
-- macOS 版没有 Developer ID 分发签名和苹果公证，首次打开可能需要在 Finder 或“隐私与安全性”中手动允许。
-- 这些系统提示无法通过官网、开源或说明文档消除。请只从本仓库的 Releases 下载，并在需要时核对 SHA-256。
+- macOS 0.9.0 使用 Apple Development 签名，没有 Developer ID 分发签名和苹果公证，首次打开仍可能被 Gatekeeper 拦截，需要在 Finder 或“隐私与安全性”中按系统提示手动允许。
+- 这些系统提示无法通过官网、开源或说明文档消除。请从上述正式国内地址或本仓库的 Releases 下载，并在需要时核对 SHA-256。
 - 不建议为运行本软件而全局关闭操作系统或杀毒软件的安全防护。
 
-## 实测记录
+## 历史实测记录（不代表 0.9.0 验收）
 
 ### Windows 0.6.0（云端真实构建 + 用户真机验收）
 
@@ -116,7 +133,7 @@ cmake --build build --config Release
 
 - 本机（macOS 开发机）未安装 `cmake`，通用 CMake 构建路径无法在本机复现；macOS 直接使用 `scripts/build-macos.sh`，Windows 使用 `scripts/build-windows.ps1` 或 GitHub Actions。
 
-## 本地形象包（macOS 0.7.0 / Windows 0.7.1）
+## 本地形象包（历史 0.7 说明；永久包使用 0.9.0）
 
 - 双击 `.nmgpack` 即可导入；同一形象 ID 再次导入会在完整校验后安全更新。
 - “更换形象”直接展示全部内置形象和本机已安装形象，确认后立即切换；本地形象可删除，功德数据不受影响。

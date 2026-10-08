@@ -4,9 +4,13 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { unzipSync } from "fflate";
 
-import { AppearancePackSigner } from "../dist/delivery/pack-signer.js";
+const { AppearancePackSigner } = await import(process.env.GONGDE_TEST_BUILD_ROOT
+  ? pathToFileURL(resolve(process.env.GONGDE_TEST_BUILD_ROOT, "delivery/pack-signer.js"))
+  : new URL("../dist/delivery/pack-signer.js", import.meta.url));
 
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",

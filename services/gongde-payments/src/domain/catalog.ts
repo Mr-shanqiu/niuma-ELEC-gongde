@@ -71,4 +71,15 @@ export const OFFICIAL_ASSET_NAMES_ZH: Readonly<Record<string, string>> = Object.
   "zqscreen.zhuan-yun-bead": "转运珠",
   "zqscreen.treasure-basin": "聚宝盆"
 });
-export const MAX_ASSETS_PER_DELIVERY = 5;
+export const MAX_ASSETS_PER_DELIVERY = 10;
+export const MAX_LEGACY_ASSETS_PER_DELIVERY = 5;
+export const OFFICIAL_APPEARANCE_BATCH = Object.freeze({
+  id: "official-appearance-batch", version: 1,
+  nameZh: "官方形象包批次", nameEn: "Official Appearance Batch",
+  descriptionZh: "按本次选择付费：每个0.2元，整批最多1元，一批最多10个；付款后24小时内下载并首次导入。",
+  currency: "CNY" as const
+});
+export function appearanceBatchPriceFen(count: number): number {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_ASSETS_PER_DELIVERY) throw new Error("asset_selection_limit_exceeded");
+  return Math.min(count * 20, 100);
+}

@@ -1,4 +1,45 @@
-import type { GongdeAccessAccount, GongdeEntitlement, GongdeOrder, OrderState, PaymentChannel } from "./types.js";
+import type {
+  GongdeAccessAccount,
+  GongdeEntitlement,
+  GongdeOrder,
+  MarketOrderItem,
+  MarketOrderItemSnapshot,
+  OrderState,
+  PaymentChannel,
+  PurchaseKind
+} from "./types.js";
+
+export function validateMarketOrderItemSnapshots(order: GongdeOrder, items: readonly MarketOrderItemSnapshot[]): void {
+  if (items.length < 1 || items.length > 10) throw new Error("market_order_items_count_invalid");
+  if (order.purchaseKind !== "appearance-batch") throw new Error("market_order_purchase_kind_invalid");
+  let totalFen = 0;
+  for (const item of items) {
+    if (item.sourceKind !== "official" && item.sourceKind !== "community") throw new Error("market_order_item_source_invalid");
+    if (!item.assetId || item.assetId.length > 80) throw new Error("market_order_item_asset_invalid");
+    if (!item.versionLabel || item.versionLabel.length > 32) throw new Error("market_order_item_version_label_invalid");
+    if (!/^[a-f0-9]{64}$/u.test(item.sourceRevision)) throw new Error("market_order_item_revision_invalid");
+    if (!item.titleZh || item.titleZh.length > 80) throw new Error("market_order_item_title_invalid");
+    if (!Number.isSafeInteger(item.unitPriceFen) || item.unitPriceFen < 0 ||
+        !Number.isSafeInteger(item.amountFen) || item.amountFen < 0) {
+      throw new Error("market_order_item_amount_invalid");
+    }
+    if (!(item.createdAt instanceof Date) || Number.isNaN(item.createdAt.getTime())) {
+      throw new Error("market_order_item_created_at_invalid");
+    }
+    if (item.revenueRuleVersion !== null && item.revenueRuleVersion.length > 64) {
+      throw new Error("market_order_item_revenue_rule_invalid");
+    }
+    if (item.sourceKind === "official" && (item.creatorId !== null || item.workId !== null || item.versionId !== null)) {
+      throw new Error("market_order_item_official_owner_invalid");
+    }
+    if (item.sourceKind === "community" && (!item.creatorId || !item.workId || !item.versionId)) {
+      throw new Error("market_order_item_community_owner_required");
+    }
+    totalFen += item.amountFen;
+    if (!Number.isSafeInteger(totalFen)) throw new Error("market_order_items_total_invalid");
+  }
+  if (totalFen !== order.amountFen) throw new Error("market_order_items_total_mismatch");
+}
 
 export interface AdminOrderFilter {
   orderNo?: string;
@@ -6,6 +47,7 @@ export interface AdminOrderFilter {
   createdFrom?: Date;
   createdTo?: Date;
   channel?: PaymentChannel;
+  purchaseKind?: PurchaseKind;
   state?: OrderState;
   effectiveOnly?: boolean;
   limit: number;
@@ -27,8 +69,9 @@ export interface PaymentStore {
   findAccessAccountByDigest(codeDigest: string): Promise<GongdeAccessAccount | null>;
   findAccessAccountById(id: string): Promise<GongdeAccessAccount | null>;
   updateAccessAccount(account: GongdeAccessAccount): Promise<void>;
-  insertOrder(order: GongdeOrder): Promise<void>;
+  insertOrder(order: GongdeOrder, marketItems?: readonly MarketOrderItemSnapshot[]): Promise<void>;
   findOrder(orderNo: string): Promise<GongdeOrder | null>;
+  findMarketOrderItemsByOrder(orderNo: string): Promise<MarketOrderItem[]>;
   updateOrder(order: GongdeOrder): Promise<void>;
   insertEntitlement(entitlement: GongdeEntitlement): Promise<void>;
   findEntitlementsByOrder(orderNo: string): Promise<GongdeEntitlement[]>;
@@ -44,6 +87,7 @@ export class InMemoryPaymentStore implements PaymentStore {
   readonly #accessAccounts = new Map<string, GongdeAccessAccount>();
   readonly #orders = new Map<string, GongdeOrder>();
   readonly #entitlements = new Map<string, GongdeEntitlement>();
+  readonly #marketOrderItems = new Map<string, MarketOrderItem[]>();
 
   async insertAccessAccount(account: GongdeAccessAccount): Promise<void> {
     if (this.#accessAccounts.has(account.id) || [...this.#accessAccounts.values()].some((item) => item.codeDigest === account.codeDigest)) {
@@ -67,14 +111,29 @@ export class InMemoryPaymentStore implements PaymentStore {
     this.#accessAccounts.set(account.id, structuredClone(account));
   }
 
-  async insertOrder(order: GongdeOrder): Promise<void> {
+  async insertOrder(order: GongdeOrder, marketItems: readonly MarketOrderItemSnapshot[] = []): Promise<void> {
     if (this.#orders.has(order.orderNo)) throw new Error("order_no_conflict");
+    if (marketItems.length > 0) validateMarketOrderItemSnapshots(order, marketItems);
     this.#orders.set(order.orderNo, structuredClone(order));
+    if (marketItems.length > 0) {
+      this.#marketOrderItems.set(order.orderNo, marketItems.map((item, index) => structuredClone({
+        ...item,
+        orderNo: order.orderNo,
+        lineNo: index + 1,
+        creatorShareBps: 0 as const,
+        creatorAmountFen: 0 as const,
+        platformAmountFen: item.amountFen
+      })));
+    }
   }
 
   async findOrder(orderNo: string): Promise<GongdeOrder | null> {
     const order = this.#orders.get(orderNo);
     return order ? structuredClone(order) : null;
+  }
+
+  async findMarketOrderItemsByOrder(orderNo: string): Promise<MarketOrderItem[]> {
+    return structuredClone(this.#marketOrderItems.get(orderNo) ?? []);
   }
 
   async updateOrder(order: GongdeOrder): Promise<void> {
@@ -108,6 +167,7 @@ export class InMemoryPaymentStore implements PaymentStore {
       .filter((order) => !filter.createdFrom || order.createdAt >= filter.createdFrom)
       .filter((order) => !filter.createdTo || order.createdAt < filter.createdTo)
       .filter((order) => !filter.channel || order.channel === filter.channel)
+      .filter((order) => !filter.purchaseKind || order.purchaseKind === filter.purchaseKind)
       .filter((order) => !filter.state || order.state === filter.state)
       .filter((order) => !filter.effectiveOnly || order.state === "PAID" || order.state === "FULFILLED")
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || right.orderNo.localeCompare(left.orderNo));

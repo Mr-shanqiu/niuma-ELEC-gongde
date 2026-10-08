@@ -1,9 +1,15 @@
 import { lstatSync, readFileSync } from "node:fs";
 import mysql from "mysql2/promise";
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
-import type { PaymentStore } from "../domain/store.js";
+import { validateMarketOrderItemSnapshots, type PaymentStore } from "../domain/store.js";
 import type { AdminOrderFilter, AdminOrderPage, AdminOrderSummary } from "../domain/store.js";
-import type { GongdeAccessAccount, GongdeEntitlement, GongdeOrder } from "../domain/types.js";
+import type {
+  GongdeAccessAccount,
+  GongdeEntitlement,
+  GongdeOrder,
+  MarketOrderItem,
+  MarketOrderItemSnapshot
+} from "../domain/types.js";
 
 export interface GongdeMySqlConfiguration {
   host: string;
@@ -108,6 +114,28 @@ function mapEntitlement(row: RowDataPacket): GongdeEntitlement {
   };
 }
 
+function mapMarketOrderItem(row: RowDataPacket): MarketOrderItem {
+  return {
+    orderNo: String(row.order_no),
+    lineNo: Number(row.line_no),
+    sourceKind: row.source_kind,
+    assetId: String(row.asset_id),
+    creatorId: row.creator_id === null ? null : String(row.creator_id),
+    workId: row.work_id === null ? null : String(row.work_id),
+    versionId: row.version_id === null ? null : String(row.version_id),
+    versionLabel: String(row.version_label),
+    sourceRevision: String(row.source_revision),
+    titleZh: String(row.title_zh),
+    unitPriceFen: Number(row.unit_price_fen),
+    amountFen: Number(row.amount_fen),
+    creatorShareBps: 0,
+    creatorAmountFen: 0,
+    platformAmountFen: Number(row.platform_amount_fen),
+    revenueRuleVersion: row.revenue_rule_version === null ? null : String(row.revenue_rule_version),
+    createdAt: asDate(row.created_at)!
+  };
+}
+
 function mapAccessAccount(row: RowDataPacket): GongdeAccessAccount {
   return {
     id: String(row.id),
@@ -174,7 +202,14 @@ export class MySqlPaymentStore implements PaymentStore {
     );
   }
 
-  async insertOrder(order: GongdeOrder): Promise<void> {
+  async insertOrder(order: GongdeOrder, marketItems: readonly MarketOrderItemSnapshot[] = []): Promise<void> {
+    if (marketItems.length > 0) {
+      validateMarketOrderItemSnapshots(order, marketItems);
+      if (this.pool && !this.transactional) {
+        await this.runInTransaction((store) => store.insertOrder(order, marketItems));
+        return;
+      }
+    }
     await this.executor.execute(
       `INSERT INTO gongde_orders
        (order_no, product_id, product_version, channel, purchase_kind, user_id, asset_id, asset_ids_json, amount_fen, currency, state,
@@ -184,6 +219,34 @@ export class MySqlPaymentStore implements PaymentStore {
         JSON.stringify(order.assetIds), order.amountFen, order.currency, order.state, order.buyerTokenDigest, order.providerTransactionId,
         order.createdAt, order.expiresAt, order.paidAt, order.fulfilledAt]
     );
+    if (marketItems.length > 0) {
+      const placeholders = marketItems.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)").join(", ");
+      const parameters = marketItems.flatMap((item, index) => [
+        order.orderNo,
+        index + 1,
+        item.sourceKind,
+        item.assetId,
+        item.creatorId,
+        item.workId,
+        item.versionId,
+        item.versionLabel,
+        item.sourceRevision,
+        item.titleZh,
+        item.unitPriceFen,
+        item.amountFen,
+        item.amountFen,
+        item.revenueRuleVersion,
+        item.createdAt
+      ]);
+      await this.executor.execute(
+        `INSERT INTO gongde_market_order_items
+         (order_no, line_no, source_kind, asset_id, creator_id, work_id, version_id, version_label,
+          source_revision, title_zh, unit_price_fen, amount_fen, creator_share_bps, creator_amount_fen,
+          platform_amount_fen, revenue_rule_version, created_at)
+         VALUES ${placeholders}`,
+        parameters
+      );
+    }
   }
 
   async findOrder(orderNo: string): Promise<GongdeOrder | null> {
@@ -192,6 +255,14 @@ export class MySqlPaymentStore implements PaymentStore {
       [orderNo]
     );
     return rows[0] ? mapOrder(rows[0]) : null;
+  }
+
+  async findMarketOrderItemsByOrder(orderNo: string): Promise<MarketOrderItem[]> {
+    const [rows] = await this.executor.execute<RowDataPacket[]>(
+      `SELECT * FROM gongde_market_order_items WHERE order_no = ? ORDER BY line_no`,
+      [orderNo]
+    );
+    return rows.map(mapMarketOrderItem);
   }
 
   async updateOrder(order: GongdeOrder): Promise<void> {
@@ -260,6 +331,10 @@ export class MySqlPaymentStore implements PaymentStore {
     if (filter.channel) {
       conditions.push("channel = ?");
       parameters.push(filter.channel);
+    }
+    if (filter.purchaseKind) {
+      conditions.push("purchase_kind = ?");
+      parameters.push(filter.purchaseKind);
     }
     if (filter.state) {
       conditions.push("state = ?");

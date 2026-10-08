@@ -6,3 +6,4 @@ preview/
 .DS_Store
 node_modules/
 website/admin/
+.local-work/

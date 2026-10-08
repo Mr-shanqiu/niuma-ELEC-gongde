@@ -3,10 +3,46 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="牛马电子功德是一款完全离线的桌面互动小伙伴，只统计键盘、鼠标和滚轮操作次数，不读取输入内容。">
-  <title>牛马电子功德｜离线桌面小伙伴</title>
+  <meta name="description" content="牛马电子功德官网：支持 Windows 和 Mac 的离线桌面电子木鱼与互动小伙伴。基础木鱼免费下载，无需注册或手机号；更多形象凭码免费领取，每批最多10个，一个文件整批导入，永久离线使用。">
+  <title>牛马电子功德官网｜桌面电子木鱼 · Windows / Mac 免费下载</title>
+  <link rel="canonical" href="https://gongde.zqscreen.cn/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:site_name" content="牛马电子功德">
+  <meta property="og:title" content="牛马电子功德｜离线桌面电子木鱼">
+  <meta property="og:description" content="基础木鱼免费，无需登录。挑选扩展形象；支持 Windows 和 Mac。">
+  <meta property="og:url" content="https://gongde.zqscreen.cn/">
+  <meta property="og:image" content="https://gongde.zqscreen.cn/assets/woodfish.png">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://gongde.zqscreen.cn/#website",
+        "name": "牛马电子功德",
+        "url": "https://gongde.zqscreen.cn/",
+        "inLanguage": "zh-CN"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://gongde.zqscreen.cn/#software",
+        "name": "牛马电子功德",
+        "url": "https://gongde.zqscreen.cn/",
+        "applicationCategory": "EntertainmentApplication",
+        "applicationSubCategory": "桌面电子木鱼与互动小伙伴",
+        "operatingSystem": "Windows, macOS",
+        "inLanguage": "zh-CN",
+        "description": "离线桌面互动小伙伴，将键盘、鼠标按键和滚轮操作转换为功德计数，不读取输入内容。基础木鱼免费，更多形象可在统一形象库凭码免费领取。",
+        "featureList": ["离线使用", "基础木鱼免费", "键盘、鼠标与滚轮操作计数", "功德日历", "形象包整批导入"],
+        "softwareHelp": { "@type": "WebPage", "url": "https://gongde.zqscreen.cn/install.html", "name": "安装与形象包导入帮助" }
+      }
+    ]
+  }
+  </script>
   <link rel="icon" type="image/png" href="assets/woodfish.png">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="free-flow.css">
 </head>
 <body>
   <div class="paper-noise" aria-hidden="true"></div>
@@ -18,8 +54,9 @@
     <nav aria-label="主要导航">
       <a href="#characters" data-zh="形象" data-en="Characters">形象</a>
       <a href="#privacy" data-zh="隐私" data-en="Privacy">隐私</a>
-      <a href="#characters" data-zh="选择与下载" data-en="Choose & download">选择与下载</a>
-      <a href="#support" data-zh="赞赏" data-en="Support">赞赏</a>
+      <a href="download.html" data-zh="下载客户端" data-en="Download">下载客户端</a>
+      <a href="#support" data-zh="关注开发者" data-en="Developer">关注开发者</a>
+      <a class="nav-creator" href="creator.html" data-zh="创作者投稿" data-en="Create a companion">创作者投稿</a>
       <button class="language" type="button" aria-label="Switch language">EN</button>
     </nav>
   </header>
@@ -36,8 +73,8 @@
           <span data-zh="它动一下，功德 +1" data-en="It moves. Merit +1.">它动一下，功德 +1</span>
         </div>
         <div class="hero-actions">
-          <a class="button primary" href="#characters" data-zh="看看有哪些桌面小伙伴" data-en="Meet the desktop companions">看看有哪些桌面小伙伴</a>
-          <a class="button text-button" href="#characters" data-zh="先选形象，再下载" data-en="Choose a companion first">先选形象，再下载</a>
+          <a class="button primary" href="download.html" data-zh="免费下载客户端" data-en="Download the free app">免费下载客户端</a>
+          <a class="button text-button" href="#characters" data-zh="挑选扩展形象" data-en="Choose a companion first">挑选扩展形象</a>
         </div>
         <p class="microcopy" data-zh="基础木鱼免费 · 无需登录 · 支持 Mac / Windows" data-en="Free base woodfish · No login needed · Mac / Windows">基础木鱼免费 · 无需登录 · 支持 Mac / Windows</p>
       </div>
@@ -59,162 +96,7 @@
       <div><b>04</b><span data-zh="功德日历" data-en="Merit calendar">功德日历</span></div>
     </section>
 
-    <section class="characters section" id="characters">
-      <div class="section-heading reveal">
-        <p class="eyebrow" data-zh="你的桌面，住谁都可以" data-en="Choose who lives on your desktop">你的桌面，住谁都可以</p>
-        <h2 data-zh="不是皮肤，是小伙伴。" data-en="More than skins. Companions.">不是皮肤，是小伙伴。</h2>
-        <p data-zh="基础安装包只内置木鱼。1 元永久获得官方形象库资格，并可首次选择最多 5 个形象包；以后每次重新生成最多 5 个形象包，整批只收取 0.2 元。" data-en="Only the woodfish comes with the base app. A one-time ¥1 pass includes up to 5 packs in the first delivery; each later batch of up to 5 packs costs ¥0.20 total.">基础安装包只内置木鱼。1 元永久获得官方形象库资格，并可首次选择最多 5 个形象包；以后每次重新生成最多 5 个形象包，整批只收取 0.2 元。</p>
-      </div>
-
-      <div class="character-rail">
-        <article class="character-card large reveal">
-          <span class="tag" data-zh="基础形象" data-en="Included">基础形象</span>
-          <div class="character-preview pack-preview" data-pack-preview="woodfish" role="img" aria-label="木鱼敲击动态预览"></div>
-          <h3 data-zh="默认木鱼" data-en="Woodfish">默认木鱼</h3>
-          <p data-zh="今天也替你默默积攒。" data-en="Quietly keeping count for you.">今天也替你默默积攒。</p>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="lucky-cat" role="img" aria-label="招财猫招手动态预览"></div>
-          <h3 data-zh="招财猫" data-en="Lucky Cat">招财猫</h3>
-          <p data-zh="每一下都离发财近一点。" data-en="One tap closer to fortune.">每一下都离发财近一点。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="official.lucky-cat" checked><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="hamster-wheel" role="img" aria-label="仓鼠跑轮动态预览"></div>
-          <h3 data-zh="仓鼠跑轮" data-en="Hamster Wheel">仓鼠跑轮</h3>
-          <p data-zh="忙了一天，轮子很有感觉。" data-en="A very productive-looking wheel.">忙了一天，轮子很有感觉。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="official.hamster-wheel" checked><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="sea-lion-belly-pat" role="img" aria-label="海狮拍肚皮动态预览"></div>
-          <h3 data-zh="海狮拍肚皮" data-en="Sea Lion Belly Pat">海狮拍肚皮</h3>
-          <p data-zh="每一次输入都值得鼓掌。" data-en="Every input deserves applause.">每一次输入都值得鼓掌。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="official.sea-lion-belly-pat" checked><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="chick-pecking" role="img" aria-label="小鸡啄米动态预览"></div>
-          <h3 data-zh="小鸡啄米" data-en="Pecking Chick">小鸡啄米</h3>
-          <p data-zh="认真工作，也认真吃饭。" data-en="Serious about work and snacks.">认真工作，也认真吃饭。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="official.chick-pecking" checked><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="caishen-ingot" role="img" aria-label="财神接宝动态预览"></div>
-          <h3 data-zh="财神接宝" data-en="God of Wealth">财神接宝</h3>
-          <p data-zh="金元宝稳稳落进手里。" data-en="A golden ingot lands right in his hands.">金元宝稳稳落进手里。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.caishen-ingot"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="red-panda-wave" role="img" aria-label="小熊猫举爪动态预览"></div>
-          <h3 data-zh="小熊猫举爪" data-en="Waving Red Panda">小熊猫举爪</h3>
-          <p data-zh="双爪一抬，今天也要元气满满。" data-en="Two paws up for a brighter day.">双爪一抬，今天也要元气满满。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.redpanda-wave"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="shiba-tilt" role="img" aria-label="柴犬歪头动态预览"></div>
-          <h3 data-zh="柴犬歪头" data-en="Tilting Shiba">柴犬歪头</h3>
-          <p data-zh="每一下都认真听你说。" data-en="Listening carefully to every tap.">每一下都认真听你说。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.shiba-tilt"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="orange-cat-wave" role="img" aria-label="橘猫招手动态预览"></div>
-          <h3 data-zh="橘猫招手" data-en="Waving Orange Cat">橘猫招手</h3>
-          <p data-zh="摇摇肉爪，欢迎好运进门。" data-en="A soft paw wave welcomes good luck.">摇摇肉爪，欢迎好运进门。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.orange-cat-wave"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="raccoon-cheer" role="img" aria-label="小浣熊欢呼动态预览"></div>
-          <h3 data-zh="小浣熊欢呼" data-en="Cheering Raccoon">小浣熊欢呼</h3>
-          <p data-zh="忙完一件，就为你欢呼一次。" data-en="One little cheer for every task done.">忙完一件，就为你欢呼一次。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.raccoon-cheer"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="golden-toad-coin" role="img" aria-label="金蟾吐钱动态预览"></div>
-          <h3 data-zh="金蟾吐钱" data-en="Coin Toad">金蟾吐钱</h3>
-          <p data-zh="张嘴一吐，好运到账。" data-en="One coin out, one lucky moment in.">张嘴一吐，好运到账。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.golden-toad-coin"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="little-jiangshi-hop" role="img" aria-label="小僵尸蹦跳动态预览"></div>
-          <h3 data-zh="小僵尸蹦跳" data-en="Hopping Jiangshi">小僵尸蹦跳</h3>
-          <p data-zh="轻轻一蹦，烦恼退散。" data-en="One tiny hop sends worries away.">轻轻一蹦，烦恼退散。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.little-jiangshi-hop"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="frog-puff" role="img" aria-label="青蛙鼓腮动态预览"></div>
-          <h3 data-zh="青蛙鼓腮" data-en="Puffing Frog">青蛙鼓腮</h3>
-          <p data-zh="深吸一口气，再继续努力。" data-en="Take a breath, then keep going.">深吸一口气，再继续努力。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.frog-puff"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="bee-flap" role="img" aria-label="蜜蜂扇翅动态预览"></div>
-          <h3 data-zh="蜜蜂扇翅" data-en="Flapping Bee">蜜蜂扇翅</h3>
-          <p data-zh="每次输入，都是勤劳的一下。" data-en="Every input is a tiny act of effort.">每次输入，都是勤劳的一下。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.bee-flap"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="koi-bubbles" role="img" aria-label="锦鲤吐泡动态预览"></div>
-          <h3 data-zh="锦鲤吐泡" data-en="Bubble Koi">锦鲤吐泡</h3>
-          <p data-zh="吐个泡泡，顺便带来好运。" data-en="A bubble rises with a little luck.">吐个泡泡，顺便带来好运。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.koi-bubbles"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="sweet-kiss" role="img" aria-label="甜蜜亲亲动态预览"></div>
-          <h3 data-zh="甜蜜亲亲" data-en="Sweet Kiss">甜蜜亲亲</h3>
-          <p data-zh="每一下，都给生活一点甜。" data-en="A little sweetness with every tap.">每一下，都给生活一点甜。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.kiss-couple"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="baodan-charm" role="img" aria-label="爆单符动态预览"></div>
-          <h3 data-zh="爆单符" data-en="Order Charm">爆单符</h3>
-          <p data-zh="敲一下，愿今天订单满满。" data-en="Tap once and wish for a busy order book.">敲一下，愿今天订单满满。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.baodan-charm"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="woodpecker-peck" role="img" aria-label="啄木鸟啄树动态预览"></div>
-          <h3 data-zh="啄木鸟啄树" data-en="Pecking Woodpecker">啄木鸟啄树</h3>
-          <p data-zh="一下一下，把目标啄出来。" data-en="Peck by peck, the goal takes shape.">一下一下，把目标啄出来。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.woodpecker-peck"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="fortune-bead" role="img" aria-label="转运珠动态预览"></div>
-          <h3 data-zh="转运珠" data-en="Fortune Bead">转运珠</h3>
-          <p data-zh="转一圈，把好运转回来。" data-en="One turn to bring good luck around.">转一圈，把好运转回来。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.zhuan-yun-bead"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-        <article class="character-card paid-pack reveal">
-          <span class="tag accent" data-zh="官方付费包" data-en="Official paid pack">官方付费包</span>
-          <div class="character-preview pack-preview" data-pack-preview="treasure-basin" role="img" aria-label="聚宝盆动态预览"></div>
-          <h3 data-zh="聚宝盆" data-en="Treasure Basin">聚宝盆</h3>
-          <p data-zh="铜钱落下，福气装满。" data-en="Falling coins fill the bowl with fortune.">铜钱落下，福气装满。</p>
-          <label class="pack-choice"><input type="checkbox" data-asset-id="zqscreen.treasure-basin"><span data-zh="选择此形象" data-en="Select this pack">选择此形象</span></label>
-        </article>
-      </div>
-      <div class="pack-purchase-bar reveal">
-        <span><strong id="selected-pack-count">4</strong> / 5 <span data-zh="个形象包已选择" data-en="packs selected">个形象包已选择</span><small id="selection-feedback" class="selection-feedback" aria-live="polite"></small></span>
-        <div class="hero-actions">
-          <button class="button primary purchase-button" type="button" data-zh="获取已选形象包" data-en="Get selected packs">获取已选形象包</button>
-          <a class="button text-button" href="#download" data-zh="只下载免费木鱼" data-en="Continue with free woodfish">只下载免费木鱼</a>
-        </div>
-      </div>
-    </section>
+    <section class="characters section" id="characters"><div class="section-heading"><p class="eyebrow">你的桌面，住谁都可以</p><h2>不是皮肤，是小伙伴。</h2><p>所有扩展形象都在这里。自由浏览与预览，使用粉丝群权益码或作者推广码免费领取；基础木鱼随客户端直接免费提供，不占批次名额。</p></div><aside class="creator-discovery"><div><h3>不止选形象，也能做一个。</h3><p>无需登录下载指南，把灵感交给自己的工具，做好源包再回来投稿。</p></div><a class="button primary" href="creator.html">我也来制作形象</a></aside><form id="library-search" class="library-controls" role="search"><label>编号、名称或介绍<input name="q" type="search" placeholder="输入完整编号或关键词"></label><label>排序<select name="sort"><option value="newest">最新</option><option value="popular7d">近 7 天领取最多</option></select></label><label>单个标签<input name="tag" type="text"></label><label>作者编号<input name="author" type="text" placeholder="C100001"></label><button class="primary" type="submit">查找</button><button id="library-clear-filters" type="button">清除筛选</button></form><p id="flow-status" class="flow-status" role="status" aria-live="polite">正在读取统一形象库…</p><div id="library-gallery" class="library-grid"></div><div class="library-pager"><button id="library-previous" type="button" disabled>上一页</button><span id="library-page"></span><button id="library-next" type="button" disabled>下一页</button></div><div class="library-selection"><div><strong id="selection-count">已选 0 / 10</strong><p id="selection-bytes" class="flow-meta"></p><p class="flow-meta">未验证码也可以先选最多 10 个；翻页不清除选择。</p></div><div class="flow-actions"><button id="selection-clear" type="button">清空选择</button><a class="button primary" href="claim.html">领取所选形象</a></div></div></section>
 
     <section class="privacy section" id="privacy">
       <div class="privacy-diagram reveal">
@@ -235,100 +117,35 @@
       </div>
     </section>
 
-    <section class="download section" id="download">
-      <div class="download-intro reveal">
-        <p class="eyebrow" data-zh="把它带回桌面" data-en="Bring one home">把它带回桌面</p>
-        <h2 data-zh="选好之后，下载客户端。" data-en="Chosen one? Download the app.">选好之后，下载客户端。</h2>
-        <p data-zh="选择你的电脑版本，下载后按安装说明打开即可。没有购买其他形象也没关系，基础木鱼永久免费，不用注册，也不用付款。" data-en="Choose your computer version and follow the setup guide. You can continue without buying another character: the base woodfish is always free, with no signup or payment required.">选择你的电脑版本，下载后按安装说明打开即可。没有购买其他形象也没关系，基础木鱼永久免费，不用注册，也不用付款。</p>
-        <p data-zh="Mac 首次使用需要开启「输入监控」，这样你在其他软件里打字时，木鱼也能跟着敲。Windows 通常没有这一步。安装手册会带你完成设置。" data-en="On Mac, first-time setup requires Input Monitoring so the woodfish can respond while you type in other apps. Windows usually has no equivalent permission step. The guide walks you through setup.">Mac 首次使用需要开启「输入监控」，这样你在其他软件里打字时，木鱼也能跟着敲。Windows 通常没有这一步。安装手册会带你完成设置。</p>
-        <p data-zh="当前为免签名公开测试版，系统可能显示未知发布者或安全提醒。请只从本官网下载；其他来源的安装包可能被篡改。" data-en="This is an unsigned public preview. Your system may show an unknown-publisher or security warning. Download only from this official website; installers from other sources may have been modified.">当前为免签名公开测试版，系统可能显示未知发布者或安全提醒。请只从本官网下载；其他来源的安装包可能被篡改。</p>
-        <a class="manual-link" href="install.html" data-zh="第一次安装？跟着步骤来" data-en="First time? Follow the setup guide">第一次安装？跟着步骤来</a>
+    <section class="download section" id="download"><div class="download-intro"><p class="eyebrow">基础木鱼直接免费下载</p><h2>先安装，即刻陪你上班。</h2><p>Windows / Mac 客户端无需账号、领取码、关注或进群。基础木鱼安装即用，更多形象凭码免费领取。</p><a class="button primary" href="download.html">免费下载客户端</a><a class="manual-link" href="install.html">查看安装与权限说明</a></div></section>
+
+    <section class="community section" id="feedback">
+      <div class="community-heading reveal">
+        <div>
+          <p class="eyebrow" data-zh="桌面上的一点快乐" data-en="A little desktop joy">桌面上的一点快乐</p>
+          <h2 data-zh="喜欢它的人，<br>说起它也会笑。" data-en="A little companion<br>worth talking about.">喜欢它的人，<br>说起它也会笑。</h2>
+        </div>
+        <p data-zh="这里有匿名聊天原话，也有根据用户反馈整理的体验短句。左右滑动，还能看更多。" data-en="A mix of anonymous user quotes and short impressions edited from feedback. Scroll sideways for more.">这里有匿名聊天原话，也有根据用户反馈整理的体验短句。左右滑动，还能看更多。</p>
       </div>
-      <div class="download-options">
-        <a class="download-row reveal" href="/api/gongde/downloads/niuma-merit-macos-0.8.2.dmg">
-          <span class="platform">macOS</span>
-          <span data-zh="0.8.2 · Universal 2 · DMG" data-en="0.8.2 · Universal 2 · DMG">0.8.2 · Universal 2 · DMG</span>
-          <b data-zh="前往下载 ↗" data-en="Download ↗">前往下载 ↗</b>
-        </a>
-        <a class="download-row reveal" href="/api/gongde/downloads/niuma-merit-windows-0.8.2-setup.exe">
-          <span class="platform">Windows</span>
-          <span data-zh="0.8.2 · Windows 10/11 · x64 安装程序" data-en="0.8.2 · Windows 10/11 · x64 installer">0.8.2 · Windows 10/11 · x64 安装程序</span>
-          <b data-zh="前往下载 ↗" data-en="Download ↗">前往下载 ↗</b>
-        </a>
-      </div>
-      <div class="install-note reveal">
-        <strong data-zh="关于形象包" data-en="About appearance packs">关于形象包</strong>
-        <p data-zh="免费包永久有效。每批可选择 1 至 5 个付费形象包；生成后，下载链接和每个形象的首次导入期限均为 24 小时，期限内重复下载不收费。下载整批文件后双击即可一次导入；已及时导入的形象可永久离线使用。过期后如需重新生成，整批统一收取 0.2 元。" data-en="Free packs never expire. Each paid batch contains 1–5 packs. Both the download link and each pack's first-import window last 24 hours. Double-click the downloaded batch file to import all packs at once. Packs imported in time remain available offline forever. A later regenerated batch costs ¥0.20 total.">免费包永久有效。每批可选择 1 至 5 个付费形象包；生成后，下载链接和每个形象的首次导入期限均为 24 小时，期限内重复下载不收费。下载整批文件后双击即可一次导入；已及时导入的形象可永久离线使用。过期后如需重新生成，整批统一收取 0.2 元。</p>
+      <div class="community-quotes reveal" aria-label="用户反馈与体验短句" tabindex="0">
+        <figure><blockquote data-zh="挺好玩的呀，本来我觉得今天好无聊" data-en="It's pretty fun. I was so bored today.">挺好玩的呀，本来我觉得今天好无聊</blockquote><figcaption data-zh="匿名聊天原话" data-en="Anonymous user quote">匿名聊天原话</figcaption></figure>
+        <figure><blockquote data-zh="给我同事也分享了" data-en="I shared it with my coworker too.">给我同事也分享了</blockquote><figcaption data-zh="匿名聊天原话" data-en="Anonymous user quote">匿名聊天原话</figcaption></figure>
+        <figure><p data-zh="下午犯困时，敲两下比盯着屏幕发呆有意思。" data-en="A couple of taps make a sleepy afternoon feel lighter.">下午犯困时，敲两下比盯着屏幕发呆有意思。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="桌面多了一点小动静，工作日也没那么无聊。" data-en="A little motion on the desktop makes workdays less dull.">桌面多了一点小动静，工作日也没那么无聊。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="看着功德数字往上跳，会想再敲一下。" data-en="Watching the merit count climb makes you want one more tap.">看着功德数字往上跳，会想再敲一下。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="小形象有点可爱，放在桌面角落刚刚好。" data-en="A cute little companion fits right into the corner of your desktop.">小形象有点可爱，放在桌面角落刚刚好。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="忙完一阵顺手碰一下，像给自己一个小小的停顿。" data-en="A quick tap after a busy stretch feels like a tiny pause.">忙完一阵顺手碰一下，像给自己一个小小的停顿。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="不同形象换着看，桌面不再一成不变。" data-en="Switching companions keeps the desktop feeling fresh.">不同形象换着看，桌面不再一成不变。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="不需要刻意安排时间，想起来就能玩两下。" data-en="No special time needed; just tap whenever you feel like it.">不需要刻意安排时间，想起来就能玩两下。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="有趣的小东西，很自然就想分享给同事。" data-en="It's the kind of small delight you want to share with coworkers.">有趣的小东西，很自然就想分享给同事。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="形象讨喜，细节里也能看出一点用心。" data-en="The companions are charming, with thoughtful details.">形象讨喜，细节里也能看出一点用心。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
+        <figure><p data-zh="从免费木鱼开始，先收获一份轻松。" data-en="Start with the free woodfish and enjoy a lighter moment.">从免费木鱼开始，先收获一份轻松。</p><figcaption data-zh="根据用户反馈整理" data-en="Edited from user feedback">根据用户反馈整理</figcaption></figure>
       </div>
     </section>
 
-    <section class="support section" id="support">
-      <div class="support-copy reveal">
-        <p class="eyebrow" data-zh="无广告的小项目" data-en="A small, ad-free project">无广告的小项目</p>
-        <h2 data-zh="没有广告，<br>只有一点点支持。" data-en="No ads.<br>Just a little support.">没有广告，<br>只有一点点支持。</h2>
-        <p data-zh="基础软件永久免费。少量服务费主要用于覆盖短信、支付、存储、带宽和持续维护成本。你也可以自愿赞赏项目；赞赏不解锁任何功能，不影响正常使用。" data-en="The base app stays free. Small service fees mainly cover SMS, payment, storage, bandwidth, and maintenance. Voluntary support unlocks nothing and never affects normal use.">基础软件永久免费。少量服务费主要用于覆盖短信、支付、存储、带宽和持续维护成本。你也可以自愿赞赏项目；赞赏不解锁任何功能，不影响正常使用。</p>
-      </div>
-      <div class="support-card reveal">
-        <strong data-zh="自愿赞赏" data-en="Voluntary support">自愿赞赏</strong>
-        <p data-zh="不构成商品购买、投资或公益捐赠。" data-en="Not a purchase, investment, or charitable donation.">不构成商品购买、投资或公益捐赠。</p>
-        <button class="button primary support-open" type="button" data-zh="支持项目" data-en="Support the project">支持项目</button>
-      </div>
-    </section>
+    <section class="section" id="support"><section class="flow-panel developer-entry"><div><h2>关注开发者抖音</h2><p>用抖音扫描右侧原始抖音码，进入开发者主页，加入粉丝群获取当前群码。</p><p>抖音号：<strong>1872941388</strong></p><div class="flow-actions"><button type="button" data-copy-developer>复制抖音号</button><a data-developer-homepage hidden rel="noreferrer" target="_blank">开发者抖音主页</a></div><p class="flow-meta">基础木鱼直接免费使用，不要求关注或进群。主页链接仅在平台提供真实地址后显示，不根据抖音号猜造链接。</p></div><img class="flow-qr" src="assets/developer-douyin.png" alt="开发者原始抖音码，使用抖音扫描进入主页"></section></section>
+    <section class="section" id="about-product"><h2>一个完全离线的桌面小伙伴。</h2><p>只记录操作次数，不读取具体输入内容，数据保存在本机。免费不代表源素材可以随意转载或转售。</p><p><a href="faq.html">免费领取与下载常见问题</a> · <a href="checkout.html?history=1">历史订单与旧权益恢复</a></p></section>
   </main>
-
-  <div class="payment-modal" hidden>
-    <div class="payment-backdrop" data-payment-close></div>
-    <section class="payment-sheet" role="dialog" aria-modal="true" aria-labelledby="payment-title">
-      <button class="payment-close" type="button" aria-label="关闭" data-payment-close>×</button>
-      <p class="eyebrow" data-zh="匿名权益码" data-en="Anonymous access code">匿名权益码</p>
-      <h2 id="payment-title" data-zh="一次选择最多 5 个，价格不随数量增加。" data-en="Choose up to 5 packs for one flat price.">一次选择最多 5 个，价格不随数量增加。</h2>
-      <p class="payment-copy" data-zh="不用注册，也不需要手机号。首次付款后会生成一个权益码，请截图或妥善保存；以后用它获取新形象包。" data-en="No account or phone number is required. Your first payment creates an access code; save it for future pack downloads.">不用注册，也不需要手机号。首次付款后会生成一个权益码，请截图或妥善保存；以后用它获取新形象包。</p>
-      <div class="selected-pack-summary"><strong id="modal-selected-count">已选择 4 / 5</strong><ul id="selected-pack-list"></ul></div>
-      <p class="payment-copy" data-zh="付款后请在 24 小时内下载并首次导入本批每个形象。多个形象会合成一个可直接双击导入的批次文件；已导入的形象可永久离线使用。" data-en="Download and first-import each pack within 24 hours after payment. Multiple packs arrive as one file you can double-click to import together. Imported packs stay available offline.">付款后请在 24 小时内下载并首次导入本批每个形象。多个形象会合成一个可直接双击导入的批次文件；已导入的形象可永久离线使用。</p>
-      <div class="phone-verification">
-        <button class="access-new" type="button" data-zh="首次购买·1 元" data-en="First purchase · ¥1">首次购买·1 元</button>
-        <label><span data-zh="已有权益码" data-en="Existing access code">已有权益码</span><input class="access-code-input" type="text" autocomplete="off" spellcheck="false" placeholder="GD-XXXX-XXXX-XXXX-XXXX-XXXX"></label>
-        <button class="access-restore" type="button" data-zh="使用权益码" data-en="Use access code">使用权益码</button>
-        <button class="access-history" type="button" data-zh="查看历史下载" data-en="View download history">查看历史下载</button>
-      </div>
-      <div class="selected-pack-summary access-history-panel" hidden></div>
-      <div class="selected-pack-summary access-code-result" hidden></div>
-      <div class="price-rules">
-        <div><strong>¥1</strong><span data-zh="永久官方形象库资格，首次可选最多 5 个" data-en="Permanent official access, up to 5 packs in the first batch">永久官方形象库资格，首次可选最多 5 个</span></div>
-        <div><strong>¥0.20</strong><span data-zh="以后每次重新生成一批，最多 5 个，整批统一收费" data-en="Each later regenerated batch of up to 5 packs, one flat fee">以后每次重新生成一批，最多 5 个，整批统一收费</span></div>
-      </div>
-      <div class="payment-channels" role="group" aria-label="支付方式">
-        <button class="payment-channel" type="button" data-channel="wechat" disabled><span>微信支付</span><small data-zh="扫码支付" data-en="Scan to pay">扫码支付</small></button>
-        <button class="payment-channel" type="button" data-channel="alipay" disabled><span>支付宝</span><small data-zh="电脑网站支付" data-en="Desktop web payment">电脑网站支付</small></button>
-      </div>
-      <div class="payment-summary"><span data-zh="应付金额" data-en="Total">应付金额</span><strong id="purchase-total">¥1.00</strong></div>
-      <button class="payment-submit" type="button" disabled data-zh="支付接口准备中" data-en="Payment integration in progress">支付接口准备中</button>
-      <p class="payment-status" aria-live="polite"></p>
-      <a class="manual-link" href="install.html#appearance-import" data-zh="查看批量导入方法" data-en="How to import the batch">查看批量导入方法</a>
-    </section>
-  </div>
-
-  <div class="support-modal" hidden>
-    <div class="payment-backdrop" data-support-close></div>
-    <section class="payment-sheet" role="dialog" aria-modal="true" aria-labelledby="support-title">
-      <button class="payment-close" type="button" aria-label="关闭" data-support-close>×</button>
-      <p class="eyebrow" data-zh="自愿赞赏" data-en="Voluntary support">自愿赞赏</p>
-      <h2 id="support-title" data-zh="谢谢你让这个小项目继续长大。" data-en="Thank you for helping this small project grow.">谢谢你让这个小项目继续长大。</h2>
-      <p class="payment-copy" data-zh="赞赏不需要权益码，不解锁商品或功能，也不影响任何正常服务。" data-en="Support requires no access code, unlocks no product or feature, and never affects regular service.">赞赏不需要权益码，不解锁商品或功能，也不影响任何正常服务。</p>
-      <div class="support-amounts" role="group" aria-label="赞赏金额">
-        <button type="button" data-support-amount="100">¥1</button>
-        <button type="button" data-support-amount="500">¥5</button>
-        <button type="button" data-support-amount="1000">¥10</button>
-      </div>
-      <div class="support-channels payment-channels" role="group" aria-label="赞赏方式">
-        <button class="payment-channel" type="button" data-support-channel="wechat" disabled><span>微信支付</span><small data-zh="扫码支付" data-en="Scan to pay">扫码支付</small></button>
-        <button class="payment-channel" type="button" data-support-channel="alipay" disabled><span>支付宝</span><small data-zh="电脑网站支付" data-en="Desktop web payment">电脑网站支付</small></button>
-      </div>
-      <div class="payment-summary"><span data-zh="赞赏金额" data-en="Support amount">赞赏金额</span><strong id="support-total">¥1.00</strong></div>
-      <button class="support-submit payment-submit" type="button" disabled data-zh="赞赏通道准备中" data-en="Support channel in progress">赞赏通道准备中</button>
-      <p class="support-status payment-status" aria-live="polite"></p>
-    </section>
-  </div>
 
   <footer>
     <div class="brand footer-brand"><span class="brand-seal">功</span><span data-zh="牛马电子功德" data-en="NiuMa Merit">牛马电子功德</span></div>
@@ -337,11 +154,13 @@
       <a href="https://github.com/Mr-shanqiu/niuma-ELEC-gongde">GitHub</a>
       <a href="privacy.html" data-zh="隐私" data-en="Privacy">隐私</a>
       <a href="contact.html" data-zh="联系" data-en="Contact">联系</a>
+      <a href="community.html" data-zh="创作者形象社区" data-en="Creator community">创作者形象社区</a>
+      <a href="creator.html" data-zh="创作者投稿" data-en="Submit a creation">创作者投稿</a>
       <a href="install.html" data-zh="安装帮助" data-en="Install help">安装帮助</a>
       <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">陕ICP备2026020359号</a>
     </div>
   </footer>
   <script src="pack-player.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="app.js?v=free-v2-20261008"></script>
 </body>
 </html>

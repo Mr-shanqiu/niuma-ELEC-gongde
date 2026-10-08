@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "db:migrate": "npm run build && node scripts/migrate.mjs",
     "start": "node dist/server.js",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build && node tests/run-local.mjs"
   },
   "dependencies": {
     "cos-nodejs-sdk-v5": "^3.0.0",
