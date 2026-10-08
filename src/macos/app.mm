@@ -1143,6 +1143,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.animationTimer = nil;
 }
 
+- (void)toggleHideDuringFullscreen:(id)sender {
+  (void)sender;
+  if (gIsolatedAcceptance) return;
+  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+  BOOL wasEnabled = [defaults objectForKey:kHideDuringFullscreenEnabled] == nil ||
+      [defaults boolForKey:kHideDuringFullscreenEnabled];
+  BOOL enabled = !wasEnabled;
+  [defaults setBool:enabled forKey:kHideDuringFullscreenEnabled];
+  self.window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+      (enabled ? 0 : NSWindowCollectionBehaviorFullScreenAuxiliary);
+}
+
 - (void)showContextMenu:(NSEvent *)event {
   NSMenu *menu = [[NSMenu alloc] init];
   NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:UiText(@"关于牛马电子功德", @"About NiuMa Merit")
@@ -1160,6 +1172,17 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       ? NSControlStateValueOn
       : NSControlStateValueOff;
   [menu addItem:launchAtLogin];
+  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+  BOOL hideDuringFullscreen = [defaults objectForKey:kHideDuringFullscreenEnabled] == nil ||
+      [defaults boolForKey:kHideDuringFullscreenEnabled];
+  NSMenuItem *fullscreen = [[NSMenuItem alloc]
+      initWithTitle:UiText(@"全屏时暂时隐藏", @"Hide during Full Screen")
+             action:@selector(toggleHideDuringFullscreen:)
+      keyEquivalent:@""];
+  fullscreen.target = self;
+  fullscreen.enabled = !gIsolatedAcceptance;
+  fullscreen.state = hideDuringFullscreen ? NSControlStateValueOn : NSControlStateValueOff;
+  [menu addItem:fullscreen];
   NSMenuItem *appearance = [[NSMenuItem alloc] initWithTitle:UiText(@"更换形象", @"Change Appearance")
                                                      action:@selector(showAppearancePicker:)
                                               keyEquivalent:@""];
