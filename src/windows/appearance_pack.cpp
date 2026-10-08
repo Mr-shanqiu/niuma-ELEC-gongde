@@ -50,6 +50,17 @@ constexpr unsigned char kPublicY[32] = {
     0xaf, 0x21, 0xb8, 0x17, 0xa2, 0x2c, 0x9e, 0x05, 0x1d, 0xf6, 0x17,
     0xd9, 0xdc, 0xc1, 0xb3, 0xb8, 0x99, 0x87, 0x62, 0x22, 0xb7};
 
+constexpr unsigned char kCurrentPublicX[32] = {
+    0x24, 0x52, 0xb3, 0xdb, 0xef, 0xcf, 0x06, 0x4c, 0x4c, 0xf2, 0x02,
+    0x22, 0x96, 0xd3, 0x6b, 0x22, 0x99, 0xac, 0x61, 0x2e, 0x42, 0xeb,
+    0x26, 0x7c, 0x55, 0x49, 0x42, 0xdf, 0xc5, 0x79, 0xb2, 0x69
+};
+constexpr unsigned char kCurrentPublicY[32] = {
+    0x21, 0xff, 0xf4, 0x90, 0x10, 0xdc, 0x6f, 0xd0, 0xff, 0xde, 0xa4,
+    0xdf, 0x2a, 0x51, 0x7d, 0x72, 0xd1, 0x7a, 0x3b, 0xa8, 0x31, 0x7c,
+    0xdd, 0x0a, 0xfc, 0xe2, 0xbd, 0x03, 0xae, 0xf2, 0x72, 0x7c
+};
+
 struct JsonValue {
   enum class Kind { Null, Boolean, Number, String, Array, Object };
   Kind kind = Kind::Null;
@@ -61,7 +72,8 @@ struct JsonValue {
 };
 
 struct LicenseInfo {
-  bool timed = false;
+  bool signedDelivery = false;
+  bool perpetual = false;
   std::int64_t issuedAt = 0;
   std::int64_t importBefore = 0;
   std::string downloadId;
@@ -497,7 +509,6 @@ bool VerifyLicenseSignature(const std::string& message,
   std::array<unsigned char, 32> digest = {};
   if (!Sha256(parts, &digest)) return false;
   BCRYPT_ALG_HANDLE algorithm = nullptr;
-  BCRYPT_KEY_HANDLE key = nullptr;
   struct PublicBlob {
     BCRYPT_ECCKEY_BLOB header;
     unsigned char x[32];
@@ -505,16 +516,24 @@ bool VerifyLicenseSignature(const std::string& message,
   } blob = {};
   blob.header.dwMagic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
   blob.header.cbKey = 32;
-  std::copy(std::begin(kPublicX), std::end(kPublicX), blob.x);
-  std::copy(std::begin(kPublicY), std::end(kPublicY), blob.y);
-  bool valid = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_ECDSA_P256_ALGORITHM,
-                                            nullptr, 0) >= 0 &&
-      BCryptImportKeyPair(algorithm, nullptr, BCRYPT_ECCPUBLIC_BLOB, &key,
-          reinterpret_cast<PUCHAR>(&blob), sizeof(blob), 0) >= 0 &&
-      BCryptVerifySignature(key, nullptr, digest.data(),
-          static_cast<ULONG>(digest.size()), signature.data(),
-          static_cast<ULONG>(signature.size()), 0) >= 0;
-  if (key != nullptr) BCryptDestroyKey(key);
+  bool valid = false;
+  if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_ECDSA_P256_ALGORITHM,
+                                   nullptr, 0) >= 0) {
+    const unsigned char *trustedX[] = {kPublicX, kCurrentPublicX};
+    const unsigned char *trustedY[] = {kPublicY, kCurrentPublicY};
+    for (size_t index = 0; index < 2 && !valid; ++index) {
+      std::copy(trustedX[index], trustedX[index] + 32, blob.x);
+      std::copy(trustedY[index], trustedY[index] + 32, blob.y);
+      BCRYPT_KEY_HANDLE key = nullptr;
+      if (BCryptImportKeyPair(algorithm, nullptr, BCRYPT_ECCPUBLIC_BLOB, &key,
+              reinterpret_cast<PUCHAR>(&blob), sizeof(blob), 0) >= 0) {
+        valid = BCryptVerifySignature(key, nullptr, digest.data(),
+            static_cast<ULONG>(digest.size()), signature.data(),
+            static_cast<ULONG>(signature.size()), 0) >= 0;
+      }
+      if (key != nullptr) BCryptDestroyKey(key);
+    }
+  }
   if (algorithm != nullptr) BCryptCloseAlgorithmProvider(algorithm, 0);
   return valid;
 }
@@ -545,6 +564,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
   if (!StringValue(Member(root, "id"), 96, &pack->id) ||
       !IsSafeId(pack->id) ||
       !StringValue(Member(root, "version"), 32, &pack->version) ||
+      pack->version.find_first_of("\r\n") != std::string::npos ||
       !StringValue(Member(root, "name_zh"), 128, &nameZh) ||
       !StringValue(Member(root, "name_en"), 128, &nameEn) ||
       !StringValue(Member(root, "author"), 128, &author) ||
@@ -557,6 +577,36 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
       !NumberInRange(Member(root, "plus_y"), 174, 174, &plusY)) {
     SetError(error, L"形象包元数据不符合 1.0 规范。");
     return false;
+  }
+  // Existing official sources use these actual issuer strings.
+  if ((pack->id.compare(0, 9, "official.") == 0 ||
+       pack->id.compare(0, 9, "zqscreen.") == 0 ||
+       pack->id.compare(0, 8, "creator.") == 0) && Member(root, "license") == nullptr) {
+    SetError(error, L"平台形象包必须包含有效的签名授权。");
+    return false;
+  }
+  if ((pack->id.compare(0, 9, "official.") == 0 && publisher != "NiuMa Merit") ||
+      (pack->id.compare(0, 9, "zqscreen.") == 0 && publisher != "zqscreen")) {
+    SetError(error, L"非官方形象包不能使用官方标识，请使用自己的形象包标识。");
+    return false;
+  }
+  // Only the platform creator namespace requires the reviewed-delivery format.
+  if (pack->id.compare(0, 8, "creator.") == 0) {
+    const auto lowerHex = [](unsigned char ch) {
+      return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+    };
+    const auto slugCharacter = [](unsigned char ch) {
+      return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || ch == '-';
+    };
+    if (publisher != "community" || pack->id.size() < 42 || pack->id.size() > 73 ||
+        pack->id[40] != '.' ||
+        !std::all_of(pack->id.begin() + 8, pack->id.begin() + 40, lowerHex) ||
+        !std::all_of(pack->id.begin() + 41, pack->id.end(), slugCharacter) ||
+        pack->reviewId.size() != 32 ||
+        !std::all_of(pack->reviewId.begin(), pack->reviewId.end(), lowerHex)) {
+      SetError(error, L"社区形象包标识或审核信息无效，请从官网重新下载。");
+      return false;
+    }
   }
   pack->nameZh = Utf8ToWide(nameZh);
   pack->nameEn = Utf8ToWide(nameEn);
@@ -572,20 +622,22 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     const JsonValue* value = Member(root, "license");
     std::string mode;
     double issued = 0, deadline = 0;
-    if (value == nullptr || !HasExactKeys(*value, {"mode", "issued_at",
-          "import_before", "download_id", "content_sha256", "signature"}) ||
-        !StringValue(Member(*value, "mode"), 16, &mode) || mode != "timed" ||
+    if (value == nullptr || !StringValue(Member(*value, "mode"), 16, &mode) ||
+        (mode != "timed" && mode != "perpetual") ||
+        !(mode == "perpetual"
+          ? HasExactKeys(*value, {"mode", "issued_at", "download_id", "content_sha256", "signature"})
+          : HasExactKeys(*value, {"mode", "issued_at", "import_before", "download_id", "content_sha256", "signature"})) ||
         !NumberInRange(Member(*value, "issued_at"), 1577836800, 4102444800, &issued) ||
-        !NumberInRange(Member(*value, "import_before"), 1577836800, 4102444800, &deadline) ||
-        std::floor(issued) != issued || std::floor(deadline) != deadline ||
-        deadline <= issued || deadline - issued > 86400 ||
+        std::floor(issued) != issued ||
+        (mode == "timed" && (!NumberInRange(Member(*value, "import_before"), 1577836800, 4102444800, &deadline) ||
+          std::floor(deadline) != deadline || deadline <= issued || deadline - issued > 86400)) ||
         !StringValue(Member(*value, "download_id"), 128, &license->downloadId) ||
         license->downloadId.size() < 16 ||
         !StringValue(Member(*value, "content_sha256"), 64, &license->contentHash) ||
         license->contentHash.size() != 64 ||
         !StringValue(Member(*value, "signature"), 128, &license->signature) ||
         license->signature.size() != 128) {
-      SetError(error, L"限时导入凭证格式无效。");
+      SetError(error, L"形象包授权凭证格式无效。");
       return false;
     }
     auto safeToken = [](const std::string& value) {
@@ -603,7 +655,8 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
       SetError(error, L"限时导入凭证包含不允许的字符。");
       return false;
     }
-    license->timed = true;
+    license->signedDelivery = true;
+    license->perpetual = mode == "perpetual";
     license->issuedAt = static_cast<std::int64_t>(issued);
     license->importBefore = static_cast<std::int64_t>(deadline);
   }
@@ -719,6 +772,7 @@ bool LoadAppearancePackFile(const std::wstring& path,
                             bool enforceImportDeadline,
                             std::unique_ptr<AppearancePack>* output,
                             std::wstring* error) {
+  (void)enforceImportDeadline; // Neither V1 nor V2 has a local clock gate.
   WIN32_FILE_ATTRIBUTE_DATA attributes = {};
   if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) ||
       (attributes.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
@@ -815,11 +869,12 @@ bool LoadAppearancePackFile(const std::wstring& path,
       return false;
     }
   }
-  if (license.timed) {
+  if (license.signedDelivery) {
     const std::string actualHash = ContentHash(pngFiles);
-    const std::string message = "NIUMA-PACK-LICENSE-V1\n" + pack->id + "\n" +
+    const std::string message = (license.perpetual
+        ? "NIUMA-PACK-LICENSE-V2\nperpetual\n" : "NIUMA-PACK-LICENSE-V1\n") + pack->id + "\n" +
         pack->version + "\n" + std::to_string(license.issuedAt) + "\n" +
-        std::to_string(license.importBefore) + "\n" + license.downloadId +
+        (license.perpetual ? "" : std::to_string(license.importBefore) + "\n") + license.downloadId +
         "\n" + license.contentHash;
     if (actualHash.empty() || actualHash != license.contentHash) {
       SetError(error, L"形象包内容与授权凭证不匹配。");
@@ -828,21 +883,6 @@ bool LoadAppearancePackFile(const std::wstring& path,
     if (!VerifyLicenseSignature(message, license.signature)) {
       SetError(error, L"形象包授权签名无效。");
       return false;
-    }
-    if (enforceImportDeadline) {
-#ifdef NIUMA_LICENSE_TEST_TIME
-      const std::int64_t now = NIUMA_LICENSE_TEST_TIME;
-#else
-      const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
-#endif
-      if (now + 300 < license.issuedAt) {
-        SetError(error, L"电脑时间早于形象包签发时间，请检查系统时间。");
-        return false;
-      }
-      if (now > license.importBefore) {
-        SetError(error, L"形象包首次导入期限已过，请登录官网重新下载，无需再次购买。");
-        return false;
-      }
     }
   }
   pack->sourcePath = path;
@@ -938,6 +978,22 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
   CreateDirectoryW(directory.c_str(), nullptr);
   const std::wstring destination =
       directory + L"\\" + FileNameForId(validated->id);
+  const DWORD destinationAttributes = GetFileAttributesW(destination.c_str());
+  if (destinationAttributes != INVALID_FILE_ATTRIBUTES) {
+    std::unique_ptr<AppearancePack> existing;
+    if ((destinationAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+        !LoadAppearancePackFile(destination, false, &existing, error) ||
+        existing->publisher != validated->publisher) {
+      SetError(error, L"同名形象包的来源不一致或原包无法校验，不能覆盖原有形象包。");
+      return false;
+    }
+  } else {
+    const DWORD destinationError = GetLastError();
+    if (destinationError != ERROR_FILE_NOT_FOUND && destinationError != ERROR_PATH_NOT_FOUND) {
+      SetError(error, L"无法检查原有形象包，未执行覆盖。");
+      return false;
+    }
+  }
   const std::wstring temporary = destination + L".incoming";
   DeleteFileW(temporary.c_str());
   if (!CopyFileW(sourcePath.c_str(), temporary.c_str(), FALSE)) {
@@ -946,7 +1002,7 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
   }
   std::unique_ptr<AppearancePack> copied;
   if (!LoadAppearancePackFile(temporary, true, &copied, error) ||
-      copied->id != validated->id ||
+      copied->id != validated->id || copied->publisher != validated->publisher ||
       !MoveFileExW(temporary.c_str(), destination.c_str(),
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
     DeleteFileW(temporary.c_str());

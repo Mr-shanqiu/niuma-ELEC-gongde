@@ -1,92 +1,58 @@
 param(
-  [string]$BuildDir = "build-windows",
-  [string]$Config = "Release"
+  [string]$BuildDir = 'build-windows',
+  [string]$Config = 'Release',
+  [switch]$ClientOnly,
+  [string]$SignedFixtureDir = 'ci/windows-perpetual-fixtures',
+  [string]$ExpectedVersion = ''
 )
 
 $ErrorActionPreference = 'Stop'
-
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path -Parent
-$distDir = Join-Path $repoRoot "dist"
-$exeName = "niuma-merit.exe"
-$version = (Get-Content (Join-Path $repoRoot "VERSION") -Raw).Trim()
-$zipName = "niuma-merit-windows-$version-$Config.zip"
-$gen = "Visual Studio 17 2022"
+$buildRoot = if ([IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $repoRoot $BuildDir }
+$distDir = Join-Path $repoRoot 'dist'
+$version = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
+if ($ExpectedVersion -and $version -ne $ExpectedVersion) { throw 'Source version does not match the release version' }
+if ($env:GITHUB_ENV) { Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_PERPETUAL_STATUS=NOT_RUN' -Encoding utf8 }
 
-$fixtureDir = Join-Path $repoRoot "$BuildDir\pack-fixtures"
-New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
-$fixturePack = Join-Path $fixtureDir "woodfish-sample.nmgpack"
-python (Join-Path $repoRoot "scripts\appearance-pack.py") build `
-  (Join-Path $repoRoot "assets\appearance-packs\woodfish-sample") $fixturePack
-if ($LASTEXITCODE -ne 0) { throw "Could not build appearance pack fixture" }
-$luckyCatPack = Join-Path $fixtureDir "lucky-cat-schema3.nmgpack"
-python (Join-Path $repoRoot "scripts\appearance-pack.py") build `
-  (Join-Path $repoRoot "assets\appearance-packs\lucky-cat") $luckyCatPack
-if ($LASTEXITCODE -ne 0) { throw "Could not build schema-3 lucky cat fixture" }
-$batchSource = Join-Path $fixtureDir "batch-source"
-New-Item -ItemType Directory -Force -Path $batchSource | Out-Null
-Copy-Item $fixturePack (Join-Path $batchSource "woodfish-sample.nmgpack") -Force
-Copy-Item $luckyCatPack (Join-Path $batchSource "lucky-cat.nmgpack") -Force
-$batchZip = Join-Path $fixtureDir "two-packs.zip"
-$batchArchive = Join-Path $fixtureDir "two-packs.nmgpacks"
-if (Test-Path $batchArchive) { Remove-Item $batchArchive -Force }
-Compress-Archive -Path (Join-Path $batchSource "*.nmgpack") -DestinationPath $batchZip -Force
-Move-Item $batchZip $batchArchive -Force
-python -c "import zipfile,sys; print('BATCH_ENTRIES=' + ','.join(zipfile.ZipFile(sys.argv[1]).namelist()))" $batchArchive
-
-cmake -S $repoRoot -B $BuildDir -G $gen -A x64
-if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
-cmake --build $BuildDir --config $Config
-if ($LASTEXITCODE -ne 0) { throw "Windows compilation failed" }
-
-$packTest = Join-Path $repoRoot "$BuildDir\$Config\niuma-pack-test.exe"
-if (-not (Test-Path $packTest)) {
-  $packTest = Join-Path $repoRoot "$BuildDir\src\windows\$Config\niuma-pack-test.exe"
-}
-if (-not (Test-Path $packTest)) { throw "Could not locate appearance pack test" }
-$testInstallDir = Join-Path $fixtureDir "installed"
-New-Item -ItemType Directory -Force -Path $testInstallDir | Out-Null
-& $packTest $testInstallDir $fixturePack
-Write-Host "SINGLE_PACK_EXIT=$LASTEXITCODE"
-if ($LASTEXITCODE -ne 0) { throw "Single appearance pack runtime test failed" }
-$batchInstallDir = Join-Path $fixtureDir "installed-batch"
-New-Item -ItemType Directory -Force -Path $batchInstallDir | Out-Null
-& $packTest $batchInstallDir $fixturePack $batchArchive
-Write-Host "BATCH_PACK_EXIT=$LASTEXITCODE"
-if ($LASTEXITCODE -ne 0) { throw "Batch appearance pack runtime test failed" }
-$catInstallDir = Join-Path $fixtureDir "installed-lucky-cat"
-New-Item -ItemType Directory -Force -Path $catInstallDir | Out-Null
-& $packTest $catInstallDir $luckyCatPack
-if ($LASTEXITCODE -ne 0) { throw "Schema-3 lucky cat runtime test failed" }
-
-$srcExe = Join-Path $repoRoot "$BuildDir\$Config\niuma-merit.exe"
-if (-not (Test-Path $srcExe)) {
-  $srcExe = Join-Path $repoRoot "$BuildDir\src\windows\$Config\niuma-merit.exe"
-}
-if (-not (Test-Path $srcExe)) {
-  $srcExe = Join-Path $repoRoot "$BuildDir\src\niuma-merit.exe"
-}
-if (-not (Test-Path $srcExe)) {
-  throw "Could not locate built exe: $srcExe"
-}
-
+# Compile the production GUI only, without injecting test trust anchors.
+& cmake -S $repoRoot -B $buildRoot -G 'Visual Studio 17 2022' -A x64
+if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
+& cmake --build $buildRoot --config $Config --target niuma-merit
+if ($LASTEXITCODE -ne 0) { throw 'Windows client compilation failed' }
+$srcExe = @(
+  (Join-Path $buildRoot "$Config/niuma-merit.exe"),
+  (Join-Path $buildRoot "src/windows/$Config/niuma-merit.exe"),
+  (Join-Path $buildRoot 'src/niuma-merit.exe')
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $srcExe) { throw 'Could not locate built client' }
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-$distExe = Join-Path $distDir $exeName
-Copy-Item $srcExe $distExe -Force
+$distExe = Join-Path $distDir 'niuma-merit.exe'
+Copy-Item -LiteralPath $srcExe -Destination $distExe -Force
 
-$zipPath = Join-Path $distDir $zipName
-if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-Compress-Archive -Path $distExe -DestinationPath $zipPath -Force
-
-$maximumBaseBytes = 10 * 1024 * 1024
-if ((Get-Item $distExe).Length -ge $maximumBaseBytes -or
-    (Get-Item $zipPath).Length -ge $maximumBaseBytes) {
-  throw "Windows base package exceeds the 10MB product limit"
+$releaseEvidenceDir = Join-Path $buildRoot ('release-evidence-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $releaseEvidenceDir | Out-Null
+$artifactArguments = @{
+  ExecutablePath = $distExe; ExpectedVersion = $version; ArtifactKind = 'client'; Configuration = $Config;
+  ReceiptPath = Join-Path $releaseEvidenceDir 'client-artifact.json'
 }
-
+& (Join-Path $repoRoot 'scripts/verify-windows-artifact.ps1') @artifactArguments
+if ($env:GITHUB_ENV) { Add-Content -LiteralPath $env:GITHUB_ENV -Value "WINDOWS_RELEASE_EVIDENCE=$releaseEvidenceDir" -Encoding utf8 }
+$zipPath = Join-Path $distDir "niuma-merit-windows-$version-$Config.zip"
+if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+Compress-Archive -LiteralPath $distExe -DestinationPath $zipPath
+$maximumBaseBytes = 10 * 1024 * 1024
+if ((Get-Item $distExe).Length -ge $maximumBaseBytes -or (Get-Item $zipPath).Length -ge $maximumBaseBytes) {
+  throw 'Windows base package exceeds the 10MB product limit'
+}
 "EXE=$distExe"
 "ZIP=$zipPath"
-"EXE_BYTES=$( (Get-Item $distExe).Length )"
-"ZIP_BYTES=$( (Get-Item $zipPath).Length )"
-"APPEARANCE_PACK_TEST=PASS"
-"APPEARANCE_BATCH_TEST=PASS"
-"LUCKY_CAT_SCHEMA3_TEST=PASS"
+"WINDOWS_RELEASE_EVIDENCE=$releaseEvidenceDir"
+if ($ClientOnly) {
+  'NORMAL_GUI_CLIENT_BUILD=PASS scope=compile-and-artifact-metadata-only'
+  'IMPORTER_FIXTURES=NOT_RUN'
+} else {
+  & (Join-Path $repoRoot 'scripts/test-windows-perpetual.ps1') `
+    -BuildDir $buildRoot -Config $Config -SignedFixtureDir $SignedFixtureDir `
+    -ClientPath $distExe -ExpectedVersion $version -EvidenceDir $releaseEvidenceDir
+}
+'INSTALLED_NORMAL_GUI_ACCEPTANCE=NOT_RUN'

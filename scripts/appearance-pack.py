@@ -23,6 +23,7 @@ ROOT_KEYS_V1 = {"schema_version", "id", "version", "name_zh", "name_en", "author
 ROOT_KEYS_V2 = ROOT_KEYS_V1 | {"license"}
 LICENSE_KEYS = {"mode", "issued_at", "import_before", "download_id",
                 "content_sha256", "signature"}
+PERPETUAL_LICENSE_KEYS = LICENSE_KEYS - {"import_before"}
 LAYER_KEYS = {"image", "frame", "anchor", "keyframes"}
 FRAME_KEYS = {"t", "x", "y", "rotation", "scale", "alpha"}
 PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
@@ -30,6 +31,14 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKsX8RSYB05zE4p7P+bYWleMceGcn
 QRoBJtPXtTUqbb1JuKb3bHrig2DxgK8huBeiLJ4FHfYX2dzBs7iZh2Iitw==
 -----END PUBLIC KEY-----
 """
+# Same current P-256 anchor as NMCurrentPublicKey / kCurrentPublicX/Y.
+# Keep the previous anchor for historical delivery files; never trust source keys.
+CURRENT_PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJFKz2+/PBkxM8gIiltNrIpmsYS5C
+6yZ8VUlC38V5smkh//SQENxv0P/epN8qUX1y0Xo7qDF83Qr84r0DrvJyfA==
+-----END PUBLIC KEY-----
+"""
+TRUSTED_PUBLIC_KEYS = (PUBLIC_KEY_PEM, CURRENT_PUBLIC_KEY_PEM)
 
 
 def fail(message):
@@ -67,6 +76,15 @@ def content_hash(files):
 
 def license_message(manifest):
     license_data = manifest["license"]
+    if any("\n" in manifest[key] or "\r" in manifest[key] for key in ("id", "version")):
+        fail("license message fields must not contain newlines")
+    if license_data["mode"] == "perpetual":
+        return (
+            "NIUMA-PACK-LICENSE-V2\nperpetual\n"
+            f"{manifest['id']}\n{manifest['version']}\n"
+            f"{license_data['issued_at']}\n{license_data['download_id']}\n"
+            f"{license_data['content_sha256']}"
+        ).encode("utf-8")
     return (
         "NIUMA-PACK-LICENSE-V1\n"
         f"{manifest['id']}\n{manifest['version']}\n"
@@ -127,15 +145,17 @@ def verify_signature(manifest):
         public_key = root / "public.pem"
         message = root / "message.bin"
         signature = root / "signature.der"
-        public_key.write_bytes(PUBLIC_KEY_PEM)
         message.write_bytes(license_message(manifest))
         signature.write_bytes(raw_to_der(raw))
-        result = subprocess.run(
-            ["openssl", "dgst", "-sha256", "-verify", str(public_key),
-             "-signature", str(signature), str(message)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        if result.returncode != 0:
-            fail("license signature is invalid")
+        for trusted_key in TRUSTED_PUBLIC_KEYS:
+            public_key.write_bytes(trusted_key)
+            result = subprocess.run(
+                ["openssl", "dgst", "-sha256", "-verify", str(public_key),
+                 "-signature", str(signature), str(message)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            if result.returncode == 0:
+                return
+        fail("license signature is invalid")
 
 
 def validate_payload(files):
@@ -210,15 +230,18 @@ def validate_payload(files):
         png_dimensions(files[name], name)
     if schema == 2 or (schema == 3 and "license" in manifest):
         license_data = manifest["license"]
-        if not isinstance(license_data, dict) or set(license_data) != LICENSE_KEYS:
+        if not isinstance(license_data, dict):
             fail("license fields are invalid")
-        if license_data.get("mode") != "timed":
-            fail("schema 2 requires timed import mode")
+        mode = license_data.get("mode")
+        if mode not in ("timed", "perpetual") or set(license_data) != (
+                PERPETUAL_LICENSE_KEYS if mode == "perpetual" else LICENSE_KEYS):
+            fail("license mode or fields are invalid")
         issued = license_data.get("issued_at")
         deadline = license_data.get("import_before")
-        if not isinstance(issued, int) or not isinstance(deadline, int) or \
-                not 1577836800 <= issued <= 4102444800 or \
-                not issued < deadline <= issued + 86400:
+        if type(issued) is not int or not 1577836800 <= issued <= 4102444800:
+            fail("issued_at must be an integer timestamp in range")
+        if mode == "timed" and (type(deadline) is not int or
+                not issued < deadline <= min(issued + 86400, 4102444800)):
             fail("timed import window must be no more than 24 hours")
         if not isinstance(license_data.get("download_id"), str) or \
                 not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", license_data["download_id"]):
@@ -269,7 +292,7 @@ def write_archive(files, output):
 def command_validate(path):
     files = read_archive(path) if path.is_file() else read_directory(path)
     manifest = validate_payload(files)
-    mode = "timed" if "license" in manifest else "free"
+    mode = manifest["license"]["mode"] if "license" in manifest else "source"
     print(f"VALID id={manifest['id']} version={manifest['version']} mode={mode} files={len(files)}")
 
 
@@ -277,13 +300,13 @@ def command_build(source, output):
     files = read_directory(source)
     manifest = validate_payload(files)
     if manifest["schema_version"] not in (1, 3) or "license" in manifest:
-        fail("build creates permanent free packs; use sign for timed packs")
+        fail("build creates unsigned source packs; use sign for delivery packs")
     write_archive(files, output)
     command_validate(output)
     print(f"BUILT path={output} bytes={output.stat().st_size} id={manifest['id']}")
 
 
-def command_sign(source, output, private_key, valid_hours, download_id, issued_at):
+def command_sign(source, output, private_key, valid_hours, download_id, issued_at, license_mode="timed"):
     files = read_directory(source)
     manifest = validate_payload(files)
     if manifest["schema_version"] not in (1, 3) or "license" in manifest:
@@ -293,9 +316,9 @@ def command_sign(source, output, private_key, valid_hours, download_id, issued_a
     issued = int(time.time()) if issued_at is None else issued_at
     manifest["schema_version"] = 3 if manifest["schema_version"] == 3 else 2
     manifest["license"] = {
-        "mode": "timed",
+        "mode": license_mode,
         "issued_at": issued,
-        "import_before": issued + valid_hours * 3600,
+        **({"import_before": issued + valid_hours * 3600} if license_mode == "timed" else {}),
         "download_id": download_id or secrets.token_hex(16),
         "content_sha256": content_hash(files),
         "signature": "0" * 128,
@@ -313,7 +336,7 @@ def command_sign(source, output, private_key, valid_hours, download_id, issued_a
     validate_payload(files)
     write_archive(files, output)
     command_validate(output)
-    print(f"SIGNED path={output} import_before={manifest['license']['import_before']} id={manifest['id']}")
+    print(f"SIGNED path={output} mode={license_mode} import_before={manifest['license'].get('import_before', 'none')} id={manifest['id']}")
 
 
 def main():
@@ -329,6 +352,7 @@ def main():
     sign.add_argument("output", type=pathlib.Path)
     sign.add_argument("--private-key", type=pathlib.Path, required=True)
     sign.add_argument("--valid-hours", type=int, default=24)
+    sign.add_argument("--license-mode", choices=("timed", "perpetual"), default="timed")
     sign.add_argument("--download-id")
     sign.add_argument("--issued-at", type=int)
     args = parser.parse_args()
@@ -339,7 +363,7 @@ def main():
             command_build(args.source, args.output)
         else:
             command_sign(args.source, args.output, args.private_key, args.valid_hours,
-                         args.download_id, args.issued_at)
+                         args.download_id, args.issued_at, args.license_mode)
     except (OSError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as error:
         print(f"INVALID: {error}", file=sys.stderr)
         return 1

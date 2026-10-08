@@ -5,6 +5,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      require_signed_fixtures:
+        description: Require signed importer evidence for a formal 0.9.0 installer
+        type: boolean
+        default: true
+      run_legacy_expiry:
+        description: Run unrelated legacy expiry diagnostics (nonblocking)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,17 +29,51 @@ jobs:
 
       - name: Read version
         shell: bash
-        run: echo "VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          test "$version" = "0.9.0" || { echo "Expected formal version 0.9.0"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Set up fixture archive dependency
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up public-only signature verification dependency
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Build Release package
         shell: powershell
-        run: ./scripts/build-windows.ps1
+        run: ./scripts/build-windows.ps1 -ExpectedVersion $env:VERSION
+
+      - name: Verify controlled source expiry regression
+        if: github.event_name == 'workflow_dispatch' && inputs.run_legacy_expiry
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & ./scripts/test-windows-owner-expiry.ps1 `
+            -ReceiverPath ./ci/windows-source-receiver/Receive-WindowsSource.ps1 `
+            -FixturesPath ./ci/windows-source-receiver/tests/expiry-fixtures.json `
+            -OriginalBlockPath ./ci/windows-source-receiver/tests/original-date-block.ps1 |
+            Tee-Object -FilePath build-windows/expiry-regression.json
+          if ($LASTEXITCODE -ne 0) { throw "Controlled source expiry regression failed" }
 
       - name: Verify offline-only client
         shell: bash
         run: ./scripts/audit-offline.sh
 
+      - name: Require formal release importer evidence
+        if: github.event_name != 'workflow_dispatch' || inputs.require_signed_fixtures
+        shell: powershell
+        run: |
+          if ($env:WINDOWS_PERPETUAL_STATUS -ne 'PASS') {
+            throw "Client compiled, but formal 0.9.0 release is blocked: supply frozen signed perpetual/expired fixtures covering both production public keys. No private signing key belongs in this workflow."
+          }
+
       - name: Build Windows installer
+        if: env.WINDOWS_PERPETUAL_STATUS == 'PASS'
         shell: powershell
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -41,11 +84,56 @@ jobs:
             throw "Inno Setup compiler was not found"
           }
           & $iscc "/DMyAppVersion=$env:VERSION" "installer\windows\niuma-merit.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
+          if (-not $env:WINDOWS_RELEASE_EVIDENCE) {
+            throw "The client artifact binding directory is missing"
+          }
+          $artifactArguments = @{
+            ExecutablePath = "dist\niuma-merit-windows-$env:VERSION-setup.exe"
+            ExpectedVersion = $env:VERSION
+            ArtifactKind = 'installer'
+            ReceiptPath = Join-Path $env:WINDOWS_RELEASE_EVIDENCE 'installer-artifact.json'
+          }
+          & ./scripts/verify-windows-artifact.ps1 @artifactArguments
 
       - name: Upload Windows installer
+        if: env.WINDOWS_PERPETUAL_STATUS == 'PASS'
         uses: actions/upload-artifact@v4
         with:
           name: niuma-merit-windows-${{ env.VERSION }}-setup
           path: dist/niuma-merit-windows-${{ env.VERSION }}-setup.exe
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Retain client-only build (not formal release evidence)
+        if: always() && env.WINDOWS_PERPETUAL_STATUS != 'PASS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-client-only-${{ env.VERSION }}-${{ github.run_id }}
+          path: dist/niuma-merit-windows-${{ env.VERSION }}-Release.zip
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Retain Windows artifact version and byte bindings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifact-bindings-${{ github.run_id }}
+          path: |
+            build-windows/release-evidence-*/*.json
+            build-windows/expiry-regression.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Retain perpetual production importer runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perpetual-windows-runtime-${{ github.run_id }}
+          path: |
+            build-windows/pack-fixtures/perpetual-runtime-*/fixture-receipt.json
+            build-windows/pack-fixtures/perpetual-runtime-*/runtime-results.json
+            build-windows/pack-fixtures/perpetual-runtime-*/*.stdout.log
+            build-windows/pack-fixtures/perpetual-runtime-*/*.stderr.log
+          if-no-files-found: ignore
           retention-days: 14

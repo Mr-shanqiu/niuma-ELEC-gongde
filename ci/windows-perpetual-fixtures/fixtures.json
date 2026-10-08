@@ -1,0 +1,16 @@
+{
+  "syntheticOnly": true,
+  "noCustomerData": true,
+  "files": [
+    {
+      "file": "synthetic-perpetual-current.nmgpack",
+      "sha256": "db011cac79e57438e3d48c41cb79bc600eb9bb406babb262b6ea0821b447ce56",
+      "bytes": 1368
+    },
+    {
+      "file": "synthetic-timed-current.nmgpack",
+      "sha256": "612e73e36f1800133166ac6a21ed5f75677c5401520953b366e948e9f2171144",
+      "bytes": 1387
+    }
+  ]
+}

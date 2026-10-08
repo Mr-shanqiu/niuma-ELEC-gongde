@@ -11,14 +11,29 @@
 // RCDATA = 10
 101 10 "woodfish.png"
 102 10 "mallet.png"
+110 10 "developer-douyin.png"
 // ICON is a resource-script keyword. Do not replace it with numeric type 1:
 // Win32 resource type 1 is RT_CURSOR, not an application icon.
 103 ICON "appicon.ico"
 
-// VS_VERSION_INFO = 16
-VS_VERSION_INFO VERSIONINFO
-  FILEVERSION 0,8,2,0
-  PRODUCTVERSION 0,8,2,0
+// Native About dialog; strings are localized by app.cpp, not by the RC compiler.
+// WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT.
+3000 DIALOGEX 0, 0, 310, 300
+STYLE 0x80C800C0
+CAPTION "About NiuMa Merit"
+FONT 9, "Segoe UI"
+BEGIN
+  LTEXT "", 3001, 12, 12, 286, 140
+  // WS_CHILD | WS_VISIBLE | SS_OWNERDRAW.
+  CONTROL "", 3002, "STATIC", 0x5000000D, 80, 155, 150, 120
+  DEFPUSHBUTTON "OK", 1, 248, 281, 50, 14
+END
+
+// RT_VERSION = 16; the VERSIONINFO resource identifier must be numeric 1.
+// No Windows headers are included here, so VS_VERSION_INFO is not a macro.
+1 VERSIONINFO
+  FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+  PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
   FILEFLAGSMASK 0x3F
   FILEFLAGS 0x0
   FILEOS 0x40004
@@ -31,12 +46,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Mr-shanqiu"
       VALUE "FileDescription", "NiuMa Merit"
-      VALUE "FileVersion", "0.8.2"
+      VALUE "FileVersion", "@PROJECT_VERSION@"
       VALUE "InternalName", "niuma-merit"
       VALUE "LegalCopyright", "Copyright (c) 2026 Mr-shanqiu"
       VALUE "OriginalFilename", "niuma-merit.exe"
       VALUE "ProductName", "NiuMa Merit"
-      VALUE "ProductVersion", "0.8.2"
+      VALUE "ProductVersion", "@PROJECT_VERSION@"
     END
   END
   BLOCK "VarFileInfo"

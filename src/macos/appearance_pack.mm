@@ -20,6 +20,16 @@ static const unsigned char NMPublicKey[] = {
   0xd9, 0xdc, 0xc1, 0xb3, 0xb8, 0x99, 0x87, 0x62, 0x22, 0xb7
 };
 
+// Keep the previous key for packs issued before the production signer changed.
+static const unsigned char NMCurrentPublicKey[] = {
+  0x04, 0x24, 0x52, 0xb3, 0xdb, 0xef, 0xcf, 0x06, 0x4c, 0x4c, 0xf2,
+  0x02, 0x22, 0x96, 0xd3, 0x6b, 0x22, 0x99, 0xac, 0x61, 0x2e, 0x42,
+  0xeb, 0x26, 0x7c, 0x55, 0x49, 0x42, 0xdf, 0xc5, 0x79, 0xb2, 0x69,
+  0x21, 0xff, 0xf4, 0x90, 0x10, 0xdc, 0x6f, 0xd0, 0xff, 0xde, 0xa4,
+  0xdf, 0x2a, 0x51, 0x7d, 0x72, 0xd1, 0x7a, 0x3b, 0xa8, 0x31, 0x7c,
+  0xdd, 0x0a, 0xfc, 0xe2, 0xbd, 0x03, 0xae, 0xf2, 0x72, 0x7c
+};
+
 static NSError *NMError(NSInteger code, NSString *message) {
   return [NSError errorWithDomain:NMErrorDomain code:code
                          userInfo:@{NSLocalizedDescriptionKey: message}];
@@ -207,24 +217,28 @@ static BOOL NMVerifyLicense(NSString *message, NSString *signatureHex) {
   NSData *rawSignature = NMDataFromHex(signatureHex);
   NSData *derSignature = NMDERSignatureFromRaw(rawSignature);
   if (!derSignature) return NO;
-  NSData *keyData = [NSData dataWithBytes:NMPublicKey length:sizeof(NMPublicKey)];
   NSDictionary *attributes = @{
     (__bridge id)kSecAttrKeyType: (__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
     (__bridge id)kSecAttrKeyClass: (__bridge id)kSecAttrKeyClassPublic,
     (__bridge id)kSecAttrKeySizeInBits: @256
   };
-  SecKeyRef key = SecKeyCreateWithData((__bridge CFDataRef)keyData,
-                                       (__bridge CFDictionaryRef)attributes, NULL);
-  if (!key) return NO;
   NSData *messageData = [message dataUsingEncoding:NSUTF8StringEncoding];
   unsigned char digest[CC_SHA256_DIGEST_LENGTH];
   CC_SHA256(messageData.bytes, (CC_LONG)messageData.length, digest);
   NSData *digestData = [NSData dataWithBytes:digest length:sizeof(digest)];
-  BOOL valid = SecKeyVerifySignature(key,
-      kSecKeyAlgorithmECDSASignatureDigestX962SHA256,
-      (__bridge CFDataRef)digestData, (__bridge CFDataRef)derSignature, NULL);
-  CFRelease(key);
-  return valid;
+  const unsigned char *trustedKeys[] = {NMPublicKey, NMCurrentPublicKey};
+  for (const unsigned char *publicKey : trustedKeys) {
+    NSData *keyData = [NSData dataWithBytes:publicKey length:sizeof(NMPublicKey)];
+    SecKeyRef key = SecKeyCreateWithData((__bridge CFDataRef)keyData,
+                                         (__bridge CFDictionaryRef)attributes, NULL);
+    if (!key) continue;
+    BOOL valid = SecKeyVerifySignature(key,
+        kSecKeyAlgorithmECDSASignatureDigestX962SHA256,
+        (__bridge CFDataRef)digestData, (__bridge CFDataRef)derSignature, NULL);
+    CFRelease(key);
+    if (valid) return YES;
+  }
+  return NO;
 }
 
 static NSImage *NMLoadPNG(NSURL *url, NSError **error) {
@@ -326,6 +340,7 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
 + (NMAppearancePack *)validatePackDirectory:(NSURL *)directoryURL
                       enforceImportDeadline:(BOOL)enforceImportDeadline
                                       error:(NSError **)error {
+  (void)enforceImportDeadline; // Retained for private call-site compatibility only.
   NSFileManager *fm = [NSFileManager defaultManager];
   NSArray<NSURL *> *files = [fm contentsOfDirectoryAtURL:directoryURL
                               includingPropertiesForKeys:@[NSURLIsRegularFileKey, NSURLIsSymbolicLinkKey]
@@ -372,6 +387,7 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   if (![identifier isKindOfClass:[NSString class]] || identifier.length < 3 || identifier.length > 80 ||
       [identifier rangeOfCharacterFromSet:badID].location != NSNotFound ||
       ![version isKindOfClass:[NSString class]] || version.length > 32 ||
+      [version rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location != NSNotFound ||
       ![json[@"name_zh"] isKindOfClass:[NSString class]] || ![json[@"name_en"] isKindOfClass:[NSString class]] ||
       ![json[@"author"] isKindOfClass:[NSString class]] || ![json[@"publisher"] isKindOfClass:[NSString class]] ||
       ![json[@"review_id"] isKindOfClass:[NSString class]] ||
@@ -379,6 +395,35 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
       !NMNumberInRange(json[@"plus_y"], NMFeedbackY, NMFeedbackY)) {
     if (error) *error = NMError(33, @"形象包基础字段无效");
     return nil;
+  }
+  // Preserve the real issuers of existing official packs, not synthetic test labels.
+  NSString *publisher = json[@"publisher"];
+  if (([identifier hasPrefix:@"official."] || [identifier hasPrefix:@"zqscreen."] ||
+       [identifier hasPrefix:@"creator."]) && !json[@"license"]) {
+    if (error) *error = NMError(37, @"平台形象包必须包含有效的签名授权");
+    return nil;
+  }
+  if (([identifier hasPrefix:@"official."] && ![publisher isEqualToString:@"NiuMa Merit"]) ||
+      ([identifier hasPrefix:@"zqscreen."] && ![publisher isEqualToString:@"zqscreen"])) {
+    if (error) *error = NMError(33, @"非官方形象包不能使用官方标识，请使用自己的形象包标识");
+    return nil;
+  }
+  // The platform namespace is reserved for reviewed community deliveries.
+  // Ordinary non-platform DIY packages retain their existing import contract.
+  if ([identifier hasPrefix:@"creator."]) {
+    NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:
+        @"^creator\\.[a-f0-9]{32}\\.[a-z0-9-]{1,32}$" options:0 error:NULL];
+    NSString *reviewID = json[@"review_id"];
+    NSCharacterSet *nonHex = [[NSCharacterSet characterSetWithCharactersInString:
+        @"0123456789abcdef"] invertedSet];
+    if (![json[@"publisher"] isEqualToString:@"community"] ||
+        [pattern numberOfMatchesInString:identifier options:0
+                                  range:NSMakeRange(0, identifier.length)] != 1 ||
+        reviewID.length != 32 ||
+        [reviewID rangeOfCharacterFromSet:nonHex].location != NSNotFound) {
+      if (error) *error = NMError(33, @"社区形象包标识或审核信息无效，请从官网重新下载");
+      return nil;
+    }
   }
   NSString *previewName = json[@"preview"];
   NSArray *layers = json[@"layers"];
@@ -432,31 +477,35 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
       return nil;
     }
     NSDictionary *license = licenseValue;
-    NSSet *licenseKeys = [NSSet setWithArray:@[@"mode", @"issued_at", @"import_before",
+    NSString *mode = license[@"mode"];
+    BOOL perpetual = [mode isKindOfClass:NSString.class] && [mode isEqualToString:@"perpetual"];
+    BOOL timed = [mode isKindOfClass:NSString.class] && [mode isEqualToString:@"timed"];
+    NSSet *licenseKeys = [NSSet setWithArray:@[@"mode", @"issued_at",
       @"download_id", @"content_sha256", @"signature"]];
+    if (timed) licenseKeys = [licenseKeys setByAddingObject:@"import_before"];
     NSNumber *issuedValue = license[@"issued_at"];
     NSNumber *deadlineValue = license[@"import_before"];
     NSString *downloadID = license[@"download_id"];
     NSString *contentHash = license[@"content_sha256"];
     NSString *signature = license[@"signature"];
-    long long issued = issuedValue.longLongValue;
-    long long deadline = deadlineValue.longLongValue;
     NSCharacterSet *badToken = [[NSCharacterSet characterSetWithCharactersInString:
         @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"] invertedSet];
     NSCharacterSet *badHex = [[NSCharacterSet characterSetWithCharactersInString:
         @"0123456789abcdef"] invertedSet];
-    if (![license isKindOfClass:NSDictionary.class] || !NMExactKeys(license, licenseKeys) ||
-        ![license[@"mode"] isEqualToString:@"timed"] ||
+    if ((!timed && !perpetual) || license.count != licenseKeys.count || !NMExactKeys(license, licenseKeys) ||
         !NMNumberInRange(issuedValue, 1577836800, 4102444800) ||
-        !NMNumberInRange(deadlineValue, 1577836800, 4102444800) ||
-        deadline <= issued || deadline - issued > 86400 ||
+        floor(issuedValue.doubleValue) != issuedValue.doubleValue ||
+        (timed && (!NMNumberInRange(deadlineValue, 1577836800, 4102444800) ||
+          floor(deadlineValue.doubleValue) != deadlineValue.doubleValue ||
+          deadlineValue.doubleValue <= issuedValue.doubleValue ||
+          deadlineValue.doubleValue - issuedValue.doubleValue > 86400)) ||
         ![downloadID isKindOfClass:NSString.class] || downloadID.length < 16 || downloadID.length > 128 ||
         [downloadID rangeOfCharacterFromSet:badToken].location != NSNotFound ||
         ![contentHash isKindOfClass:NSString.class] || contentHash.length != 64 ||
         [contentHash rangeOfCharacterFromSet:badHex].location != NSNotFound ||
         ![signature isKindOfClass:NSString.class] || signature.length != 128 ||
         [signature rangeOfCharacterFromSet:badHex].location != NSNotFound) {
-      if (error) *error = NMError(37, @"限时导入凭证格式无效");
+      if (error) *error = NMError(37, @"形象包授权凭证格式无效");
       return nil;
     }
     NSString *actualHash = NMContentHash(directoryURL, expected, error);
@@ -464,27 +513,15 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
       if (error && !*error) *error = NMError(38, @"形象包内容与授权凭证不匹配");
       return nil;
     }
-    NSString *message = [NSString stringWithFormat:
-        @"NIUMA-PACK-LICENSE-V1\n%@\n%@\n%lld\n%lld\n%@\n%@",
-        identifier, version, issued, deadline, downloadID, contentHash];
+    long long issued = issuedValue.longLongValue;
+    NSString *message = perpetual
+        ? [NSString stringWithFormat:@"NIUMA-PACK-LICENSE-V2\nperpetual\n%@\n%@\n%lld\n%@\n%@",
+            identifier, version, issued, downloadID, contentHash]
+        : [NSString stringWithFormat:@"NIUMA-PACK-LICENSE-V1\n%@\n%@\n%lld\n%lld\n%@\n%@",
+            identifier, version, issued, deadlineValue.longLongValue, downloadID, contentHash];
     if (!NMVerifyLicense(message, signature)) {
       if (error) *error = NMError(39, @"形象包授权签名无效");
       return nil;
-    }
-    if (enforceImportDeadline) {
-#ifdef NIUMA_LICENSE_TEST_TIME
-      long long now = NIUMA_LICENSE_TEST_TIME;
-#else
-      long long now = (long long)NSDate.date.timeIntervalSince1970;
-#endif
-      if (now + 300 < issued) {
-        if (error) *error = NMError(40, @"电脑时间早于形象包签发时间，请检查系统时间");
-        return nil;
-      }
-      if (now > deadline) {
-        if (error) *error = NMError(41, @"形象包首次导入期限已过，请登录官网重新下载，无需再次购买");
-        return nil;
-      }
     }
   }
   for (NSString *name in expected) {
@@ -500,6 +537,7 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
     pack.nameZH = json[@"name_zh"];
     pack.nameEN = json[@"name_en"];
     pack.author = json[@"author"];
+    pack.publisher = json[@"publisher"];
     pack.reviewID = json[@"review_id"];
     pack.directoryURL = directoryURL;
     pack.previewImage = images[previewName];
@@ -514,22 +552,47 @@ invalidLayers:
 }
 
 + (NSArray<NMAppearancePack *> *)loadInstalledPacks:(NSError **)error {
+  if (error) *error = nil;
   NSFileManager *fm = [NSFileManager defaultManager];
   NSURL *root = [self packsDirectoryURL];
   if (![fm createDirectoryAtURL:root withIntermediateDirectories:YES attributes:nil error:error]) return @[];
   NSArray<NSURL *> *directories = [fm contentsOfDirectoryAtURL:root includingPropertiesForKeys:@[NSURLIsDirectoryKey]
                                                         options:NSDirectoryEnumerationSkipsHiddenFiles error:error];
+  if (!directories) return @[];
   NSMutableArray *packs = [NSMutableArray array];
+  NSMutableArray<NSString *> *failures = [NSMutableArray array];
+  NSError *firstFailure = nil;
   for (NSURL *directory in directories) {
     NSNumber *isDirectory = nil;
     [directory getResourceValue:&isDirectory forKey:NSURLIsDirectoryKey error:nil];
     if (!isDirectory.boolValue || ![directory.pathExtension isEqualToString:@"nmgpackdata"]) continue;
-    NMAppearancePack *pack = [self validatePackDirectory:directory error:nil];
-    if (pack) [packs addObject:pack];
+    NSError *packError = nil;
+    // Installed and newly imported packs remain usable independently of the clock.
+    // This still verifies their manifest, images, content hash, and license signature.
+    NMAppearancePack *pack = [self validatePackDirectory:directory
+                                enforceImportDeadline:NO error:&packError];
+    if (pack) {
+      [packs addObject:pack];
+    } else {
+      if (!firstFailure) firstFailure = packError;
+      [failures addObject:[NSString stringWithFormat:@"%@：%@",
+          directory.lastPathComponent.stringByDeletingPathExtension,
+          packError.localizedDescription ?: @"无法读取形象包"]];
+    }
   }
   [packs sortUsingComparator:^NSComparisonResult(NMAppearancePack *a, NMAppearancePack *b) {
     return [[a localizedName] localizedCaseInsensitiveCompare:[b localizedName]];
   }];
+  if (failures.count && error) {
+    NSMutableDictionary *info = [@{
+      NSLocalizedDescriptionKey: [NSString stringWithFormat:
+          @"以下本地形象未能加载，原文件仍保留，请勿重复付款：\n%@",
+          [failures componentsJoinedByString:@"\n"]]
+    } mutableCopy];
+    if (firstFailure) info[NSUnderlyingErrorKey] = firstFailure;
+    *error = [NSError errorWithDomain:@"cn.niuma.merit.appearance-load"
+                                code:1 userInfo:info];
+  }
   return packs;
 }
 
@@ -577,6 +640,14 @@ invalidLayers:
   NSURL *destination = [root URLByAppendingPathComponent:[pack.identifier stringByAppendingPathExtension:@"nmgpackdata"] isDirectory:YES];
   NSURL *backup = [root URLByAppendingPathComponent:[NSString stringWithFormat:@".backup-%@", NSUUID.UUID.UUIDString] isDirectory:YES];
   BOOL hadOld = [fm fileExistsAtPath:destination.path];
+  if (hadOld) {
+    NMAppearancePack *existing = [self validatePackDirectory:destination error:nil];
+    if (!existing || ![existing.publisher isEqualToString:pack.publisher]) {
+      if (error) *error = NMError(43, @"同名形象包的来源不一致或原包无法校验，不能覆盖原有形象包");
+      [fm removeItemAtURL:stage error:nil];
+      return nil;
+    }
+  }
   if (hadOld && ![fm moveItemAtURL:destination toURL:backup error:error]) {
     [fm removeItemAtURL:stage error:nil];
     return nil;

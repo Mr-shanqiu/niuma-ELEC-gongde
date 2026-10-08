@@ -10,6 +10,41 @@ static void Require(BOOL condition, NSString *message) {
 
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
+    if (argc == 4 && strcmp(argv[1], "--protocol") == 0) {
+      NSString *root = [NSString stringWithUTF8String:argv[3]];
+      setenv("NIUMA_PACK_ROOT", argv[3], 1);
+      NSArray *cases = [NSJSONSerialization JSONObjectWithData:
+          [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]]
+          options:0 error:nil];
+      Require([cases isKindOfClass:NSArray.class] && cases.count > 0, @"missing batch protocol cases");
+      for (NSDictionary *entry in cases) {
+        [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+        NSURL *archive = [NSURL fileURLWithPath:entry[@"archive"]];
+        NSError *error = nil;
+        NSArray<NMAppearancePack *> *packs =
+            [NMAppearancePackStore installBatchArchiveAtURL:archive error:&error];
+        NSString *label = entry[@"name"];
+        if ([entry[@"accept"] boolValue]) {
+          NSUInteger count = [entry[@"count"] unsignedIntegerValue];
+          Require(packs.count == count, [NSString stringWithFormat:@"%@: %@", label, error.localizedDescription]);
+          Require([NMAppearancePackStore loadInstalledPacks:&error].count == count, label);
+          for (NMAppearancePack *pack in packs) {
+            NSImage *snapshot = [[NSImage alloc] initWithSize:NSMakeSize(240, 250)];
+            [snapshot lockFocus];
+            [pack drawAtPhase:0.5];
+            [snapshot unlockFocus];
+            Require(snapshot.TIFFRepresentation.length > 100, label);
+          }
+          Require([NMAppearancePackStore installBatchArchiveAtURL:archive error:&error].count == count, label);
+          Require([NMAppearancePackStore loadInstalledPacks:&error].count == count, label);
+          [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+          Require([NMAppearancePackStore installBatchArchiveAtURL:archive error:&error].count == count, label);
+        } else Require(packs == nil && error != nil, [label stringByAppendingString:@" was accepted"]);
+        printf("PASS macOS batch %s\n", label.UTF8String);
+      }
+      [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+      return 0;
+    }
     Require(argc == 3, @"usage: test-batch archive pack-root");
     setenv("NIUMA_PACK_ROOT", argv[2], 1);
     NSFileManager *fm = NSFileManager.defaultManager;

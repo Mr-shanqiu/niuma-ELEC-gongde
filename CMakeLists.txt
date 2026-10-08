@@ -3,10 +3,12 @@ file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" NIUMA_VERSION LIMIT_COUNT 1)
 project(NiuMaMerit VERSION "${NIUMA_VERSION}" LANGUAGES C CXX)
 
 if(WIN32)
-  configure_file(src/windows/app.rc "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc" COPYONLY)
+  configure_file(src/windows/app.rc "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc" @ONLY)
+  configure_file(src/app_version.h.in "${CMAKE_CURRENT_BINARY_DIR}/app_version.h" @ONLY)
   configure_file(src/windows/app.manifest "${CMAKE_CURRENT_BINARY_DIR}/app.manifest" COPYONLY)
   configure_file(assets/woodfish.png "${CMAKE_CURRENT_BINARY_DIR}/woodfish.png" COPYONLY)
   configure_file(assets/mallet.png "${CMAKE_CURRENT_BINARY_DIR}/mallet.png" COPYONLY)
+  configure_file(assets/developer-douyin.png "${CMAKE_CURRENT_BINARY_DIR}/developer-douyin.png" COPYONLY)
   configure_file(assets/appicon.ico "${CMAKE_CURRENT_BINARY_DIR}/appicon.ico" COPYONLY)
   add_executable(niuma-merit WIN32
     src/windows/app.cpp
@@ -14,7 +16,7 @@ if(WIN32)
     third_party/miniz/miniz.c
     "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc"
   )
-  target_include_directories(niuma-merit PRIVATE src/windows third_party/miniz)
+  target_include_directories(niuma-merit PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
   set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc" PROPERTIES GENERATED TRUE)
   target_compile_features(niuma-merit PRIVATE cxx_std_17)
   target_compile_definitions(niuma-merit PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
@@ -45,6 +47,7 @@ elseif(APPLE)
   set(MACOS_RESOURCES
     assets/woodfish.png
     assets/mallet.png
+    assets/developer-douyin.png
   )
   set_source_files_properties(${MACOS_RESOURCES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources"

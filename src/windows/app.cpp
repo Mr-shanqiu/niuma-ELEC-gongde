@@ -14,6 +14,7 @@
 #include <bcrypt.h>
 
 #include "appearance_pack.h"
+#include "app_version.h"
 
 #include <algorithm>
 #include <cmath>
@@ -505,6 +506,9 @@ void ReleasePngResource(PngResource& resource) {
 }
 
 void ReleaseAllPngResources() {
+  // The catalog also owns GDI+ images. Release it before GDI+ or COM stops,
+  // including on the startup-failure paths that share this cleanup function.
+  gAppearanceCatalog = niuma::AppearanceCatalog{};
   ReleasePngResource(gHamsterActor);
   ReleasePngResource(gHamsterHabitat);
   ReleasePngResource(gSeaLionFlipper);
@@ -812,8 +816,12 @@ LRESULT CALLBACK MouseHook(
   return CallNextHookEx(gState.mouseHook, code, message, data);
 }
 
-void ShowPrivacyNotice(HWND owner) {
-  MessageBoxW(
+bool IsMainWindowAlive(HWND owner) {
+  return owner != nullptr && gState.window == owner && IsWindow(owner);
+}
+
+bool ShowPrivacyNotice(HWND owner) {
+  return MessageBoxW(
       owner,
       UiText(
           L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
@@ -823,11 +831,117 @@ void ShowPrivacyNotice(HWND owner) {
           L"and scroll gestures.\n\nIt does not read, save, or upload key content, "
           L"mouse positions, the current app, clipboard data, or screen content. "
           L"The app has no network features."),
-      UiText(L"隐私说明", L"Privacy"), MB_OK | MB_ICONINFORMATION);
+      UiText(L"隐私说明", L"Privacy"), MB_OK | MB_ICONINFORMATION) == IDOK;
+}
+
+struct AboutDialogState {
+  std::wstring text;
+  PngResource douyin;
+};
+
+INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
+                                      WPARAM wParam, LPARAM lParam) {
+  auto* state = reinterpret_cast<AboutDialogState*>(
+      GetWindowLongPtrW(window, DWLP_USER));
+  switch (message) {
+    case WM_INITDIALOG: {
+      state = reinterpret_cast<AboutDialogState*>(lParam);
+      SetWindowLongPtrW(window, DWLP_USER, lParam);
+      SetWindowTextW(window, UiText(L"关于牛马电子功德", L"About NiuMa Merit"));
+      SetDlgItemTextW(window, 3001, state->text.c_str());
+      SetDlgItemTextW(window, IDOK, UiText(L"知道了", L"OK"));
+
+      MONITORINFO monitor = {};
+      monitor.cbSize = sizeof(monitor);
+      RECT work = {};
+      if (GetMonitorInfoW(MonitorFromWindow(GetWindow(window, GW_OWNER),
+                                            MONITOR_DEFAULTTONEAREST), &monitor)) {
+        work = monitor.rcWork;
+      } else {
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+      }
+      RECT outer = {}, client = {};
+      GetWindowRect(window, &outer);
+      GetClientRect(window, &client);
+      const int borderHeight = outer.bottom - outer.top - client.bottom;
+      const int borderWidth = outer.right - outer.left - client.right;
+      const int width = std::min(static_cast<int>(outer.right - outer.left),
+                                static_cast<int>(work.right - work.left) - 32);
+      const int clientWidth = width - borderWidth;
+      const int padding = MulDiv(16, gState.dpi, 96);
+      const int textWidth = clientWidth - padding * 2;
+      RECT measured = {0, 0, textWidth, 0};
+      const HWND textControl = GetDlgItem(window, 3001);
+      HDC dc = GetDC(textControl);
+      const HFONT font = reinterpret_cast<HFONT>(
+          SendMessageW(textControl, WM_GETFONT, 0, 0));
+      HGDIOBJ oldFont = font ? SelectObject(dc, font) : nullptr;
+      DrawTextW(dc, state->text.c_str(), -1, &measured,
+                DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+      if (oldFont) SelectObject(dc, oldFont);
+      ReleaseDC(textControl, dc);
+      const int textHeight = measured.bottom + MulDiv(4, gState.dpi, 96);
+      const int buttonHeight = MulDiv(28, gState.dpi, 96);
+      const int imageTop = padding + textHeight + padding;
+      const int availableImageHeight = static_cast<int>(work.bottom - work.top)
+          - borderHeight - imageTop - buttonHeight - padding * 3;
+      const int imageHeight = std::max(1, std::min(MulDiv(260, gState.dpi, 96),
+                                                  availableImageHeight));
+      const int buttonTop = imageTop + imageHeight + padding;
+      const int clientHeight = buttonTop + buttonHeight + padding;
+      MoveWindow(textControl, padding, padding, textWidth, textHeight, TRUE);
+      MoveWindow(GetDlgItem(window, 3002), padding, imageTop,
+                 textWidth, imageHeight, TRUE);
+      const int buttonWidth = MulDiv(92, gState.dpi, 96);
+      MoveWindow(GetDlgItem(window, IDOK), clientWidth - padding - buttonWidth,
+                 buttonTop, buttonWidth, buttonHeight, TRUE);
+      const int height = clientHeight + borderHeight;
+      SetWindowPos(window, nullptr,
+                   work.left + (work.right - work.left - width) / 2,
+                   work.top + (work.bottom - work.top - height) / 2,
+                   width, height, SWP_NOZORDER);
+      SetFocus(GetDlgItem(window, IDOK));
+      return FALSE;
+    }
+    case WM_DRAWITEM: {
+      if (wParam != 3002 || !state) return FALSE;
+      const auto* item = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+      FillRect(item->hDC, &item->rcItem, GetSysColorBrush(COLOR_3DFACE));
+      if (state->douyin.image && state->douyin.image->GetWidth() != 0 &&
+          state->douyin.image->GetHeight() != 0) {
+        const float availableWidth = static_cast<float>(
+            item->rcItem.right - item->rcItem.left);
+        const float availableHeight = static_cast<float>(
+            item->rcItem.bottom - item->rcItem.top);
+        const float scale = std::min(
+            availableWidth / state->douyin.image->GetWidth(),
+            availableHeight / state->douyin.image->GetHeight());
+        const float width = state->douyin.image->GetWidth() * scale;
+        const float height = state->douyin.image->GetHeight() * scale;
+        Gdiplus::Graphics graphics(item->hDC);
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        graphics.DrawImage(state->douyin.image.get(), Gdiplus::RectF(
+            item->rcItem.left + (availableWidth - width) / 2.0f,
+            item->rcItem.top + (availableHeight - height) / 2.0f,
+            width, height));
+      }
+      return TRUE;
+    }
+    case WM_COMMAND:
+      if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
+        EndDialog(window, LOWORD(wParam));
+        return TRUE;
+      }
+      break;
+    case WM_CLOSE:
+      EndDialog(window, IDCANCEL);
+      return TRUE;
+  }
+  return FALSE;
 }
 
 void ShowAboutDialog(HWND owner) {
-  const std::wstring version = L"0.8.2";
+  const std::wstring version = NIUMA_APP_VERSION_W;
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
@@ -840,8 +954,38 @@ void ShowAboutDialog(HWND owner) {
         L"telemetry, or automatic updates.\n\nClient source code is available under GPLv3."
         L"\n\nOfficial website:\n";
   text += L"https://gongde.zqscreen.cn/";
-  MessageBoxW(owner, text.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
-              MB_OK | MB_ICONINFORMATION);
+  text += UiText(L"\n\n欢迎关注开发者抖音\n@山丘 / 抖音号：1872941388",
+                 L"\n\nFollow the developer on Douyin\n@Shanqiu / Douyin ID: 1872941388");
+  AboutDialogState state;
+  state.text = text;
+  const HMODULE module = GetModuleHandleW(nullptr);
+  const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(110), RT_RCDATA);
+  const DWORD size = resource ? SizeofResource(module, resource) : 0;
+  const HGLOBAL loaded = resource ? LoadResource(module, resource) : nullptr;
+  const void* bytes = loaded ? LockResource(loaded) : nullptr;
+  if (bytes && size != 0) {
+    const HGLOBAL buffer = GlobalAlloc(GMEM_MOVEABLE, size);
+    void* destination = buffer ? GlobalLock(buffer) : nullptr;
+    if (destination) {
+      CopyMemory(destination, bytes, size);
+      GlobalUnlock(buffer);
+      if (SUCCEEDED(CreateStreamOnHGlobal(buffer, TRUE, &state.douyin.stream))) {
+        state.douyin.image.reset(Gdiplus::Image::FromStream(state.douyin.stream));
+        if (state.douyin.image && state.douyin.image->GetLastStatus() != Gdiplus::Ok) {
+          state.douyin.image.reset();
+        }
+      } else {
+        GlobalFree(buffer);
+      }
+    } else if (buffer) {
+      GlobalFree(buffer);
+    }
+  }
+  if (DialogBoxParamW(module, MAKEINTRESOURCEW(3000), owner,
+                      AboutDialogProcedure, reinterpret_cast<LPARAM>(&state)) == -1) {
+    MessageBoxW(owner, text.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
+                MB_OK | MB_ICONINFORMATION);
+  }
 }
 
 const wchar_t* SceneTitle(MeritScene scene) {
@@ -1291,16 +1435,30 @@ void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
   }
 }
 
-void ShowPrivacyNoticeIfNeeded(HWND owner) {
+bool ShowPrivacyNoticeIfNeeded(HWND owner) {
+  if (!IsMainWindowAlive(owner)) return false;
   const std::wstring path = DataPath();
-  if (path.empty() ||
+  if (!path.empty() &&
       GetPrivateProfileIntW(L"state", L"privacy_shown", 0, path.c_str()) == 1) {
-    return;
+    return true;
   }
 
-  ShowPrivacyNotice(owner);
-  WritePrivateProfileStringW(
-      L"state", L"privacy_shown", L"1", path.c_str());
+  if (!ShowPrivacyNotice(owner) || !IsMainWindowAlive(owner)) return false;
+  if (!path.empty()) {
+    WritePrivateProfileStringW(
+        L"state", L"privacy_shown", L"1", path.c_str());
+  }
+  return true;
+}
+
+bool PrepareClientStartup(HWND owner, const std::wstring& pendingAppearancePack) {
+  if (!IsMainWindowAlive(owner)) return false;
+  if (!StartedAutomatically() && !ShowPrivacyNoticeIfNeeded(owner)) return false;
+  if (!IsMainWindowAlive(owner)) return false;
+  if (!pendingAppearancePack.empty()) {
+    ImportAppearancePack(owner, pendingAppearancePack, true);
+  }
+  return IsMainWindowAlive(owner);
 }
 
 void ClampWindowToWorkArea() {
@@ -1700,29 +1858,28 @@ int WINAPI wWinMain(
   }
 
   ConfigureLaunchAtLogin();
-  if (!StartedAutomatically()) {
-    ShowPrivacyNoticeIfNeeded(window);
-  }
-  if (!pendingAppearancePack.empty()) {
-    ImportAppearancePack(window, pendingAppearancePack, true);
-  }
-
-  gState.keyboardHook =
-      SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
-  gState.mouseHook =
-      SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
-  if (gState.keyboardHook == nullptr || gState.mouseHook == nullptr) {
-    MessageBoxW(
-        window, UiText(L"无法启动全局键盘或鼠标计数。",
-                       L"Unable to start global keyboard or mouse counting."), WindowTitle(),
-        MB_OK | MB_ICONERROR);
+  if (PrepareClientStartup(window, pendingAppearancePack)) {
+    gState.keyboardHook =
+        SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
+    gState.mouseHook =
+        SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
+    if (gState.keyboardHook == nullptr || gState.mouseHook == nullptr) {
+      MessageBoxW(
+          window, UiText(L"无法启动全局键盘或鼠标计数。",
+                         L"Unable to start global keyboard or mouse counting."), WindowTitle(),
+          MB_OK | MB_ICONERROR);
+      if (IsMainWindowAlive(window)) DestroyWindow(window);
+    }
+  } else if (IsMainWindowAlive(window)) {
     DestroyWindow(window);
   }
 
   MSG message = {};
-  while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-    TranslateMessage(&message);
-    DispatchMessageW(&message);
+  if (IsMainWindowAlive(window)) {
+    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
   }
 
   if (gState.keyboardHook != nullptr) {

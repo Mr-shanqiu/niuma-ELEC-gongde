@@ -6,6 +6,90 @@
 #include <cmath>
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <sys/stat.h>
+#include <unistd.h>
+
+// Explicit acceptance launches never consult the user's product preferences.
+// The pack root must be an empty, private directory supplied by the runner;
+// invalid or incomplete isolation settings fail before NSApplication starts.
+static BOOL gIsolatedAcceptance = NO;
+
+@protocol NMMeritPreferences <NSObject>
+- (id)objectForKey:(NSString *)key;
+- (NSInteger)integerForKey:(NSString *)key;
+- (BOOL)boolForKey:(NSString *)key;
+- (NSString *)stringForKey:(NSString *)key;
+- (NSDictionary *)dictionaryForKey:(NSString *)key;
+- (void)setInteger:(NSInteger)value forKey:(NSString *)key;
+- (void)setBool:(BOOL)value forKey:(NSString *)key;
+- (void)setObject:(id)value forKey:(NSString *)key;
+@end
+
+@interface NMEphemeralMeritPreferences : NSObject <NMMeritPreferences>
+@property(nonatomic, strong) NSMutableDictionary<NSString *, id> *values;
+@end
+
+@implementation NMEphemeralMeritPreferences
+- (instancetype)init {
+  self = [super init];
+  if (self) self.values = [NSMutableDictionary dictionary];
+  return self;
+}
+- (id)objectForKey:(NSString *)key { return self.values[key]; }
+- (NSInteger)integerForKey:(NSString *)key { return [self.values[key] integerValue]; }
+- (BOOL)boolForKey:(NSString *)key { return [self.values[key] boolValue]; }
+- (NSString *)stringForKey:(NSString *)key {
+  id value = self.values[key];
+  return [value isKindOfClass:NSString.class] ? value : nil;
+}
+- (NSDictionary *)dictionaryForKey:(NSString *)key {
+  id value = self.values[key];
+  return [value isKindOfClass:NSDictionary.class] ? value : nil;
+}
+- (void)setInteger:(NSInteger)value forKey:(NSString *)key { self.values[key] = @(value); }
+- (void)setBool:(BOOL)value forKey:(NSString *)key { self.values[key] = @(value); }
+- (void)setObject:(id)value forKey:(NSString *)key {
+  if (value) self.values[key] = [value copy];
+  else [self.values removeObjectForKey:key];
+}
+@end
+
+static NMEphemeralMeritPreferences *gAcceptancePreferences;
+
+static BOOL InitializeAcceptanceContext(int argc, const char *argv[]) {
+  BOOL requested = NO;
+  for (int index = 1; index < argc; ++index) {
+    if (strcmp(argv[index], "--isolated-acceptance") == 0) requested = YES;
+  }
+  const char *rootValue = getenv("NIUMA_ACCEPTANCE_ROOT");
+  if (!requested && !rootValue) return YES;
+  if (!requested || !rootValue || !rootValue[0]) return NO;
+  NSString *root = [NSString stringWithUTF8String:rootValue];
+  if (!root.isAbsolutePath ||
+      ![root.stringByDeletingLastPathComponent isEqualToString:@"/private/tmp"] ||
+      ![root.lastPathComponent hasPrefix:@"niuma-merit-acceptance-"]) return NO;
+  char resolved[PATH_MAX];
+  struct stat attributes;
+  if (!realpath(rootValue, resolved) || strcmp(rootValue, resolved) != 0 ||
+      lstat(rootValue, &attributes) != 0 || !S_ISDIR(attributes.st_mode) ||
+      attributes.st_uid != geteuid() || (attributes.st_mode & 0777) != 0700) return NO;
+  const char *packValue = getenv("NIUMA_PACK_ROOT");
+  NSString *packRoot = packValue ? [NSString stringWithUTF8String:packValue] : nil;
+  if (![packRoot isEqualToString:[root stringByAppendingPathComponent:@"AppearancePacks"]]) return NO;
+  NSError *error = nil;
+  NSArray *entries = [NSFileManager.defaultManager contentsOfDirectoryAtPath:root error:&error];
+  if (!entries || error || entries.count != 0) return NO;
+  gAcceptancePreferences = [[NMEphemeralMeritPreferences alloc] init];
+  gIsolatedAcceptance = YES;
+  return YES;
+}
+
+static id<NMMeritPreferences> MeritPreferences(void) {
+  if (gIsolatedAcceptance) return gAcceptancePreferences;
+  return (id<NMMeritPreferences>)NSUserDefaults.standardUserDefaults;
+}
 
 // Decode chroma-keyed artwork once, never during an animation frame.
 static NSImage *LoadHamsterSprite(NSString *name) {
@@ -62,6 +146,7 @@ static constexpr CGFloat kFeedbackY = 174.0;
 static constexpr CGFloat kCounterY = 210.0;
 static NSString *const kLaunchAtLoginConfigured = @"launchAtLoginConfigured";
 static NSString *const kLaunchAtLoginEnabled = @"launchAtLoginEnabled";
+static NSString *const kHideDuringFullscreenEnabled = @"hideDuringFullscreenEnabled";
 static NSString *const kLaunchAgentLabel = @"cn.niuma.merit.autostart";
 static BOOL IsChineseUI(void) {
   NSString *override = NSProcessInfo.processInfo.environment[@"NIUMA_UI_LANGUAGE"];
@@ -557,7 +642,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @implementation MeritController
 
 - (void)loadState {
-  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  id<NMMeritPreferences> defaults = MeritPreferences();
   self.total = [defaults integerForKey:kTotal];
   NSDictionary *storedDaily = [defaults dictionaryForKey:kDailyTotals];
   self.dailyTotals = storedDaily ? [storedDaily mutableCopy] : [NSMutableDictionary dictionary];
@@ -580,7 +665,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)saveState {
   if (!self.dirty) return;
-  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  id<NMMeritPreferences> defaults = MeritPreferences();
   [defaults setInteger:self.total forKey:kTotal];
   [defaults setObject:self.dailyTotals forKey:kDailyTotals];
   self.dirty = NO;
@@ -596,6 +681,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (NSURL *)launchAgentURL {
+  if (gIsolatedAcceptance) return nil;
   NSURL *libraryURL = [NSFileManager.defaultManager
       URLsForDirectory:NSLibraryDirectory
              inDomains:NSUserDomainMask].firstObject;
@@ -606,12 +692,14 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (BOOL)isLaunchAtLoginEnabled {
-  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  if (gIsolatedAcceptance) return NO;
+  id<NMMeritPreferences> defaults = MeritPreferences();
   if (![defaults boolForKey:kLaunchAtLoginEnabled]) return NO;
   return [NSFileManager.defaultManager fileExistsAtPath:self.launchAgentURL.path];
 }
 
 - (BOOL)setLaunchAtLoginEnabled:(BOOL)enabled showError:(BOOL)showError {
+  if (gIsolatedAcceptance) return NO;
   NSFileManager *fileManager = NSFileManager.defaultManager;
   NSURL *agentURL = self.launchAgentURL;
   NSError *error = nil;
@@ -651,7 +739,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
 
   if (succeeded) {
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    id<NMMeritPreferences> defaults = MeritPreferences();
     [defaults setBool:YES forKey:kLaunchAtLoginConfigured];
     [defaults setBool:enabled forKey:kLaunchAtLoginEnabled];
   } else if (showError) {
@@ -666,7 +754,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)configureLaunchAtLogin {
-  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  if (gIsolatedAcceptance) return;
+  id<NMMeritPreferences> defaults = MeritPreferences();
   if ([defaults objectForKey:kLaunchAtLoginConfigured] == nil) {
     [self setLaunchAtLoginEnabled:YES showError:NO];
   } else if ([defaults boolForKey:kLaunchAtLoginEnabled]) {
@@ -681,7 +770,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       [NSProcessInfo.processInfo.arguments containsObject:@"--autostart"];
   self.diagnostics = [NSProcessInfo.processInfo.arguments containsObject:@"--diagnostics"];
   NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
-  if (bundleIdentifier.length > 0) {
+  if (bundleIdentifier.length > 0 && !gIsolatedAcceptance) {
     pid_t currentProcess = NSProcessInfo.processInfo.processIdentifier;
     for (NSRunningApplication *running in
          [NSRunningApplication runningApplicationsWithBundleIdentifier:bundleIdentifier]) {
@@ -712,11 +801,19 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.window.opaque = NO;
   self.window.hasShadow = NO;
   self.window.level = NSFloatingWindowLevel;
-  self.window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-    NSWindowCollectionBehaviorFullScreenAuxiliary;
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        BOOL hideDuringFullscreen = [defaults objectForKey:kHideDuringFullscreenEnabled] == nil ||
+            [defaults boolForKey:kHideDuringFullscreenEnabled];
+        self.window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+            (hideDuringFullscreen ? 0 : NSWindowCollectionBehaviorFullScreenAuxiliary);
   self.window.movableByWindowBackground = YES;
-  [self.window setFrameAutosaveName:@"NiuMaMeritPosition"];
-  BOOL restoredFrame = [self.window setFrameUsingName:@"NiuMaMeritPosition"];
+  BOOL restoredFrame = NO;
+  if (gIsolatedAcceptance) {
+    self.window.restorable = NO;
+  } else {
+    [self.window setFrameAutosaveName:@"NiuMaMeritPosition"];
+    restoredFrame = [self.window setFrameUsingName:@"NiuMaMeritPosition"];
+  }
   if (restoredFrame) {
     NSRect frame = self.window.frame;
     frame.size = NSMakeSize(kWindowScaleWidth, kWindowScaleHeight);
@@ -751,18 +848,21 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                                   repeats:YES];
   [NSRunLoop.mainRunLoop addTimer:self.dayTimer forMode:NSRunLoopCommonModes];
   [NSRunLoop.mainRunLoop addTimer:self.dayTimer forMode:NSModalPanelRunLoopMode];
-  // Monitor tap health even on a silent autostart or after a failed installation.
-  self.permissionPollTimer = [NSTimer timerWithTimeInterval:kPermissionPollInterval * 2
-      target:self selector:@selector(checkPermission:) userInfo:nil repeats:YES];
-  [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSRunLoopCommonModes];
-  [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSModalPanelRunLoopMode];
-  [self installEventTap];
-  if (!self.launchedAutomatically) [self showPermissionIntroIfNeeded];
+  if (!gIsolatedAcceptance) {
+    // Monitor tap health even on a silent autostart or after a failed installation.
+    self.permissionPollTimer = [NSTimer timerWithTimeInterval:kPermissionPollInterval * 2
+        target:self selector:@selector(checkPermission:) userInfo:nil repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSRunLoopCommonModes];
+    [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSModalPanelRunLoopMode];
+    [self installEventTap];
+    if (!self.launchedAutomatically) [self showPermissionIntroIfNeeded];
+  }
 }
 
 - (void)application:(NSApplication *)application openFiles:(NSArray<NSString *> *)filenames {
   NSString *installedId = nil;
   NSUInteger installedCount = 0;
+  NSMutableArray<NSString *> *importedIds = [NSMutableArray array];
   for (NSString *filename in filenames) {
     NSError *error = nil;
     NSURL *source = [NSURL fileURLWithPath:filename];
@@ -783,10 +883,28 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       return;
     }
     installedCount += imported.count;
+    for (NMAppearancePack *pack in imported) [importedIds addObject:pack.identifier];
     installedId = imported.lastObject.identifier;
   }
+  NSError *loadError = nil;
+  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&loadError];
+  NSMutableArray<NSString *> *unavailableIds = [NSMutableArray array];
+  for (NSString *identifier in importedIds) {
+    if (![self appearancePackWithId:identifier]) [unavailableIds addObject:identifier];
+  }
+  if (unavailableIds.count) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleWarning;
+    alert.messageText = UiText(@"形象已保存，但未能加载", @"Packs Saved but Not Loaded");
+    alert.informativeText = loadError.localizedDescription ?: [NSString stringWithFormat:
+        UiText(@"这些形象还未进入可选列表：%@。原文件仍保留，请勿重复付款。",
+               @"These packs are not available in the picker: %@. Their files are preserved; do not pay again."),
+        [unavailableIds componentsJoinedByString:@", "]];
+    [alert runModal];
+    [application replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
+    return;
+  }
   [application replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
-  [self reloadAppearancePacks];
   if (installedCount > 1) {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = UiText(@"整批形象已导入", @"Appearance Batch Imported");
@@ -833,6 +951,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)showPermissionIntroIfNeeded {
+  if (gIsolatedAcceptance) return;
   if (self.inputMonitoringAuthorized) return;
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"需要输入监控权限", @"Input Monitoring Permission Required");
@@ -852,6 +971,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)requestListenPermission {
+  if (gIsolatedAcceptance) return;
   BOOL granted = CGRequestListenEventAccess();
   if (granted) {
     [self checkPermission:nil];
@@ -874,6 +994,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)checkPermission:(NSTimer *)timer {
   (void)timer;
+  if (gIsolatedAcceptance) return;
   BOOL allowed = CGPreflightListenEventAccess();
   // Preflight is advisory: creation/enabled state is the actual result.
   // In particular, do not tear down a working tap on a stale preflight answer.
@@ -899,6 +1020,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)installEventTap {
+  if (gIsolatedAcceptance) return;
   if (self.eventTap) {
     return;
   }
@@ -960,6 +1082,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)handleEventTapDisabled {
+  if (gIsolatedAcceptance) return;
   if (self.eventTap && CFMachPortIsValid(self.eventTap)) {
     CGEventTapEnable(self.eventTap, true);
   }
@@ -1032,6 +1155,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
              action:@selector(toggleLaunchAtLogin:)
       keyEquivalent:@""];
   launchAtLogin.target = self;
+  launchAtLogin.enabled = !gIsolatedAcceptance;
   launchAtLogin.state = self.isLaunchAtLoginEnabled
       ? NSControlStateValueOn
       : NSControlStateValueOff;
@@ -1083,6 +1207,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.calendarWindow.title = UiText(@"功德日历", @"Merit Calendar");
     self.calendarWindow.contentView = self.calendarView;
     self.calendarWindow.releasedWhenClosed = NO;
+    if (gIsolatedAcceptance) self.calendarWindow.restorable = NO;
     [self.calendarWindow center];
   }
   [NSApp activateIgnoringOtherApps:YES];
@@ -1102,7 +1227,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)reloadAppearancePacks {
-  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:nil];
+  NSError *error = nil;
+  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&error];
+  if (error && self.window) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleWarning;
+    alert.messageText = UiText(@"本地形象加载失败", @"Unable to Load Local Packs");
+    alert.informativeText = error.localizedDescription;
+    [alert runModal];
+  }
 }
 
 - (NMAppearancePack *)appearancePackWithId:(NSString *)identifier {
@@ -1122,9 +1255,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.view.scene = self.selectedScene;
     self.view.appearancePack = nil;
     self.selectedAppearanceId = @"builtin.woodfish";
-    [NSUserDefaults.standardUserDefaults setInteger:self.selectedScene forKey:kSelectedScene];
+    [MeritPreferences() setInteger:self.selectedScene forKey:kSelectedScene];
   }
-  [NSUserDefaults.standardUserDefaults setObject:self.selectedAppearanceId forKey:kSelectedAppearance];
+  [MeritPreferences() setObject:self.selectedAppearanceId forKey:kSelectedAppearance];
   [self.view setNeedsDisplay:YES];
 }
 
@@ -1233,22 +1366,41 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)sender;
   NSAlert *alert = [[NSAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
-  alert.informativeText = UiText(
-      @"版本 0.8.2\n\n"
+  NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?";
+  alert.informativeText = [NSString stringWithFormat:UiText(
+      @"版本 %@\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"官方网站：\n"
-       @"https://gongde.zqscreen.cn/",
-      @"Version 0.8.2\n\n"
+       @"https://gongde.zqscreen.cn/\n\n"
+       @"欢迎关注开发者抖音\n"
+       @"@山丘 / 抖音号：1872941388",
+      @"Version %@\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"
        @"Client source code is available under GPLv3.\n\n"
        @"Official website:\n"
-       @"https://gongde.zqscreen.cn/");
+       @"https://gongde.zqscreen.cn/\n\n"
+       @"Follow the developer on Douyin\n"
+       @"@Shanqiu / Douyin ID: 1872941388"), version];
+  NSString *douyinPath = [NSBundle.mainBundle pathForResource:@"developer-douyin" ofType:@"png"];
+  NSImage *douyinImage = douyinPath ? [[NSImage alloc] initWithContentsOfFile:douyinPath] : nil;
+  if (douyinImage) {
+    NSView *accessory = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 260)];
+    NSImageView *code = [[NSImageView alloc] initWithFrame:NSMakeRect(30, 0, 240, 260)];
+    code.image = douyinImage;
+    code.imageScaling = NSImageScaleProportionallyUpOrDown;
+    code.imageAlignment = NSImageAlignCenter;
+    code.toolTip = UiText(@"使用抖音扫一扫，关注开发者山丘", @"Scan with Douyin to find the developer");
+    code.accessibilityLabel = UiText(@"开发者山丘的抖音码，抖音号 1872941388",
+                                     @"Developer Douyin code, ID 1872941388");
+    [accessory addSubview:code];
+    alert.accessoryView = accessory;
+  }
   [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
-  if (!self.inputMonitoringAuthorized) {
+  if (!self.inputMonitoringAuthorized && !gIsolatedAcceptance) {
     [alert addButtonWithTitle:UiText(@"开启输入监控", @"Enable Input Monitoring")];
   }
   NSModalResponse response = [alert runModal];
@@ -1265,6 +1417,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy proxy,
                                    void *context) {
   (void)proxy;
   (void)event;
+  if (gIsolatedAcceptance) return event;
   MeritController *controller = (__bridge MeritController *)context;
   if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
     [controller handleEventTapDisabled];
@@ -1283,9 +1436,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy proxy,
 }
 
 int main(int argc, const char *argv[]) {
-  (void)argc;
-  (void)argv;
   @autoreleasepool {
+    if (!InitializeAcceptanceContext(argc, argv)) {
+      fprintf(stderr, "isolated_acceptance_configuration_invalid\n");
+      return 2;
+    }
     NSApplication *app = NSApplication.sharedApplication;
     MeritController *controller = [[MeritController alloc] init];
     app.delegate = controller;
