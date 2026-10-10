@@ -2,14 +2,15 @@
 
 > 当前业务以 [全免费领取与共创 PRD 1.1](docs/PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md) 为准。新领取全免费；旧收费、权益码和 24 小时首次导入规则已被替代，仅保留既有付费订单的历史履行与恢复。下文旧版本实测记录不是 0.9.0 的验收结果。
 
-## 0.9.0 发布与免费领取状态
+## 0.9.1 发布与免费领取状态
 
-- macOS / Windows 0.9.0 客户端已发布；免费领取服务、统一形象库和创作者自动审核已部署并启用。真实群码领取、作者投稿与另一个浏览器使用作者码下载已有证据；这不代表双平台最终客户端验收全部通过。
+- 本次提供 macOS / Windows 0.9.1 客户端；免费领取服务、统一形象库和创作者自动审核沿用已上线实现。真实群码领取、作者投稿与另一个浏览器使用作者码下载已有证据；这不代表双平台最终客户端验收全部通过。
 - 基础木鱼和公开安装包免费，不需要领取码。扩展形象的新领取全免费，统一形象库按有效群码或创作者码范围授权，每批最多 10 个；码不作为付款凭证。
 - 新交付使用签名永久包，文件可永久导入并离线使用，没有 24 小时首次导入限制。0.9.0 客户端兼容验证历史 timed 包的原签名，不因旧首次导入日期已过而拒绝导入。
 - 同一批次在服务器签发后 7 日内可重新下载；超过 7 日不再保证服务器重下，不影响已保存文件的永久导入与本地使用。单个形象交付 `.nmgpack`，多个形象交付一个 `.nmgpacks` 批次文件。
 - 不再创建新收费订单；既有已付款订单仍按原订单上下文履行、恢复，不要求用户重复付款。
-- 0.9.1 是补齐 macOS 全屏隐藏开关的验收候选，尚未正式发布。下方下载链接仍是正式 0.9.0；候选构建通过不能替代正常安装后的界面与权限验收。当前执行状态见 [WORK_PLAN.md](WORK_PLAN.md)。
+- 0.9.1 改善关于页的长内容和抖音码展示；全屏自动隐藏设计已经取消，两端不提供该模式。Mac 已完成清理版菜单、形象切换、关于页及退出重启检查；Windows 构建和实际导入器回归通过，完整实机界面验收由用户在发布后完成，不将其标为已通过。
+- 0.9.0 安装文件仍保留，可从历史发布页回退。当前执行状态见 [WORK_PLAN.md](WORK_PLAN.md)。
 
 ## 项目资料入口
 
@@ -21,9 +22,11 @@
 
 ## 下载
 
-- [GitHub v0.9.0 发布页](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.0)
-- [macOS 0.9.0 DMG 国内下载](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.0.dmg)：`3143825` 字节；SHA-256：`46abb7293592e24b1630d539825ef69f636e66f2e678e920c6e5e4d70b314ddc`。
-- [Windows 0.9.0 安装程序国内下载](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.0-setup.exe)：`3229050` 字节；SHA-256：`10203fe1e71c54ce19f4e24980dbefd14aafba0d10b8f5135c213dfa6184f4af`。
+- [GitHub v0.9.1 发布页](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.1)
+- [macOS 0.9.1 DMG 国内下载](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.1.dmg)：`3134634` 字节；SHA-256：`a3b84bd6ae2a2781b907a3a090a0b8a668ef9897b59ce5f6a4ad325e61107cab`。
+- [Windows 0.9.1 安装程序国内下载](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.1-setup.exe)：`3230792` 字节；SHA-256：`ea2368ab64cbd7444823e1f0ad3cdd79f563bdb97a37eb40fd1182bc0ae6724e`。
+- [0.9.1 发布说明与验收边界](docs/RELEASE_0.9.1.zh-CN.md)
+- [历史 0.9.0 发布页与回退文件](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.0)
 - [免签名安装、升级与卸载指南](docs/INSTALL_UNSIGNED.md)
 - 此次 macOS 使用 Apple Development 签名，不是 Developer ID 分发签名，未公证；Windows 未签名。两端仍可能出现系统安全提示，不承诺无 Gatekeeper / SmartScreen 提示。
 

@@ -146,7 +146,6 @@ static constexpr CGFloat kFeedbackY = 174.0;
 static constexpr CGFloat kCounterY = 210.0;
 static NSString *const kLaunchAtLoginConfigured = @"launchAtLoginConfigured";
 static NSString *const kLaunchAtLoginEnabled = @"launchAtLoginEnabled";
-static NSString *const kHideDuringFullscreenEnabled = @"hideDuringFullscreenEnabled";
 static NSString *const kLaunchAgentLabel = @"cn.niuma.merit.autostart";
 static BOOL IsChineseUI(void) {
   NSString *override = NSProcessInfo.processInfo.environment[@"NIUMA_UI_LANGUAGE"];
@@ -801,11 +800,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.window.opaque = NO;
   self.window.hasShadow = NO;
   self.window.level = NSFloatingWindowLevel;
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        BOOL hideDuringFullscreen = [defaults objectForKey:kHideDuringFullscreenEnabled] == nil ||
-            [defaults boolForKey:kHideDuringFullscreenEnabled];
-        self.window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-            (hideDuringFullscreen ? 0 : NSWindowCollectionBehaviorFullScreenAuxiliary);
+  // Keep the existing floating-window Space behavior. There is no
+  // application-fullscreen detection or automatic hiding preference.
+  self.window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+      NSWindowCollectionBehaviorFullScreenAuxiliary;
   self.window.movableByWindowBackground = YES;
   BOOL restoredFrame = NO;
   if (gIsolatedAcceptance) {
@@ -930,6 +928,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)notification;
   [self saveState];
   [self.dayTimer invalidate];
+  [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
   [self removeEventTap];
   [self stopPermissionPoll];
 }
@@ -1143,18 +1142,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.animationTimer = nil;
 }
 
-- (void)toggleHideDuringFullscreen:(id)sender {
-  (void)sender;
-  if (gIsolatedAcceptance) return;
-  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-  BOOL wasEnabled = [defaults objectForKey:kHideDuringFullscreenEnabled] == nil ||
-      [defaults boolForKey:kHideDuringFullscreenEnabled];
-  BOOL enabled = !wasEnabled;
-  [defaults setBool:enabled forKey:kHideDuringFullscreenEnabled];
-  self.window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-      (enabled ? 0 : NSWindowCollectionBehaviorFullScreenAuxiliary);
-}
-
 - (void)showContextMenu:(NSEvent *)event {
   NSMenu *menu = [[NSMenu alloc] init];
   NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:UiText(@"关于牛马电子功德", @"About NiuMa Merit")
@@ -1173,16 +1160,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       : NSControlStateValueOff;
   [menu addItem:launchAtLogin];
   NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-  BOOL hideDuringFullscreen = [defaults objectForKey:kHideDuringFullscreenEnabled] == nil ||
-      [defaults boolForKey:kHideDuringFullscreenEnabled];
-  NSMenuItem *fullscreen = [[NSMenuItem alloc]
-      initWithTitle:UiText(@"全屏时暂时隐藏", @"Hide during Full Screen")
-             action:@selector(toggleHideDuringFullscreen:)
-      keyEquivalent:@""];
-  fullscreen.target = self;
-  fullscreen.enabled = !gIsolatedAcceptance;
-  fullscreen.state = hideDuringFullscreen ? NSControlStateValueOn : NSControlStateValueOff;
-  [menu addItem:fullscreen];
   NSMenuItem *appearance = [[NSMenuItem alloc] initWithTitle:UiText(@"更换形象", @"Change Appearance")
                                                      action:@selector(showAppearancePicker:)
                                               keyEquivalent:@""];
