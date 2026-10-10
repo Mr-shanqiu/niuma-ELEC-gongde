@@ -20,6 +20,28 @@
       "sha256": "ea2368ab64cbd7444823e1f0ad3cdd79f563bdb97a37eb40fd1182bc0ae6724e",
       "publicDownloadUrl": "https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.1-setup.exe",
       "perpetualCompatible": true
+    },
+    {
+      "platform": "macos",
+      "format": "dmg",
+      "releaseId": "niuma-merit-macos-0.9.0",
+      "version": "0.9.0",
+      "bytes": 3143825,
+      "sha256": "46abb7293592e24b1630d539825ef69f636e66f2e678e920c6e5e4d70b314ddc",
+      "publicDownloadUrl": "https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.0.dmg",
+      "perpetualCompatible": true,
+      "systemRequirements": "历史回退版；新安装请优先选择上方 0.9.1。"
+    },
+    {
+      "platform": "windows",
+      "format": "exe",
+      "releaseId": "niuma-merit-windows-0.9.0-setup",
+      "version": "0.9.0",
+      "bytes": 3229050,
+      "sha256": "10203fe1e71c54ce19f4e24980dbefd14aafba0d10b8f5135c213dfa6184f4af",
+      "publicDownloadUrl": "https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.0-setup.exe",
+      "perpetualCompatible": true,
+      "systemRequirements": "历史回退版；新安装请优先选择上方 0.9.1。"
     }
   ]
 }
