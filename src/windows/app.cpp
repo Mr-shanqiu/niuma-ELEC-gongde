@@ -74,6 +74,13 @@ constexpr UINT_PTR kMenuLaunchAtLogin = 2;
 constexpr UINT_PTR kMenuAppearance = 3;
 constexpr UINT_PTR kMenuCalendar = 4;
 constexpr UINT_PTR kMenuQuit = 5;
+constexpr UINT_PTR kMenuCountStatus = 6;
+constexpr UINT_PTR kMenuGuide = 7;
+constexpr wchar_t kCountStatusClass[] = L"NiuMaMeritCountStatus";
+constexpr int kStatusText = 4001;
+constexpr int kStatusStart = 4002;
+constexpr int kStatusRetry = 4003;
+constexpr int kStatusClose = 4004;
 
 bool IsChineseUi() {
   return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;
@@ -135,6 +142,34 @@ struct AppState {
 };
 
 AppState gState;
+
+// Ephemeral event counts and monotonic relative times only. Never inspect
+// hook payloads or foreground windows.
+struct CountingCheck {
+  HWND window = nullptr;
+  bool observedCount = false;
+  bool deliveryFault = false;
+  DWORD keyboardError = ERROR_SUCCESS;
+  DWORD mouseError = ERROR_SUCCESS;
+  bool active = false;
+  bool counting = false;
+  unsigned int generation = 0;
+  unsigned int listenerGeneration = 0;
+  ULONGLONG starts = 0;
+  ULONGLONG ends = 0;
+  ULONGLONG lastRelative = 0;
+  std::uint64_t keys = 0;
+  std::uint64_t clicks = 0;
+  std::uint64_t scrolls = 0;
+  std::uint64_t handled = 0;
+  std::uint64_t expected = 0;
+  std::uint64_t counted = 0;
+  std::wstring result;
+};
+
+CountingCheck gCountingCheck;
+std::vector<std::string> gNewlyImportedIds;
+std::vector<std::string> gLastImportedIds;
 PngResource gFish;
 PngResource gMallet;
 PngResource gLuckyCatBase;
@@ -729,6 +764,7 @@ void CountOneOperation() {
   if (EnsureCurrentDay()) {
     RenderLayeredWindow(GetTickCount64());
   }
+  if (gCountingCheck.counting) ++gCountingCheck.expected;
   if (gState.total == std::numeric_limits<std::uint64_t>::max()) {
     return;
   }
@@ -751,6 +787,7 @@ void CountOneOperation() {
 
   gState.lastInputTime = now;
   ++gState.total;
+  if (gCountingCheck.counting) ++gCountingCheck.counted;
   if (gState.todayTotal < std::numeric_limits<std::uint64_t>::max()) {
     ++gState.todayTotal;
   }
@@ -783,13 +820,29 @@ void CountScrollGesture() {
   }
 }
 
+void QueueGlobalInput(UINT message, unsigned int kind) {
+  const ULONGLONG now = GetTickCount64();
+  const bool observing = gCountingCheck.active &&
+      now >= gCountingCheck.starts && now < gCountingCheck.ends;
+  if (observing) {
+    if (kind == 1) ++gCountingCheck.keys;
+    else if (kind == 2) ++gCountingCheck.clicks;
+    else ++gCountingCheck.scrolls;
+    gCountingCheck.lastRelative = now - gCountingCheck.starts;
+  }
+  if (!PostMessageW(gState.window, message, gCountingCheck.listenerGeneration,
+          observing ? static_cast<LPARAM>(gCountingCheck.generation) : 0)) {
+    gCountingCheck.deliveryFault = true;
+  }
+}
+
 LRESULT CALLBACK KeyboardHook(
     int code, WPARAM message, LPARAM data) {
   (void)data;
   if (code == HC_ACTION &&
       (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) &&
       gState.window != nullptr) {
-    PostMessageW(gState.window, kCountMessage, 0, 0);
+    QueueGlobalInput(kCountMessage, 1);
   }
   return CallNextHookEx(gState.keyboardHook, code, message, data);
 }
@@ -803,17 +856,241 @@ LRESULT CALLBACK MouseHook(
       case WM_RBUTTONDOWN:
       case WM_MBUTTONDOWN:
       case WM_XBUTTONDOWN:
-        PostMessageW(gState.window, kCountMessage, 0, 0);
+        QueueGlobalInput(kCountMessage, 2);
         break;
       case WM_MOUSEWHEEL:
       case WM_MOUSEHWHEEL:
-        PostMessageW(gState.window, kScrollMessage, 0, 0);
+        QueueGlobalInput(kScrollMessage, 3);
         break;
       default:
         break;
     }
   }
   return CallNextHookEx(gState.mouseHook, code, message, data);
+}
+
+void CountGlobalDelivery(bool scroll, LPARAM generation, WPARAM listenerGeneration) {
+  const std::uint64_t before = gState.total;
+  gCountingCheck.counting = generation != 0 &&
+      static_cast<unsigned int>(generation) == gCountingCheck.generation;
+  if (gCountingCheck.counting) ++gCountingCheck.handled;
+  if (scroll) CountScrollGesture();
+  else CountOneOperation();
+  gCountingCheck.counting = false;
+  if (gState.total > before && listenerGeneration == gCountingCheck.listenerGeneration)
+    gCountingCheck.observedCount = true;
+}
+
+void RestartGlobalListeners() {
+  ++gCountingCheck.listenerGeneration;
+  if (gState.keyboardHook != nullptr) UnhookWindowsHookEx(gState.keyboardHook);
+  if (gState.mouseHook != nullptr) UnhookWindowsHookEx(gState.mouseHook);
+  gCountingCheck.observedCount = false;
+  gCountingCheck.deliveryFault = false;
+  HINSTANCE instance = GetModuleHandleW(nullptr);
+  gState.keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
+  gCountingCheck.keyboardError = gState.keyboardHook ? ERROR_SUCCESS : GetLastError();
+  gState.mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
+  gCountingCheck.mouseError = gState.mouseHook ? ERROR_SUCCESS : GetLastError();
+}
+
+std::wstring CountingStatusTitle() {
+  if (!gState.keyboardHook && !gState.mouseHook)
+    return UiText(L"仅点击小伙伴计数", L"Pet-click Counting Only");
+  if (!gState.keyboardHook || !gState.mouseHook)
+    return UiText(L"待检查：部分监听未建立", L"Check Needed: Partial Listener");
+  if (gCountingCheck.deliveryFault)
+    return UiText(L"待检查：监听与计数结果不一致", L"Check Needed: Counting Mismatch");
+  if (!gCountingCheck.observedCount)
+    return UiText(L"待检查：监听已建立，尚未观察到计数",
+                  L"Check Pending: Listener Ready, No Count Observed");
+  return UiText(L"全局监听已收到事件并计数", L"Global Events Received and Counted");
+}
+
+void RefreshCountingStatus() {
+  if (!gCountingCheck.window) return;
+  const ULONGLONG now = GetTickCount64();
+  const std::uint64_t events =
+      gCountingCheck.keys + gCountingCheck.clicks + gCountingCheck.scrolls;
+  if (gCountingCheck.active && now >= gCountingCheck.ends) {
+    gCountingCheck.active = false;
+    if (events == 0) {
+      gCountingCheck.observedCount = false;
+      gCountingCheck.result = UiText(
+          L"未观察到输入，不能判断失败。若确实在其他应用操作过，请重试监听后再测；否则可直接重新自检。",
+          L"No input observed; this is not a failure verdict. If you used another app, retry the listener and check again; otherwise repeat the check.");
+    } else if (gCountingCheck.handled != events ||
+               gCountingCheck.expected != gCountingCheck.counted) {
+      gCountingCheck.deliveryFault = true;
+      gCountingCheck.result = UiText(
+          L"收到事件，但计数未完全更新。请重试监听；总数已达上限时也不会继续增加。",
+          L"Events arrived but counts did not fully update. Retry the listener; counts also stop at the numeric limit.");
+    } else if (gCountingCheck.expected == 0) {
+      gCountingCheck.result = UiText(
+          L"只观察到同一段连续滚动，未开始新手势；停一下再试，不判失败。",
+          L"Only an existing scroll gesture was observed. Pause and retry; no failure inferred.");
+    } else {
+      gCountingCheck.deliveryFault = false;
+      gCountingCheck.result = UiText(
+          L"本次观察到的输入已计数。未发生的输入类型未判断；请自行确认刚才已切到其他应用。",
+          L"Observed inputs were counted. Unused input types are not assessed; please confirm you switched to another app.");
+    }
+  }
+  std::wstring progress = gCountingCheck.result.empty()
+      ? UiText(L"尚未开始自检。", L"No check started.") : gCountingCheck.result;
+  if (gCountingCheck.active) {
+    if (now < gCountingCheck.starts) {
+      progress = UiText(L"准备中：请切换到其他应用。2 秒后开始记录。",
+                        L"Get ready: switch to another app. Recording starts after 2 seconds.");
+    } else {
+      progress = UiText(L"记录中，剩余秒数：", L"Recording; seconds left: ") +
+          std::to_wstring((gCountingCheck.ends - now + 999) / 1000);
+    }
+  }
+  std::wstring text = CountingStatusTitle();
+  text += UiText(
+      L"\r\n\r\n点击开始后切到其他应用，按几次键、点击或滚动；10 秒后回来。程序不读取当前应用，请自行确认已切换。\r\n\r\n",
+      L"\r\n\r\nStart, switch to another app, type, click or scroll, then return after 10 seconds. The app does not inspect the active app; please confirm you switched.\r\n\r\n");
+  text += progress;
+  text += UiText(L"\r\n\r\n收到按键事件：", L"\r\n\r\nKey events received: ") + std::to_wstring(gCountingCheck.keys);
+  text += UiText(L"\r\n鼠标按键：", L"\r\nMouse clicks: ") + std::to_wstring(gCountingCheck.clicks);
+  text += UiText(L"\r\n滚动事件：", L"\r\nScroll events: ") + std::to_wstring(gCountingCheck.scrolls);
+  text += UiText(L"\r\n按规则应增加：", L"\r\nExpected count increase: ") + std::to_wstring(gCountingCheck.expected);
+  text += UiText(L"；实际增加：", L"; actual increase: ") + std::to_wstring(gCountingCheck.counted);
+  text += UiText(L"\r\n最后事件距开始的毫秒数：", L"\r\nLast event, milliseconds after start: ") +
+      std::to_wstring(gCountingCheck.lastRelative);
+  text += UiText(L"（无事件时为 0）。连续滚动按一次手势计数。", L" (0 if none). Continuous scrolling counts as one gesture.");
+  text += UiText(L"\r\n\r\n键盘监听句柄：", L"\r\n\r\nKeyboard listener handle: ");
+  text += gState.keyboardHook ? UiText(L"已建立", L"created") : UiText(L"未建立", L"unavailable");
+  text += UiText(L"；鼠标监听句柄：", L"; mouse listener handle: ");
+  text += gState.mouseHook ? UiText(L"已建立", L"created") : UiText(L"未建立", L"unavailable");
+  if (!gState.keyboardHook)
+    text += UiText(L"；键盘错误码 ", L"; keyboard error ") + std::to_wstring(gCountingCheck.keyboardError);
+  if (!gState.mouseHook)
+    text += UiText(L"；鼠标错误码 ", L"; mouse error ") + std::to_wstring(gCountingCheck.mouseError);
+  text += UiText(
+      L"。句柄存在不保证仍在收到输入，请以实际自检为准。\r\n\r\nWindows 安全桌面、会话切换或监听超时可能影响监听。可点“重试监听”，不需要开启 macOS 权限，也不要求管理员提权或关闭安全保护。\r\n\r\n自检仅在内存中保留事件次数与相对时间；不读取或保存具体键值、内容、坐标、应用或窗口信息。不联网。",
+      L". A handle alone does not prove input is still arriving; use the check.\r\n\r\nWindows secure desktops, session changes or listener timeouts can affect input. Retry the listener; no macOS permissions, elevation or disabling security is required.\r\n\r\nOnly event counts and relative times are kept in memory, never key values, contents, coordinates, apps or window information. No networking.");
+  SetDlgItemTextW(gCountingCheck.window, kStatusText, text.c_str());
+  EnableWindow(GetDlgItem(gCountingCheck.window, kStatusStart), !gCountingCheck.active);
+}
+
+void LayoutCountingStatus(HWND window) {
+  RECT client = {};
+  GetClientRect(window, &client);
+  const UINT dpi = gState.dpi ? gState.dpi : 96;
+  const int margin = ScaleDip(16, dpi);
+  const int buttonHeight = ScaleDip(32, dpi);
+  const int bottom = client.bottom - margin - buttonHeight;
+  MoveWindow(GetDlgItem(window, kStatusText), margin, margin,
+      std::max(1, static_cast<int>(client.right) - 2 * margin),
+      std::max(1, bottom - 2 * margin), TRUE);
+  const int width = std::max(1, (static_cast<int>(client.right) - 4 * margin) / 3);
+  for (int i = 0; i < 3; ++i) {
+    MoveWindow(GetDlgItem(window, kStatusStart + i),
+        margin + i * (width + margin), bottom, width, buttonHeight, TRUE);
+  }
+}
+
+LRESULT CALLBACK CountingStatusProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+  switch (message) {
+    case WM_CREATE:
+      gCountingCheck.window = window;
+      CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+          WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+          0, 0, 1, 1, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusText)),
+          GetModuleHandleW(nullptr), nullptr);
+      CreateWindowW(L"BUTTON", UiText(L"开始 10 秒自检", L"Start 10-second Check"),
+          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 1, 1,
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusStart)), GetModuleHandleW(nullptr), nullptr);
+      CreateWindowW(L"BUTTON", UiText(L"重试监听", L"Retry Listener"),
+          WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 1, 1,
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusRetry)), GetModuleHandleW(nullptr), nullptr);
+      CreateWindowW(L"BUTTON", UiText(L"关闭", L"Close"),
+          WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 1, 1,
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusClose)), GetModuleHandleW(nullptr), nullptr);
+      for (int id = kStatusText; id <= kStatusClose; ++id)
+        SendDlgItemMessageW(window, id, WM_SETFONT,
+            reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+      SetTimer(window, 1, 1000, nullptr);
+      LayoutCountingStatus(window);
+      RefreshCountingStatus();
+      return 0;
+    case WM_SIZE:
+      LayoutCountingStatus(window);
+      return 0;
+    case WM_GETMINMAXINFO: {
+      auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);
+      const UINT dpi = gState.dpi ? gState.dpi : 96;
+      limits->ptMinTrackSize.x = ScaleDip(500, dpi);
+      limits->ptMinTrackSize.y = ScaleDip(400, dpi);
+      return 0;
+    }
+    case WM_TIMER:
+      RefreshCountingStatus();
+      return 0;
+    case WM_COMMAND:
+      if (LOWORD(wParam) == kStatusStart && !gCountingCheck.active) {
+        ++gCountingCheck.generation;
+        if (gCountingCheck.generation == 0) ++gCountingCheck.generation;
+        gCountingCheck.keys = gCountingCheck.clicks = gCountingCheck.scrolls = 0;
+        gCountingCheck.handled = gCountingCheck.expected = gCountingCheck.counted = 0;
+        gCountingCheck.lastRelative = 0;
+        gCountingCheck.result.clear();
+        gCountingCheck.starts = GetTickCount64() + 2000;
+        gCountingCheck.ends = gCountingCheck.starts + 10000;
+        gCountingCheck.active = true;
+        RefreshCountingStatus();
+        return 0;
+      }
+      if (LOWORD(wParam) == kStatusRetry) {
+        gCountingCheck.active = false;
+        ++gCountingCheck.generation;
+        gCountingCheck.result = UiText(L"监听已重试，请重新开始自检。", L"Listener retried. Start a new check.");
+        RestartGlobalListeners();
+        RefreshCountingStatus();
+        return 0;
+      }
+      if (LOWORD(wParam) == kStatusClose || LOWORD(wParam) == IDCANCEL) {
+        DestroyWindow(window);
+        return 0;
+      }
+      break;
+    case WM_CLOSE:
+      DestroyWindow(window);
+      return 0;
+    case WM_DESTROY:
+      KillTimer(window, 1);
+      if (gCountingCheck.active)
+        gCountingCheck.result = UiText(L"自检已取消，未作故障判断。", L"Check cancelled; no failure inferred.");
+      gCountingCheck.active = false;
+      gCountingCheck.window = nullptr;
+      return 0;
+  }
+  return DefWindowProcW(window, message, wParam, lParam);
+}
+
+void ShowCountingStatus(HWND owner) {
+  if (!gCountingCheck.window) {
+    WNDCLASSEXW cls = {};
+    cls.cbSize = sizeof(cls);
+    cls.hInstance = GetModuleHandleW(nullptr);
+    cls.lpfnWndProc = CountingStatusProcedure;
+    cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    cls.lpszClassName = kCountStatusClass;
+    if (!RegisterClassExW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return;
+    const UINT dpi = gState.dpi ? gState.dpi : 96;
+    gCountingCheck.window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT,
+        kCountStatusClass, UiText(L"计数状态与自检", L"Counting Status & Check"),
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+        CW_USEDEFAULT, CW_USEDEFAULT, ScaleDip(640, dpi), ScaleDip(570, dpi),
+        owner, nullptr, cls.hInstance, nullptr);
+  }
+  if (!gCountingCheck.window) return;
+  ShowWindow(gCountingCheck.window, SW_SHOW);
+  SetForegroundWindow(gCountingCheck.window);
+  RefreshCountingStatus();
 }
 
 bool IsMainWindowAlive(HWND owner) {
@@ -824,14 +1101,20 @@ bool ShowPrivacyNotice(HWND owner) {
   return MessageBoxW(
       owner,
       UiText(
+          L"1. 按住小伙伴拖动，放到喜欢的位置。\n"
+          L"2. 右键小伙伴，可以换形象、看日历和退出。\n"
+          L"3. 右键打开“计数状态与自检”，查看实际监听结果。未建立监听时，只能点击小伙伴计数。\n\n"
           L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
           L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
           L"剪贴板或屏幕内容；程序不包含联网功能。",
+          L"1. Drag your companion to move it.\n"
+          L"2. Right-click it to change appearance, view the calendar, or quit.\n"
+          L"3. Open Counting Status & Check from that menu to check actual input. Without a listener, only pet clicks count.\n\n"
           L"NiuMa Merit counts only keyboard presses, mouse button presses, "
           L"and scroll gestures.\n\nIt does not read, save, or upload key content, "
           L"mouse positions, the current app, clipboard data, or screen content. "
           L"The app has no network features."),
-      UiText(L"隐私说明", L"Privacy"), MB_OK | MB_ICONINFORMATION) == IDOK;
+      UiText(L"先记住三件事", L"Three Things to Get Started"), MB_OK | MB_ICONINFORMATION) == IDOK;
 }
 
 struct AboutDialogState {
@@ -1446,9 +1729,33 @@ void PaintAppearancePicker(HWND window) {
     }
     graphics.DrawImage(&thumbnail, Gdiplus::RectF(
         static_cast<float>(card.left + ScaleDip(20, dpi)),
-        static_cast<float>(card.top + ScaleDip(3, dpi)),
+        static_cast<float>(card.top + ScaleDip(22, dpi)),
         static_cast<float>(ScaleDip(116, dpi)),
-        static_cast<float>(ScaleDip(96, dpi))));
+        static_cast<float>(ScaleDip(76, dpi))));
+    std::wstring badge;
+    if (index == CurrentPickerIndex()) badge = UiText(L"当前", L"Current");
+    if (index > 0) {
+      const auto& id = gAppearanceCatalog.packs()[static_cast<size_t>(index - 1)]->id;
+      if (std::find(gNewlyImportedIds.begin(), gNewlyImportedIds.end(), id) != gNewlyImportedIds.end()) {
+        if (!badge.empty()) badge += L" / ";
+        badge += UiText(L"本次新增", L"New");
+      } else if (std::find(gLastImportedIds.begin(), gLastImportedIds.end(), id) != gLastImportedIds.end()) {
+        if (!badge.empty()) badge += L" / ";
+        badge += UiText(L"本次导入", L"Imported");
+      }
+    }
+    if (!badge.empty()) {
+      Gdiplus::Font badgeFont(L"Microsoft YaHei UI", static_cast<float>(ScaleDip(11, dpi)),
+          Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+      Gdiplus::SolidBrush badgeInk(Gdiplus::Color(255, 51, 92, 68));
+      Gdiplus::StringFormat badgeFormat;
+      badgeFormat.SetAlignment(Gdiplus::StringAlignmentCenter);
+      graphics.DrawString(badge.c_str(), -1, &badgeFont,
+          Gdiplus::RectF(static_cast<float>(card.left + ScaleDip(4, dpi)),
+              static_cast<float>(card.top + ScaleDip(4, dpi)),
+              static_cast<float>(card.right - card.left - ScaleDip(8, dpi)),
+              static_cast<float>(ScaleDip(18, dpi))), &badgeFormat, &badgeInk);
+    }
 
     Gdiplus::Font font(L"Microsoft YaHei UI", static_cast<float>(ScaleDip(14, dpi)),
                        Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
@@ -1570,7 +1877,20 @@ LRESULT CALLBACK PickerWindowProcedure(
 
 void ShowAppearancePicker(HWND owner) {
   gPicker.pendingIndex = CurrentPickerIndex();
+  if (gPicker.window && IsWindow(gPicker.window)) {
+    InvalidateRect(gPicker.window, nullptr, FALSE);
+    SetForegroundWindow(gPicker.window);
+    return;
+  }
   gPicker.scrollRow = std::max(0, gPicker.pendingIndex / 2 - 2);
+  for (size_t i = 0; i < gAppearanceCatalog.packs().size(); ++i) {
+    if (std::find(gLastImportedIds.begin(), gLastImportedIds.end(),
+            gAppearanceCatalog.packs()[i]->id) != gLastImportedIds.end()) {
+      gPicker.scrollRow = static_cast<int>((i + 1) / 2);
+      break;
+    }
+  }
+  gPicker.scrollRow = std::min(gPicker.scrollRow, std::max(0, (PickerItemCount() + 1) / 2 - 3));
   gPicker.confirmed = false;
   const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
   RECT desired = {0, 0, ScaleDip(360, dpi), ScaleDip(538, dpi)};
@@ -1649,45 +1969,86 @@ std::wstring AppearancePackArgument() {
 
 void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
                           bool showSuccess) {
+  const bool batch = niuma::IsAppearanceBatchPath(sourcePath);
+  if (GetFileAttributesW(sourcePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    MessageBoxW(owner,
+        UiText(L"文件不存在或无法读取，请重新选择原文件。原有形象和功德未改变。",
+               L"File missing or unreadable. Select the original file again. Existing packs and counts are unchanged."),
+        WindowTitle(), MB_OK | MB_ICONWARNING);
+    return;
+  }
+  std::vector<std::string> previousIds;
+  for (const auto& pack : gAppearanceCatalog.packs()) previousIds.push_back(pack->id);
   std::wstring error;
-  std::vector<std::string> installedIds;
+  std::vector<std::string> installedIds, duplicates;
   bool installed = false;
-  if (niuma::IsAppearanceBatchPath(sourcePath)) {
+  if (batch) {
     installed = gAppearanceCatalog.InstallBatch(
-        sourcePath, AppearanceDirectory(), &installedIds, &error);
+        sourcePath, AppearanceDirectory(), &installedIds, &error, &duplicates);
   } else {
     std::string id;
+    bool duplicate = false;
     installed = gAppearanceCatalog.Install(
-        sourcePath, AppearanceDirectory(), &id, &error);
+        sourcePath, AppearanceDirectory(), &id, &error, &duplicate);
     if (installed) installedIds.push_back(id);
+    if (installed && duplicate) duplicates.push_back(id);
   }
-  if (!installed) {
-    MessageBoxW(owner, error.c_str(),
-                UiText(L"形象包导入失败", L"Appearance Pack Import Failed"),
-                MB_OK | MB_ICONERROR);
-    return;
+  gNewlyImportedIds.clear();
+  gLastImportedIds.clear();
+  std::wstring details;
+  for (const auto& id : installedIds) {
+    const auto* pack = gAppearanceCatalog.Find(id);
+    if (!pack) {
+      error += UiText(L"\n已保存的形象未能加载，未启用；原文件保留。",
+                      L"\nA saved pack could not be loaded; it was not enabled; files were kept.");
+      continue;
+    }
+    if (std::find(gLastImportedIds.begin(), gLastImportedIds.end(), id) != gLastImportedIds.end()) continue;
+    gLastImportedIds.push_back(id);
+    details += L"\n" + (IsChineseUi() ? pack->nameZh : pack->nameEn) + L" : ";
+    if (std::find(duplicates.begin(), duplicates.end(), id) != duplicates.end()) {
+      details += UiText(L"重复包，已保留原形象", L"Duplicate; existing pack kept");
+    } else if (std::find(previousIds.begin(), previousIds.end(), id) != previousIds.end()) {
+      details += UiText(L"已更新", L"Updated");
+    } else {
+      gNewlyImportedIds.push_back(id);
+      details += UiText(L"本次新增", L"New in this import");
+    }
   }
-  const std::string& installedId = installedIds.back();
-  if (gAppearanceCatalog.Find(installedId) == nullptr) {
-    MessageBoxW(owner,
-        UiText(L"形象包导入后无法重新读取。",
-               L"The imported appearance pack could not be reloaded."),
-        UiText(L"形象包导入失败", L"Appearance Pack Import Failed"),
-        MB_OK | MB_ICONERROR);
-    return;
+  const bool singleEnabled = !batch && installed && gLastImportedIds.size() == 1;
+  if (singleEnabled) {
+    gState.selectedPackId = gLastImportedIds.front();
+    gState.dirty = true;
+    SaveState();
   }
-  gState.selectedPackId = installedId;
-  gState.dirty = true;
-  SaveState();
+  // Refresh the current pack without implicitly selecting the last batch member.
   RenderLayeredWindow(GetTickCount64());
-  if (showSuccess) {
-    const std::wstring message = installedIds.size() > 1
-        ? std::to_wstring(installedIds.size()) +
-          UiText(L" 个形象已导入。可在“更换形象”中切换。",
-                 L" packs imported. Switch between them in Change Appearance.")
-        : UiText(L"形象包已安全导入并启用。",
-                 L"The appearance pack was safely imported and enabled.");
-    MessageBoxW(owner, message.c_str(), WindowTitle(), MB_OK | MB_ICONINFORMATION);
+  if (gPicker.window && IsWindow(gPicker.window)) {
+    gPicker.pendingIndex = CurrentPickerIndex();
+    InvalidateRect(gPicker.window, nullptr, FALSE);
+  }
+  std::wstring message = singleEnabled
+      ? UiText(L"导入完成，已启用此形象。", L"Imported and enabled.")
+      : UiText(L"当前形象未改变。只有确认选择后才会切换。", L"Current appearance unchanged. Confirm a selection to switch.");
+  message += UiText(L"\n本次可用形象：", L"\nPacks available from this import: ") +
+      std::to_wstring(gLastImportedIds.size()) + details;
+  if (!installed || !error.empty()) {
+    message += UiText(L"\n\n未完成 / 损坏或校验失败：\n", L"\n\nNot completed / damaged or failed verification:\n");
+    message += error.empty() ? UiText(L"形象包无法加载。", L"Pack unavailable.") : error;
+    message += UiText(L"\n其他正常形象、功德和日历不受影响。可重新选择原文件或重新下载。",
+                     L"\nOther valid packs, counts and calendar are unchanged. Select the original file or download it again.");
+  }
+  const bool canChoose = !gLastImportedIds.empty();
+  if (canChoose && !singleEnabled)
+    message += UiText(L"\n\n现在打开形象列表选择吗？", L"\n\nOpen the appearance list to choose now?");
+  if (showSuccess || !installed || !error.empty()) {
+    const int response = MessageBoxW(owner, message.c_str(),
+        !installed ? (canChoose ? UiText(L"部分形象已导入", L"Some Packs Imported")
+                               : UiText(L"未能导入形象", L"No Packs Imported"))
+                   : WindowTitle(),
+        (canChoose && !singleEnabled ? MB_YESNO : MB_OK) |
+        (!installed || !error.empty() ? MB_ICONWARNING : MB_ICONINFORMATION));
+    if (response == IDYES && IsMainWindowAlive(owner)) ShowAppearancePicker(owner);
   }
 }
 
@@ -1695,7 +2056,7 @@ bool ShowPrivacyNoticeIfNeeded(HWND owner) {
   if (!IsMainWindowAlive(owner)) return false;
   const std::wstring path = DataPath();
   if (!path.empty() &&
-      GetPrivateProfileIntW(L"state", L"privacy_shown", 0, path.c_str()) == 1) {
+      GetPrivateProfileIntW(L"state", L"basic_guide_shown", 0, path.c_str()) == 1) {
     return true;
   }
 
@@ -1703,6 +2064,7 @@ bool ShowPrivacyNoticeIfNeeded(HWND owner) {
   if (!path.empty()) {
     WritePrivateProfileStringW(
         L"state", L"privacy_shown", L"1", path.c_str());
+    WritePrivateProfileStringW(L"state", L"basic_guide_shown", L"1", path.c_str());
   }
   return true;
 }
@@ -1775,6 +2137,10 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
       menu,
       MF_STRING | (IsLaunchAtLoginEnabled() ? MF_CHECKED : MF_UNCHECKED),
       kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"));
+  const std::wstring statusLabel =
+      UiText(L"计数状态与自检：", L"Counting Status & Check: ") + CountingStatusTitle();
+  AppendMenuW(menu, MF_STRING, kMenuCountStatus, statusLabel.c_str());
+  AppendMenuW(menu, MF_STRING, kMenuGuide, UiText(L"使用说明：三件事", L"Getting Started"));
   AppendMenuW(menu, MF_STRING, kMenuAppearance,
               UiText(L"更换形象", L"Change Appearance"));
   AppendMenuW(menu, MF_STRING, kMenuCalendar,
@@ -1799,6 +2165,10 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
                          L"Unable to change login startup. Please try again."),
                   WindowTitle(), MB_OK | MB_ICONERROR);
     }
+  } else if (command == static_cast<int>(kMenuCountStatus)) {
+    ShowCountingStatus(window);
+  } else if (command == static_cast<int>(kMenuGuide)) {
+    ShowPrivacyNotice(window);
   } else if (command == static_cast<int>(kMenuAppearance)) {
     ShowAppearancePicker(window);
   } else if (command == static_cast<int>(kMenuCalendar)) {
@@ -1816,11 +2186,11 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case kCountMessage:
-      CountOneOperation();
+      CountGlobalDelivery(false, lParam, wParam);
       return 0;
 
     case kScrollMessage:
-      CountScrollGesture();
+      CountGlobalDelivery(true, lParam, wParam);
       return 0;
 
     case WM_COPYDATA: {
@@ -1889,6 +2259,13 @@ LRESULT CALLBACK WindowProcedure(
       RenderLayeredWindow(GetTickCount64());
       return 0;
 
+    case WM_NCLBUTTONDOWN:
+    case WM_NCRBUTTONDOWN:
+    case WM_NCMBUTTONDOWN:
+    case WM_NCXBUTTONDOWN:
+      if (!gState.mouseHook) CountOneOperation();
+      break;
+
     case WM_NCHITTEST:
       return HTCAPTION;
 
@@ -1921,6 +2298,7 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_DESTROY:
+      if (gCountingCheck.window) DestroyWindow(gCountingCheck.window);
       KillTimer(window, kDayTimer);
       if (gState.timerRunning) {
         KillTimer(window, kAnimationTimer);
@@ -2001,8 +2379,9 @@ int WINAPI wWinMain(
   }
 
   std::wstring catalogError;
-  if (!gAppearanceCatalog.Reload(AppearanceDirectory(), &catalogError)) {
-    MessageBoxW(nullptr, catalogError.c_str(), WindowTitle(), MB_OK | MB_ICONERROR);
+  const bool catalogLoaded = gAppearanceCatalog.Reload(AppearanceDirectory(), &catalogError);
+  if (!catalogLoaded || !catalogError.empty()) {
+    MessageBoxW(nullptr, catalogError.c_str(), WindowTitle(), MB_OK | MB_ICONWARNING);
   }
 
   WNDCLASSEXW windowClass = {};
@@ -2064,7 +2443,11 @@ int WINAPI wWinMain(
       ? static_cast<MeritScene>(selectedScene)
       : MeritScene::Woodfish;
   gState.selectedPackId = ReadSelectedPackId();
-  if (gAppearanceCatalog.Find(gState.selectedPackId) == nullptr) {
+  if (!gState.selectedPackId.empty() && gAppearanceCatalog.Find(gState.selectedPackId) == nullptr) {
+    MessageBoxW(nullptr,
+        UiText(L"上次使用的形象文件缺失或未通过校验，暂时显示木鱼。原文件、功德和日历不删除；可重新导入原包。",
+               L"The previous appearance is missing or failed verification. Woodfish is shown for now. Original files, counts and calendar are kept; re-import the pack."),
+        WindowTitle(), MB_OK | MB_ICONWARNING);
     gState.selectedPackId.clear();
   }
 
@@ -2114,25 +2497,17 @@ int WINAPI wWinMain(
   }
 
   ConfigureLaunchAtLogin();
-  if (PrepareClientStartup(window, pendingAppearancePack)) {
-    gState.keyboardHook =
-        SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
-    gState.mouseHook =
-        SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
-    if (gState.keyboardHook == nullptr || gState.mouseHook == nullptr) {
-      MessageBoxW(
-          window, UiText(L"无法启动全局键盘或鼠标计数。",
-                         L"Unable to start global keyboard or mouse counting."), WindowTitle(),
-          MB_OK | MB_ICONERROR);
-      if (IsMainWindowAlive(window)) DestroyWindow(window);
-    }
-  } else if (IsMainWindowAlive(window)) {
+  RestartGlobalListeners();
+  if (!PrepareClientStartup(window, pendingAppearancePack) && IsMainWindowAlive(window)) {
     DestroyWindow(window);
   }
+  // A listener failure leaves click-only/partial counting and a reachable retry
+  // entry, instead of terminating the client and losing its recovery path.
 
   MSG message = {};
   if (IsMainWindowAlive(window)) {
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+      if (gCountingCheck.window && IsDialogMessageW(gCountingCheck.window, &message)) continue;
       TranslateMessage(&message);
       DispatchMessageW(&message);
     }

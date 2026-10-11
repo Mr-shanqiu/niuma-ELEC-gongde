@@ -544,7 +544,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
   JsonValue root;
   JsonParser parser(text);
   if (!parser.Parse(&root)) {
-    SetError(error, L"manifest.json 格式不正确或包含未知字段。");
+    SetError(error, L"形象配置格式不正确或含未知字段。请重新下载，或按制作指南重新封装。");
     return false;
   }
   double schema = 0, canvasWidth = 0, canvasHeight = 0, plusY = 0;
@@ -557,7 +557,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
           "name_zh", "name_en", "author", "publisher", "review_id",
           "canvas_width", "canvas_height", "preview", "plus_y", "layers",
           "license"})))) {
-    SetError(error, L"manifest.json 格式不正确或包含未知字段。");
+    SetError(error, L"形象配置格式不正确或含未知字段。请重新下载，或按制作指南重新封装。");
     return false;
   }
   std::string nameZh, nameEn, author, publisher;
@@ -575,19 +575,19 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
       !NumberInRange(Member(root, "canvas_width"), 240, 240, &canvasWidth) ||
       !NumberInRange(Member(root, "canvas_height"), 250, 250, &canvasHeight) ||
       !NumberInRange(Member(root, "plus_y"), 174, 174, &plusY)) {
-    SetError(error, L"形象包元数据不符合 1.0 规范。");
+    SetError(error, L"形象包基础资料或版本不合规。请重新下载，或按制作指南修正后重新封装。");
     return false;
   }
   // Existing official sources use these actual issuer strings.
   if ((pack->id.compare(0, 9, "official.") == 0 ||
        pack->id.compare(0, 9, "zqscreen.") == 0 ||
        pack->id.compare(0, 8, "creator.") == 0) && Member(root, "license") == nullptr) {
-    SetError(error, L"平台形象包必须包含有效的签名授权。");
+    SetError(error, L"形象包缺少有效授权凭证。请从官网重新下载，不要修改包内文件。");
     return false;
   }
   if ((pack->id.compare(0, 9, "official.") == 0 && publisher != "NiuMa Merit") ||
       (pack->id.compare(0, 9, "zqscreen.") == 0 && publisher != "zqscreen")) {
-    SetError(error, L"非官方形象包不能使用官方标识，请使用自己的形象包标识。");
+    SetError(error, L"形象来源与标识不一致。请从官网重新下载，或修正制作时使用的标识。");
     return false;
   }
   // Only the platform creator namespace requires the reviewed-delivery format.
@@ -604,7 +604,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
         !std::all_of(pack->id.begin() + 41, pack->id.end(), slugCharacter) ||
         pack->reviewId.size() != 32 ||
         !std::all_of(pack->reviewId.begin(), pack->reviewId.end(), lowerHex)) {
-      SetError(error, L"社区形象包标识或审核信息无效，请从官网重新下载。");
+      SetError(error, L"形象标识或审核信息无效。请从官网重新下载原包。");
       return false;
     }
   }
@@ -615,7 +615,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
   pack->plusY = static_cast<int>(plusY);
   if (pack->nameZh.empty() || pack->nameEn.empty() || pack->author.empty() ||
       pack->publisher.empty()) {
-    SetError(error, L"形象包文字必须是有效 UTF-8。");
+    SetError(error, L"形象文字编码不正确。请按制作指南使用 UTF-8 编码重新封装。");
     return false;
   }
   if (schema == 2 || (schema == 3 && Member(root, "license") != nullptr)) {
@@ -637,7 +637,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
         license->contentHash.size() != 64 ||
         !StringValue(Member(*value, "signature"), 128, &license->signature) ||
         license->signature.size() != 128) {
-      SetError(error, L"形象包授权凭证格式无效。");
+      SetError(error, L"形象包授权凭证格式无效。请从官网重新下载，不要修改包内文件。");
       return false;
     }
     auto safeToken = [](const std::string& value) {
@@ -652,7 +652,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     };
     if (!safeToken(license->downloadId) || !lowerHex(license->contentHash) ||
         !lowerHex(license->signature)) {
-      SetError(error, L"限时导入凭证包含不允许的字符。");
+      SetError(error, L"形象包授权凭证含无效字符。请从官网重新下载原包。");
       return false;
     }
     license->signedDelivery = true;
@@ -664,14 +664,14 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
   const JsonValue* layers = Member(root, "layers");
   if (layers == nullptr || layers->kind != JsonValue::Kind::Array ||
       layers->array.empty() || layers->array.size() > kMaximumLayers) {
-    SetError(error, L"形象包必须包含 1 至 6 个图层。");
+    SetError(error, L"形象须包含 1 至 6 个图层。请按制作指南调整后重新封装。");
     return false;
   }
   for (const JsonValue& layerValue : layers->array) {
     if (!(schema == 3
         ? HasExactKeys(layerValue, {"image", "frame", "anchor", "keyframes", "interpolation"})
         : HasExactKeys(layerValue, {"image", "frame", "anchor", "keyframes"}))) {
-      SetError(error, L"图层字段不符合规范。");
+      SetError(error, L"形象图层配置不合规。请按制作指南修正后重新封装。");
       return false;
     }
     PackLayer layer;
@@ -679,14 +679,14 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
       std::string interpolation;
       if (!StringValue(Member(layerValue, "interpolation"), 16, &interpolation) ||
           (interpolation != "linear" && interpolation != "smoothstep")) {
-        SetError(error, L"Unsupported appearance interpolation.");
+        SetError(error, L"形象动作的插值方式不受支持。请按制作指南修正后重新封装。");
         return false;
       }
       layer.smoothInterpolation = interpolation == "smoothstep";
     }
     if (!StringValue(Member(layerValue, "image"), 128, &layer.imageName) ||
         !IsSafeRootPng(layer.imageName)) {
-      SetError(error, L"图层图片名称不合法。");
+      SetError(error, L"形象图层文件名不合规。请按制作指南改名并重新封装。");
       return false;
     }
     const JsonValue* frame = Member(layerValue, "frame");
@@ -694,13 +694,13 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     if (frame == nullptr || frame->kind != JsonValue::Kind::Array ||
         frame->array.size() != 4 || anchor == nullptr ||
         anchor->kind != JsonValue::Kind::Array || anchor->array.size() != 2) {
-      SetError(error, L"图层位置或锚点格式不正确。");
+      SetError(error, L"形象图层的位置或锚点格式不正确。请按制作指南修正后重新封装。");
       return false;
     }
     double values[6] = {};
     for (size_t index = 0; index < 4; ++index) {
       if (!NumberInRange(&frame->array[index], -480, 480, &values[index])) {
-        SetError(error, L"图层位置超出允许范围。");
+        SetError(error, L"形象图层位置超出范围。请按制作指南调整后重新封装。");
         return false;
       }
     }
@@ -708,7 +708,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
         !NumberInRange(&anchor->array[1], 0, 1, &values[5]) ||
         values[2] <= 0 || values[3] <= 0 || values[2] > 480 ||
         values[3] > 480 || (schema != 3 && (values[1] < 0 || values[1] + values[3] > 170))) {
-      SetError(error, L"图层必须完全位于形象安全区内。");
+      SetError(error, L"形象图层超出安全显示区。请缩小或调整图层后重新封装。");
       return false;
     }
     layer.x = static_cast<float>(values[0]);
@@ -721,7 +721,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
     const JsonValue* keyframes = Member(layerValue, "keyframes");
     if (keyframes == nullptr || keyframes->kind != JsonValue::Kind::Array ||
         keyframes->array.empty() || keyframes->array.size() > kMaximumKeyframes) {
-      SetError(error, L"每个图层必须包含 1 至 8 个关键帧。");
+      SetError(error, L"每个图层须包含 1 至 8 个关键帧。请按制作指南调整后重新封装。");
       return false;
     }
     float previousT = -1.0f;
@@ -729,7 +729,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
       if (!(schema == 3
           ? HasExactKeys(keyframeValue, {"t", "x", "y", "rotation", "scale", "alpha", "scale_y"})
           : HasExactKeys(keyframeValue, {"t", "x", "y", "rotation", "scale", "alpha"}))) {
-        SetError(error, L"关键帧字段不符合规范。");
+        SetError(error, L"形象动作配置不合规。请按制作指南修正后重新封装。");
         return false;
       }
       double key[6] = {};
@@ -740,13 +740,13 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
           !NumberInRange(Member(keyframeValue, "scale"), 0.1, 4, &key[4]) ||
           !NumberInRange(Member(keyframeValue, "alpha"), 0, 1, &key[5]) ||
           key[0] <= previousT) {
-        SetError(error, L"关键帧数值不合法或时间未严格递增。");
+        SetError(error, L"形象动作数值或时间顺序不正确。请按制作指南修正后重新封装。");
         return false;
       }
       PackKeyframe keyframe;
       double scaleY = 1.0;
       if (schema == 3 && !NumberInRange(Member(keyframeValue, "scale_y"), 0.1, 4, &scaleY)) {
-        SetError(error, L"Invalid vertical appearance scale.");
+        SetError(error, L"形象纵向缩放数值不正确。请按制作指南修正后重新封装。");
         return false;
       }
       keyframe.scaleY = static_cast<float>(scaleY);
@@ -760,7 +760,7 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
       previousT = keyframe.t;
     }
     if (layer.keyframes.front().t != 0.0f) {
-      SetError(error, L"每个图层的第一个关键帧必须从 t=0 开始。");
+      SetError(error, L"形象动作必须从初始时刻开始。请将首个关键帧设为 t=0 后重新封装。");
       return false;
     }
     pack->layers.push_back(std::move(layer));
@@ -777,24 +777,28 @@ bool LoadAppearancePackFile(const std::wstring& path,
   if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) ||
       (attributes.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
                                       FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
-    SetError(error, L"形象包文件无效。");
+    SetError(error, L"形象文件无法读取或不是普通文件。请重新选择完整形象包，并检查文件读取权限。");
     return false;
   }
   const ULONGLONG size =
       (static_cast<ULONGLONG>(attributes.nFileSizeHigh) << 32) |
       attributes.nFileSizeLow;
-  if (size == 0 || size > kMaximumPackBytes) {
-    SetError(error, L"形象包不能超过 50MB。");
+  if (size == 0) {
+    SetError(error, L"形象包为空或下载不完整。请重新下载完整文件后再导入。");
+    return false;
+  }
+  if (size > kMaximumPackBytes) {
+    SetError(error, L"单个形象包超过 50MB。请按制作指南压缩素材后重新封装。");
     return false;
   }
   const std::string utf8Path = WideToUtf8(path);
   if (utf8Path.empty()) {
-    SetError(error, L"形象包路径无效。");
+    SetError(error, L"无法识别所选文件。请重新选择形象包，或从官网重新下载。");
     return false;
   }
   mz_zip_archive archive = {};
   if (!mz_zip_reader_init_file(&archive, utf8Path.c_str(), 0)) {
-    SetError(error, L"形象包不是有效 ZIP 文件。");
+    SetError(error, L"形象包损坏或压缩格式不正确。请重新下载完整文件后重试。");
     return false;
   }
   struct ArchiveGuard {
@@ -803,7 +807,7 @@ bool LoadAppearancePackFile(const std::wstring& path,
   } guard{&archive};
   if (archive.m_total_files == 0 || archive.m_total_files > kMaximumFiles ||
       !mz_zip_validate_archive(&archive, 0)) {
-    SetError(error, L"形象包文件数量或压缩数据不合法。");
+    SetError(error, L"形象文件数量不合规或内容损坏。请重新下载完整包，或按制作指南重新封装。");
     return false;
   }
   std::set<std::string> archiveNames;
@@ -811,7 +815,7 @@ bool LoadAppearancePackFile(const std::wstring& path,
   for (mz_uint index = 0; index < archive.m_total_files; ++index) {
     mz_zip_archive_file_stat stat = {};
     if (!mz_zip_reader_file_stat(&archive, index, &stat) || stat.m_is_directory) {
-      SetError(error, L"形象包不允许目录。");
+      SetError(error, L"形象包内含文件夹或目录信息损坏。请重新下载，或按制作指南重新封装。");
       return false;
     }
     const std::string name(stat.m_filename);
@@ -821,19 +825,19 @@ bool LoadAppearancePackFile(const std::wstring& path,
         name.find('\\') != std::string::npos ||
         (unixMode & 0170000U) == 0120000U ||
         !archiveNames.insert(name).second) {
-      SetError(error, L"形象包不允许隐藏文件、子目录或符号链接。");
+      SetError(error, L"形象文件结构不安全，含重复或不允许的文件。请重新下载，或按制作指南重新封装。");
       return false;
     }
     totalUncompressed += stat.m_uncomp_size;
     if (totalUncompressed > kMaximumPackBytes) {
-      SetError(error, L"形象包解压数据超过 50MB。");
+      SetError(error, L"形象解压内容超过 50MB。请压缩素材后重新封装。");
       return false;
     }
   }
   std::vector<unsigned char> manifestBytes;
   if (!ReadArchiveEntry(&archive, "manifest.json", kMaximumManifestBytes,
                         &manifestBytes)) {
-    SetError(error, L"形象包缺少有效 manifest.json。");
+    SetError(error, L"形象配置缺失、损坏或超过 64KB。请重新下载，或按制作指南精简配置后重新封装。");
     return false;
   }
   auto pack = std::make_unique<AppearancePack>();
@@ -846,26 +850,26 @@ bool LoadAppearancePackFile(const std::wstring& path,
   std::set<std::string> declared = {"manifest.json", previewName};
   for (const PackLayer& layer : pack->layers) declared.insert(layer.imageName);
   if (archiveNames != declared) {
-    SetError(error, L"形象包包含未声明文件或缺少声明的 PNG。");
+    SetError(error, L"形象文件不完整或含未声明内容。请重新下载完整包，不要手工修改包内文件。");
     return false;
   }
   std::map<std::string, std::vector<unsigned char>> pngFiles;
   for (const std::string& name : declared) {
     if (name == "manifest.json") continue;
     if (!ReadArchiveEntry(&archive, name, kMaximumPngBytes, &pngFiles[name])) {
-      SetError(error, L"形象包 PNG 无效。");
+      SetError(error, L"形象图片损坏或超过 32MB。请重新下载；自行制作的包请压缩并重新导出 PNG。");
       return false;
     }
   }
   if (!LoadImage(pngFiles[previewName].data(), pngFiles[previewName].size(),
                  &pack->preview)) {
-    SetError(error, L"形象包预览图无效。");
+    SetError(error, L"形象封面损坏或尺寸不合规。请重新下载；自行制作的包请按指南重新导出 PNG。");
     return false;
   }
   for (PackLayer& layer : pack->layers) {
     const auto& pngBytes = pngFiles[layer.imageName];
     if (!LoadImage(pngBytes.data(), pngBytes.size(), &layer.image)) {
-      SetError(error, L"形象包图层 PNG 无效。");
+      SetError(error, L"形象图层图片损坏或尺寸不合规。请重新下载；自行制作的包请按指南重新导出 PNG。");
       return false;
     }
   }
@@ -877,11 +881,11 @@ bool LoadAppearancePackFile(const std::wstring& path,
         (license.perpetual ? "" : std::to_string(license.importBefore) + "\n") + license.downloadId +
         "\n" + license.contentHash;
     if (actualHash.empty() || actualHash != license.contentHash) {
-      SetError(error, L"形象包内容与授权凭证不匹配。");
+      SetError(error, L"形象内容与授权凭证不一致。请从官网重新下载原包，不要修改包内文件。");
       return false;
     }
     if (!VerifyLicenseSignature(message, license.signature)) {
-      SetError(error, L"形象包授权签名无效。");
+      SetError(error, L"形象包签名校验失败。请从官网重新下载，不要继续使用来源不明的文件。");
       return false;
     }
   }
@@ -940,39 +944,84 @@ PackImage& PackImage::operator=(PackImage&& other) noexcept {
   return *this;
 }
 
+// Compare only after both archives have passed the existing complete validator.
+// Bounded streaming avoids loading another whole archive or changing signatures.
+static bool SamePackArchive(const std::wstring& leftPath, const std::wstring& rightPath) {
+  HANDLE left = CreateFileW(leftPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+  HANDLE right = CreateFileW(rightPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+  bool same = left != INVALID_HANDLE_VALUE && right != INVALID_HANDLE_VALUE;
+  LARGE_INTEGER leftSize = {}, rightSize = {};
+  if (same) same = GetFileSizeEx(left, &leftSize) && GetFileSizeEx(right, &rightSize) &&
+      leftSize.QuadPart == rightSize.QuadPart;
+  BYTE leftBytes[65536], rightBytes[65536];
+  while (same) {
+    DWORD leftRead = 0, rightRead = 0;
+    if (!ReadFile(left, leftBytes, sizeof(leftBytes), &leftRead, nullptr) ||
+        !ReadFile(right, rightBytes, sizeof(rightBytes), &rightRead, nullptr) ||
+        leftRead != rightRead ||
+        !std::equal(leftBytes, leftBytes + leftRead, rightBytes)) {
+      same = false;
+      break;
+    }
+    if (leftRead == 0) break;
+  }
+  if (left != INVALID_HANDLE_VALUE) CloseHandle(left);
+  if (right != INVALID_HANDLE_VALUE) CloseHandle(right);
+  return same;
+}
+
 bool AppearanceCatalog::Reload(const std::wstring& directory,
                                std::wstring* error) {
+  // Keep the prior valid in-memory catalog if directory enumeration fails.
+  auto previous = std::move(packs_);
   packs_.clear();
   CreateDirectoryW(directory.c_str(), nullptr);
   WIN32_FIND_DATAW entry = {};
   HANDLE search = FindFirstFileW((directory + L"\\*.nmgpack").c_str(), &entry);
   if (search == INVALID_HANDLE_VALUE) {
     if (GetLastError() == ERROR_FILE_NOT_FOUND) return true;
-    SetError(error, L"无法读取本地形象包目录。");
+    packs_ = std::move(previous);
+    SetError(error, L"无法读取本地形象包目录，保留原有可用列表。");
     return false;
   }
+  std::wstring unavailable;
   do {
     if ((entry.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
                                    FILE_ATTRIBUTE_REPARSE_POINT)) != 0) continue;
     std::unique_ptr<AppearancePack> pack;
-    std::wstring ignored;
+    std::wstring packError;
     if (LoadAppearancePackFile(directory + L"\\" + entry.cFileName, false, &pack,
-                               &ignored)) {
+                               &packError)) {
       if (Find(pack->id) == nullptr) packs_.push_back(std::move(pack));
+    } else {
+      unavailable += L"\n" + std::wstring(entry.cFileName) + L" : " + packError;
     }
   } while (FindNextFileW(search, &entry));
+  const DWORD enumerationError = GetLastError();
   FindClose(search);
+  if (enumerationError != ERROR_NO_MORE_FILES) {
+    packs_ = std::move(previous);
+    SetError(error, L"本地形象列表读取中断，保留原有可用列表。");
+    return false;
+  }
   std::sort(packs_.begin(), packs_.end(),
             [](const auto& left, const auto& right) {
               return left->id < right->id;
             });
+  if (!unavailable.empty())
+    SetError(error, (L"以下形象损坏或未通过校验，原文件保留，其他正常形象不受影响：" + unavailable).c_str());
   return true;
 }
 
 bool AppearanceCatalog::Install(const std::wstring& sourcePath,
                                 const std::wstring& directory,
                                 std::string* installedId,
-                                std::wstring* error) {
+                                std::wstring* error,
+                                bool* alreadyInstalled) {
+  if (alreadyInstalled) *alreadyInstalled = false;
+  if (error) error->clear();
   std::unique_ptr<AppearancePack> validated;
   if (!LoadAppearancePackFile(sourcePath, true, &validated, error)) return false;
   CreateDirectoryW(directory.c_str(), nullptr);
@@ -984,20 +1033,26 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
     if ((destinationAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
         !LoadAppearancePackFile(destination, false, &existing, error) ||
         existing->publisher != validated->publisher) {
-      SetError(error, L"同名形象包的来源不一致或原包无法校验，不能覆盖原有形象包。");
+      SetError(error, L"同名形象来源不一致或原形象无法校验。原形象已保留；请确认来源后重新下载。");
       return false;
+    }
+    if (SamePackArchive(sourcePath, destination)) {
+      *installedId = validated->id;
+      const bool loaded = Reload(directory, error);
+      if (alreadyInstalled) *alreadyInstalled = loaded;
+      return loaded;
     }
   } else {
     const DWORD destinationError = GetLastError();
     if (destinationError != ERROR_FILE_NOT_FOUND && destinationError != ERROR_PATH_NOT_FOUND) {
-      SetError(error, L"无法检查原有形象包，未执行覆盖。");
+      SetError(error, L"无法检查原形象，未执行覆盖。请检查文件读取权限后重新导入。");
       return false;
     }
   }
   const std::wstring temporary = destination + L".incoming";
   DeleteFileW(temporary.c_str());
   if (!CopyFileW(sourcePath.c_str(), temporary.c_str(), FALSE)) {
-    SetError(error, L"无法把形象包保存到本机。");
+    SetError(error, L"无法把形象保存到本机。请检查磁盘空间和保存目录的写入权限后重试。");
     return false;
   }
   std::unique_ptr<AppearancePack> copied;
@@ -1007,7 +1062,7 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
     DeleteFileW(temporary.c_str());
     if (error != nullptr && error->empty())
-      SetError(error, L"无法原子替换本地形象包。");
+      SetError(error, L"无法完成形象替换，原形象已保留。请关闭占用文件的程序，检查空间和写入权限后重试。");
     return false;
   }
   *installedId = validated->id;
@@ -1017,29 +1072,35 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
 bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
                                      const std::wstring& directory,
                                      std::vector<std::string>* installedIds,
-                                     std::wstring* error) {
+                                     std::wstring* error,
+                                     std::vector<std::string>* alreadyInstalledIds) {
   NM_BATCH_TRACE("start", 0);
   if (installedIds == nullptr || !IsAppearanceBatchPath(sourcePath)) {
-    SetError(error, L"请选择 .nmgpacks 批次文件。");
+    SetError(error, L"请选择 .nmgpacks 批次文件；单个形象请使用 .nmgpack 文件导入。");
     return false;
   }
   installedIds->clear();
+  if (alreadyInstalledIds) alreadyInstalledIds->clear();
   WIN32_FILE_ATTRIBUTE_DATA attributes = {};
   if (!GetFileAttributesExW(sourcePath.c_str(), GetFileExInfoStandard, &attributes) ||
       (attributes.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
-    SetError(error, L"批次文件无效。");
+    SetError(error, L"批次文件无法读取或不是普通文件。请重新选择完整批次，并检查文件读取权限。");
     return false;
   }
   const ULONGLONG size =
       (static_cast<ULONGLONG>(attributes.nFileSizeHigh) << 32) | attributes.nFileSizeLow;
-  if (size == 0 || size > kMaximumBatchBytes) {
-    SetError(error, L"批次文件不能超过 100MB。");
+  if (size == 0) {
+    SetError(error, L"批次文件为空或下载不完整。请重新下载完整批次后再导入。");
+    return false;
+  }
+  if (size > kMaximumBatchBytes) {
+    SetError(error, L"批次文件超过 100MB。请减少本批形象数量后重新下载。");
     return false;
   }
   const std::string utf8Path = WideToUtf8(sourcePath);
   mz_zip_archive archive = {};
   if (utf8Path.empty() || !mz_zip_reader_init_file(&archive, utf8Path.c_str(), 0)) {
-    SetError(error, L"批次文件不是有效的压缩文件。");
+    SetError(error, L"批次损坏或压缩格式不正确。请重新下载完整批次后重试。");
     return false;
   }
   struct BatchArchiveGuard {
@@ -1047,9 +1108,12 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     ~BatchArchiveGuard() { mz_zip_reader_end(archive); }
   } guard{&archive};
   NM_BATCH_TRACE("opened", 0);
-  if (archive.m_total_files < 2 || archive.m_total_files > kMaximumBatchCount ||
-      !mz_zip_validate_archive(&archive, 0)) {
-    SetError(error, L"批次必须包含 2 至 10 个有效形象包。");
+  if (archive.m_total_files < 2 || archive.m_total_files > kMaximumBatchCount) {
+    SetError(error, L"一个批次须包含 2 至 10 个独立形象。请重新下载，或按制作指南重新封装。");
+    return false;
+  }
+  if (!mz_zip_validate_archive(&archive, 0)) {
+    SetError(error, L"批次内容损坏或不完整。请重新下载完整批次后重试。");
     return false;
   }
   NM_BATCH_TRACE("validated", archive.m_total_files);
@@ -1059,8 +1123,12 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     NM_BATCH_TRACE("metadata", index);
     mz_zip_archive_file_stat stat = {};
     if (!mz_zip_reader_file_stat(&archive, index, &stat) || stat.m_is_directory ||
-        stat.m_uncomp_size == 0 || stat.m_uncomp_size > kMaximumPackBytes) {
-      SetError(error, L"批次中的形象包文件无效。");
+        stat.m_uncomp_size == 0) {
+      SetError(error, L"批次中的形象损坏、为空或含文件夹。请重新下载完整批次后重试。");
+      return false;
+    }
+    if (stat.m_uncomp_size > kMaximumPackBytes) {
+      SetError(error, L"批次中的单个形象超过 50MB。请压缩该形象素材后重新封装。");
       return false;
     }
     const std::string name(stat.m_filename);
@@ -1072,19 +1140,19 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
         !std::all_of(name.begin(), name.end(), [](unsigned char ch) {
           return std::isalnum(ch) || ch == '.' || ch == '_' || ch == '-';
         })) {
-      SetError(error, L"批次包含危险路径或不支持的文件。");
+      SetError(error, L"批次文件结构不安全或包含不支持的文件。请重新下载，或按制作指南重新封装。");
       return false;
     }
     std::string lowerName = name;
     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     if (!seen.insert(lowerName).second) {
-      SetError(error, L"批次包含重复形象包文件。");
+      SetError(error, L"批次包含重复形象文件。请去除重复项后重新下载或重新封装。");
       return false;
     }
     totalUncompressed += stat.m_uncomp_size;
     if (totalUncompressed > kMaximumBatchBytes) {
-      SetError(error, L"批次解压数据超过 100MB。");
+      SetError(error, L"批次解压内容超过 100MB。请减少本批形象数量后重新下载。");
       return false;
     }
   }
@@ -1093,7 +1161,7 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     NM_BATCH_TRACE("extract", index);
     mz_zip_archive_file_stat stat = {};
     if (!mz_zip_reader_file_stat(&archive, index, &stat)) {
-      SetError(error, L"无法读取批次形象包。");
+      SetError(error, L"无法读取批次中的形象。请重新下载完整批次后重试。");
       return false;
     }
     size_t extractedSize = 0;
@@ -1101,20 +1169,20 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     NM_BATCH_TRACE("extracted", index);
     if (bytes == nullptr || extractedSize != stat.m_uncomp_size) {
       if (bytes != nullptr) mz_free(bytes);
-      SetError(error, L"批次形象包解压失败。");
+      SetError(error, L"批次中的形象损坏或解压失败。请重新下载完整批次后重试。");
       return false;
     }
     wchar_t temporary[MAX_PATH] = {};
     if (!GetTempFileNameW(directory.c_str(), L"nmb", 0, temporary)) {
       mz_free(bytes);
-      SetError(error, L"无法创建批次临时文件。");
+      SetError(error, L"无法创建导入临时文件。请检查磁盘空间和临时目录写入权限后重试。");
       return false;
     }
     const std::wstring packTemporary = std::wstring(temporary) + L".nmgpack";
     if (!MoveFileW(temporary, packTemporary.c_str())) {
       DeleteFileW(temporary);
       mz_free(bytes);
-      SetError(error, L"无法准备批次临时形象包。");
+      SetError(error, L"无法准备导入临时文件。请检查磁盘空间和临时目录写入权限后重试。");
       return false;
     }
     HANDLE file = CreateFileW(packTemporary.c_str(), GENERIC_WRITE, 0, nullptr,
@@ -1127,24 +1195,27 @@ bool AppearanceCatalog::InstallBatch(const std::wstring& sourcePath,
     mz_free(bytes);
     if (!saved || written != extractedSize) {
       DeleteFileW(packTemporary.c_str());
-      SetError(error, L"无法保存批次中的临时形象包。");
+      SetError(error, L"无法保存导入临时文件。请检查磁盘空间和写入权限后重试。");
       return false;
     }
     std::string installedId;
     NM_BATCH_TRACE("install", index);
-    const bool installed = Install(packTemporary, directory, &installedId, error);
+    bool unchanged = false;
+    const bool installed = Install(packTemporary, directory, &installedId, error, &unchanged);
     NM_BATCH_TRACE("installed", index);
     DeleteFileW(packTemporary.c_str());
     if (!installed) {
       if (error != nullptr && !installedIds->empty()) {
-        *error = L"已导入 " + std::to_wstring(installedIds->size()) +
-                 L" 个形象，其余未完成：" + *error;
+        *error = L"已处理 " + std::to_wstring(installedIds->size()) +
+                 L" 个形象；从第 " + std::to_wstring(index + 1) +
+                 L" 个起未完成：" + *error;
       }
       return false;
     }
-    if (!Reload(directory, error)) return false;
+    // Install already reloaded and verified the saved member.
     NM_BATCH_TRACE("reloaded", index);
     installedIds->push_back(installedId);
+    if (unchanged && alreadyInstalledIds) alreadyInstalledIds->push_back(installedId);
   }
   return true;
 }
@@ -1154,7 +1225,7 @@ bool AppearanceCatalog::Delete(const std::string& id, std::wstring* error) {
   if (pack == nullptr) return true;
   const std::wstring path = pack->sourcePath;
   if (!DeleteFileW(path.c_str())) {
-    SetError(error, L"无法删除所选形象包。");
+    SetError(error, L"无法删除所选形象。请关闭占用文件的程序并检查文件写入权限后重试。");
     return false;
   }
   packs_.erase(
@@ -1216,7 +1287,7 @@ bool RegisterAppearancePackAssociation(const std::wstring& executable,
       !writeDefault(batchClassKey, L"NiuMa Merit Appearance Batch") ||
       !writeDefault(batchCommandKey, command)) {
     if (key != nullptr) RegCloseKey(key);
-    SetError(error, L"无法注册形象包文件类型。");
+    SetError(error, L"无法关联形象包文件类型。请在客户端使用导入入口，或重新安装官方客户端。");
     return false;
   }
   SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
