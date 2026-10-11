@@ -225,7 +225,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic) BOOL previewOnly;
 @end
 
-@interface MeritController : NSObject <NSApplicationDelegate>
+@interface MeritController : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) MeritView *view;
 @property(nonatomic, strong) NSTimer *animationTimer;
@@ -262,6 +262,38 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic) NSUInteger receivedKeys;
 @property(nonatomic) NSUInteger receivedClicks;
 @property(nonatomic) NSUInteger receivedScrolls;
+@property(nonatomic, strong) NSWindow *countStatusWindow;
+@property(nonatomic, strong) NSTextView *countStatusText;
+@property(nonatomic, strong) NSButton *selfCheckButton;
+@property(nonatomic, strong) NSTimer *countStatusTimer;
+@property(nonatomic) BOOL globalCountConfirmed;
+@property(nonatomic) BOOL listenerNeedsCheck;
+@property(nonatomic) BOOL selfCheckActive;
+@property(nonatomic) BOOL selfCheckCountingEvent;
+@property(nonatomic) BOOL selfCheckInterrupted;
+@property(nonatomic) NSTimeInterval selfCheckStarts;
+@property(nonatomic) NSTimeInterval selfCheckEnds;
+@property(nonatomic) NSTimeInterval selfCheckLastEvent;
+@property(nonatomic) NSUInteger selfCheckKeys;
+@property(nonatomic) NSUInteger selfCheckClicks;
+@property(nonatomic) NSUInteger selfCheckScrolls;
+@property(nonatomic) NSUInteger selfCheckExpected;
+@property(nonatomic) NSUInteger selfCheckCounted;
+@property(nonatomic, copy) NSString *selfCheckResult;
+@property(nonatomic, copy) NSSet<NSString *> *newlyImportedIds;
+@property(nonatomic, copy) NSSet<NSString *> *lastImportedIds;
+@property(nonatomic, strong) NSAlert *appearancePickerAlert;
+@property(nonatomic, strong) NSError *appearanceLoadError;
+- (BOOL)hasLiveEventTap;
+- (NSString *)countStatusTitle;
+- (void)receiveGlobalEvent:(CGEventType)type;
+- (void)countPetClickIfNeeded;
+- (void)showCountStatus:(id)sender;
+- (void)refreshCountStatus:(NSTimer *)timer;
+- (void)startSelfCheck:(id)sender;
+- (void)retryListener:(id)sender;
+- (void)closeCountStatus:(id)sender;
+- (void)showFirstUseGuide:(id)sender;
 - (void)count;
 - (void)countScrollGesture;
 - (void)showContextMenu:(NSEvent *)event;
@@ -323,7 +355,20 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (BOOL)mouseDownCanMoveWindow { return YES; }
 
+- (void)mouseDown:(NSEvent *)event {
+  if (self.previewOnly) return;
+  [self.controller countPetClickIfNeeded];
+  [self.window performWindowDragWithEvent:event];
+}
+
+- (void)otherMouseDown:(NSEvent *)event {
+  (void)event;
+  if (!self.previewOnly) [self.controller countPetClickIfNeeded];
+}
+
 - (void)rightMouseDown:(NSEvent *)event {
+  if (self.previewOnly) return;
+  [self.controller countPetClickIfNeeded];
   [self.controller showContextMenu:event];
 }
 
@@ -789,7 +834,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.view = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, kWindowScaleWidth, kWindowScaleHeight)];
   self.view.controller = self;
   self.view.scene = self.selectedScene;
+  NSString *restoredAppearanceId = [self.selectedAppearanceId copy];
   [self reloadAppearancePacks];
+  BOOL previousAppearanceMissing = restoredAppearanceId.length &&
+      ![restoredAppearanceId isEqualToString:@"builtin.woodfish"] &&
+      ![self appearancePackWithId:restoredAppearanceId];
   [self applyAppearanceId:self.selectedAppearanceId];
   self.window = [[NSWindow alloc] initWithContentRect:self.view.bounds
                                             styleMask:NSWindowStyleMaskBorderless
@@ -831,6 +880,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                            NSMaxY(screen.visibleFrame) - 270 * kUiScale)];
   }
   [self.window orderFrontRegardless];
+  if (previousAppearanceMissing || self.appearanceLoadError) {
+    NSAlert *notice = [[NSAlert alloc] init];
+    notice.alertStyle = NSAlertStyleWarning;
+    notice.messageText = UiText(@"部分本地形象未能加载", @"Some Local Packs Are Unavailable");
+    notice.informativeText = self.appearanceLoadError.localizedDescription ?: UiText(
+        @"上次使用的形象文件缺失或未通过校验，暂时显示木鱼。原文件、功德和日历不删除；可重新导入原包。",
+        @"The previous appearance is missing or failed verification. Woodfish is shown for now. Original files, counts and calendar are kept; re-import the pack.");
+    [notice runModal];
+  }
 
   self.saveTimer = [NSTimer scheduledTimerWithTimeInterval:5
                                                     target:self
@@ -858,64 +916,114 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)application:(NSApplication *)application openFiles:(NSArray<NSString *> *)filenames {
-  NSString *installedId = nil;
-  NSUInteger installedCount = 0;
-  NSMutableArray<NSString *> *importedIds = [NSMutableArray array];
+  NSMutableSet<NSString *> *previousIds = [NSMutableSet set];
+  for (NMAppearancePack *pack in self.installedAppearancePacks)
+    [previousIds addObject:pack.identifier];
+  NSMutableArray<NMAppearancePack *> *imported = [NSMutableArray array];
+  NSMutableArray<NSString *> *failures = [NSMutableArray array];
+  BOOL batch = filenames.count > 1;
   for (NSString *filename in filenames) {
-    NSError *error = nil;
     NSURL *source = [NSURL fileURLWithPath:filename];
-    NSArray<NMAppearancePack *> *imported = nil;
-    if ([[source.pathExtension lowercaseString] isEqualToString:@"nmgpacks"]) {
-      imported = [NMAppearancePackStore installBatchArchiveAtURL:source error:&error];
+    NSError *error = nil;
+    if (![NSFileManager.defaultManager fileExistsAtPath:filename]) {
+      [failures addObject:[NSString stringWithFormat:
+          UiText(@"%@：文件已移动或不存在。", @"%@: file moved or missing."), source.lastPathComponent]];
+      continue;
+    }
+    if ([source.pathExtension.lowercaseString isEqualToString:@"nmgpacks"]) {
+      batch = YES;
+      NSArray<NMAppearancePack *> *packs =
+          [NMAppearancePackStore installBatchArchiveAtURL:source error:&error];
+      // Failed batches may already contain safely installed, verified members.
+      NSArray *partial = error.userInfo[@"NMSuccessfulImports"];
+      if (packs) [imported addObjectsFromArray:packs];
+      else if ([partial isKindOfClass:NSArray.class]) [imported addObjectsFromArray:partial];
     } else {
       NMAppearancePack *pack = [NMAppearancePackStore installArchiveAtURL:source error:&error];
-      if (pack) imported = @[pack];
+      if (pack) [imported addObject:pack];
     }
-    if (!imported.count) {
-      NSAlert *alert = [[NSAlert alloc] init];
-      alert.alertStyle = NSAlertStyleWarning;
-      alert.messageText = UiText(@"无法导入形象包", @"Unable to Import Appearance Pack");
-      alert.informativeText = error.localizedDescription ?: UiText(@"形象包无效。", @"The appearance pack is invalid.");
-      [alert runModal];
-      [application replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
-      return;
-    }
-    installedCount += imported.count;
-    for (NMAppearancePack *pack in imported) [importedIds addObject:pack.identifier];
-    installedId = imported.lastObject.identifier;
+    if (error) [failures addObject:[NSString stringWithFormat:@"%@：%@",
+        source.lastPathComponent, error.localizedDescription]];
   }
+
+  const BOOL importsSucceeded = failures.count == 0;
   NSError *loadError = nil;
   self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&loadError];
-  NSMutableArray<NSString *> *unavailableIds = [NSMutableArray array];
-  for (NSString *identifier in importedIds) {
-    if (![self appearancePackWithId:identifier]) [unavailableIds addObject:identifier];
+  if (loadError) [failures addObject:loadError.localizedDescription];
+  NSMutableSet<NSString *> *newIds = [NSMutableSet set];
+  NSMutableSet<NSString *> *availableIds = [NSMutableSet set];
+  NSMutableArray<NSString *> *lines = [NSMutableArray array];
+  for (NMAppearancePack *pack in imported) {
+    if (![self appearancePackWithId:pack.identifier]) {
+      [failures addObject:[NSString stringWithFormat:
+          UiText(@"%@：已保存但未能加载，未启用，原文件保留。",
+                 @"%@: saved but unavailable; not enabled; original files kept."), pack.localizedName]];
+      continue;
+    }
+    [availableIds addObject:pack.identifier];
+    NSString *kind = nil;
+    if (pack.alreadyInstalled) {
+      kind = UiText(@"重复包，已保留原形象", @"Duplicate; existing pack kept");
+    } else if ([previousIds containsObject:pack.identifier]) {
+      kind = UiText(@"已更新", @"Updated");
+    } else {
+      [newIds addObject:pack.identifier];
+      kind = UiText(@"本次新增", @"New in this import");
+    }
+    [lines addObject:[NSString stringWithFormat:@"%@ · %@", pack.localizedName, kind]];
   }
-  if (unavailableIds.count) {
-    NSAlert *alert = [[NSAlert alloc] init];
-    alert.alertStyle = NSAlertStyleWarning;
-    alert.messageText = UiText(@"形象已保存，但未能加载", @"Packs Saved but Not Loaded");
-    alert.informativeText = loadError.localizedDescription ?: [NSString stringWithFormat:
-        UiText(@"这些形象还未进入可选列表：%@。原文件仍保留，请勿重复付款。",
-               @"These packs are not available in the picker: %@. Their files are preserved; do not pay again."),
-        [unavailableIds componentsJoinedByString:@", "]];
-    [alert runModal];
-    [application replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
-    return;
+  self.newlyImportedIds = newIds;
+  self.lastImportedIds = availableIds;
+  BOOL singleEnabled = !batch && importsSucceeded && availableIds.count == 1;
+  if (singleEnabled) {
+    [self applyAppearanceId:availableIds.anyObject];
+  } else if ([self appearancePackWithId:self.selectedAppearanceId]) {
+    // Refresh an updated current pack, but never choose the last batch member.
+    [self applyAppearanceId:self.selectedAppearanceId];
   }
-  [application replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
-  if (installedCount > 1) {
-    NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = UiText(@"整批形象已导入", @"Appearance Batch Imported");
-    alert.informativeText = [NSString stringWithFormat:
-        UiText(@"已导入 %lu 个形象。现在可以选择要显示的小伙伴。",
-               @"Imported %lu packs. Choose the companion to display."),
-        (unsigned long)installedCount];
-    [alert runModal];
+  if (self.appearancePickerAlert) {
+    self.pendingAppearanceId = self.selectedAppearanceId;
+    self.appearancePickerAlert.accessoryView = [self appearanceGrid];
   }
-  if (installedId.length) {
-    self.suggestedAppearanceId = installedId;
-    [self showAppearancePicker:nil];
+  [application replyToOpenOrPrint:failures.count
+      ? NSApplicationDelegateReplyFailure : NSApplicationDelegateReplySuccess];
+  NSAlert *alert = [[NSAlert alloc] init];
+  alert.alertStyle = failures.count ? NSAlertStyleWarning : NSAlertStyleInformational;
+  alert.messageText = singleEnabled
+      ? UiText(@"导入完成，已启用此形象", @"Imported and Enabled")
+      : failures.count
+          ? (availableIds.count ? UiText(@"部分形象已导入", @"Some Packs Imported")
+                                : UiText(@"未能导入形象", @"No Packs Imported"))
+          : UiText(@"导入完成，当前形象未改变", @"Imported; Current Appearance Unchanged");
+  NSString *summary = [NSString stringWithFormat:
+      UiText(@"本次可用 %lu 个形象，新增 %lu 个。功德和日历不受影响。",
+             @"%lu packs available from this import; %lu new. Counts and calendar are unchanged."),
+      (unsigned long)availableIds.count, (unsigned long)newIds.count];
+  if (!singleEnabled) summary = [summary stringByAppendingString:
+      UiText(@"\n只有确认选择后才会切换形象。", @"\nYour appearance changes only after you confirm a choice.")];
+  alert.informativeText = summary;
+  NSMutableArray<NSString *> *details = [lines mutableCopy];
+  if (failures.count) {
+    [details addObject:UiText(@"未完成 / 损坏或校验失败：", @"Not completed / damaged or failed verification:")];
+    [details addObjectsFromArray:failures];
+    [details addObject:UiText(@"其他正常形象仍可使用；请重新选择原文件或从官网重新下载。",
+                             @"Other valid packs remain usable. Select the original file or download it again.")];
   }
+  if (details.count) {
+    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 400, 170)];
+    scroll.hasVerticalScroller = YES;
+    NSTextView *text = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 380, 170)];
+    text.editable = NO;
+    text.font = [NSFont systemFontOfSize:13];
+    text.string = [details componentsJoinedByString:@"\n"];
+    text.textContainer.widthTracksTextView = YES;
+    text.autoresizingMask = NSViewWidthSizable;
+    scroll.documentView = text;
+    alert.accessoryView = scroll;
+  }
+  [alert addButtonWithTitle:UiText(@"完成", @"Done")];
+  if (availableIds.count) [alert addButtonWithTitle:UiText(@"选择形象…", @"Choose Appearance…")];
+  if ([alert runModal] == NSAlertSecondButtonReturn) [self showAppearancePicker:nil];
 }
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
@@ -928,6 +1036,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)notification;
   [self saveState];
   [self.dayTimer invalidate];
+  [self.countStatusTimer invalidate];
   [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
   [self removeEventTap];
   [self stopPermissionPoll];
@@ -950,23 +1059,203 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)showPermissionIntroIfNeeded {
-  if (gIsolatedAcceptance) return;
-  if (self.inputMonitoringAuthorized) return;
+  if (gIsolatedAcceptance || [MeritPreferences() boolForKey:@"basicGuideShown"]) return;
+  [self showFirstUseGuide:nil];
+  [MeritPreferences() setBool:YES forKey:@"basicGuideShown"];
+}
+
+- (void)showFirstUseGuide:(id)sender {
+  (void)sender;
   NSAlert *alert = [[NSAlert alloc] init];
-  alert.messageText = UiText(@"需要输入监控权限", @"Input Monitoring Permission Required");
+  alert.messageText = UiText(@"先记住三件事", @"Three Things to Get Started");
   alert.informativeText = UiText(
-      @"为了在其他软件中也能计数，macOS 需要“输入监控”权限。"
-       @"本应用只判断是否发生按键或鼠标事件，不读取具体按键、鼠标坐标、窗口名或内容。\n\n"
-       @"本版本不包含联网功能，数据只保存在本机。",
-      @"To count while you use other apps, macOS requires Input Monitoring permission. "
-       @"This app only detects that a keyboard or mouse event occurred. It does not read "
-       @"specific keys, mouse coordinates, window names, or content.\n\n"
-       @"This version has no network features. All data stays on this Mac.");
-  [alert addButtonWithTitle:UiText(@"开启全局计数", @"Enable Global Counting")];
-  [alert addButtonWithTitle:UiText(@"暂不开启", @"Not Now")];
-  if ([alert runModal] == NSAlertFirstButtonReturn) {
-    [self requestListenPermission];
+      @"1. 按住小伙伴拖动，放到喜欢的位置。\n"
+       @"2. 右键小伙伴，可以换形象、看日历和退出。\n"
+       @"3. 右键打开“计数状态与自检”，确认是否收到全局输入；未开启监听时只能点击小伙伴计数。\n\n"
+       @"只统计事件次数，不读取按键内容、坐标、当前应用或窗口内容；不联网，数据留在本机。",
+      @"1. Drag your companion to move it.\n"
+       @"2. Right-click it to change appearance, view the calendar, or quit.\n"
+       @"3. Open Counting Status & Check from that menu to check global input. Without a listener, only pet clicks count.\n\n"
+       @"Only event counts are used, never keys, coordinates, apps or window contents. No networking; data stays on this Mac.");
+  [alert addButtonWithTitle:UiText(@"知道了", @"Got It")];
+  [alert addButtonWithTitle:UiText(@"查看计数状态", @"Counting Status")];
+  if ([alert runModal] == NSAlertSecondButtonReturn) [self showCountStatus:nil];
+}
+
+- (BOOL)hasLiveEventTap {
+  return self.eventTap && CFMachPortIsValid(self.eventTap) && CGEventTapIsEnabled(self.eventTap);
+}
+
+- (NSString *)countStatusTitle {
+  if (![self hasLiveEventTap])
+    return UiText(@"仅点击小伙伴计数", @"Pet-click Counting Only");
+  if (self.listenerNeedsCheck)
+    return UiText(@"待检查：监听与计数结果不一致", @"Check Needed: Counting Mismatch");
+  if (!self.globalCountConfirmed)
+    return UiText(@"待检查：监听已建立，尚未观察到计数", @"Check Pending: Listener Ready, No Count Observed");
+  return UiText(@"全局监听已收到事件并计数", @"Global Events Received and Counted");
+}
+
+- (void)countPetClickIfNeeded {
+  if (![self hasLiveEventTap]) [self count];
+}
+
+- (void)receiveGlobalEvent:(CGEventType)type {
+  self.receivedEvents++;
+  if (type == kCGEventKeyDown) self.receivedKeys++;
+  else if (type == kCGEventScrollWheel) self.receivedScrolls++;
+  else self.receivedClicks++;
+  const NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+  BOOL observing = self.selfCheckActive && now >= self.selfCheckStarts && now < self.selfCheckEnds;
+  if (observing) {
+    if (type == kCGEventKeyDown) self.selfCheckKeys++;
+    else if (type == kCGEventScrollWheel) self.selfCheckScrolls++;
+    else self.selfCheckClicks++;
+    self.selfCheckLastEvent = now - self.selfCheckStarts;
   }
+  const long long before = self.total;
+  self.selfCheckCountingEvent = observing;
+  if (type == kCGEventScrollWheel) [self countScrollGesture];
+  else [self count];
+  self.selfCheckCountingEvent = NO;
+  if (self.total > before) self.globalCountConfirmed = YES;
+}
+
+- (void)showCountStatus:(id)sender {
+  (void)sender;
+  if (!self.countStatusWindow) {
+    self.countStatusWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 580, 490)
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+        backing:NSBackingStoreBuffered defer:NO];
+    self.countStatusWindow.title = UiText(@"计数状态与自检", @"Counting Status & Check");
+    self.countStatusWindow.releasedWhenClosed = NO;
+    self.countStatusWindow.delegate = self;
+    self.countStatusWindow.minSize = NSMakeSize(540, 440);
+    NSView *content = self.countStatusWindow.contentView;
+    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(18, 62, 544, 410)];
+    scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    scroll.hasVerticalScroller = YES;
+    self.countStatusText = [[NSTextView alloc] initWithFrame:scroll.contentView.bounds];
+    self.countStatusText.editable = NO;
+    self.countStatusText.font = [NSFont systemFontOfSize:14];
+    self.countStatusText.textContainerInset = NSMakeSize(6, 8);
+    self.countStatusText.textContainer.widthTracksTextView = YES;
+    self.countStatusText.autoresizingMask = NSViewWidthSizable;
+    scroll.documentView = self.countStatusText;
+    [content addSubview:scroll];
+    self.selfCheckButton = [NSButton buttonWithTitle:UiText(@"开始 10 秒自检", @"Start 10-second Check")
+        target:self action:@selector(startSelfCheck:)];
+    self.selfCheckButton.frame = NSMakeRect(18, 18, 174, 32);
+    [content addSubview:self.selfCheckButton];
+    NSButton *retry = [NSButton buttonWithTitle:UiText(@"检查权限 / 重试监听", @"Permissions / Retry Listener")
+        target:self action:@selector(retryListener:)];
+    retry.frame = NSMakeRect(202, 18, 226, 32);
+    [content addSubview:retry];
+    NSButton *close = [NSButton buttonWithTitle:UiText(@"关闭", @"Close")
+        target:self action:@selector(closeCountStatus:)];
+    close.frame = NSMakeRect(442, 18, 118, 32);
+    close.autoresizingMask = NSViewMinXMargin;
+    [content addSubview:close];
+    [self.countStatusWindow center];
+  }
+  [self.countStatusWindow makeKeyAndOrderFront:nil];
+  [NSApp activateIgnoringOtherApps:YES];
+  if (!self.countStatusTimer) {
+    self.countStatusTimer = [NSTimer timerWithTimeInterval:1 target:self
+        selector:@selector(refreshCountStatus:) userInfo:nil repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:self.countStatusTimer forMode:NSRunLoopCommonModes];
+    [NSRunLoop.mainRunLoop addTimer:self.countStatusTimer forMode:NSModalPanelRunLoopMode];
+  }
+  [self refreshCountStatus:nil];
+}
+
+- (void)startSelfCheck:(id)sender {
+  (void)sender;
+  if (self.selfCheckActive) return;
+  self.selfCheckKeys = self.selfCheckClicks = self.selfCheckScrolls = 0;
+  self.selfCheckExpected = self.selfCheckCounted = 0;
+  self.selfCheckLastEvent = 0;
+  self.selfCheckInterrupted = NO;
+  self.selfCheckResult = nil;
+  // Exclude the button click and allow a short switch-to-another-app interval.
+  self.selfCheckStarts = NSProcessInfo.processInfo.systemUptime + 2;
+  self.selfCheckEnds = self.selfCheckStarts + 10;
+  self.selfCheckActive = YES;
+  [self refreshCountStatus:nil];
+}
+
+- (void)retryListener:(id)sender {
+  (void)sender;
+  if (self.selfCheckActive) {
+    self.selfCheckActive = NO;
+    self.selfCheckResult = UiText(@"已停止本次自检，重试监听后可重新开始。", @"Check stopped. Start again after retrying the listener.");
+  }
+  [self removeEventTap];
+  self.listenerNeedsCheck = NO;
+  [self requestListenPermission];
+  [self refreshCountStatus:nil];
+}
+
+- (void)closeCountStatus:(id)sender {
+  (void)sender;
+  [self.countStatusWindow close];
+}
+
+- (void)windowWillClose:(NSNotification *)notification {
+  if (notification.object != self.countStatusWindow) return;
+  [self.countStatusTimer invalidate];
+  self.countStatusTimer = nil;
+  if (self.selfCheckActive) {
+    self.selfCheckActive = NO;
+    self.selfCheckResult = UiText(@"自检已取消，未作故障判断。", @"Check cancelled; no failure inferred.");
+  }
+}
+
+- (void)refreshCountStatus:(NSTimer *)timer {
+  (void)timer;
+  if (!self.countStatusWindow) return;
+  const NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+  if (self.selfCheckActive && now >= self.selfCheckEnds) {
+    self.selfCheckActive = NO;
+    const NSUInteger events = self.selfCheckKeys + self.selfCheckClicks + self.selfCheckScrolls;
+    if (!events) {
+      self.globalCountConfirmed = NO;
+      self.selfCheckResult = UiText(
+          @"未观察到输入，不能判断失败。若你确实在其他应用操作过，请检查权限后重试；否则可直接重新自检。",
+          @"No input observed; this is not a failure verdict. If you did use another app, check permissions and retry; otherwise repeat the check.");
+    } else if (self.selfCheckInterrupted) {
+      self.listenerNeedsCheck = YES;
+      self.selfCheckResult = UiText(@"本次监听曾中断，请重试；不把部分记录当作通过。",
+                                   @"The listener was interrupted. Repeat the check; partial observations do not count as a pass.");
+    } else if (self.selfCheckExpected != self.selfCheckCounted) {
+      self.listenerNeedsCheck = YES;
+      self.selfCheckResult = UiText(@"收到事件，但计数未完全更新。请重试监听；总数已达上限时也不会继续增加。",
+                                   @"Events arrived but counts did not fully update. Retry the listener; counts also stop at the numeric limit.");
+    } else if (!self.selfCheckExpected) {
+      self.selfCheckResult = UiText(@"只观察到同一段连续滚动，未开始新手势；停一下再试，不判失败。",
+                                   @"Only an existing scroll gesture was observed. Pause and retry; no failure inferred.");
+    } else {
+      self.listenerNeedsCheck = NO;
+      self.selfCheckResult = UiText(
+          @"本次观察到的输入已计数。未发生的输入类型未判断；请自行确认刚才已切换到其他应用。",
+          @"Observed inputs were counted. Unused input types are not assessed; please confirm you switched to another app.");
+    }
+  }
+  self.selfCheckButton.enabled = !self.selfCheckActive;
+  NSString *progress = self.selfCheckResult ?: UiText(@"尚未开始自检。", @"No check started.");
+  if (self.selfCheckActive) {
+    progress = now < self.selfCheckStarts
+        ? UiText(@"准备中：请切换到其他应用。2 秒后开始记录。", @"Get ready: switch to another app. Recording starts after 2 seconds.")
+        : [NSString stringWithFormat:UiText(@"记录中，还剩 %.0f 秒。", @"Recording: %.0f seconds left."),
+              ceil(MAX(0.0, self.selfCheckEnds - now))];
+  }
+  self.countStatusText.string = [NSString stringWithFormat:
+      UiText(@"%@\n\n点击“开始”后切到其他应用，做几次按键、鼠标点击或滚动，10 秒后回来查看。程序不会读取你在哪个应用，请自行确认。\n\n%@\n\n本次收到：按键 %lu 次 / 鼠标按键 %lu 次 / 滚动事件 %lu 次\n按现有规则应增加 %lu，实际增加 %lu。连续滚动按一次手势计数。\n最后事件：开始后 %.1f 秒（无事件时为 0）。\n\n监听句柄或权限开关本身不是成功证据。输入监控未授权、授权身份变化或安全输入都可能影响监听；不绕过系统限制。\n\n自检仅在内存中保留事件次数与相对时间；不读取或保存具体键值、输入内容、坐标、应用或窗口信息。不联网。",
+             @"%@\n\nStart, switch to another app and type, click or scroll. Return after 10 seconds. The app does not inspect which app you used; please confirm the switch yourself.\n\n%@\n\nReceived: %lu key events / %lu mouse clicks / %lu scroll events\nExpected count increase: %lu; actual: %lu. Continuous scrolling counts as one gesture.\nLast event: %.1f seconds after start (0 if none).\n\nA handle or permission switch alone is not proof. Missing or changed Input Monitoring permission and secure input may affect listening. No system restrictions are bypassed.\n\nOnly event counts and relative times are kept in memory, never key values, contents, coordinates, apps or windows. No networking."),
+      self.countStatusTitle, progress, (unsigned long)self.selfCheckKeys,
+      (unsigned long)self.selfCheckClicks, (unsigned long)self.selfCheckScrolls,
+      (unsigned long)self.selfCheckExpected, (unsigned long)self.selfCheckCounted,
+      self.selfCheckLastEvent];
 }
 
 - (void)requestListenPermission {
@@ -998,7 +1287,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   // Preflight is advisory: creation/enabled state is the actual result.
   // In particular, do not tear down a working tap on a stale preflight answer.
   if (self.eventTap && !CFMachPortIsValid(self.eventTap)) [self removeEventTap];
-  if (self.eventTap && !CGEventTapIsEnabled(self.eventTap)) CGEventTapEnable(self.eventTap, true);
+  if (self.eventTap && !CGEventTapIsEnabled(self.eventTap)) {
+    self.globalCountConfirmed = NO;
+    if (self.selfCheckActive) self.selfCheckInterrupted = YES;
+    CGEventTapEnable(self.eventTap, true);
+  }
   if (self.eventTap && !CGEventTapIsEnabled(self.eventTap)) [self removeEventTap];
   [self installEventTap];
   self.inputMonitoringAuthorized = self.eventTap && CGEventTapIsEnabled(self.eventTap);
@@ -1023,6 +1316,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (self.eventTap) {
     return;
   }
+  self.globalCountConfirmed = NO;
   CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventLeftMouseDown) |
                      CGEventMaskBit(kCGEventRightMouseDown) |
                      CGEventMaskBit(kCGEventOtherMouseDown) |
@@ -1065,6 +1359,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)removeEventTap {
+  self.globalCountConfirmed = NO;
+  if (self.selfCheckActive) self.selfCheckInterrupted = YES;
   if (!self.eventTap && !self.eventSource) return;
   if (self.eventTap) {
     CGEventTapEnable(self.eventTap, false);
@@ -1082,6 +1378,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)handleEventTapDisabled {
   if (gIsolatedAcceptance) return;
+  self.globalCountConfirmed = NO;
+  if (self.selfCheckActive) self.selfCheckInterrupted = YES;
   if (self.eventTap && CFMachPortIsValid(self.eventTap)) {
     CGEventTapEnable(self.eventTap, true);
   }
@@ -1090,8 +1388,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)count {
   [self ensureCurrentDay];
+  if (self.selfCheckCountingEvent) self.selfCheckExpected++;
   if (self.total == LLONG_MAX) return;
   self.total++;
+  if (self.selfCheckCountingEvent) self.selfCheckCounted++;
   if (self.todayTotal < LLONG_MAX) self.todayTotal++;
   self.dailyTotals[self.currentDayKey] = @(self.todayTotal);
   self.dirty = YES;
@@ -1159,7 +1459,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       ? NSControlStateValueOn
       : NSControlStateValueOff;
   [menu addItem:launchAtLogin];
-  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+  NSMenuItem *status = [[NSMenuItem alloc] initWithTitle:
+      [NSString stringWithFormat:UiText(@"计数状态与自检：%@", @"Counting Status & Check: %@"), self.countStatusTitle]
+      action:@selector(showCountStatus:) keyEquivalent:@""];
+  status.target = self;
+  [menu addItem:status];
+  NSMenuItem *guide = [[NSMenuItem alloc] initWithTitle:UiText(@"使用说明：三件事", @"Getting Started")
+      action:@selector(showFirstUseGuide:) keyEquivalent:@""];
+  guide.target = self;
+  [menu addItem:guide];
   NSMenuItem *appearance = [[NSMenuItem alloc] initWithTitle:UiText(@"更换形象", @"Change Appearance")
                                                      action:@selector(showAppearancePicker:)
                                               keyEquivalent:@""];
@@ -1229,6 +1537,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)reloadAppearancePacks {
   NSError *error = nil;
   self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&error];
+  self.appearanceLoadError = error;
   if (error && self.window) {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.alertStyle = NSAlertStyleWarning;
@@ -1292,7 +1601,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     NSInteger row = i / 2;
     NSButton *button = [[NSButton alloc] initWithFrame:NSMakeRect((i % 2) * 168,
         gridHeight - (row + 1) * 154 - row * 8, 156, 154)];
-    button.title = item[@"title"];
+    NSMutableArray<NSString *> *badges = [NSMutableArray array];
+    if ([item[@"id"] isEqualToString:self.selectedAppearanceId])
+      [badges addObject:UiText(@"当前", @"Current")];
+    if ([self.newlyImportedIds containsObject:item[@"id"]])
+      [badges addObject:UiText(@"本次新增", @"New")];
+    else if ([self.lastImportedIds containsObject:item[@"id"]])
+      [badges addObject:UiText(@"本次导入", @"Imported")];
+    button.title = badges.count
+        ? [NSString stringWithFormat:@"%@\n%@", item[@"title"], [badges componentsJoinedByString:@" · "]]
+        : item[@"title"];
+    button.toolTip = button.title;
+    button.accessibilityLabel = button.title;
     button.image = thumbnail;
     button.imagePosition = NSImageAbove;
     button.imageScaling = NSImageScaleProportionallyDown;
@@ -1311,24 +1631,39 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   scroll.documentView = grid;
   scroll.hasVerticalScroller = gridHeight > NSHeight(scroll.bounds);
   scroll.drawsBackground = NO;
+  for (NSButton *button in buttons) {
+    NSString *identifier = items[(NSUInteger)button.tag][@"id"];
+    if ([self.lastImportedIds containsObject:identifier]) {
+      [grid scrollRectToVisible:button.frame];
+      break;
+    }
+  }
   return scroll;
 }
 
 - (void)showAppearancePicker:(id)sender {
   (void)sender;
   [self reloadAppearancePacks];
-  self.pendingAppearanceId = self.suggestedAppearanceId ?: self.selectedAppearanceId;
-  self.suggestedAppearanceId = nil;
+  if (self.appearancePickerAlert) {
+    self.pendingAppearanceId = self.selectedAppearanceId;
+    self.appearancePickerAlert.accessoryView = [self appearanceGrid];
+    [self.appearancePickerAlert.window makeKeyAndOrderFront:nil];
+    return;
+  }
+  self.pendingAppearanceId = self.selectedAppearanceId;
   while (YES) {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = UiText(@"更换形象", @"Change Appearance");
-    alert.informativeText = @"";
+    alert.informativeText = UiText(@"当前 = 正在显示；本次新增 = 新加入。选择后点确认才会切换。",
+                                   @"Current = displayed now; New = newly added. Confirm your selection to switch.");
     alert.accessoryView = [self appearanceGrid];
     [alert addButtonWithTitle:UiText(@"确认", @"Confirm")];
     [alert addButtonWithTitle:UiText(@"取消", @"Cancel")];
     [alert addButtonWithTitle:UiText(@"删除所选本地形象", @"Remove Selected Pack")];
     [alert addButtonWithTitle:UiText(@"去官网查看更多形象", @"See More Appearances Online")];
+    self.appearancePickerAlert = alert;
     NSModalResponse response = [alert runModal];
+    self.appearancePickerAlert = nil;
     if (response == NSAlertFirstButtonReturn) {
       [self applyAppearanceId:self.pendingAppearanceId];
       [self stopAnimation];
@@ -1463,16 +1798,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy proxy,
   MeritController *controller = (__bridge MeritController *)context;
   if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
     [controller handleEventTapDisabled];
-  } else if (type == kCGEventScrollWheel) {
-    controller.receivedEvents++;
-    controller.receivedScrolls++;
-    [controller countScrollGesture];
-  } else if (type == kCGEventKeyDown || type == kCGEventLeftMouseDown ||
-             type == kCGEventRightMouseDown || type == kCGEventOtherMouseDown) {
-    controller.receivedEvents++;
-    if (type == kCGEventKeyDown) controller.receivedKeys++;
-    else controller.receivedClicks++;
-    [controller count];
+  } else if (type == kCGEventScrollWheel || type == kCGEventKeyDown ||
+             type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown ||
+             type == kCGEventOtherMouseDown) {
+    [controller receiveGlobalEvent:type];
   }
   return event;
 }

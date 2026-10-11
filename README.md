@@ -1,16 +1,19 @@
 # 牛马电子功德
 
-> 当前业务以 [全免费领取与共创 PRD 1.1](docs/PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md) 为准。新领取全免费；旧收费、权益码和 24 小时首次导入规则已被替代，仅保留既有付费订单的历史履行与恢复。下文旧版本实测记录不是 0.9.0 的验收结果。
+> 当前业务以 [全免费领取与共创 PRD 1.1](docs/PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md) 为准。新领取全免费；旧收费、权益码和 24 小时首次导入规则已被替代，仅保留既有付费订单的历史履行与恢复。下文旧版本实测记录不是 0.9.2 的验收结果。
 
-## 0.9.1 发布与免费领取状态
+## 0.9.2 客户端交付与免费领取状态
 
-- 本次提供 macOS / Windows 0.9.1 客户端；免费领取服务、统一形象库和创作者自动审核沿用已上线实现。真实群码领取、作者投稿与另一个浏览器使用作者码下载已有证据；这不代表双平台最终客户端验收全部通过。
+- 当前国内公开下载与官网安装登记为 macOS / Windows 0.9.2。GitHub 安装文件以实际发行列表为准；源码版本号不替代制品和验收证据。
+- 免费领取服务、统一形象库和创作者自动审核沿用已上线实现。真实群码领取、作者投稿与另一个浏览器使用作者码下载已有证据；本次客户端交付不代表官网/API 的冷首屏性能或整轮产品优化已经全部完成。
 - 基础木鱼和公开安装包免费，不需要领取码。扩展形象的新领取全免费，统一形象库按有效群码或创作者码范围授权，每批最多 10 个；码不作为付款凭证。
 - 新交付使用签名永久包，文件可永久导入并离线使用，没有 24 小时首次导入限制。0.9.0 客户端兼容验证历史 timed 包的原签名，不因旧首次导入日期已过而拒绝导入。
 - 同一批次在服务器签发后 7 日内可重新下载；超过 7 日不再保证服务器重下，不影响已保存文件的永久导入与本地使用。单个形象交付 `.nmgpack`，多个形象交付一个 `.nmgpacks` 批次文件。
 - 不再创建新收费订单；既有已付款订单仍按原订单上下文履行、恢复，不要求用户重复付款。
-- 0.9.1 改善关于页的长内容和抖音码展示；全屏自动隐藏设计已经取消，两端不提供该模式。Mac 已完成清理版菜单、形象切换、关于页及退出重启检查；Windows 构建和实际导入器回归通过，完整实机界面验收由用户在发布后完成，不将其标为已通过。
-- 0.9.0 安装文件仍保留，可从历史发布页回退。当前执行状态见 [WORK_PLAN.md](WORK_PLAN.md)。
+- 0.9.2 改善监听状态、首次使用引导和导入结果：区分仅点击计数、监听建立但待检查、已观察到全局输入；提供用户主动的约 10 秒跨应用自检，无输入时不判故障。只统计事件次数和相对时间，不采集输入内容、键值、坐标或窗口信息。
+- 单包导入成功后明确询问是否启用；批次展示本次新增和当前形象，允许选择而不隐式切换到最后一项；重复、损坏和部分成功结果分别提示。失败提示使用简短中文，不向用户显示本机文件路径或子进程原始错误。
+- Mac 0.9.2 已有本地 Universal 2 构建与正常启动 GUI 证据；用户已确认有效权限下计数持续稳定。Windows 0.9.2 已通过此前实际 MSVC CI 构建和制品绑定，数值版本为 `0.9.2.0`；本批 Win11 GUI 未执行，不将构建结果称为真机界面验收。
+- 0.9.2 的关于页和抖音码改善保留；全屏自动隐藏设计已经取消，两端不提供该模式。0.9.2、0.9.0 安装文件和历史发布页保留，旧验收记录不冒充 0.9.2 验收。当前执行状态见 [WORK_PLAN.md](WORK_PLAN.md)。
 
 ## 项目资料入口
 
@@ -22,10 +25,13 @@
 
 ## 下载
 
-- [GitHub v0.9.1 发布页](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.1)
-- [macOS 0.9.1 DMG 国内下载](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.1.dmg)：`3134634` 字节；SHA-256：`a3b84bd6ae2a2781b907a3a090a0b8a668ef9897b59ce5f6a4ad325e61107cab`。
-- [Windows 0.9.1 安装程序国内下载](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.1-setup.exe)：`3230792` 字节；SHA-256：`ea2368ab64cbd7444823e1f0ad3cdd79f563bdb97a37eb40fd1182bc0ae6724e`。
-- [0.9.1 发布说明与验收边界](docs/RELEASE_0.9.1.zh-CN.md)
+- [macOS 0.9.2 DMG 国内下载](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.2.dmg)：`2872994` 字节；SHA-256：`dbc8d72e41b33a9ab5b2e4f44b7e099fd15c6a9bd8bcb914682f1f97a0cd3fc7`。
+- [Windows 0.9.2 安装程序国内下载](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.2-setup.exe)：`3239118` 字节；SHA-256：`79f85fb1a7e1d94de27bebf850561f726705a3e22143f08f4a95a29230272c25`。
+- [GitHub 客户端发行列表](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases)：只以列表内实际公开的文件为准，不把候选分支、自动 CI 制品或源码归档当作已发布安装包。
+- Windows 原包来自源码 `ad51bb018948edb76f3efc1213b44ed19af350e2`、[既有构建 38143857784](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/actions/runs/38143857784)、安装制品 `11703279500`。发行复用这份原包，不以随后自动 CI 产物替换。
+- [历史 GitHub v0.9.2 发布页](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases)、[0.9.2 发布说明与验收边界](docs/RELEASE_0.9.2.zh-CN.md)
+- 历史 [macOS 0.9.2 DMG](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.2.dmg)：`2872994` 字节；SHA-256：`dbc8d72e41b33a9ab5b2e4f44b7e099fd15c6a9bd8bcb914682f1f97a0cd3fc7`。
+- 历史 [Windows 0.9.2 安装程序](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.2-setup.exe)：`3239118` 字节；SHA-256：`79f85fb1a7e1d94de27bebf850561f726705a3e22143f08f4a95a29230272c25`。
 - [历史 0.9.0 发布页与回退文件](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.0)
 - [免签名安装、升级与卸载指南](docs/INSTALL_UNSIGNED.md)
 - 此次 macOS 使用 Apple Development 签名，不是 Developer ID 分发签名，未公证；Windows 未签名。两端仍可能出现系统安全提示，不承诺无 Gatekeeper / SmartScreen 提示。
@@ -94,15 +100,26 @@ cmake --build build --config Release
 ./scripts/build-windows.ps1
 ```
 
-## 0.9.0 签名与安全提示
+## 当前签名与安全提示
 
 - Windows 版不做代码签名，因此系统可能显示“未知发布者”，SmartScreen 或安全软件也可能拦截。
 - SmartScreen 警告与 Smart App Control 的执行阻止不是同一种提示。后者可能没有单文件“仍要运行”入口；已连接的 Win11 验收机在 Smart App Control 开启时发生启动错误 4551，不能把下载或安装完成当成客户端已正常运行。不要为此关闭系统保护。
-- macOS 0.9.0 使用 Apple Development 签名，没有 Developer ID 分发签名和苹果公证，首次打开仍可能被 Gatekeeper 拦截，需要在 Finder 或“隐私与安全性”中按系统提示手动允许。
+- macOS 0.9.2 使用 Apple Development 签名，没有 Developer ID 分发签名和苹果公证，首次打开仍可能被 Gatekeeper 拦截，需要在 Finder 或“隐私与安全性”中按系统提示手动允许。
 - 这些系统提示无法通过官网、开源或说明文档消除。请从上述正式国内地址或本仓库的 Releases 下载，并在需要时核对 SHA-256。
 - 不建议为运行本软件而全局关闭操作系统或杀毒软件的安全防护。
 
-## 历史实测记录（不代表 0.9.0 验收）
+### 代码签名政策
+
+当前 Windows 安装包未签名，没有任何当前版本被表示为已获 SignPath 签名或认可。尚未取得并接入 SignPath Foundation 签名支持；不把申请、源码公开或下载量当作批准。
+
+若未来获批并完成集成，Windows 签名版本才使用归属说明：“Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).”这只描述预期服务，不代表当前已获批。
+
+- 维护、代码审查和签名审批：Yue Wang（[Mr-shanqiu](https://github.com/Mr-shanqiu)）。
+- 计划签名范围：来自公开仓库并通过 GitHub Actions 构建的本项目 Windows 客户端和安装程序；签名集成待审批，每次签名均需维护者人工批准。
+- 外部贡献需经维护者审查。启用签名前，源码仓库和签名服务访问需使用多重身份验证。
+- 签名申请不覆盖网站、支付服务、第三方应用或 macOS Developer ID 签名与公证。
+
+## 历史实测记录（不代表 0.9.2 验收）
 
 ### Windows 0.6.0（云端真实构建 + 用户真机验收）
 
@@ -146,3 +163,9 @@ cmake --build build --config Release
 - 基础应用 ZIP 上限为 `10MB`；单独下载的 `.nmgpack` 不计入基础应用体积。
 - 制作和校验命令：`./scripts/appearance-pack.py build|validate`。
 - 示例包输出：`dist/sample-packs/woodfish-sample.nmgpack`。
+
+## 当前交付边界（2026-10-11）
+
+官网默认 Mac 和 Windows 安装包均为 0.9.2；GitHub 下载以对应发行页实际提供的版本和原始文件为准。旧版制品仍保留，不要用旧校验值核对新版。Windows 0.9.2 原包来源为源码 ad51bb018948edb76f3efc1213b44ed19af350e2、Actions run 38143857784；原生源码的后续同步提交不改变此构建来源。Mac 原包沿用已接受的本地 universal 候选，不重建或重签名。
+
+Mac 使用 Apple Development 签名，非 Developer ID，未公证；Windows 未签名。Windows 0.9.2 完整实机 GUI 验收未声明完成。用户确认取得有效输入权限后计数稳定，不重复测试或改动计数核心；系统权限说明与计数故障分别处理。官网首屏性能优化仍未全部完成，不把客户端发布当成整轮产品目标达成。

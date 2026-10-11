@@ -15,6 +15,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy) NSArray<NSDictionary *> *layers;
 @property(nonatomic, copy) NSDictionary<NSString *, NSImage *> *images;
 @property(nonatomic) CGFloat plusY;
+// Import-only result; never persisted and never bypasses signature validation.
+@property(nonatomic) BOOL alreadyInstalled;
 - (NSString *)localizedName;
 - (void)drawAtPhase:(CGFloat)phase;
 @end
