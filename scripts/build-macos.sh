@@ -15,6 +15,7 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" \
   "$APP_DIR/Contents/Resources/zh-Hant.lproj"
 cp "$ROOT_DIR/assets/woodfish.png" "$APP_DIR/Contents/Resources/woodfish.png"
 cp "$ROOT_DIR/assets/mallet.png" "$APP_DIR/Contents/Resources/mallet.png"
+cp "$ROOT_DIR/assets/developer-douyin.png" "$APP_DIR/Contents/Resources/developer-douyin.png"
 cp "$ROOT_DIR/assets/appicon.icns" "$APP_DIR/Contents/Resources/appicon.icns"
 cp "$ROOT_DIR/src/macos/en.lproj/InfoPlist.strings" \
   "$APP_DIR/Contents/Resources/en.lproj/InfoPlist.strings"
@@ -65,6 +66,9 @@ if [[ -z "$SIGNING_IDENTITY" ]]; then
   fi
 fi
 
+# Build copies may inherit Finder metadata from source artwork. Remove it only
+# from this newly built bundle; downloaded applications still get Gatekeeper checks.
+xattr -cr "$APP_DIR"
 codesign --force --deep --sign "$SIGNING_IDENTITY" --options runtime --timestamp=none \
   "$APP_DIR"
 

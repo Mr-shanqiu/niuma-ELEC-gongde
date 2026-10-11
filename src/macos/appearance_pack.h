@@ -15,11 +15,15 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy) NSArray<NSDictionary *> *layers;
 @property(nonatomic, copy) NSDictionary<NSString *, NSImage *> *images;
 @property(nonatomic) CGFloat plusY;
+// Import-only result; never persisted and never bypasses signature validation.
+@property(nonatomic) BOOL alreadyInstalled;
 - (NSString *)localizedName;
 - (void)drawAtPhase:(CGFloat)phase;
 @end
 
 @interface NMAppearancePackStore : NSObject
+// Platform deliveries require a trusted V1 timed or V2 perpetual license.
+// Neither mode uses the local clock as an import or offline-use gate.
 + (NSURL *)packsDirectoryURL;
 + (NSArray<NMAppearancePack *> *)loadInstalledPacks:(NSError **)error;
 + (nullable NMAppearancePack *)installArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error;

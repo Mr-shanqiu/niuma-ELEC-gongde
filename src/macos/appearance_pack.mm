@@ -2,6 +2,7 @@
 #import <ImageIO/ImageIO.h>
 #import <Security/Security.h>
 #import <CommonCrypto/CommonDigest.h>
+#include <cerrno>
 
 static NSString *const NMErrorDomain = @"cn.niuma.merit.appearance-pack";
 static const unsigned long long NMMaxArchiveBytes = 50ull * 1024ull * 1024ull;
@@ -30,32 +31,172 @@ static const unsigned char NMCurrentPublicKey[] = {
   0xdd, 0x0a, 0xfc, 0xe2, 0xbd, 0x03, 0xae, 0xf2, 0x72, 0x7c
 };
 
-static NSError *NMError(NSInteger code, NSString *message) {
-  return [NSError errorWithDomain:NMErrorDomain code:code
-                         userInfo:@{NSLocalizedDescriptionKey: message}];
+// User-facing messages are selected by code, never by tool output or a
+// filesystem exception description. No raw path or stderr is retained here.
+static NSString *NMImportMessage(NSInteger code) {
+  switch (code) {
+    case 1:
+      return @"系统解包工具未能启动。请退出后重试；仍失败请重新安装官方客户端。";
+    case 2:
+      return @"压缩包损坏或格式不正确。请重新下载完整形象包后重试。";
+    case 20: case 22:
+      return @"形象图片损坏或无法读取。请重新下载；自行制作的包请重新导出 PNG 图片。";
+    case 21:
+      return @"形象图片格式或尺寸不合规。请使用长宽均为 1 至 2048 像素的 PNG 图片重新封装。";
+    case 30: case 41: case 65:
+      return @"文件结构不安全，含目录、重复文件或不允许的内容。请重新下载，或按制作指南重新封装。";
+    case 31:
+      return @"形象包缺少可读取的配置文件。请重新下载完整包，或按制作指南重新封装。";
+    case 32: case 33: case 34: case 36: case 42:
+      return @"形象包格式或版本不符合规范。请重新下载；自行制作的包请按制作指南修正后重新封装。";
+    case 35:
+      return @"形象包文件不完整或含未声明内容。请重新下载完整包，不要手工修改包内文件。";
+    case 37:
+      return @"形象包授权凭证缺失或格式无效。请从官网重新下载，不要修改包内文件。";
+    case 38:
+      return @"形象内容与授权凭证不一致。请从官网重新下载原包，不要修改包内文件。";
+    case 39:
+      return @"形象包签名校验失败。请从官网重新下载，不要继续使用来源不明的文件。";
+    case 40:
+      return @"请选择有效的 .nmgpack 文件，不要选择文件夹或链接。可从官网重新下载后再导入。";
+    case 43:
+      return @"同名形象来源不一致或原形象无法校验。原形象已保留；请确认来源后重新下载。";
+    case 44:
+      return @"形象配置文件超过 64KB。请按制作指南精简配置后重新封装。";
+    case 45:
+      return @"单个形象包超过 50MB。请按制作指南压缩素材后重新封装。";
+    case 46: case 67:
+      return @"批次文件或解压内容超过 100MB。请减少本批形象数量后重新下载。";
+    case 50:
+      return @"不能删除形象目录之外的文件。请从形象列表重新选择，不要手动调整存放位置。";
+    case 60:
+      return @"无法创建导入临时文件。请检查磁盘空间和本机文件夹写入权限后重试。";
+    case 61:
+      return @"批次中的单个形象超过 50MB。请按制作指南压缩该形象素材后重新封装。";
+    case 62:
+      return @"批次读取或保存中断。请检查文件读取权限和磁盘空间后重试。";
+    case 63:
+      return @"批次内容损坏或不完整。请重新下载完整批次后重试。";
+    case 64:
+      return @"请选择有效的 .nmgpacks 批次文件，不要选择文件夹或链接。可从官网重新下载。";
+    case 66:
+      return @"一个批次须包含 2 至 10 个独立形象。请重新下载，或按制作指南重新封装。";
+    case 80:
+      return @"找不到形象文件，可能已被移动。请重新选择原文件，或从官网重新下载。";
+    case 81:
+      return @"无法访问形象文件或保存目录。请检查本机文件读取、写入权限后重试。";
+    case 82:
+      return @"本机存储空间不足。请清理空间后重新导入，其他已安装形象无需删除。";
+    default:
+      return @"形象文件暂时无法读取或保存。请检查磁盘空间和文件权限后重试；仍失败请重新下载。";
+  }
 }
+
+static NSError *NMError(NSInteger code, NSString *message) {
+  (void)message; // Existing call sites retain their numeric reason codes.
+  return [NSError errorWithDomain:NMErrorDomain code:code
+                         userInfo:@{NSLocalizedDescriptionKey: NMImportMessage(code)}];
+}
+
+static NSError *NMUserFacingImportError(NSError *failure) {
+  if (!failure) return nil;
+  if ([failure.domain isEqualToString:NMErrorDomain]) {
+    if (failure.code == 68) {
+      NSArray *completed = failure.userInfo[@"NMSuccessfulImports"];
+      if (![completed isKindOfClass:NSArray.class]) completed = @[];
+      NSError *cause = failure.userInfo[NSUnderlyingErrorKey];
+      cause = [cause isKindOfClass:NSError.class]
+          ? NMUserFacingImportError(cause) : NMError(2, nil);
+      return [NSError errorWithDomain:NMErrorDomain code:68 userInfo:@{
+        NSLocalizedDescriptionKey: [NSString stringWithFormat:
+            @"已处理 %lu 个形象；第 %lu 个及后续项目未完成。%@",
+            (unsigned long)completed.count, (unsigned long)completed.count + 1,
+            cause.localizedDescription],
+        @"NMSuccessfulImports": completed,
+        NSUnderlyingErrorKey: cause
+      }];
+    }
+    return NMError(failure.code, nil);
+  }
+  if ([failure.domain isEqualToString:@"cn.niuma.merit.appearance-load"] &&
+      failure.code == 1) {
+    NSArray *failures = failure.userInfo[@"NMPublicImportFailures"];
+    if (![failures isKindOfClass:NSArray.class]) return NMError(83, nil);
+    NSMutableArray<NSError *> *safeFailures = [NSMutableArray array];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (NSError *entry in failures) {
+      NSError *safe = [entry isKindOfClass:NSError.class]
+          ? NMUserFacingImportError(entry) : NMError(83, nil);
+      [safeFailures addObject:safe];
+      if (lines.count < 10)
+        [lines addObject:[NSString stringWithFormat:@"第 %lu 项：%@",
+            (unsigned long)safeFailures.count, safe.localizedDescription]];
+    }
+    if (safeFailures.count > lines.count)
+      [lines addObject:[NSString stringWithFormat:@"另有 %lu 项未能加载，请检查原包后重新导入。",
+          (unsigned long)(safeFailures.count - lines.count)]];
+    return [NSError errorWithDomain:failure.domain code:1 userInfo:@{
+      NSLocalizedDescriptionKey: [NSString stringWithFormat:
+          @"%lu 个本地形象暂不可用；原文件保留，其他正常形象不受影响。\n%@",
+          (unsigned long)safeFailures.count, [lines componentsJoinedByString:@"\n"]],
+      @"NMPublicImportFailures": safeFailures
+    }];
+  }
+  // Inspect only bounded domain/code metadata. Discard file paths, process
+  // output and the original userInfo rather than carrying them to the UI.
+  NSError *cursor = failure;
+  NSInteger code = 83;
+  for (NSUInteger depth = 0; cursor && depth < 4; ++depth) {
+    if ([cursor.domain isEqualToString:NSCocoaErrorDomain]) {
+      if (cursor.code == NSFileNoSuchFileError || cursor.code == NSFileReadNoSuchFileError) code = 80;
+      else if (cursor.code == NSFileReadNoPermissionError || cursor.code == NSFileWriteNoPermissionError) code = 81;
+      else if (cursor.code == NSFileWriteOutOfSpaceError) code = 82;
+      else if (cursor.code == NSFileReadCorruptFileError) code = 2;
+    } else if ([cursor.domain isEqualToString:NSPOSIXErrorDomain]) {
+      if (cursor.code == ENOENT) code = 80;
+      else if (cursor.code == EACCES || cursor.code == EPERM) code = 81;
+      else if (cursor.code == ENOSPC) code = 82;
+    }
+    if (code != 83) break;
+    id underlying = cursor.userInfo[NSUnderlyingErrorKey];
+    cursor = [underlying isKindOfClass:NSError.class] ? underlying : nil;
+  }
+  return NMError(code, nil);
+}
+
+// Every external error result crosses this boundary, including Foundation
+// read/write failures and partially imported batches. No telemetry is added.
+class NMImportErrorScope {
+ public:
+  explicit NMImportErrorScope(NSError *__autoreleasing *output) : output_(output) {
+    if (output_) *output_ = nil;
+  }
+  ~NMImportErrorScope() {
+    if (output_ && *output_) *output_ = NMUserFacingImportError(*output_);
+  }
+ private:
+  NSError *__autoreleasing *output_;
+};
 
 static BOOL NMRun(NSString *launchPath, NSArray<NSString *> *arguments,
                   NSData **stdoutData, NSError **error) {
   NSTask *task = [[NSTask alloc] init];
   NSPipe *out = [NSPipe pipe];
-  NSPipe *err = [NSPipe pipe];
   task.launchPath = launchPath;
   task.arguments = arguments;
   task.standardOutput = out;
-  task.standardError = err;
+  task.standardError = [NSFileHandle fileHandleWithNullDevice];
   @try {
     [task launch];
     [task waitUntilExit];
   } @catch (NSException *exception) {
-    if (error) *error = NMError(1, exception.reason ?: @"无法运行系统解压工具");
+    (void)exception;
+    if (error) *error = NMError(1, nil);
     return NO;
   }
   NSData *output = [[out fileHandleForReading] readDataToEndOfFile];
-  NSData *failure = [[err fileHandleForReading] readDataToEndOfFile];
   if (task.terminationStatus != 0) {
-    NSString *detail = [[NSString alloc] initWithData:failure encoding:NSUTF8StringEncoding];
-    if (error) *error = NMError(2, detail.length ? detail : @"形象包解压失败");
+    if (error) *error = NMError(2, nil);
     return NO;
   }
   if (stdoutData) *stdoutData = output;
@@ -120,7 +261,8 @@ static BOOL NMExtractBatchEntry(NSURL *archiveURL, NSString *name, NSURL *destin
     }
   } @catch (NSException *exception) {
     complete = NO;
-    if (error) *error = NMError(62, exception.reason ?: @"形象包解压失败");
+    (void)exception;
+    if (error) *error = NMError(62, nil);
   }
   [writer closeFile];
   if (launched) {
@@ -340,6 +482,8 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
 + (NMAppearancePack *)validatePackDirectory:(NSURL *)directoryURL
                       enforceImportDeadline:(BOOL)enforceImportDeadline
                                       error:(NSError **)error {
+  NMImportErrorScope safeError(error);
+  (void)enforceImportDeadline; // Retained for private call-site compatibility only.
   NSFileManager *fm = [NSFileManager defaultManager];
   NSArray<NSURL *> *files = [fm contentsOfDirectoryAtURL:directoryURL
                               includingPropertiesForKeys:@[NSURLIsRegularFileKey, NSURLIsSymbolicLinkKey]
@@ -359,8 +503,12 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   NSURL *manifestURL = [directoryURL URLByAppendingPathComponent:@"manifest.json"];
   NSNumber *manifestSize = nil;
   [manifestURL getResourceValue:&manifestSize forKey:NSURLFileSizeKey error:nil];
-  if (!manifestSize || manifestSize.unsignedLongLongValue > NMMaxManifestBytes) {
-    if (error) *error = NMError(31, @"manifest.json 缺失或超过 64KB");
+  if (!manifestSize) {
+    if (error) *error = NMError(31, nil);
+    return nil;
+  }
+  if (manifestSize.unsignedLongLongValue > NMMaxManifestBytes) {
+    if (error) *error = NMError(44, nil);
     return nil;
   }
   NSData *data = [NSData dataWithContentsOfURL:manifestURL options:0 error:error];
@@ -386,6 +534,7 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   if (![identifier isKindOfClass:[NSString class]] || identifier.length < 3 || identifier.length > 80 ||
       [identifier rangeOfCharacterFromSet:badID].location != NSNotFound ||
       ![version isKindOfClass:[NSString class]] || version.length > 32 ||
+      [version rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location != NSNotFound ||
       ![json[@"name_zh"] isKindOfClass:[NSString class]] || ![json[@"name_en"] isKindOfClass:[NSString class]] ||
       ![json[@"author"] isKindOfClass:[NSString class]] || ![json[@"publisher"] isKindOfClass:[NSString class]] ||
       ![json[@"review_id"] isKindOfClass:[NSString class]] ||
@@ -396,6 +545,11 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   }
   // Preserve the real issuers of existing official packs, not synthetic test labels.
   NSString *publisher = json[@"publisher"];
+  if (([identifier hasPrefix:@"official."] || [identifier hasPrefix:@"zqscreen."] ||
+       [identifier hasPrefix:@"creator."]) && !json[@"license"]) {
+    if (error) *error = NMError(37, @"平台形象包必须包含有效的签名授权");
+    return nil;
+  }
   if (([identifier hasPrefix:@"official."] && ![publisher isEqualToString:@"NiuMa Merit"]) ||
       ([identifier hasPrefix:@"zqscreen."] && ![publisher isEqualToString:@"zqscreen"])) {
     if (error) *error = NMError(33, @"非官方形象包不能使用官方标识，请使用自己的形象包标识");
@@ -470,31 +624,35 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
       return nil;
     }
     NSDictionary *license = licenseValue;
-    NSSet *licenseKeys = [NSSet setWithArray:@[@"mode", @"issued_at", @"import_before",
+    NSString *mode = license[@"mode"];
+    BOOL perpetual = [mode isKindOfClass:NSString.class] && [mode isEqualToString:@"perpetual"];
+    BOOL timed = [mode isKindOfClass:NSString.class] && [mode isEqualToString:@"timed"];
+    NSSet *licenseKeys = [NSSet setWithArray:@[@"mode", @"issued_at",
       @"download_id", @"content_sha256", @"signature"]];
+    if (timed) licenseKeys = [licenseKeys setByAddingObject:@"import_before"];
     NSNumber *issuedValue = license[@"issued_at"];
     NSNumber *deadlineValue = license[@"import_before"];
     NSString *downloadID = license[@"download_id"];
     NSString *contentHash = license[@"content_sha256"];
     NSString *signature = license[@"signature"];
-    long long issued = issuedValue.longLongValue;
-    long long deadline = deadlineValue.longLongValue;
     NSCharacterSet *badToken = [[NSCharacterSet characterSetWithCharactersInString:
         @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"] invertedSet];
     NSCharacterSet *badHex = [[NSCharacterSet characterSetWithCharactersInString:
         @"0123456789abcdef"] invertedSet];
-    if (![license isKindOfClass:NSDictionary.class] || !NMExactKeys(license, licenseKeys) ||
-        ![license[@"mode"] isEqualToString:@"timed"] ||
+    if ((!timed && !perpetual) || license.count != licenseKeys.count || !NMExactKeys(license, licenseKeys) ||
         !NMNumberInRange(issuedValue, 1577836800, 4102444800) ||
-        !NMNumberInRange(deadlineValue, 1577836800, 4102444800) ||
-        deadline <= issued || deadline - issued > 86400 ||
+        floor(issuedValue.doubleValue) != issuedValue.doubleValue ||
+        (timed && (!NMNumberInRange(deadlineValue, 1577836800, 4102444800) ||
+          floor(deadlineValue.doubleValue) != deadlineValue.doubleValue ||
+          deadlineValue.doubleValue <= issuedValue.doubleValue ||
+          deadlineValue.doubleValue - issuedValue.doubleValue > 86400)) ||
         ![downloadID isKindOfClass:NSString.class] || downloadID.length < 16 || downloadID.length > 128 ||
         [downloadID rangeOfCharacterFromSet:badToken].location != NSNotFound ||
         ![contentHash isKindOfClass:NSString.class] || contentHash.length != 64 ||
         [contentHash rangeOfCharacterFromSet:badHex].location != NSNotFound ||
         ![signature isKindOfClass:NSString.class] || signature.length != 128 ||
         [signature rangeOfCharacterFromSet:badHex].location != NSNotFound) {
-      if (error) *error = NMError(37, @"限时导入凭证格式无效");
+      if (error) *error = NMError(37, @"形象包授权凭证格式无效");
       return nil;
     }
     NSString *actualHash = NMContentHash(directoryURL, expected, error);
@@ -502,27 +660,15 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
       if (error && !*error) *error = NMError(38, @"形象包内容与授权凭证不匹配");
       return nil;
     }
-    NSString *message = [NSString stringWithFormat:
-        @"NIUMA-PACK-LICENSE-V1\n%@\n%@\n%lld\n%lld\n%@\n%@",
-        identifier, version, issued, deadline, downloadID, contentHash];
+    long long issued = issuedValue.longLongValue;
+    NSString *message = perpetual
+        ? [NSString stringWithFormat:@"NIUMA-PACK-LICENSE-V2\nperpetual\n%@\n%@\n%lld\n%@\n%@",
+            identifier, version, issued, downloadID, contentHash]
+        : [NSString stringWithFormat:@"NIUMA-PACK-LICENSE-V1\n%@\n%@\n%lld\n%lld\n%@\n%@",
+            identifier, version, issued, deadlineValue.longLongValue, downloadID, contentHash];
     if (!NMVerifyLicense(message, signature)) {
       if (error) *error = NMError(39, @"形象包授权签名无效");
       return nil;
-    }
-    if (enforceImportDeadline) {
-#ifdef NIUMA_LICENSE_TEST_TIME
-      long long now = NIUMA_LICENSE_TEST_TIME;
-#else
-      long long now = (long long)NSDate.date.timeIntervalSince1970;
-#endif
-      if (now + 300 < issued) {
-        if (error) *error = NMError(40, @"电脑时间早于形象包签发时间，请检查系统时间");
-        return nil;
-      }
-      if (now > deadline) {
-        if (error) *error = NMError(41, @"形象包首次导入期限已过，请登录官网重新下载，无需再次购买");
-        return nil;
-      }
     }
   }
   for (NSString *name in expected) {
@@ -553,7 +699,7 @@ invalidLayers:
 }
 
 + (NSArray<NMAppearancePack *> *)loadInstalledPacks:(NSError **)error {
-  if (error) *error = nil;
+  NMImportErrorScope safeError(error);
   NSFileManager *fm = [NSFileManager defaultManager];
   NSURL *root = [self packsDirectoryURL];
   if (![fm createDirectoryAtURL:root withIntermediateDirectories:YES attributes:nil error:error]) return @[];
@@ -561,48 +707,43 @@ invalidLayers:
                                                         options:NSDirectoryEnumerationSkipsHiddenFiles error:error];
   if (!directories) return @[];
   NSMutableArray *packs = [NSMutableArray array];
-  NSMutableArray<NSString *> *failures = [NSMutableArray array];
-  NSError *firstFailure = nil;
+  NSMutableArray<NSError *> *failures = [NSMutableArray array];
   for (NSURL *directory in directories) {
     NSNumber *isDirectory = nil;
     [directory getResourceValue:&isDirectory forKey:NSURLIsDirectoryKey error:nil];
     if (!isDirectory.boolValue || ![directory.pathExtension isEqualToString:@"nmgpackdata"]) continue;
     NSError *packError = nil;
-    // Already installed packs remain usable offline after their first-import deadline.
+    // Installed and newly imported packs remain usable independently of the clock.
     // This still verifies their manifest, images, content hash, and license signature.
     NMAppearancePack *pack = [self validatePackDirectory:directory
                                 enforceImportDeadline:NO error:&packError];
     if (pack) {
       [packs addObject:pack];
     } else {
-      if (!firstFailure) firstFailure = packError;
-      [failures addObject:[NSString stringWithFormat:@"%@：%@",
-          directory.lastPathComponent.stringByDeletingPathExtension,
-          packError.localizedDescription ?: @"无法读取形象包"]];
+      [failures addObject:NMUserFacingImportError(packError) ?: NMError(83, nil)];
     }
   }
   [packs sortUsingComparator:^NSComparisonResult(NMAppearancePack *a, NMAppearancePack *b) {
     return [[a localizedName] localizedCaseInsensitiveCompare:[b localizedName]];
   }];
   if (failures.count && error) {
-    NSMutableDictionary *info = [@{
-      NSLocalizedDescriptionKey: [NSString stringWithFormat:
-          @"以下本地形象未能加载，原文件仍保留，请勿重复付款：\n%@",
-          [failures componentsJoinedByString:@"\n"]]
-    } mutableCopy];
-    if (firstFailure) info[NSUnderlyingErrorKey] = firstFailure;
     *error = [NSError errorWithDomain:@"cn.niuma.merit.appearance-load"
-                                code:1 userInfo:info];
+        code:1 userInfo:@{@"NMPublicImportFailures": failures}];
   }
   return packs;
 }
 
 + (NMAppearancePack *)installArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error {
+  NMImportErrorScope safeError(error);
   NSNumber *size = nil, *regular = nil, *symbolic = nil;
   [archiveURL getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
   [archiveURL getResourceValue:&regular forKey:NSURLIsRegularFileKey error:nil];
   [archiveURL getResourceValue:&symbolic forKey:NSURLIsSymbolicLinkKey error:nil];
-  if (!regular.boolValue || symbolic.boolValue || size.unsignedLongLongValue > NMMaxArchiveBytes ||
+  if (size.unsignedLongLongValue > NMMaxArchiveBytes) {
+    if (error) *error = NMError(45, nil);
+    return nil;
+  }
+  if (!regular.boolValue || symbolic.boolValue ||
       ![[archiveURL.pathExtension lowercaseString] isEqualToString:@"nmgpack"]) {
     if (error) *error = NMError(40, @"请选择不超过 50MB 的 .nmgpack 文件");
     return nil;
@@ -648,6 +789,24 @@ invalidLayers:
       [fm removeItemAtURL:stage error:nil];
       return nil;
     }
+    NSArray<NSString *> *oldNames = [fm contentsOfDirectoryAtPath:destination.path error:nil];
+    NSArray<NSString *> *newNames = [fm contentsOfDirectoryAtPath:stage.path error:nil];
+    BOOL identical = oldNames && newNames &&
+        [[NSSet setWithArray:oldNames] isEqualToSet:[NSSet setWithArray:newNames]];
+    if (identical) {
+      for (NSString *name in newNames) {
+        if (![fm contentsEqualAtPath:[destination.path stringByAppendingPathComponent:name]
+                             andPath:[stage.path stringByAppendingPathComponent:name]]) {
+          identical = NO;
+          break;
+        }
+      }
+    }
+    if (identical) {
+      existing.alreadyInstalled = YES;
+      [fm removeItemAtURL:stage error:nil];
+      return existing;
+    }
   }
   if (hadOld && ![fm moveItemAtURL:destination toURL:backup error:error]) {
     [fm removeItemAtURL:stage error:nil];
@@ -662,12 +821,20 @@ invalidLayers:
 }
 
 + (NSArray<NMAppearancePack *> *)installBatchArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error {
+  NMImportErrorScope safeError(error);
   NSNumber *size = nil, *regular = nil, *symbolic = nil;
   [archiveURL getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
   [archiveURL getResourceValue:&regular forKey:NSURLIsRegularFileKey error:nil];
   [archiveURL getResourceValue:&symbolic forKey:NSURLIsSymbolicLinkKey error:nil];
-  if (!regular.boolValue || symbolic.boolValue || size.unsignedLongLongValue == 0 ||
-      size.unsignedLongLongValue > NMMaxBatchBytes ||
+  if (size.unsignedLongLongValue > NMMaxBatchBytes) {
+    if (error) *error = NMError(46, nil);
+    return nil;
+  }
+  if (size && size.unsignedLongLongValue == 0 && regular.boolValue && !symbolic.boolValue) {
+    if (error) *error = NMError(63, nil);
+    return nil;
+  }
+  if (!regular.boolValue || symbolic.boolValue ||
       ![[archiveURL.pathExtension lowercaseString] isEqualToString:@"nmgpacks"]) {
     if (error) *error = NMError(64, @"请选择不超过 100MB 的 .nmgpacks 批次文件");
     return nil;
@@ -710,7 +877,7 @@ invalidLayers:
     [file getResourceValue:&fileSymbolic forKey:NSURLIsSymbolicLinkKey error:nil];
     totalBytes += fileSize.unsignedLongLongValue;
     if (!fileRegular.boolValue || fileSymbolic.boolValue || totalBytes > NMMaxBatchBytes) {
-      if (error) *error = NMError(67, @"批次解压数据超过 100MB");
+      if (error) *error = NMError(totalBytes > NMMaxBatchBytes ? 67 : 65, nil);
       [fm removeItemAtURL:stage error:nil];
       return nil;
     }
@@ -721,9 +888,13 @@ invalidLayers:
     NSError *packError = nil;
     NMAppearancePack *pack = [self installArchiveAtURL:file error:&packError];
     if (!pack) {
-      if (error) *error = NMError(68, [NSString stringWithFormat:
-          @"已导入 %lu 个形象，其余未完成：%@", (unsigned long)installed.count,
-          packError.localizedDescription ?: @"形象包无效"]);
+      if (error) {
+        NSMutableDictionary *info = [@{
+          @"NMSuccessfulImports": [installed copy]
+        } mutableCopy];
+        if (packError) info[NSUnderlyingErrorKey] = packError;
+        *error = [NSError errorWithDomain:NMErrorDomain code:68 userInfo:info];
+      }
       [fm removeItemAtURL:stage error:nil];
       return nil;
     }
@@ -734,6 +905,7 @@ invalidLayers:
 }
 
 + (BOOL)removePack:(NMAppearancePack *)pack error:(NSError **)error {
+  NMImportErrorScope safeError(error);
   NSURL *root = [self packsDirectoryURL].URLByStandardizingPath;
   NSURL *target = pack.directoryURL.URLByStandardizingPath;
   if (![[target URLByDeletingLastPathComponent].path isEqualToString:root.path] ||

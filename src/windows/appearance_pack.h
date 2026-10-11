@@ -65,11 +65,13 @@ class AppearanceCatalog {
   bool Install(const std::wstring& sourcePath,
                const std::wstring& directory,
                std::string* installedId,
-               std::wstring* error);
+               std::wstring* error,
+               bool* alreadyInstalled = nullptr);
   bool InstallBatch(const std::wstring& sourcePath,
                     const std::wstring& directory,
                     std::vector<std::string>* installedIds,
-                    std::wstring* error);
+                    std::wstring* error,
+                    std::vector<std::string>* alreadyInstalledIds = nullptr);
   bool Delete(const std::string& id, std::wstring* error);
   AppearancePack* Find(const std::string& id) const;
   const std::vector<std::unique_ptr<AppearancePack>>& packs() const {

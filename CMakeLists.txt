@@ -8,6 +8,7 @@ if(WIN32)
   configure_file(src/windows/app.manifest "${CMAKE_CURRENT_BINARY_DIR}/app.manifest" COPYONLY)
   configure_file(assets/woodfish.png "${CMAKE_CURRENT_BINARY_DIR}/woodfish.png" COPYONLY)
   configure_file(assets/mallet.png "${CMAKE_CURRENT_BINARY_DIR}/mallet.png" COPYONLY)
+  configure_file(assets/developer-douyin.png "${CMAKE_CURRENT_BINARY_DIR}/developer-douyin.png" COPYONLY)
   configure_file(assets/appicon.ico "${CMAKE_CURRENT_BINARY_DIR}/appicon.ico" COPYONLY)
   add_executable(niuma-merit WIN32
     src/windows/app.cpp
@@ -46,6 +47,7 @@ elseif(APPLE)
   set(MACOS_RESOURCES
     assets/woodfish.png
     assets/mallet.png
+    assets/developer-douyin.png
   )
   set_source_files_properties(${MACOS_RESOURCES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources"
