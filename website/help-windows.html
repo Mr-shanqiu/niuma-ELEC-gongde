@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="牛马电子功德 Windows 权限帮助：普通使用无需额外授权，了解系统安全窗口的计数边界，以及更新后如何保留数据。">
+  <title>Windows 权限与计数帮助｜牛马电子功德</title>
+  <link rel="canonical" href="https://gongde.zqscreen.cn/help-windows.html">
+  <link rel="icon" href="assets/woodfish.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="client-help.css">
+</head>
+<body class="guide-page">
+  <header class="guide-nav">
+    <a class="guide-brand" href="index.html">牛马电子功德</a>
+    <a class="text-link" href="help-macos.html">使用 Mac？查看 Mac 帮助</a>
+  </header>
+  <main class="client-help">
+    <p class="eyebrow">WINDOWS HELP</p>
+    <h1>正常打开，<br>不必寻找“输入监控”开关。</h1>
+    <p class="help-lead">Windows 10 / 11 没有 Mac 那样的“输入监控”授权开关。普通使用通常不需要额外权限，也不需要把客户端长期设为管理员运行。</p>
+    <aside class="help-summary"><strong>先记住这一条：</strong>从正式安装后的快捷方式打开客户端，在普通应用中正常使用。不要为增加计数关闭 UAC、防病毒或其他系统保护。</aside>
+    <nav class="help-toc" aria-label="本页目录">
+      <a href="#normal-use">普通使用</a><a href="#only-pet">只有点击宠物才计数</a><a href="#system-boundary">系统权限边界</a><a href="#updates">更新与数据</a><a href="#privacy">隐私说明</a>
+    </nav>
+    <section class="help-section" id="normal-use">
+      <h2>普通使用，不需要设置一堆权限</h2>
+      <ol>
+        <li>从官网下载并安装牛马电子功德，使用安装后的桌面或开始菜单快捷方式打开。</li>
+        <li>小伙伴出现后，在普通记事本、浏览器等应用里打字或点击鼠标，功德会随操作增加。</li>
+        <li>右键小伙伴可以打开“关于”、开启或关闭自启动、更换形象、查看功德日历或退出。</li>
+      </ol>
+      <p>无需开启 Windows 的“墨迹书写和键入个性化”、诊断数据、麦克风或摄像头权限。那些设置不是本软件全局计数的授权入口。</p>
+    </section>
+    <section class="help-section" id="only-pet">
+      <h2>只有点击小伙伴时数字增加？</h2>
+      <p>点击计数可用，不等于其他应用中的输入也已被接收。先按下面的短流程处理，不必删除软件数据：</p>
+      <ol>
+        <li>右键小伙伴选择“退出”，再从正式安装的快捷方式重新打开；不要同时运行下载目录中的旧副本。</li>
+        <li>在普通记事本中输入几个字，或正常点击桌面。不要用登录界面、UAC 提示或密码输入窗口判断全局计数。</li>
+        <li>如果普通应用中正常，只在某个特殊窗口中不计数，先查看下方的系统权限边界。</li>
+        <li>如果普通应用中仍没有计数，保留“关于”中的客户端版本、Windows 版本和出现的提示，<a href="contact.html">联系项目</a>。不要清空功德、日历或形象文件。</li>
+      </ol>
+      <p>客户端没有独立“权限检查”或“计数自检”入口，不需要到菜单里寻找这些按钮。</p>
+    </section>
+    <section class="help-section" id="system-boundary">
+      <h2>有些窗口受到 Windows 系统保护</h2>
+      <p>UAC 确认窗口、安全桌面，以及不同权限级别的应用，存在系统访问边界。普通应用中的操作正常计数，并不保证所有高权限或安全窗口中的操作都能计数。</p>
+      <p>遇到这种情况，优先在普通权限运行的应用中使用。不要关闭 UAC 或安全桌面，不要为计数绕过系统保护，也不建议把桌面小伙伴始终设为管理员运行。</p>
+      <p>如果电脑由公司统一管理，部分限制可能由组织策略决定，请遵守组织规定，不要修改安全策略来扩大监听范围。</p>
+      <p><a href="https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-securityoverview" target="_blank" rel="noopener noreferrer">Microsoft 官方：应用权限级别与系统访问边界</a> · <a href="https://learn.microsoft.com/en-us/windows/security/application-security/application-control/user-account-control/settings-and-configuration" target="_blank" rel="noopener noreferrer">Microsoft 官方：UAC 与安全桌面</a></p>
+    </section>
+    <section class="help-section" id="updates">
+      <h2>更新应用，不清空你的积累</h2>
+      <ol>
+        <li>先在小伙伴的右键菜单中选择“退出”。</li>
+        <li>用官网新版安装程序更新原安装位置，不同时运行新旧副本。</li>
+        <li>正常重开后，在“关于”查看版本；原计数、日历和导入形象不应因更新而需要清空。</li>
+      </ol>
+      <p>本软件没有自动更新。安装相关问题请查看<a href="install.html?os=windows">Windows 安装与导入说明</a>；不要按 Mac 的输入监控步骤寻找 Windows 的授权开关。</p>
+    </section>
+    <section class="help-section" id="privacy">
+      <h2>只统计次数，不记录输入内容</h2>
+      <p>牛马电子功德用按键、鼠标按键和滚轮事件进行计数与动画，不保存具体按键内容、鼠标坐标、当前应用或窗口内容。计数、日历和已导入形象保存在本机，客户端无需联网运行。</p>
+      <p>点击“关于”中的帮助链接，由默认浏览器打开本页，不会把客户端计数或输入记录发送到官网。本页也不会替你修改系统权限、下载安装程序或开启远程控制。</p>
+      <p><a href="privacy.html">查看产品隐私说明</a></p>
+    </section>
+    <footer class="help-footer">
+      <a href="index.html">返回官网</a> · <a href="download.html">下载客户端</a> · <a href="install.html?os=windows">Windows 安装与导入</a> · <a href="contact.html">联系项目</a>
+      <p class="help-note">本页专用于 Windows 10 / 11。Mac 用户请查看独立的 Mac 权限说明。</p>
+    </footer>
+  </main>
+</body>
+</html>

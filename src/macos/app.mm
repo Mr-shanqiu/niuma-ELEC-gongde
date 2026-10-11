@@ -1071,15 +1071,14 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   alert.informativeText = UiText(
       @"1. 按住小伙伴拖动，放到喜欢的位置。\n"
        @"2. 右键小伙伴，可以换形象、看日历和退出。\n"
-       @"3. 右键打开“计数状态与自检”，确认是否收到全局输入；未开启监听时只能点击小伙伴计数。\n\n"
+       @"3. 在其他应用中计数需要允许“输入监控”；右键打开“关于”，可查看 Mac 权限帮助。\n\n"
        @"只统计事件次数，不读取按键内容、坐标、当前应用或窗口内容；不联网，数据留在本机。",
       @"1. Drag your companion to move it.\n"
        @"2. Right-click it to change appearance, view the calendar, or quit.\n"
-       @"3. Open Counting Status & Check from that menu to check global input. Without a listener, only pet clicks count.\n\n"
+       @"3. Counting in other apps requires Input Monitoring permission. Open About for Mac permissions help.\n\n"
        @"Only event counts are used, never keys, coordinates, apps or window contents. No networking; data stays on this Mac.");
   [alert addButtonWithTitle:UiText(@"知道了", @"Got It")];
-  [alert addButtonWithTitle:UiText(@"查看计数状态", @"Counting Status")];
-  if ([alert runModal] == NSAlertSecondButtonReturn) [self showCountStatus:nil];
+  [alert runModal];
 }
 
 - (BOOL)hasLiveEventTap {
@@ -1459,15 +1458,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       ? NSControlStateValueOn
       : NSControlStateValueOff;
   [menu addItem:launchAtLogin];
-  NSMenuItem *status = [[NSMenuItem alloc] initWithTitle:
-      [NSString stringWithFormat:UiText(@"计数状态与自检：%@", @"Counting Status & Check: %@"), self.countStatusTitle]
-      action:@selector(showCountStatus:) keyEquivalent:@""];
-  status.target = self;
-  [menu addItem:status];
-  NSMenuItem *guide = [[NSMenuItem alloc] initWithTitle:UiText(@"使用说明：三件事", @"Getting Started")
-      action:@selector(showFirstUseGuide:) keyEquivalent:@""];
-  guide.target = self;
-  [menu addItem:guide];
   NSMenuItem *appearance = [[NSMenuItem alloc] initWithTitle:UiText(@"更换形象", @"Change Appearance")
                                                      action:@selector(showAppearancePicker:)
                                               keyEquivalent:@""];
@@ -1706,6 +1696,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       @"版本 %@\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
+       @"在其他应用中计数，需要允许本应用使用“输入监控”。\n"
+       @"Mac 权限与计数帮助\n\n"
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"官方网站：\n"
        @"https://gongde.zqscreen.cn/\n\n"
@@ -1715,6 +1707,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"
+       @"Counting in other apps requires Input Monitoring permission.\n"
+       @"Mac permissions and counting help\n\n"
        @"Client source code is available under GPLv3.\n\n"
        @"Official website:\n"
        @"https://gongde.zqscreen.cn/\n\n"
@@ -1728,8 +1722,16 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                                   scrollerStyle:NSScrollerStyleLegacy];
   CGFloat contentWidth = MAX(240.0, MIN(340.0, NSWidth(visibleFrame) - 64.0 - scrollerWidth));
   NSFont *bodyFont = [NSFont systemFontOfSize:NSFont.systemFontSize];
-  NSAttributedString *bodyText = [[NSAttributedString alloc] initWithString:aboutText
+  NSMutableAttributedString *bodyText = [[NSMutableAttributedString alloc] initWithString:aboutText
       attributes:@{NSFontAttributeName: bodyFont, NSForegroundColorAttributeName: NSColor.labelColor}];
+  NSRange helpRange = [aboutText rangeOfString:UiText(@"Mac 权限与计数帮助",
+      @"Mac permissions and counting help")];
+  if (helpRange.location != NSNotFound) {
+    [bodyText addAttributes:@{
+        NSLinkAttributeName: @"https://gongde.zqscreen.cn/help-macos.html",
+        NSForegroundColorAttributeName: NSColor.linkColor,
+        NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)} range:helpRange];
+  }
   CGFloat textHeight = ceil([bodyText boundingRectWithSize:NSMakeSize(contentWidth, CGFLOAT_MAX)
       options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading].size.height) + 4.0;
   CGFloat contentHeight = textHeight + 16.0 + (douyinImage ? 276.0 : 0.0);
@@ -1738,6 +1740,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       NSMakeRect(0, contentHeight - 8.0 - textHeight, contentWidth, textHeight)];
   body.editable = NO;
   body.selectable = YES;
+  body.allowsEditingTextAttributes = YES;
   body.bordered = NO;
   body.drawsBackground = NO;
   body.usesSingleLineMode = NO;
@@ -1770,9 +1773,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   alert.informativeText = @"";
   alert.accessoryView = scroll;
   [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
-  if (!self.inputMonitoringAuthorized && !gIsolatedAcceptance) {
-    [alert addButtonWithTitle:UiText(@"开启输入监控", @"Enable Input Monitoring")];
-  }
   // Keep the native alert buttons outside the scroll area, reserving their actual layout height.
   [alert layout];
   CGFloat chromeHeight = NSHeight(alert.window.frame) - NSHeight(scroll.frame);
@@ -1780,10 +1780,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [scroll setFrameSize:NSMakeSize(NSWidth(scroll.frame), MIN(contentHeight, availableHeight))];
   [alert layout];
   [content scrollPoint:NSMakePoint(0, MAX(0.0, contentHeight - scroll.contentSize.height))];
-  NSModalResponse response = [alert runModal];
-  if (!self.inputMonitoringAuthorized && response == NSAlertSecondButtonReturn) {
-    [self requestListenPermission];
-  }
+  [alert runModal];
 }
 
 @end

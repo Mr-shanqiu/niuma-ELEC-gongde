@@ -1103,13 +1103,13 @@ bool ShowPrivacyNotice(HWND owner) {
       UiText(
           L"1. 按住小伙伴拖动，放到喜欢的位置。\n"
           L"2. 右键小伙伴，可以换形象、看日历和退出。\n"
-          L"3. 右键打开“计数状态与自检”，查看实际监听结果。未建立监听时，只能点击小伙伴计数。\n\n"
+          L"3. Windows 通常无需额外授权；需要帮助时，右键打开“关于”，查看 Windows 权限与计数帮助。\n\n"
           L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
           L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
           L"剪贴板或屏幕内容；程序不包含联网功能。",
           L"1. Drag your companion to move it.\n"
           L"2. Right-click it to change appearance, view the calendar, or quit.\n"
-          L"3. Open Counting Status & Check from that menu to check actual input. Without a listener, only pet clicks count.\n\n"
+          L"3. Windows normally needs no extra permission. Open About for Windows permissions and counting help.\n\n"
           L"NiuMa Merit counts only keyboard presses, mouse button presses, "
           L"and scroll gestures.\n\nIt does not read, save, or upload key content, "
           L"mouse positions, the current app, clipboard data, or screen content. "
@@ -1117,15 +1117,19 @@ bool ShowPrivacyNotice(HWND owner) {
       UiText(L"先记住三件事", L"Three Things to Get Started"), MB_OK | MB_ICONINFORMATION) == IDOK;
 }
 
+constexpr int kAboutHelpLink = 3090;
+
 struct AboutDialogState {
   std::wstring text;
   PngResource douyin;
   HWND viewport = nullptr;
+  HWND helpLink = nullptr;
   HFONT font = nullptr;
   WNDPROC buttonProcedure = nullptr;
   int padding = 16;
   int lineHeight = 16;
   int textHeight = 0;
+  int helpHeight = 0;
   int imageWidth = 260;
   int imageHeight = 260;
   int contentWidth = 0;
@@ -1150,6 +1154,11 @@ void ScrollAboutContent(AboutDialogState& state, int x, int y) {
   SetScrollInfo(state.viewport, SB_HORZ, &info, TRUE);
   info.nPos = state.scrollY;
   SetScrollInfo(state.viewport, SB_VERT, &info, TRUE);
+  if (state.helpLink) {
+    MoveWindow(state.helpLink, state.padding - state.scrollX,
+        state.padding * 2 + state.textHeight - state.scrollY,
+        std::max(1, state.contentWidth - state.padding * 2), state.helpHeight, TRUE);
+  }
   InvalidateRect(state.viewport, nullptr, FALSE);
 }
 
@@ -1174,7 +1183,9 @@ void MeasureAboutContent(AboutDialogState& state) {
   SelectObject(dc, oldFont);
   ReleaseDC(state.viewport, dc);
   state.textHeight = static_cast<int>(measured.bottom) + 4;
-  state.contentHeight = state.padding * 3 + state.textHeight + state.imageHeight;
+  state.helpHeight = state.lineHeight + state.padding;
+  state.contentHeight = state.padding * 4 + state.textHeight +
+                        state.helpHeight + state.imageHeight;
 
   SCROLLINFO info = {};
   info.cbSize = sizeof(info);
@@ -1210,6 +1221,57 @@ LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
   }
   if (!state) return DefWindowProcW(window, message, wParam, lParam);
   switch (message) {
+    case WM_CREATE:
+      state->helpLink = CreateWindowExW(0, L"BUTTON",
+          UiText(L"Windows 权限与计数帮助", L"Windows permissions and counting help"),
+          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+          0, 0, 1, 1, window, reinterpret_cast<HMENU>(kAboutHelpLink),
+          GetModuleHandleW(nullptr), nullptr);
+      if (!state->helpLink) return -1;
+      SendMessageW(state->helpLink, WM_SETFONT,
+          reinterpret_cast<WPARAM>(state->font), TRUE);
+      MeasureAboutContent(*state);
+      return 0;
+    case WM_COMMAND:
+      if (LOWORD(wParam) == kAboutHelpLink && HIWORD(wParam) == BN_CLICKED) {
+        ShellExecuteW(window, L"open", L"https://gongde.zqscreen.cn/help-windows.html",
+            nullptr, nullptr, SW_SHOWNORMAL);
+        return 0;
+      }
+      break;
+    case WM_SETCURSOR:
+      if (reinterpret_cast<HWND>(wParam) == state->helpLink && LOWORD(lParam) == HTCLIENT) {
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        return TRUE;
+      }
+      break;
+    case WM_DRAWITEM: {
+      const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+      if (!draw || draw->CtlID != kAboutHelpLink) break;
+      FillRect(draw->hDC, &draw->rcItem, GetSysColorBrush(COLOR_3DFACE));
+      HGDIOBJ oldFont = SelectObject(draw->hDC, state->font);
+      const COLORREF color = GetSysColor(COLOR_HOTLIGHT);
+      SetBkMode(draw->hDC, TRANSPARENT);
+      SetTextColor(draw->hDC, color);
+      const wchar_t* label = UiText(L"Windows 权限与计数帮助",
+                                    L"Windows permissions and counting help");
+      RECT text = draw->rcItem;
+      DrawTextW(draw->hDC, label, -1, &text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+      SIZE size = {};
+      GetTextExtentPoint32W(draw->hDC, label, static_cast<int>(std::wcslen(label)), &size);
+      HPEN pen = CreatePen(PS_SOLID, 1, color);
+      if (pen) {
+        HGDIOBJ oldPen = SelectObject(draw->hDC, pen);
+        const int y = draw->rcItem.top + (draw->rcItem.bottom - draw->rcItem.top - size.cy) / 2 + size.cy - 1;
+        MoveToEx(draw->hDC, draw->rcItem.left, y, nullptr);
+        LineTo(draw->hDC, std::min(draw->rcItem.right, draw->rcItem.left + size.cx), y);
+        SelectObject(draw->hDC, oldPen);
+        DeleteObject(pen);
+      }
+      if (draw->itemState & ODS_FOCUS) DrawFocusRect(draw->hDC, &draw->rcItem);
+      SelectObject(draw->hDC, oldFont);
+      return TRUE;
+    }
     case WM_SIZE:
       MeasureAboutContent(*state);
       return 0;
@@ -1317,7 +1379,7 @@ LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
         graphics.DrawImage(state->douyin.image.get(), Gdiplus::RectF(
             static_cast<float>((state->contentWidth - state->imageWidth) / 2 -
                                state->scrollX),
-            static_cast<float>(state->padding * 2 + state->textHeight -
+            static_cast<float>(state->padding * 3 + state->textHeight + state->helpHeight -
                                state->scrollY),
             static_cast<float>(state->imageWidth),
             static_cast<float>(state->imageHeight)));
@@ -1421,8 +1483,8 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
         EndDialog(window, -1);
         return TRUE;
       }
-      if (!CreateWindowExW(0, contentClass.lpszClassName, state->text.c_str(),
-                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_HSCROLL,
+      if (!CreateWindowExW(WS_EX_CONTROLPARENT, contentClass.lpszClassName, state->text.c_str(),
+                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_HSCROLL | WS_CLIPCHILDREN,
                            0, 0, 1, 1, window, nullptr, instance, state)) {
         EndDialog(window, -1);
         return TRUE;
@@ -1493,8 +1555,10 @@ void ShowAboutDialog(HWND owner) {
         L"telemetry, or automatic updates.\n\nClient source code is available under GPLv3."
         L"\n\nOfficial website:\n";
   text += L"https://gongde.zqscreen.cn/";
-  text += UiText(L"\n\n欢迎关注开发者抖音\n@山丘 / 抖音号：1872941388",
-                 L"\n\nFollow the developer on Douyin\n@Shanqiu / Douyin ID: 1872941388");
+  text += UiText(L"\n\n欢迎关注开发者抖音\n@山丘 / 抖音号：1872941388"
+                L"\n\nWindows 通常无需额外授权。若在其他应用中没有计数，请查看下方权限与计数帮助。",
+                L"\n\nFollow the developer on Douyin\n@Shanqiu / Douyin ID: 1872941388"
+                L"\n\nWindows normally needs no extra permission. If input in other apps is not counted, see the help link below.");
   AboutDialogState state;
   state.text = text;
   const HMODULE module = GetModuleHandleW(nullptr);
@@ -1522,7 +1586,8 @@ void ShowAboutDialog(HWND owner) {
   }
   if (DialogBoxParamW(module, MAKEINTRESOURCEW(3000), owner,
                       AboutDialogProcedure, reinterpret_cast<LPARAM>(&state)) == -1) {
-    MessageBoxW(owner, text.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
+    const std::wstring fallback = text + L"\n\nhttps://gongde.zqscreen.cn/help-windows.html";
+    MessageBoxW(owner, fallback.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
                 MB_OK | MB_ICONINFORMATION);
   }
 }
@@ -2137,10 +2202,6 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
       menu,
       MF_STRING | (IsLaunchAtLoginEnabled() ? MF_CHECKED : MF_UNCHECKED),
       kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"));
-  const std::wstring statusLabel =
-      UiText(L"计数状态与自检：", L"Counting Status & Check: ") + CountingStatusTitle();
-  AppendMenuW(menu, MF_STRING, kMenuCountStatus, statusLabel.c_str());
-  AppendMenuW(menu, MF_STRING, kMenuGuide, UiText(L"使用说明：三件事", L"Getting Started"));
   AppendMenuW(menu, MF_STRING, kMenuAppearance,
               UiText(L"更换形象", L"Change Appearance"));
   AppendMenuW(menu, MF_STRING, kMenuCalendar,
@@ -2165,10 +2226,6 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
                          L"Unable to change login startup. Please try again."),
                   WindowTitle(), MB_OK | MB_ICONERROR);
     }
-  } else if (command == static_cast<int>(kMenuCountStatus)) {
-    ShowCountingStatus(window);
-  } else if (command == static_cast<int>(kMenuGuide)) {
-    ShowPrivacyNotice(window);
   } else if (command == static_cast<int>(kMenuAppearance)) {
     ShowAppearancePicker(window);
   } else if (command == static_cast<int>(kMenuCalendar)) {

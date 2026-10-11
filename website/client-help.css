@@ -1,0 +1,31 @@
+.client-help {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 64px 32px 80px;
+  color: #29231c;
+  line-height: 1.85;
+}
+.client-help h1 {
+  margin: 16px 0;
+  font-family: "Songti SC", "STSong", "SimSun", serif;
+  font-size: clamp(32px, 4vw, 48px);
+  line-height: 1.35;
+}
+.client-help h2 { margin: 0 0 16px; font-size: 24px; line-height: 1.5; }
+.client-help h3 { margin: 24px 0 8px; font-size: 18px; }
+.client-help p { margin: 12px 0; }
+.client-help .help-lead { max-width: 720px; font-size: 19px; color: #746858; }
+.client-help .help-summary {
+  margin: 32px 0;
+  padding: 20px 24px;
+  border-left: 3px solid #d6532d;
+  background: #fffaf1;
+}
+.client-help .help-section { padding: 32px 0; border-top: 1px solid #d9cdbc; scroll-margin-top: 24px; }
+.client-help .help-toc { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 24px 0 36px; }
+.client-help a { color: #a43c20; text-underline-offset: 4px; }
+.client-help a:focus-visible { outline: 2px solid #415b49; outline-offset: 5px; }
+.client-help ol, .client-help ul { margin: 16px 0; padding-left: 28px; }
+.client-help li { margin: 10px 0; }
+.client-help .help-note { color: #746858; font-size: 14px; }
+.client-help .help-footer { border-top: 1px solid #d9cdbc; padding-top: 24px; margin-top: 24px; }
