@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import "appearance_pack.mm"
+#include "../offwork_clock.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -141,6 +143,16 @@ static NSString *const kTotal = @"total";
 static NSString *const kDailyTotals = @"dailyTotals";
 static NSString *const kSelectedScene = @"selectedScene";
 static NSString *const kSelectedAppearance = @"selectedAppearanceId";
+// Keep countdown preferences and snapshots independent of merit persistence.
+static NSString *const kOffworkEnabled = @"offwork.enabled";
+static NSString *const kOffworkHour = @"offwork.hour";
+static NSString *const kOffworkMinute = @"offwork.minute";
+static NSString *const kOffworkDailySnapshots = @"offwork.dailySnapshots";
+static constexpr CGFloat kOffworkRegionHeight = 96.0;
+static constexpr CGFloat kCalendarLeft = 14.0;
+static constexpr CGFloat kCalendarTop = 112.0;
+static constexpr CGFloat kCalendarCellWidth = 76.0;
+static constexpr CGFloat kCalendarCellHeight = 64.0;
 static constexpr CGFloat kArtworkTop = 170.0;
 static constexpr CGFloat kFeedbackY = 174.0;
 static constexpr CGFloat kCounterY = 210.0;
@@ -157,6 +169,10 @@ static BOOL IsChineseUI(void) {
 
 static NSString *UiText(NSString *chinese, NSString *english) {
   return IsChineseUI() ? chinese : english;
+}
+
+static NSString *OffworkDurationText(long long seconds) {
+  return [NSString stringWithUTF8String:niuma::OffworkDuration(seconds).c_str()];
 }
 
 static NSString *DateKeyForDate(NSDate *date) {
@@ -225,7 +241,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic) BOOL previewOnly;
 @end
 
-@interface MeritController : NSObject <NSApplicationDelegate, NSWindowDelegate>
+@interface MeritController : NSObject <NSApplicationDelegate, NSWindowDelegate> {
+  niuma::OffworkSnapshot _offworkSnapshot;
+}
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) MeritView *view;
 @property(nonatomic, strong) NSTimer *animationTimer;
@@ -234,6 +252,25 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic, strong) NSTimer *dayTimer;
 @property(nonatomic, strong) NSWindow *calendarWindow;
 @property(nonatomic, strong) MeritCalendarView *calendarView;
+@property(nonatomic, strong) NSTimer *offworkTimer;
+@property(nonatomic, strong) NSWindow *offworkSettingsWindow;
+@property(nonatomic, strong) NSButton *offworkEnableControl;
+@property(nonatomic, strong) NSPopUpButton *offworkHourControl;
+@property(nonatomic, strong) NSPopUpButton *offworkMinuteControl;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *offworkDailySnapshots;
+@property(nonatomic) BOOL offworkEnabled;
+@property(nonatomic) NSInteger offworkHour;
+@property(nonatomic) NSInteger offworkMinute;
+@property(nonatomic) BOOL offworkDirty;
+@property(nonatomic) BOOL offworkHasSnapshot;
+@property(nonatomic) BOOL offworkSuspended;
+@property(nonatomic) BOOL offworkLayoutExpanded;
+@property(nonatomic) BOOL offworkIsOvertime;
+@property(nonatomic, copy) NSString *offworkDayKey;
+@property(nonatomic, copy) NSString *offworkDisplayLabel;
+@property(nonatomic, copy) NSString *offworkDisplayDuration;
+@property(nonatomic) NSTimeInterval offworkLastSampleUptime;
+@property(nonatomic) NSTimeInterval offworkLastFlushUptime;
 @property(nonatomic) CFMachPortRef eventTap;
 @property(nonatomic) CFRunLoopSourceRef eventSource;
 @property(nonatomic) long long total;
@@ -318,6 +355,16 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)reloadAppearancePacks;
 - (NMAppearancePack *)appearancePackWithId:(NSString *)identifier;
 - (void)applyAppearanceId:(NSString *)identifier;
+- (void)loadOffworkState;
+- (void)startOffworkTimer;
+- (void)refreshOffworkAllowRollover:(BOOL)allowRollover;
+- (void)flushOffwork:(BOOL)durable;
+- (void)showOffworkSettings:(id)sender;
+- (void)offworkEnableChanged:(id)sender;
+- (void)saveOffworkSettings:(id)sender;
+- (void)cancelOffworkSettings:(id)sender;
+- (NSDictionary *)offworkRecordForDay:(NSString *)key;
+- (void)showCalendarDay:(NSString *)key;
 @end
 
 @implementation MeritView
@@ -400,6 +447,14 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAffineTransform *canvas = [NSAffineTransform transform];
   [canvas scaleBy:kUiScale];
   [canvas concat];
+
+  // Extend below the existing canvas, leaving every artwork/counter coordinate intact.
+  [ctx saveGraphicsState];
+  if (!self.previewOnly && self.controller.offworkEnabled) {
+    NSAffineTransform *layout = [NSAffineTransform transform];
+    [layout translateXBy:0 yBy:kOffworkRegionHeight];
+    [layout concat];
+  }
 
   MeritController *controller = self.controller;
   NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
@@ -562,7 +617,21 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                    color:[NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1]];
   }
 
-[ctx restoreGraphicsState];
+  [ctx restoreGraphicsState];
+  if (!self.previewOnly && controller.offworkEnabled) {
+    NSColor *color = controller.offworkIsOvertime
+        ? [NSColor colorWithCalibratedRed:.91 green:.46 blue:.13 alpha:1]
+        : [NSColor colorWithCalibratedWhite:.42 alpha:1];
+    [self drawCenteredText:controller.offworkDisplayLabel ?: UiText(@"距下班", @"Until off work")
+                     rect:NSMakeRect(0, 55, kWindowWidth, 28)
+                     font:[NSFont systemFontOfSize:22 weight:NSFontWeightMedium]
+                    color:color];
+    [self drawCenteredText:controller.offworkDisplayDuration ?: @"--:--:--"
+                     rect:NSMakeRect(0, 14, kWindowWidth, 35)
+                     font:[NSFont monospacedDigitSystemFontOfSize:28 weight:NSFontWeightSemibold]
+                    color:color];
+  }
+  [ctx restoreGraphicsState];
 }
 
 @end
@@ -640,7 +709,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSArray<NSString *> *weekdays = IsChineseUI()
       ? @[@"一", @"二", @"三", @"四", @"五", @"六", @"日"]
       : @[@"MON", @"TUE", @"WED", @"THU", @"FRI", @"SAT", @"SUN"];
-  const CGFloat left = 14, top = 112, cellWidth = 76, cellHeight = 51;
+  const CGFloat left = kCalendarLeft, top = kCalendarTop;
+  const CGFloat cellWidth = kCalendarCellWidth, cellHeight = kCalendarCellHeight;
   for (NSInteger column = 0; column < 7; ++column) {
     [self drawText:weekdays[column]
               rect:NSMakeRect(left + column * cellWidth, 94, cellWidth, 20)
@@ -678,12 +748,313 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [self drawText:dateText
               rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 27, NSWidth(cell) - 4, 16)
               size:10 color:muted weight:NSFontWeightMedium];
+    NSDictionary *overtime = [self.controller offworkRecordForDay:key];
+    if (overtime) {
+      NSString *text = [NSString stringWithFormat:@"%@ %@", UiText(@"加班", @"OT"),
+          OffworkDurationText([overtime[@"seconds"] longLongValue])];
+      [self drawText:text
+                rect:NSMakeRect(NSMinX(cell) + 1, NSMinY(cell) + 44, NSWidth(cell) - 2, 14)
+                size:9 color:accent weight:NSFontWeightMedium];
+    }
   }
+}
+
+- (void)mouseDown:(NSEvent *)event {
+  NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+  if (point.x < kCalendarLeft || point.y < kCalendarTop) return;
+  NSInteger column = (NSInteger)((point.x - kCalendarLeft) / kCalendarCellWidth);
+  NSInteger row = (NSInteger)((point.y - kCalendarTop) / kCalendarCellHeight);
+  if (column > 6 || row > 5) return;
+  NSDateComponents *parts = [[NSDateComponents alloc] init];
+  parts.year = self.year; parts.month = self.month; parts.day = 1;
+  NSDate *firstDate = [NSCalendar.currentCalendar dateFromComponents:parts];
+  NSInteger weekday = [NSCalendar.currentCalendar component:NSCalendarUnitWeekday fromDate:firstDate];
+  NSInteger day = row * 7 + column - (weekday + 5) % 7 + 1;
+  NSRange days = [NSCalendar.currentCalendar rangeOfUnit:NSCalendarUnitDay
+      inUnit:NSCalendarUnitMonth forDate:firstDate];
+  if (day < 1 || day > (NSInteger)days.length) return;
+  [self.controller showCalendarDay:[NSString stringWithFormat:@"%04ld-%02ld-%02ld",
+      (long)self.year, (long)self.month, (long)day]];
 }
 
 @end
 
 @implementation MeritController
+
+- (void)loadOffworkState {
+  id<NMMeritPreferences> defaults = MeritPreferences();
+  self.offworkEnabled = [defaults boolForKey:kOffworkEnabled];
+  NSInteger hour = [defaults objectForKey:kOffworkHour] ? [defaults integerForKey:kOffworkHour] : 18;
+  NSInteger minute = [defaults objectForKey:kOffworkMinute] ? [defaults integerForKey:kOffworkMinute] : 0;
+  self.offworkHour = hour >= 0 && hour <= 23 ? hour : 18;
+  self.offworkMinute = minute >= 0 && minute <= 59 ? minute : 0;
+  NSDictionary *stored = [defaults dictionaryForKey:kOffworkDailySnapshots];
+  self.offworkDailySnapshots = stored ? [stored mutableCopy] : [NSMutableDictionary dictionary];
+  self.offworkLastFlushUptime = NSProcessInfo.processInfo.systemUptime;
+}
+
+- (NSDictionary *)offworkRecordForDay:(NSString *)key {
+  id record = self.offworkDailySnapshots[key];
+  if (![record isKindOfClass:NSDictionary.class]) return nil;
+  id seconds = record[@"seconds"], target = record[@"targetMinutes"], sampled = record[@"sampledAt"];
+  if (![seconds isKindOfClass:NSNumber.class] || [seconds longLongValue] <= 0 ||
+      ![target isKindOfClass:NSNumber.class] || [target integerValue] < 0 ||
+      [target integerValue] >= 1440 || ![sampled isKindOfClass:NSNumber.class] ||
+      !std::isfinite([sampled doubleValue])) return nil;
+  return record;
+}
+
+- (void)flushOffwork:(BOOL)durable {
+  if (self.offworkDirty) {
+    [MeritPreferences() setObject:[self.offworkDailySnapshots copy] forKey:kOffworkDailySnapshots];
+    self.offworkDirty = NO;
+  }
+  self.offworkLastFlushUptime = NSProcessInfo.processInfo.systemUptime;
+  // Best effort at lifecycle boundaries only; normal per-second updates stay in memory.
+  if (durable && !gIsolatedAcceptance) [NSUserDefaults.standardUserDefaults synchronize];
+}
+
+- (void)updateOffworkWindowLayout {
+  if (!self.window || self.offworkLayoutExpanded == self.offworkEnabled) return;
+  CGFloat delta = kOffworkRegionHeight * kUiScale * (self.offworkEnabled ? 1 : -1);
+  NSRect frame = self.window.frame;
+  frame.origin.y -= delta;
+  frame.size.height += delta;
+  NSScreen *screen = self.window.screen ?: NSScreen.mainScreen;
+  if (screen) {
+    NSRect visible = screen.visibleFrame;
+    frame.origin.x = MAX(NSMinX(visible), MIN(frame.origin.x, NSMaxX(visible) - NSWidth(frame)));
+    frame.origin.y = MAX(NSMinY(visible), MIN(frame.origin.y, NSMaxY(visible) - NSHeight(frame)));
+  }
+  self.offworkLayoutExpanded = self.offworkEnabled;
+  [self.window setFrame:frame display:NO];
+  [self.view setFrameSize:frame.size];
+  [self.view setNeedsDisplay:YES];
+}
+
+- (void)refreshOffworkAllowRollover:(BOOL)allowRollover {
+  if (!self.offworkEnabled || self.offworkSuspended) return;
+  const time_t now = std::time(nullptr);
+  const NSTimeInterval uptime = NSProcessInfo.processInfo.systemUptime;
+  const auto next = niuma::EvaluateOffwork(now, (int)self.offworkHour, (int)self.offworkMinute);
+  if (!next.valid) {
+    self.offworkHasSnapshot = NO;
+    self.offworkIsOvertime = NO;
+    self.offworkDisplayLabel = UiText(@"时间不可用", @"Time unavailable");
+    self.offworkDisplayDuration = @"--:--:--";
+    [self.view setNeedsDisplay:YES];
+    return;
+  }
+  NSString *key = DateKeyForDate([NSDate dateWithTimeIntervalSince1970:next.sampledAt]);
+  BOOL changedDay = self.offworkHasSnapshot && ![key isEqualToString:self.offworkDayKey];
+  if (changedDay) {
+    double wallGap = std::difftime(next.sampledAt, _offworkSnapshot.sampledAt);
+    double uptimeGap = uptime - self.offworkLastSampleUptime;
+    // Only adjacent live samples may finalize yesterday. Sleep, unlock, clock changes,
+    // long run-loop stalls and missed days must never fabricate a historical day.
+    BOOL continuousMidnight = allowRollover && wallGap >= 0 && wallGap <= 5 &&
+        uptimeGap >= 0 && uptimeGap <= 5 && std::abs(wallGap - uptimeGap) <= 2 &&
+        next.sampledAt >= _offworkSnapshot.nextMidnightAt &&
+        std::difftime(next.sampledAt, _offworkSnapshot.nextMidnightAt) <= 5 &&
+        _offworkSnapshot.targetMinutes == self.offworkHour * 60 + self.offworkMinute;
+    if (continuousMidnight) {
+      long long seconds = niuma::OffworkFinalDaySeconds(_offworkSnapshot);
+      if (seconds > 0) {
+        self.offworkDailySnapshots[self.offworkDayKey] = @{
+          @"seconds": @(seconds), @"targetMinutes": @(_offworkSnapshot.targetMinutes),
+          @"sampledAt": @(_offworkSnapshot.nextMidnightAt - 1),
+          @"targetAt": @(_offworkSnapshot.targetAt)
+        };
+        self.offworkDirty = YES;
+      }
+    }
+  }
+  _offworkSnapshot = next;
+  self.offworkHasSnapshot = YES;
+  self.offworkDayKey = key;
+  self.offworkLastSampleUptime = uptime;
+  self.offworkIsOvertime = next.overtime;
+  self.offworkDisplayLabel = next.overtime ? UiText(@"已加班", @"Overtime")
+                                          : UiText(@"距下班", @"Until off work");
+  self.offworkDisplayDuration = OffworkDurationText(next.overtime ? next.overtimeSeconds : next.remainingSeconds);
+  if (next.overtime && next.overtimeSeconds > 0) {
+    self.offworkDailySnapshots[key] = @{
+      @"seconds": @(next.overtimeSeconds), @"targetMinutes": @(next.targetMinutes),
+      @"sampledAt": @(next.sampledAt), @"targetAt": @(next.targetAt)
+    };
+    self.offworkDirty = YES;
+  } else if (self.offworkDailySnapshots[key]) {
+    // Rewinding the clock or moving today's target forward removes only today's result.
+    [self.offworkDailySnapshots removeObjectForKey:key];
+    self.offworkDirty = YES;
+  }
+  self.view.accessibilityLabel = [NSString stringWithFormat:@"%@ %lld, %@ %@",
+      UiText(@"今日功德", @"Today's merit"), self.todayTotal,
+      self.offworkDisplayLabel, self.offworkDisplayDuration];
+  [self.view setNeedsDisplay:YES];
+  if (self.calendarWindow.isVisible) [self.calendarView setNeedsDisplay:YES];
+  if (changedDay) [self flushOffwork:YES];
+  else if (uptime - self.offworkLastFlushUptime >= 60) [self flushOffwork:NO];
+}
+
+- (void)offworkTick:(NSTimer *)timer {
+  (void)timer;
+  [self refreshOffworkAllowRollover:YES];
+}
+
+- (void)startOffworkTimer {
+  [self.offworkTimer invalidate];
+  self.offworkTimer = nil;
+  [self updateOffworkWindowLayout];
+  if (!self.offworkEnabled) {
+    self.offworkHasSnapshot = NO;
+    self.view.accessibilityLabel = nil;
+    return;
+  }
+  [self refreshOffworkAllowRollover:NO];
+  NSDate *firstTick = [NSDate dateWithTimeIntervalSince1970:std::floor(NSDate.date.timeIntervalSince1970) + 1];
+  self.offworkTimer = [[NSTimer alloc] initWithFireDate:firstTick interval:1
+      target:self selector:@selector(offworkTick:) userInfo:nil repeats:YES];
+  self.offworkTimer.tolerance = .05;
+  [NSRunLoop.mainRunLoop addTimer:self.offworkTimer forMode:NSRunLoopCommonModes];
+  [NSRunLoop.mainRunLoop addTimer:self.offworkTimer forMode:NSModalPanelRunLoopMode];
+}
+
+- (void)offworkWillSleep:(NSNotification *)notification {
+  (void)notification;
+  [self refreshOffworkAllowRollover:YES];
+  [self flushOffwork:YES];
+  self.offworkSuspended = YES;
+}
+
+- (void)offworkClockChanged:(NSNotification *)notification {
+  (void)notification;
+  [NSTimeZone resetSystemTimeZone];
+  tzset();
+  self.offworkSuspended = NO;
+  [self ensureCurrentDay];
+  [self refreshOffworkAllowRollover:NO];
+  [self flushOffwork:YES];
+}
+
+- (void)offworkWillPowerOff:(NSNotification *)notification {
+  (void)notification;
+  [self refreshOffworkAllowRollover:YES];
+  [self flushOffwork:YES];
+}
+
+- (void)showOffworkSettings:(id)sender {
+  (void)sender;
+  if (!self.offworkSettingsWindow) {
+    self.offworkSettingsWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 440, 290)
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+        backing:NSBackingStoreBuffered defer:NO];
+    self.offworkSettingsWindow.title = UiText(@"下班倒计时", @"Off-work Countdown");
+    self.offworkSettingsWindow.releasedWhenClosed = NO;
+    self.offworkSettingsWindow.delegate = self;
+    if (gIsolatedAcceptance) self.offworkSettingsWindow.restorable = NO;
+    NSView *content = self.offworkSettingsWindow.contentView;
+    self.offworkEnableControl = [NSButton checkboxWithTitle:UiText(@"启用下班倒计时", @"Enable off-work countdown")
+        target:self action:@selector(offworkEnableChanged:)];
+    self.offworkEnableControl.frame = NSMakeRect(24, 240, 392, 26);
+    [content addSubview:self.offworkEnableControl];
+    NSTextField *label = [NSTextField labelWithString:UiText(@"下班时间（24小时制）", @"Off-work time (24-hour)")];
+    label.frame = NSMakeRect(24, 196, 214, 24);
+    [content addSubview:label];
+    self.offworkHourControl = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(244, 192, 70, 28) pullsDown:NO];
+    self.offworkMinuteControl = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(336, 192, 70, 28) pullsDown:NO];
+    for (NSInteger hour = 0; hour < 24; ++hour)
+      [self.offworkHourControl addItemWithTitle:[NSString stringWithFormat:@"%02ld", (long)hour]];
+    for (NSInteger minute = 0; minute < 60; ++minute)
+      [self.offworkMinuteControl addItemWithTitle:[NSString stringWithFormat:@"%02ld", (long)minute]];
+    self.offworkHourControl.accessibilityLabel = UiText(@"下班小时", @"Off-work hour");
+    self.offworkMinuteControl.accessibilityLabel = UiText(@"下班分钟", @"Off-work minute");
+    [content addSubview:self.offworkHourControl];
+    [content addSubview:self.offworkMinuteControl];
+    NSTextField *colon = [NSTextField labelWithString:@":"];
+    colon.frame = NSMakeRect(319, 197, 12, 22);
+    [content addSubview:colon];
+    NSTextField *explanation = [NSTextField wrappingLabelWithString:UiText(
+        @"每天按本地下班时间重新计算，超过即为加班。开启时自动保存当天加班快照，关闭保留历史。仅本地运行，不需要输入监控权限，不判断实际劳动或离岗时间。",
+        @"Recalculates daily using local time. Time past your target is overtime. While enabled, daily snapshots are saved; disabling keeps history. Local only, no Input Monitoring needed. This is not work or attendance detection.")];
+    explanation.frame = NSMakeRect(24, 66, 392, 108);
+    explanation.font = [NSFont systemFontOfSize:13];
+    [content addSubview:explanation];
+    NSButton *cancel = [NSButton buttonWithTitle:UiText(@"取消", @"Cancel")
+        target:self action:@selector(cancelOffworkSettings:)];
+    cancel.frame = NSMakeRect(232, 20, 88, 30);
+    cancel.keyEquivalent = @"\033";
+    [content addSubview:cancel];
+    NSButton *save = [NSButton buttonWithTitle:UiText(@"保存", @"Save")
+        target:self action:@selector(saveOffworkSettings:)];
+    save.frame = NSMakeRect(328, 20, 88, 30);
+    save.keyEquivalent = @"\r";
+    [content addSubview:save];
+    [self.offworkSettingsWindow center];
+  }
+  if (!self.offworkSettingsWindow.isVisible) {
+    self.offworkEnableControl.state = self.offworkEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+    [self.offworkHourControl selectItemAtIndex:self.offworkHour];
+    [self.offworkMinuteControl selectItemAtIndex:self.offworkMinute];
+    [self offworkEnableChanged:nil];
+  }
+  [NSApp activateIgnoringOtherApps:YES];
+  [self.offworkSettingsWindow makeKeyAndOrderFront:nil];
+}
+
+- (void)offworkEnableChanged:(id)sender {
+  (void)sender;
+  BOOL enabled = self.offworkEnableControl.state == NSControlStateValueOn;
+  self.offworkHourControl.enabled = enabled;
+  self.offworkMinuteControl.enabled = enabled;
+}
+
+- (void)cancelOffworkSettings:(id)sender {
+  (void)sender;
+  [self.offworkSettingsWindow close];
+}
+
+- (void)saveOffworkSettings:(id)sender {
+  (void)sender;
+  [self refreshOffworkAllowRollover:YES];
+  [self flushOffwork:YES];
+  self.offworkEnabled = self.offworkEnableControl.state == NSControlStateValueOn;
+  self.offworkHour = self.offworkHourControl.indexOfSelectedItem;
+  self.offworkMinute = self.offworkMinuteControl.indexOfSelectedItem;
+  id<NMMeritPreferences> defaults = MeritPreferences();
+  [defaults setBool:self.offworkEnabled forKey:kOffworkEnabled];
+  [defaults setInteger:self.offworkHour forKey:kOffworkHour];
+  [defaults setInteger:self.offworkMinute forKey:kOffworkMinute];
+  [self startOffworkTimer];
+  [self flushOffwork:YES];
+  [self.calendarView setNeedsDisplay:YES];
+  [self.offworkSettingsWindow close];
+}
+
+- (void)showCalendarDay:(NSString *)key {
+  [self refreshOffworkAllowRollover:YES];
+  NSAlert *alert = [[NSAlert alloc] init];
+  alert.messageText = key;
+  NSString *merit = [NSString stringWithFormat:@"%@ %llu", UiText(@"功德", @"Merit"),
+      self.dailyTotals[key].unsignedLongLongValue];
+  NSDictionary *record = [self offworkRecordForDay:key];
+  if (record) {
+    NSInteger minutes = [record[@"targetMinutes"] integerValue];
+    NSString *updated = [NSDateFormatter localizedStringFromDate:
+        [NSDate dateWithTimeIntervalSince1970:[record[@"sampledAt"] doubleValue]]
+        dateStyle:NSDateFormatterMediumStyle timeStyle:NSDateFormatterMediumStyle];
+    alert.informativeText = [NSString stringWithFormat:UiText(
+        @"%@\n加班快照：%@\n当日预定下班：%02ld:%02ld\n最后更新：%@\n\n本地时间快照，不代表实际劳动或离岗时刻。历史日期不随当前设置回算。",
+        @"%@\nOvertime snapshot: %@\nOff-work target: %02ld:%02ld\nLast updated: %@\n\nA local time snapshot, not actual work or departure time. Historical dates are not recalculated with current settings."),
+        merit, OffworkDurationText([record[@"seconds"] longLongValue]),
+        (long)(minutes / 60), (long)(minutes % 60), updated];
+  } else {
+    alert.informativeText = [NSString stringWithFormat:@"%@\n\n%@", merit,
+        UiText(@"没有加班快照，不代表当天准时下班。", @"No overtime snapshot. This does not mean an on-time departure.")];
+  }
+  [alert addButtonWithTitle:UiText(@"关闭", @"Close")];
+  [alert runModal];
+}
 
 - (void)loadState {
   id<NMMeritPreferences> defaults = MeritPreferences();
@@ -829,6 +1200,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
   [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
   [self loadState];
+  [self loadOffworkState];
   [self configureLaunchAtLogin];
 
   self.view = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, kWindowScaleWidth, kWindowScaleHeight)];
@@ -863,6 +1235,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
   if (restoredFrame) {
     NSRect frame = self.window.frame;
+    // Saved expanded frames use a lower origin; normalize without launch-to-launch drift.
+    frame.origin.y += MAX(0.0, NSHeight(frame) - kWindowScaleHeight);
     frame.size = NSMakeSize(kWindowScaleWidth, kWindowScaleHeight);
     [self.window setFrame:frame display:NO];
   }
@@ -879,6 +1253,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [self.window setFrameOrigin:NSMakePoint(NSMaxX(screen.visibleFrame) - 280 * kUiScale,
                                            NSMaxY(screen.visibleFrame) - 270 * kUiScale)];
   }
+  NSNotificationCenter *workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
+  [workspaceCenter addObserver:self selector:@selector(offworkWillSleep:) name:NSWorkspaceWillSleepNotification object:nil];
+  [workspaceCenter addObserver:self selector:@selector(offworkClockChanged:) name:NSWorkspaceDidWakeNotification object:nil];
+  [workspaceCenter addObserver:self selector:@selector(offworkClockChanged:) name:NSWorkspaceSessionDidBecomeActiveNotification object:nil];
+  [workspaceCenter addObserver:self selector:@selector(offworkWillPowerOff:) name:NSWorkspaceWillPowerOffNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(offworkClockChanged:)
+      name:NSSystemClockDidChangeNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(offworkClockChanged:)
+      name:NSSystemTimeZoneDidChangeNotification object:nil];
+  [NSDistributedNotificationCenter.defaultCenter addObserver:self selector:@selector(offworkClockChanged:)
+      name:@"com.apple.screenIsUnlocked" object:nil suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+  [self startOffworkTimer];
   [self.window orderFrontRegardless];
   if (previousAppearanceMissing || self.appearanceLoadError) {
     NSAlert *notice = [[NSAlert alloc] init];
@@ -1029,15 +1415,22 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
   (void)notification;
   [self ensureCurrentDay];
+  [self refreshOffworkAllowRollover:NO];
   [self checkPermission:nil];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
   (void)notification;
+  [self refreshOffworkAllowRollover:YES];
+  [self flushOffwork:YES];
+  [self.offworkTimer invalidate];
+  self.offworkTimer = nil;
   [self saveState];
   [self.dayTimer invalidate];
   [self.countStatusTimer invalidate];
   [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
+  [NSNotificationCenter.defaultCenter removeObserver:self];
+  [NSDistributedNotificationCenter.defaultCenter removeObserver:self];
   [self removeEventTap];
   [self stopPermissionPoll];
 }
@@ -1201,6 +1594,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
+  // Closing the settings window discards its controls, never commits their values.
+  if (notification.object == self.offworkSettingsWindow) return;
   if (notification.object != self.countStatusWindow) return;
   [self.countStatusTimer invalidate];
   self.countStatusTimer = nil;
@@ -1469,6 +1864,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       keyEquivalent:@""];
   calendar.target = self;
   [menu addItem:calendar];
+  NSMenuItem *offwork = [[NSMenuItem alloc]
+      initWithTitle:UiText(@"下班倒计时…", @"Off-work Countdown…")
+             action:@selector(showOffworkSettings:) keyEquivalent:@""];
+  offwork.target = self;
+  [menu addItem:offwork];
   [menu addItem:NSMenuItem.separatorItem];
   NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:UiText(@"退出", @"Quit")
                                                 action:@selector(terminate:)
@@ -1487,7 +1887,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)sender;
   [self ensureCurrentDay];
   if (!self.calendarWindow) {
-    NSRect frame = NSMakeRect(0, 0, 560, 430);
+    NSRect frame = NSMakeRect(0, 0, 560, 516);
     self.calendarView = [[MeritCalendarView alloc] initWithFrame:frame];
     self.calendarView.controller = self;
     [self.calendarView showCurrentMonth];

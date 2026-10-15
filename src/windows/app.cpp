@@ -15,12 +15,15 @@
 
 #include "appearance_pack.h"
 #include "app_version.h"
+#include "../offwork_clock.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cwchar>
+#include <ctime>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -44,6 +47,8 @@ constexpr UINT kScrollMessage = WM_APP + 2;
 constexpr ULONG_PTR kAppearancePackCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
 constexpr UINT_PTR kDayTimer = 2;
+constexpr UINT_PTR kOffworkTimer = 3;
+constexpr UINT kOffworkSessionChange = 0x02B1;  // WM_WTSSESSION_CHANGE
 constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
 constexpr int kLuckyCatBaseResource = 104;
@@ -56,6 +61,7 @@ constexpr int kDesignWidth = 240;
 constexpr int kDesignHeight = 250;
 constexpr int kWindowDipWidth = 120;
 constexpr int kWindowDipHeight = 125;
+constexpr int kOffworkDipHeight = 44;
 constexpr ULONGLONG kScrollGestureGapMs = 180;
 constexpr ULONGLONG kTempoResetGapMs = 600;
 constexpr int kDefaultStrikeMs = 220;
@@ -76,6 +82,7 @@ constexpr UINT_PTR kMenuCalendar = 4;
 constexpr UINT_PTR kMenuQuit = 5;
 constexpr UINT_PTR kMenuCountStatus = 6;
 constexpr UINT_PTR kMenuGuide = 7;
+constexpr UINT_PTR kMenuOffwork = 8;
 constexpr wchar_t kCountStatusClass[] = L"NiuMaMeritCountStatus";
 constexpr int kStatusText = 4001;
 constexpr int kStatusStart = 4002;
@@ -196,6 +203,49 @@ struct CalendarState {
 };
 
 CalendarState gCalendar;
+
+// Separate from merit counts and their save/animation timer. A missing record
+// means "not recorded", never a claim that the user left work on time.
+struct OffworkDayRecord {
+  bool present = false;
+  bool dirty = false;
+  int seconds = 0;
+  int targetMinutes = 18 * 60;
+  std::time_t updatedAt = 0;
+};
+
+struct OffworkState {
+  bool enabled = false;
+  int hour = 18;
+  int minute = 0;
+  bool settingsDirty = false;
+  bool timerRunning = false;
+  bool suspended = false;
+  bool baselineValid = false;
+  bool awakeClockValid = false;
+  ULONGLONG lastTick = 0;
+  ULONGLONG lastAwake = 0;
+  ULONGLONG lastFlush = 0;
+  LONG zoneBias = 0;
+  niuma::OffworkSnapshot snapshot;
+  std::map<std::wstring, OffworkDayRecord> days;
+  HMODULE sessionLibrary = nullptr;
+  HWND dialog = nullptr;
+};
+
+OffworkState gOffwork;
+
+int MainWindowDipHeight() {
+  return kWindowDipHeight + (gOffwork.enabled ? kOffworkDipHeight : 0);
+}
+
+std::wstring OffworkWide(const std::string& value) {
+  return std::wstring(value.begin(), value.end());
+}
+
+std::wstring OffworkTimeText(int seconds) {
+  return OffworkWide(niuma::OffworkDuration(seconds));
+}
 
 void EnableBestDpiAwareness() {
   using SetContextFn = BOOL(WINAPI*)(HANDLE);
@@ -449,6 +499,181 @@ std::uint64_t ReadIniTotal() {
   wchar_t* end = nullptr;
   const unsigned long long result = _wcstoui64(value, &end, 10);
   return end == value ? 0 : static_cast<std::uint64_t>(result);
+}
+
+void LoadOffworkSettings() {
+  const std::wstring path = DataPath();
+  if (!path.empty()) {
+    gOffwork.enabled = GetPrivateProfileIntW(L"offwork", L"enabled", 0, path.c_str()) == 1;
+    const int hour = static_cast<int>(GetPrivateProfileIntW(L"offwork", L"hour", 18, path.c_str()));
+    const int minute = static_cast<int>(GetPrivateProfileIntW(L"offwork", L"minute", 0, path.c_str()));
+    gOffwork.hour = hour >= 0 && hour < 24 ? hour : 18;
+    gOffwork.minute = minute >= 0 && minute < 60 ? minute : 0;
+  }
+  gOffwork.lastFlush = GetTickCount64();
+}
+
+OffworkDayRecord& OffworkDay(const std::wstring& key) {
+  const auto found = gOffwork.days.find(key);
+  if (found != gOffwork.days.end()) return found->second;
+  OffworkDayRecord record;
+  const std::wstring path = DataPath();
+  if (!path.empty()) {
+    wchar_t value[128] = {};
+    GetPrivateProfileStringW(L"offwork_daily", key.c_str(), L"", value,
+        static_cast<DWORD>(std::size(value)), path.c_str());
+    long long updated = 0;
+    if (swscanf_s(value, L"%d,%d,%lld", &record.seconds,
+                  &record.targetMinutes, &updated) == 3 &&
+        record.seconds > 0 && record.seconds <= 172800 &&
+        record.targetMinutes >= 0 && record.targetMinutes < 1440 && updated > 0) {
+      record.present = true;
+      record.updatedAt = static_cast<std::time_t>(updated);
+    }
+  }
+  return gOffwork.days.emplace(key, record).first->second;
+}
+
+void UpdateOffworkDay(const niuma::OffworkSnapshot& snapshot, int seconds,
+                      std::time_t updatedAt) {
+  auto& record = OffworkDay(OffworkWide(snapshot.dayKey));
+  const bool present = seconds > 0;
+  if (record.present == present && (!present ||
+      (record.seconds == seconds && record.targetMinutes == snapshot.targetMinutes &&
+       record.updatedAt == updatedAt))) return;
+  record.present = present;
+  record.seconds = seconds;
+  record.targetMinutes = snapshot.targetMinutes;
+  record.updatedAt = updatedAt;
+  record.dirty = true;
+}
+
+bool FlushOffwork() {
+  const std::wstring path = DataPath();
+  if (path.empty()) return false;
+  bool success = true;
+  bool wrote = false;
+  if (gOffwork.settingsDirty) {
+    const bool enabledSaved = WritePrivateProfileStringW(L"offwork", L"enabled",
+        gOffwork.enabled ? L"1" : L"0", path.c_str()) != FALSE;
+    const bool hourSaved = WritePrivateProfileStringW(L"offwork", L"hour",
+        std::to_wstring(gOffwork.hour).c_str(), path.c_str()) != FALSE;
+    const bool minuteSaved = WritePrivateProfileStringW(L"offwork", L"minute",
+        std::to_wstring(gOffwork.minute).c_str(), path.c_str()) != FALSE;
+    success = enabledSaved && hourSaved && minuteSaved;
+    gOffwork.settingsDirty = !success;
+    wrote = true;
+  }
+  for (auto& entry : gOffwork.days) {
+    auto& record = entry.second;
+    if (!record.dirty) continue;
+    // Version-one daily value: elapsed seconds, target minute, actual sample time.
+    const std::wstring value = std::to_wstring(record.seconds) + L"," +
+        std::to_wstring(record.targetMinutes) + L"," +
+        std::to_wstring(static_cast<long long>(record.updatedAt));
+    const bool saved = WritePrivateProfileStringW(L"offwork_daily", entry.first.c_str(),
+        record.present ? value.c_str() : nullptr, path.c_str()) != FALSE;
+    record.dirty = !saved;
+    success = saved && success;
+    wrote = true;
+  }
+  if (wrote && !WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str())) {
+    // Keep the snapshots retryable if flushing the profile cache failed.
+    for (auto& entry : gOffwork.days) entry.second.dirty = true;
+    gOffwork.settingsDirty = true;
+    success = false;
+  }
+  // Failed storage is retried at the next interval or lifecycle event, not 1 Hz.
+  gOffwork.lastFlush = GetTickCount64();
+  return success;
+}
+
+bool OffworkAwakeTime(ULONGLONG& value) {
+  using QueryFn = BOOL(WINAPI*)(PULONGLONG);
+  static const auto query = reinterpret_cast<QueryFn>(
+      GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "QueryUnbiasedInterruptTime"));
+  return query && query(&value);
+}
+
+void RefreshOffwork(bool allowMidnight = true, bool flush = false) {
+  if (!gOffwork.enabled || gOffwork.suspended) {
+    if (flush) FlushOffwork();
+    return;
+  }
+  // The display and record always share exactly one wall-clock sample.
+  const auto snapshot = niuma::EvaluateOffwork(std::time(nullptr), gOffwork.hour, gOffwork.minute);
+  const ULONGLONG tick = GetTickCount64();
+  ULONGLONG awake = 0;
+  const bool hasAwake = OffworkAwakeTime(awake);
+  TIME_ZONE_INFORMATION zone = {};
+  const DWORD zoneId = GetTimeZoneInformation(&zone);
+  const LONG bias = zone.Bias + (zoneId == TIME_ZONE_ID_DAYLIGHT ? zone.DaylightBias : zone.StandardBias);
+  if (!snapshot.valid) {
+    gOffwork.snapshot = snapshot;
+    gOffwork.baselineValid = false;
+    if (flush) FlushOffwork();
+    return;
+  }
+  const auto& previous = gOffwork.snapshot;
+  const bool changedDay = previous.valid && previous.dayKey != snapshot.dayKey;
+  if (changedDay) {
+    const ULONGLONG elapsed = tick - gOffwork.lastTick;
+    const double wallSeconds = std::difftime(snapshot.sampledAt, previous.sampledAt);
+    const bool continuouslyAwake = hasAwake && gOffwork.awakeClockValid
+        ? awake >= gOffwork.lastAwake &&
+          std::fabs(static_cast<double>(awake - gOffwork.lastAwake) / 10000.0 -
+                    static_cast<double>(elapsed)) < 1000.0
+        : elapsed <= 5000;
+    // No yesterday/missing-day synthesis after sleep, restart, timezone or clock
+    // changes. Only an observed continuous transition gets the 23:59:59 value.
+    if (allowMidnight && gOffwork.baselineValid && continuouslyAwake &&
+        bias == gOffwork.zoneBias && wallSeconds >= 0 &&
+        std::fabs(wallSeconds - static_cast<double>(elapsed) / 1000.0) < 2.0 &&
+        snapshot.sampledAt >= previous.nextMidnightAt &&
+        niuma::EvaluateOffwork(previous.nextMidnightAt, gOffwork.hour, gOffwork.minute).dayKey == snapshot.dayKey) {
+      UpdateOffworkDay(previous, niuma::OffworkFinalDaySeconds(previous), previous.nextMidnightAt - 1);
+    }
+    FlushOffwork();
+  }
+  gOffwork.snapshot = snapshot;
+  gOffwork.lastTick = tick;
+  gOffwork.lastAwake = awake;
+  gOffwork.awakeClockValid = hasAwake;
+  gOffwork.zoneBias = bias;
+  gOffwork.baselineValid = true;
+  UpdateOffworkDay(snapshot, snapshot.overtimeSeconds, snapshot.sampledAt);
+  if (flush || changedDay || tick - gOffwork.lastFlush >= 60000) FlushOffwork();
+  if (gCalendar.window) InvalidateRect(gCalendar.window, nullptr, FALSE);
+}
+
+bool SyncOffworkTimer() {
+  const bool run = gOffwork.enabled && !gOffwork.suspended;
+  if (!run && gOffwork.timerRunning) {
+    KillTimer(gState.window, kOffworkTimer);
+    gOffwork.timerRunning = false;
+  } else if (run && !gOffwork.timerRunning && gState.window) {
+    gOffwork.timerRunning = SetTimer(gState.window, kOffworkTimer, 1000, nullptr) != 0;
+  }
+  return !run || gOffwork.timerRunning;
+}
+
+void RegisterOffworkSessionNotifications(HWND window) {
+  gOffwork.sessionLibrary = LoadLibraryW(L"wtsapi32.dll");
+  if (!gOffwork.sessionLibrary) return;
+  using RegisterFn = BOOL(WINAPI*)(HWND, DWORD);
+  const auto registerSession = reinterpret_cast<RegisterFn>(
+      GetProcAddress(gOffwork.sessionLibrary, "WTSRegisterSessionNotification"));
+  if (registerSession) registerSession(window, 0);  // This session only.
+}
+
+void UnregisterOffworkSessionNotifications(HWND window) {
+  if (!gOffwork.sessionLibrary) return;
+  using UnregisterFn = BOOL(WINAPI*)(HWND);
+  const auto unregisterSession = reinterpret_cast<UnregisterFn>(
+      GetProcAddress(gOffwork.sessionLibrary, "WTSUnRegisterSessionNotification"));
+  if (unregisterSession) unregisterSession(window);
+  FreeLibrary(gOffwork.sessionLibrary);
+  gOffwork.sessionLibrary = nullptr;
 }
 
 void SaveState() {
@@ -734,6 +959,27 @@ void RenderLayeredWindow(ULONGLONG now) {
         static_cast<float>(kDesignWidth);
     graphics.ScaleTransform(scale, scale);
     DrawScene(graphics, now);
+    if (gOffwork.enabled) {
+      // Below the original 240x250 artwork, including imported packs and +1.
+      Gdiplus::SolidBrush background(Gdiplus::Color(230, 255, 249, 238));
+      graphics.FillRectangle(&background, Gdiplus::RectF(8, 254, 224, 80));
+      const auto& snapshot = gOffwork.snapshot;
+      Gdiplus::SolidBrush ink(snapshot.valid && snapshot.overtime
+          ? Gdiplus::Color(255, 188, 86, 22) : Gdiplus::Color(255, 65, 70, 73));
+      Gdiplus::StringFormat format;
+      format.SetAlignment(Gdiplus::StringAlignmentCenter);
+      format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+      format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+      Gdiplus::Font labelFont(L"Microsoft YaHei UI", 20, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+      Gdiplus::Font numberFont(L"Consolas", 32, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+      const wchar_t* label = !snapshot.valid ? UiText(L"时间不可用", L"Time unavailable") :
+          snapshot.overtime ? UiText(L"已加班", L"Overtime") : UiText(L"距下班", L"Until off work");
+      const std::wstring duration = snapshot.valid ? OffworkTimeText(snapshot.overtime
+          ? snapshot.overtimeSeconds : snapshot.remainingSeconds) : L"--:--:--";
+      graphics.DrawString(label, -1, &labelFont, Gdiplus::RectF(12, 258, 216, 28), &format, &ink);
+      graphics.DrawString(duration.c_str(), -1, &numberFont,
+          Gdiplus::RectF(12, 286, 216, 42), &format, &ink);
+    }
   }
 
   RECT rect = {};
@@ -1603,8 +1849,9 @@ const wchar_t* SceneTitle(MeritScene scene) {
 
 void DrawCalendarText(Gdiplus::Graphics& graphics, const std::wstring& text,
                       const Gdiplus::RectF& rect, float size,
-                      const Gdiplus::Color& color, bool bold = false) {
-  Gdiplus::Font font(L"Microsoft YaHei UI", size,
+                      const Gdiplus::Color& color, bool bold = false,
+                      const wchar_t* family = L"Microsoft YaHei UI") {
+  Gdiplus::Font font(family, size,
       bold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
   Gdiplus::StringFormat format;
   format.SetAlignment(Gdiplus::StringAlignmentCenter);
@@ -1647,7 +1894,7 @@ void PaintMeritCalendar(HWND window) {
 
   const wchar_t* zhWeekdays[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
   const wchar_t* enWeekdays[] = {L"MON", L"TUE", L"WED", L"THU", L"FRI", L"SAT", L"SUN"};
-  const float left = 14, top = 112, cellWidth = 76, cellHeight = 51;
+  const float left = 14, top = 112, cellWidth = 76, cellHeight = 72;
   for (int column = 0; column < 7; ++column) {
     DrawCalendarText(graphics, IsChineseUi() ? zhWeekdays[column] : enWeekdays[column],
         Gdiplus::RectF(left + column * cellWidth, 94, cellWidth, 20), 11, muted, true);
@@ -1677,6 +1924,14 @@ void PaintMeritCalendar(HWND window) {
     DrawCalendarText(graphics, dateText,
         Gdiplus::RectF(cell.X + 2, cell.Y + 27, cell.Width - 4, 16),
         10, muted, false);
+    const auto& overtime = OffworkDay(key);
+    if (overtime.present) {
+      DrawCalendarText(graphics, UiText(L"自动加班", L"Auto overtime"),
+          Gdiplus::RectF(cell.X + 2, cell.Y + 42, cell.Width - 4, 11), 8, accent);
+      DrawCalendarText(graphics, OffworkTimeText(overtime.seconds),
+          Gdiplus::RectF(cell.X + 2, cell.Y + 53, cell.Width - 4, 14),
+          12, accent, true, L"Consolas");
+    }
   }
   EndPaint(window, &paint);
 }
@@ -1707,7 +1962,7 @@ void ShowMeritCalendar(HWND owner) {
     SYSTEMTIME now = {};
     GetLocalTime(&now);
     gCalendar.year = now.wYear; gCalendar.month = now.wMonth;
-    RECT desired = {0, 0, ScaleDip(560, gState.dpi), ScaleDip(430, gState.dpi)};
+    RECT desired = {0, 0, ScaleDip(560, gState.dpi), ScaleDip(552, gState.dpi)};
     AdjustWindowRectEx(&desired, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_TOOLWINDOW);
     gCalendar.window = CreateWindowExW(
         WS_EX_TOOLWINDOW, kCalendarClass, UiText(L"功德日历", L"Merit Calendar"),
@@ -2184,11 +2439,150 @@ void ApplyWindowDpi(HWND window) {
 
   gState.dpi = windowDpi;
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
-  gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
+  gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
   RECT rect = {};
   GetWindowRect(window, &rect);
   SetWindowPos(window, nullptr, rect.left, rect.top, gState.windowWidth,
                gState.windowHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void ResizeOffworkWindow() {
+  gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
+  // Preserve the pet's top-left unless the extra band would leave the work area.
+  SetWindowPos(gState.window, nullptr, 0, 0, gState.windowWidth, gState.windowHeight,
+      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+  ClampWindowToWorkArea();
+  RenderLayeredWindow(GetTickCount64());
+}
+
+constexpr int kOffworkEnable = 5101;
+constexpr int kOffworkHour = 5102;
+constexpr int kOffworkMinute = 5103;
+
+INT_PTR CALLBACK OffworkDialogProcedure(HWND window, UINT message, WPARAM wParam, LPARAM) {
+  switch (message) {
+    case WM_INITDIALOG: {
+      gOffwork.dialog = window;
+      SetWindowTextW(window, UiText(L"下班倒计时", L"Off-work Countdown"));
+      const UINT dpi = gState.dpi ? gState.dpi : 96;
+      const auto control = [window, dpi](const wchar_t* cls, const wchar_t* text,
+          DWORD style, int x, int y, int width, int height, int id) {
+        HWND child = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+            ScaleDip(x, dpi), ScaleDip(y, dpi), ScaleDip(width, dpi), ScaleDip(height, dpi),
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
+        SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(
+            GetWindowLongPtrW(window, GWLP_USERDATA)), TRUE);
+        return child;
+      };
+      const HFONT font = CreateFontW(-ScaleDip(14, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
+          FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+          DEFAULT_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei UI");
+      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(font ? font :
+          GetStockObject(DEFAULT_GUI_FONT)));
+      SetWindowLongPtrW(window, DWLP_USER, reinterpret_cast<LONG_PTR>(font));
+      control(L"BUTTON", UiText(L"启用下班倒计时", L"Enable off-work countdown"),
+          BS_AUTOCHECKBOX | WS_TABSTOP, 20, 18, 370, 28, kOffworkEnable);
+      control(L"STATIC", UiText(L"每日下班时间（24 小时制）", L"Daily off-work time (24-hour)"),
+          0, 20, 58, 370, 24, -1);
+      control(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+          20, 88, 82, 230, kOffworkHour);
+      control(L"STATIC", L":", SS_CENTER, 106, 90, 20, 24, -1);
+      control(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+          130, 88, 82, 230, kOffworkMinute);
+      for (int value = 0; value < 60; ++value) {
+        wchar_t text[4] = {};
+        swprintf_s(text, L"%02d", value);
+        if (value < 24) SendDlgItemMessageW(window, kOffworkHour, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+        SendDlgItemMessageW(window, kOffworkMinute, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+      }
+      SendDlgItemMessageW(window, kOffworkHour, CB_SETCURSEL, gOffwork.hour, 0);
+      SendDlgItemMessageW(window, kOffworkMinute, CB_SETCURSEL, gOffwork.minute, 0);
+      CheckDlgButton(window, kOffworkEnable, gOffwork.enabled ? BST_CHECKED : BST_UNCHECKED);
+      EnableWindow(GetDlgItem(window, kOffworkHour), gOffwork.enabled);
+      EnableWindow(GetDlgItem(window, kOffworkMinute), gOffwork.enabled);
+      control(L"STATIC", UiText(
+          L"每天按本地日期计算，超过设定时间即为加班。\r\n运行时自动记录到功德日历，不代表实际劳动。\r\n关闭后停止更新，保留时间设定及已有记录。\r\n完全本地，不依赖账号、网络或输入权限。",
+          L"Uses each local date, including weekends.\r\nAfter the target, overtime is saved automatically while\r\nrunning; this does not measure actual work. Turning it\r\noff keeps settings and records. No account, network\r\nor input permission is required."),
+          0, 20, 132, 380, 116, -1);
+      control(L"BUTTON", UiText(L"取消", L"Cancel"), WS_TABSTOP | BS_PUSHBUTTON,
+          214, 266, 86, 32, IDCANCEL);
+      control(L"BUTTON", UiText(L"保存", L"Save"), WS_TABSTOP | BS_DEFPUSHBUTTON,
+          310, 266, 86, 32, IDOK);
+      RECT rect = {0, 0, ScaleDip(416, dpi), ScaleDip(318, dpi)};
+      AdjustWindowRectEx(&rect, WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME,
+          FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+      MONITORINFO monitor = {sizeof(monitor)};
+      GetMonitorInfoW(MonitorFromWindow(GetWindow(window, GW_OWNER), MONITOR_DEFAULTTONEAREST), &monitor);
+      const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+      SetWindowPos(window, nullptr,
+          monitor.rcWork.left + std::max(0, static_cast<int>(monitor.rcWork.right - monitor.rcWork.left - width) / 2),
+          monitor.rcWork.top + std::max(0, static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top - height) / 2),
+          width, height, SWP_NOZORDER);
+      return TRUE;
+    }
+    case WM_COMMAND:
+      if (LOWORD(wParam) == kOffworkEnable && HIWORD(wParam) == BN_CLICKED) {
+        const bool enabled = IsDlgButtonChecked(window, kOffworkEnable) == BST_CHECKED;
+        EnableWindow(GetDlgItem(window, kOffworkHour), enabled);
+        EnableWindow(GetDlgItem(window, kOffworkMinute), enabled);
+        return TRUE;
+      }
+      if (LOWORD(wParam) == IDOK) {
+        const int hour = static_cast<int>(SendDlgItemMessageW(window, kOffworkHour, CB_GETCURSEL, 0, 0));
+        const int minute = static_cast<int>(SendDlgItemMessageW(window, kOffworkMinute, CB_GETCURSEL, 0, 0));
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return TRUE;
+        // Pending controls never touch live settings until Save is pressed.
+        RefreshOffwork(true, true);
+        gOffwork.hour = hour;
+        gOffwork.minute = minute;
+        gOffwork.enabled = IsDlgButtonChecked(window, kOffworkEnable) == BST_CHECKED;
+        gOffwork.settingsDirty = true;
+        gOffwork.baselineValid = false;
+        gOffwork.snapshot = {};
+        RefreshOffwork(false);
+        const bool saved = FlushOffwork();
+        const bool ticking = SyncOffworkTimer();
+        ResizeOffworkWindow();
+        if (!saved || !ticking) MessageBoxW(window,
+            !saved ? UiText(L"本次设置已在内存生效，但未能写入本地文件；程序会稍后重试。",
+                            L"Settings are active in memory, but local saving failed. The app will retry.") :
+                     UiText(L"无法启动逐秒刷新，请关闭并重新开启下班倒计时。",
+                            L"The refresh timer could not start. Turn the countdown off and on again."),
+            WindowTitle(), MB_OK | MB_ICONWARNING);
+        EndDialog(window, IDOK);
+        return TRUE;
+      }
+      if (LOWORD(wParam) == IDCANCEL) {
+        EndDialog(window, IDCANCEL);
+        return TRUE;
+      }
+      break;
+    case WM_CLOSE:
+      EndDialog(window, IDCANCEL);
+      return TRUE;
+    case WM_DESTROY: {
+      const auto font = reinterpret_cast<HFONT>(GetWindowLongPtrW(window, DWLP_USER));
+      if (font) DeleteObject(font);
+      gOffwork.dialog = nullptr;
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+void ShowOffworkSettings(HWND owner) {
+  // Native resource-free modal dialog; no second permanent floating window.
+  alignas(DWORD) WORD storage[64] = {};
+  auto* dialog = reinterpret_cast<DLGTEMPLATE*>(storage);
+  dialog->style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME;
+  dialog->dwExtendedStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
+  dialog->cx = 240;
+  dialog->cy = 180;
+  if (DialogBoxIndirectParamW(GetModuleHandleW(nullptr), dialog, owner,
+                              OffworkDialogProcedure, 0) == -1) {
+    MessageBoxW(owner, UiText(L"无法打开下班倒计时设置。", L"Unable to open countdown settings."),
+        WindowTitle(), MB_OK | MB_ICONERROR);
+  }
 }
 
 void ShowContextMenu(HWND window, POINT screenPoint) {
@@ -2206,6 +2600,8 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
               UiText(L"更换形象", L"Change Appearance"));
   AppendMenuW(menu, MF_STRING, kMenuCalendar,
               UiText(L"功德日历…", L"Merit Calendar…"));
+  AppendMenuW(menu, MF_STRING, kMenuOffwork,
+              UiText(L"下班倒计时…", L"Off-work Countdown..."));
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kMenuQuit, UiText(L"退出", L"Exit"));
 
@@ -2230,6 +2626,8 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     ShowAppearancePicker(window);
   } else if (command == static_cast<int>(kMenuCalendar)) {
     ShowMeritCalendar(window);
+  } else if (command == static_cast<int>(kMenuOffwork)) {
+    ShowOffworkSettings(window);
   } else if (command == static_cast<int>(kMenuQuit)) {
     DestroyWindow(window);
   }
@@ -2266,7 +2664,16 @@ LRESULT CALLBACK WindowProcedure(
     }
 
     case WM_TIMER: {
+      if (wParam == kOffworkTimer) {
+        if (gOffwork.enabled && !gOffwork.suspended) {
+          RefreshOffwork();
+          RenderLayeredWindow(GetTickCount64());
+        }
+        return 0;
+      }
       if (wParam == kDayTimer) {
+        // Retry failed local saves even when the countdown itself is disabled.
+        if (GetTickCount64() - gOffwork.lastFlush >= 60000) FlushOffwork();
         if (EnsureCurrentDay()) RenderLayeredWindow(GetTickCount64());
         if (gCalendar.window != nullptr) InvalidateRect(gCalendar.window, nullptr, FALSE);
         return 0;
@@ -2301,7 +2708,7 @@ LRESULT CALLBACK WindowProcedure(
       const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
       gState.dpi = newDpi == 0 ? 96 : newDpi;
       gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
-      gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
+      gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
       SetWindowPos(
           window, nullptr, suggested->left, suggested->top,
           gState.windowWidth, gState.windowHeight,
@@ -2312,9 +2719,34 @@ LRESULT CALLBACK WindowProcedure(
     }
 
     case WM_DISPLAYCHANGE:
+      gOffwork.baselineValid = false;
+      RefreshOffwork(false, true);
       ClampWindowToWorkArea();
       RenderLayeredWindow(GetTickCount64());
       return 0;
+
+    case WM_TIMECHANGE:
+    case WM_SETTINGCHANGE:
+    case kOffworkSessionChange:
+      gOffwork.baselineValid = false;
+      RefreshOffwork(false, true);
+      RenderLayeredWindow(GetTickCount64());
+      return 0;
+
+    case WM_POWERBROADCAST:
+      if (wParam == PBT_APMSUSPEND) {
+        RefreshOffwork(false, true);
+        gOffwork.baselineValid = false;
+        gOffwork.suspended = true;
+        SyncOffworkTimer();
+      } else if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND) {
+        gOffwork.suspended = false;
+        gOffwork.baselineValid = false;
+        RefreshOffwork(false, true);
+        SyncOffworkTimer();
+        RenderLayeredWindow(GetTickCount64());
+      }
+      return TRUE;
 
     case WM_NCLBUTTONDOWN:
     case WM_NCRBUTTONDOWN:
@@ -2348,13 +2780,23 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
     }
 
+    case WM_QUERYENDSESSION:
+      RefreshOffwork(true, true);
+      return TRUE;
+
     case WM_ENDSESSION:
       if (wParam != 0) {
+        RefreshOffwork(true, true);
         SaveState();
       }
       return 0;
 
     case WM_DESTROY:
+      RefreshOffwork(true, true);
+      KillTimer(window, kOffworkTimer);
+      gOffwork.timerRunning = false;
+      UnregisterOffworkSessionNotifications(window);
+      if (gOffwork.dialog) EndDialog(gOffwork.dialog, IDCANCEL);
       if (gCountingCheck.window) DestroyWindow(gCountingCheck.window);
       KillTimer(window, kDayTimer);
       if (gState.timerRunning) {
@@ -2491,8 +2933,9 @@ int WINAPI wWinMain(
   }
 
   gState.dpi = SystemDpi();
+  LoadOffworkSettings();
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
-  gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
+  gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
   gState.total = ReadIniTotal();
   EnsureCurrentDay();
   const long selectedScene = ReadIniLong(L"selected_scene", 0);
@@ -2539,12 +2982,19 @@ int WINAPI wWinMain(
   // that actually hosts the window, which can differ from the system DPI.
   ApplyWindowDpi(window);
   ClampWindowToWorkArea();
+  RefreshOffwork(false, true);
   RenderLayeredWindow(GetTickCount64());
   ShowWindow(window, SW_SHOWNOACTIVATE);
   SetWindowPos(
       window, HWND_TOPMOST, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
   SetTimer(window, kDayTimer, 30000, nullptr);
+  RegisterOffworkSessionNotifications(window);
+  if (!SyncOffworkTimer()) {
+    MessageBoxW(window, UiText(L"无法启动下班倒计时逐秒刷新，请在设置中关闭后重新开启。",
+        L"The countdown refresh timer could not start. Turn it off and on in settings."),
+        WindowTitle(), MB_OK | MB_ICONWARNING);
+  }
 
   wchar_t executable[MAX_PATH] = {};
   if (GetModuleFileNameW(nullptr, executable,
