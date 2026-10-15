@@ -2470,7 +2470,7 @@ INT_PTR CALLBACK OffworkDialogProcedure(HWND window, UINT message, WPARAM wParam
         HWND child = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
             ScaleDip(x, dpi), ScaleDip(y, dpi), ScaleDip(width, dpi), ScaleDip(height, dpi),
             window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
-        SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(
+        SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(
             GetWindowLongPtrW(window, GWLP_USERDATA)), TRUE);
         return child;
       };
