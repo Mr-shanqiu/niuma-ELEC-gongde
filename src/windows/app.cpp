@@ -804,7 +804,7 @@ void DrawWidgetText(Gdiplus::Graphics& graphics,
                     const Gdiplus::RectF& rect,
                     float fontSize,
                     const Gdiplus::Color& color,
-                    Gdiplus::FontStyle style = Gdiplus::FontStyleBold) {
+                    Gdiplus::FontStyle style = Gdiplus::FontStyleRegular) {
   Gdiplus::FontFamily family(L"Microsoft YaHei UI");
   Gdiplus::StringFormat format;
   format.SetAlignment(Gdiplus::StringAlignmentCenter);
@@ -927,8 +927,8 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
   }
 
   const std::wstring totalText = std::to_wstring(gState.todayTotal);
-  float totalFont = totalText.size() > 24 ? 20.0f :
-                    totalText.size() > 18 ? 24.0f : 30.0f;
+  float totalFont = totalText.size() > 24 ? 18.0f :
+                    totalText.size() > 18 ? 22.0f : 26.0f;
   DrawWidgetText(graphics, totalText,
                  Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), totalFont,
                  Gdiplus::Color(255, 240, 139, 35));
@@ -987,17 +987,17 @@ void RenderLayeredWindow(ULONGLONG now) {
       const std::wstring duration = snapshot.valid ? OffworkTimeText(snapshot.overtime
           ? snapshot.overtimeSeconds : snapshot.remainingSeconds) : L"--:--:--";
       DrawWidgetText(graphics, label, Gdiplus::RectF(12, 258, 216, 28),
-                     18.0f, Gdiplus::Color(255, 248, 244, 235),
+                     20.0f, Gdiplus::Color(255, 248, 244, 235),
                      Gdiplus::FontStyleRegular);
       // Fixed character cells keep every digit in place without a second font.
-      const float cellWidth = 23.0f;
+      const float cellWidth = 17.0f;
       const float durationLeft =
           (240.0f - cellWidth * static_cast<float>(duration.size())) / 2.0f;
       for (size_t index = 0; index < duration.size(); ++index) {
         DrawWidgetText(graphics, std::wstring(1, duration[index]),
             Gdiplus::RectF(durationLeft + cellWidth * static_cast<float>(index),
                           286, cellWidth, 42),
-            28.0f, Gdiplus::Color(255, 240, 139, 35));
+            24.0f, Gdiplus::Color(255, 240, 139, 35));
       }
     }
   }
@@ -1385,6 +1385,11 @@ bool ShowPrivacyNotice(HWND owner) {
 
 constexpr int kAboutHelpLink = 3090;
 
+const wchar_t* AboutDouyinCaption() {
+  return UiText(L"欢迎关注开发者抖音，一起交流产品的奇思妙想\n抖音号：1872941388",
+                L"Follow the developer on Douyin and share creative product ideas\nDouyin ID: 1872941388");
+}
+
 struct AboutDialogState {
   std::wstring text;
   PngResource douyin;
@@ -1396,6 +1401,7 @@ struct AboutDialogState {
   int lineHeight = 16;
   int textHeight = 0;
   int helpHeight = 0;
+  int promoHeight = 0;
   int imageWidth = 260;
   int imageHeight = 260;
   int contentWidth = 0;
@@ -1446,12 +1452,16 @@ void MeasureAboutContent(AboutDialogState& state) {
   GetTextMetricsW(dc, &metrics);
   state.lineHeight = std::max(1, static_cast<int>(metrics.tmHeight +
                                                metrics.tmExternalLeading));
+  RECT promo = {0, 0, state.contentWidth - state.padding * 2, 0};
+  DrawTextW(dc, AboutDouyinCaption(), -1, &promo,
+            DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_CENTER);
+  state.promoHeight = static_cast<int>(promo.bottom) + 4;
   SelectObject(dc, oldFont);
   ReleaseDC(state.viewport, dc);
   state.textHeight = static_cast<int>(measured.bottom) + 4;
   state.helpHeight = state.lineHeight + state.padding;
-  state.contentHeight = state.padding * 4 + state.textHeight +
-                        state.helpHeight + state.imageHeight;
+  state.contentHeight = state.padding * 5 + state.textHeight +
+                        state.helpHeight + state.promoHeight + state.imageHeight;
 
   SCROLLINFO info = {};
   info.cbSize = sizeof(info);
@@ -1472,6 +1482,69 @@ void MeasureAboutContent(AboutDialogState& state) {
 bool IsAboutScrollKey(WPARAM key) {
   return key == VK_UP || key == VK_DOWN || key == VK_LEFT || key == VK_RIGHT ||
          key == VK_PRIOR || key == VK_NEXT || key == VK_HOME || key == VK_END;
+}
+
+void DrawAboutContent(HWND window, HDC dc, const RECT& client,
+                      const AboutDialogState& state) {
+  FillRect(dc, &client, GetSysColorBrush(COLOR_3DFACE));
+  HGDIOBJ oldFont = SelectObject(dc, state.font);
+  SetBkMode(dc, TRANSPARENT);
+  SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+  RECT text = {state.padding - state.scrollX,
+               state.padding - state.scrollY,
+               state.contentWidth - state.padding - state.scrollX,
+               state.padding + state.textHeight - state.scrollY};
+  DrawTextW(dc, state.text.c_str(), -1, &text, DT_WORDBREAK | DT_NOPREFIX);
+  RECT promo = {state.padding - state.scrollX,
+      state.padding * 3 + state.textHeight + state.helpHeight - state.scrollY,
+      state.contentWidth - state.padding - state.scrollX,
+      state.padding * 3 + state.textHeight + state.helpHeight + state.promoHeight - state.scrollY};
+  DrawTextW(dc, AboutDouyinCaption(), -1, &promo,
+            DT_WORDBREAK | DT_NOPREFIX | DT_CENTER);
+  SelectObject(dc, oldFont);
+  if (state.douyin.image && state.douyin.image->GetWidth() != 0 &&
+      state.douyin.image->GetHeight() != 0) {
+    Gdiplus::Graphics graphics(dc);
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.DrawImage(state.douyin.image.get(), Gdiplus::RectF(
+        static_cast<float>((state.contentWidth - state.imageWidth) / 2 -
+                           state.scrollX),
+        static_cast<float>(state.padding * 4 + state.textHeight + state.helpHeight + state.promoHeight -
+                           state.scrollY),
+        static_cast<float>(state.imageWidth),
+        static_cast<float>(state.imageHeight)));
+    graphics.Flush(Gdiplus::FlushIntentionSync);
+  }
+  if (GetFocus() == window) DrawFocusRect(dc, &client);
+}
+
+void PaintAboutContent(HWND window, const AboutDialogState& state) {
+  PAINTSTRUCT paint = {};
+  HDC dc = BeginPaint(window, &paint);
+  RECT client = {};
+  GetClientRect(window, &client);
+  const int width = client.right - client.left;
+  const int height = client.bottom - client.top;
+  if (dc == nullptr || width <= 0 || height <= 0) {
+    EndPaint(window, &paint);
+    return;
+  }
+
+  HDC bufferDc = CreateCompatibleDC(dc);
+  HBITMAP bitmap = bufferDc ? CreateCompatibleBitmap(dc, width, height) : nullptr;
+  HGDIOBJ previousBitmap = bitmap ? SelectObject(bufferDc, bitmap) : nullptr;
+  const bool buffered = previousBitmap != nullptr && previousBitmap != HGDI_ERROR;
+  if (buffered) {
+    // Present text, background and QR image together, never a cleared frame.
+    DrawAboutContent(window, bufferDc, client, state);
+    BitBlt(dc, 0, 0, width, height, bufferDc, 0, 0, SRCCOPY);
+    SelectObject(bufferDc, previousBitmap);
+  } else {
+    DrawAboutContent(window, dc, client, state);
+  }
+  if (bitmap) DeleteObject(bitmap);
+  if (bufferDc) DeleteDC(bufferDc);
+  EndPaint(window, &paint);
 }
 
 LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
@@ -1623,35 +1696,7 @@ LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
     case WM_ERASEBKGND:
       return 1;
     case WM_PAINT: {
-      PAINTSTRUCT paint = {};
-      HDC dc = BeginPaint(window, &paint);
-      RECT client = {};
-      GetClientRect(window, &client);
-      FillRect(dc, &client, GetSysColorBrush(COLOR_3DFACE));
-      HGDIOBJ oldFont = SelectObject(dc, state->font);
-      SetBkMode(dc, TRANSPARENT);
-      SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
-      RECT text = {state->padding - state->scrollX,
-                   state->padding - state->scrollY,
-                   state->contentWidth - state->padding - state->scrollX,
-                   state->padding + state->textHeight - state->scrollY};
-      DrawTextW(dc, state->text.c_str(), -1, &text,
-                DT_WORDBREAK | DT_NOPREFIX);
-      SelectObject(dc, oldFont);
-      if (state->douyin.image && state->douyin.image->GetWidth() != 0 &&
-          state->douyin.image->GetHeight() != 0) {
-        Gdiplus::Graphics graphics(dc);
-        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-        graphics.DrawImage(state->douyin.image.get(), Gdiplus::RectF(
-            static_cast<float>((state->contentWidth - state->imageWidth) / 2 -
-                               state->scrollX),
-            static_cast<float>(state->padding * 3 + state->textHeight + state->helpHeight -
-                               state->scrollY),
-            static_cast<float>(state->imageWidth),
-            static_cast<float>(state->imageHeight)));
-      }
-      if (GetFocus() == window) DrawFocusRect(dc, &client);
-      EndPaint(window, &paint);
+      PaintAboutContent(window, *state);
       return 0;
     }
   }
@@ -1821,9 +1866,7 @@ void ShowAboutDialog(HWND owner) {
         L"telemetry, or automatic updates.\n\nClient source code is available under GPLv3."
         L"\n\nOfficial website:\n";
   text += L"https://gongde.zqscreen.cn/";
-  text += UiText(L"\n\n欢迎关注开发者抖音\n@山丘 / 抖音号：1872941388"
-                L"\n\nWindows 通常无需额外授权。若在其他应用中没有计数，请查看下方权限与计数帮助。",
-                L"\n\nFollow the developer on Douyin\n@Shanqiu / Douyin ID: 1872941388"
+  text += UiText(L"\n\nWindows 通常无需额外授权。若在其他应用中没有计数，请查看下方权限与计数帮助。",
                 L"\n\nWindows normally needs no extra permission. If input in other apps is not counted, see the help link below.");
   AboutDialogState state;
   state.text = text;
@@ -1852,7 +1895,7 @@ void ShowAboutDialog(HWND owner) {
   }
   if (DialogBoxParamW(module, MAKEINTRESOURCEW(3000), owner,
                       AboutDialogProcedure, reinterpret_cast<LPARAM>(&state)) == -1) {
-    const std::wstring fallback = text + L"\n\nhttps://gongde.zqscreen.cn/help-windows.html";
+    const std::wstring fallback = text + L"\n\nhttps://gongde.zqscreen.cn/help-windows.html\n\n" + AboutDouyinCaption();
     MessageBoxW(owner, fallback.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
                 MB_OK | MB_ICONINFORMATION);
   }
@@ -2649,7 +2692,8 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
               UiText(L"更换形象", L"Change Appearance"));
   AppendMenuW(menu, MF_STRING, kMenuCalendar,
               UiText(L"功德日历…", L"Merit Calendar…"));
-  AppendMenuW(menu, MF_STRING, kMenuOffwork,
+  AppendMenuW(menu,
+              MF_STRING | (gOffwork.enabled ? MF_CHECKED : MF_UNCHECKED), kMenuOffwork,
               UiText(L"下班倒计时…", L"Off-work Countdown..."));
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kMenuQuit, UiText(L"退出", L"Exit"));

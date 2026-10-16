@@ -608,12 +608,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   // a scene or one of its moving layers, so it is deliberately drawn last.
   if (!self.previewOnly) {
   NSString *totalText = [NSString stringWithFormat:@"%lld", controller.todayTotal];
-  CGFloat totalFont = totalText.length > 18 ? 24 : 30;
-  if (totalText.length > 24) totalFont = 20;
+  CGFloat totalFont = totalText.length > 18 ? 22 : 26;
+  if (totalText.length > 24) totalFont = 18;
   [self drawCenteredText:totalText
                     rect:NSMakeRect(0, kCounterY, kWindowWidth, 40)
                     font:[NSFont monospacedDigitSystemFontOfSize:totalFont
-                                                         weight:NSFontWeightBold]
+                                                         weight:NSFontWeightRegular]
                    color:[NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1]];
   }
 
@@ -624,11 +624,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
         : [NSColor colorWithCalibratedWhite:.42 alpha:1];
     [self drawCenteredText:controller.offworkDisplayLabel ?: UiText(@"距下班", @"Until off work")
                      rect:NSMakeRect(0, 55, kWindowWidth, 28)
-                     font:[NSFont systemFontOfSize:22 weight:NSFontWeightMedium]
+                     font:[NSFont systemFontOfSize:24 weight:NSFontWeightMedium]
                     color:color];
     [self drawCenteredText:controller.offworkDisplayDuration ?: @"--:--:--"
                      rect:NSMakeRect(0, 14, kWindowWidth, 35)
-                     font:[NSFont monospacedDigitSystemFontOfSize:28 weight:NSFontWeightSemibold]
+                     font:[NSFont monospacedDigitSystemFontOfSize:24 weight:NSFontWeightRegular]
                     color:color];
   }
   [ctx restoreGraphicsState];
@@ -1868,6 +1868,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       initWithTitle:UiText(@"下班倒计时…", @"Off-work Countdown…")
              action:@selector(showOffworkSettings:) keyEquivalent:@""];
   offwork.target = self;
+  offwork.state = self.offworkEnabled ? NSControlStateValueOn : NSControlStateValueOff;
   [menu addItem:offwork];
   [menu addItem:NSMenuItem.separatorItem];
   NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:UiText(@"退出", @"Quit")
@@ -2101,8 +2102,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
        @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"官方网站：\n"
        @"https://gongde.zqscreen.cn/\n\n"
-       @"欢迎关注开发者抖音\n"
-       @"@山丘 / 抖音号：1872941388",
+       @"欢迎关注开发者抖音，一起交流产品的奇思妙想\n"
+       @"抖音号：1872941388",
       @"Version %@\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
@@ -2112,8 +2113,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
        @"Client source code is available under GPLv3.\n\n"
        @"Official website:\n"
        @"https://gongde.zqscreen.cn/\n\n"
-       @"Follow the developer on Douyin\n"
-       @"@Shanqiu / Douyin ID: 1872941388"), version];
+       @"Follow the developer on Douyin and share creative product ideas\n"
+       @"Douyin ID: 1872941388"), version];
   NSString *douyinPath = [NSBundle.mainBundle pathForResource:@"developer-douyin" ofType:@"png"];
   NSImage *douyinImage = douyinPath ? [[NSImage alloc] initWithContentsOfFile:douyinPath] : nil;
   NSScreen *screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;
@@ -2131,6 +2132,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
         NSLinkAttributeName: @"https://gongde.zqscreen.cn/help-macos.html",
         NSForegroundColorAttributeName: NSColor.linkColor,
         NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)} range:helpRange];
+  }
+  NSRange promoRange = [aboutText rangeOfString:UiText(
+      @"欢迎关注开发者抖音，一起交流产品的奇思妙想",
+      @"Follow the developer on Douyin and share creative product ideas")];
+  if (promoRange.location != NSNotFound) {
+    NSMutableParagraphStyle *promoStyle = [[NSMutableParagraphStyle alloc] init];
+    promoStyle.alignment = NSTextAlignmentCenter;
+    [bodyText addAttribute:NSParagraphStyleAttributeName value:promoStyle
+        range:NSMakeRange(promoRange.location, aboutText.length - promoRange.location)];
   }
   CGFloat textHeight = ceil([bodyText boundingRectWithSize:NSMakeSize(contentWidth, CGFLOAT_MAX)
       options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading].size.height) + 4.0;
@@ -2155,8 +2165,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     code.image = douyinImage;
     code.imageScaling = NSImageScaleProportionallyUpOrDown;
     code.imageAlignment = NSImageAlignCenter;
-    code.toolTip = UiText(@"使用抖音扫一扫，关注开发者山丘", @"Scan with Douyin to find the developer");
-    code.accessibilityLabel = UiText(@"开发者山丘的抖音码，抖音号 1872941388",
+    code.toolTip = UiText(@"使用抖音扫一扫，关注开发者", @"Scan with Douyin to find the developer");
+    code.accessibilityLabel = UiText(@"开发者抖音码，抖音号 1872941388",
                                      @"Developer Douyin code, ID 1872941388");
     [content addSubview:code];
   }
