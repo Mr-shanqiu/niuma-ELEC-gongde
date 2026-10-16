@@ -799,6 +799,27 @@ void DrawCenteredText(Gdiplus::Graphics& graphics,
       text.c_str(), -1, &font, rect, &format, &brush);
 }
 
+void DrawWidgetText(Gdiplus::Graphics& graphics,
+                    const std::wstring& text,
+                    const Gdiplus::RectF& rect,
+                    float fontSize,
+                    const Gdiplus::Color& color,
+                    Gdiplus::FontStyle style = Gdiplus::FontStyleBold) {
+  Gdiplus::FontFamily family(L"Microsoft YaHei UI");
+  Gdiplus::StringFormat format;
+  format.SetAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+  Gdiplus::GraphicsPath glyphs;
+  glyphs.AddString(text.c_str(), -1, &family, style, fontSize, rect, &format);
+  // Outline glyphs only; the surrounding layered surface stays transparent.
+  Gdiplus::Pen outline(Gdiplus::Color(190, 24, 24, 24), 1.5f);
+  outline.SetLineJoin(Gdiplus::LineJoinRound);
+  graphics.DrawPath(&outline, &glyphs);
+  Gdiplus::SolidBrush fill(color);
+  graphics.FillPath(&fill, &glyphs);
+}
+
 void DrawSceneArtwork(
     Gdiplus::Graphics& graphics, MeritScene scene, float strikeAmount) {
   using Gdiplus::GraphicsState;
@@ -908,9 +929,9 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
   const std::wstring totalText = std::to_wstring(gState.todayTotal);
   float totalFont = totalText.size() > 24 ? 20.0f :
                     totalText.size() > 18 ? 24.0f : 30.0f;
-  DrawCenteredText(graphics, totalText,
-                   Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), totalFont, 255,
-                   L"Consolas");
+  DrawWidgetText(graphics, totalText,
+                 Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), totalFont,
+                 Gdiplus::Color(255, 240, 139, 35));
 }
 
 void RenderLayeredWindow(ULONGLONG now) {
@@ -959,25 +980,25 @@ void RenderLayeredWindow(ULONGLONG now) {
     graphics.ScaleTransform(scale, scale);
     DrawScene(graphics, now);
     if (gOffwork.enabled) {
-      // Below the original 240x250 artwork, including imported packs and +1.
-      Gdiplus::SolidBrush background(Gdiplus::Color(230, 255, 249, 238));
-      graphics.FillRectangle(&background, Gdiplus::RectF(8, 254, 224, 80));
+      // Match the merit text without painting a panel over the desktop.
       const auto& snapshot = gOffwork.snapshot;
-      Gdiplus::SolidBrush ink(snapshot.valid && snapshot.overtime
-          ? Gdiplus::Color(255, 188, 86, 22) : Gdiplus::Color(255, 65, 70, 73));
-      Gdiplus::StringFormat format;
-      format.SetAlignment(Gdiplus::StringAlignmentCenter);
-      format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-      format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-      Gdiplus::Font labelFont(L"Microsoft YaHei UI", 20, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-      Gdiplus::Font numberFont(L"Consolas", 32, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
       const wchar_t* label = !snapshot.valid ? UiText(L"时间不可用", L"Time unavailable") :
           snapshot.overtime ? UiText(L"已加班", L"Overtime") : UiText(L"距下班", L"Until off work");
       const std::wstring duration = snapshot.valid ? OffworkTimeText(snapshot.overtime
           ? snapshot.overtimeSeconds : snapshot.remainingSeconds) : L"--:--:--";
-      graphics.DrawString(label, -1, &labelFont, Gdiplus::RectF(12, 258, 216, 28), &format, &ink);
-      graphics.DrawString(duration.c_str(), -1, &numberFont,
-          Gdiplus::RectF(12, 286, 216, 42), &format, &ink);
+      DrawWidgetText(graphics, label, Gdiplus::RectF(12, 258, 216, 28),
+                     18.0f, Gdiplus::Color(255, 248, 244, 235),
+                     Gdiplus::FontStyleRegular);
+      // Fixed character cells keep every digit in place without a second font.
+      const float cellWidth = 23.0f;
+      const float durationLeft =
+          (240.0f - cellWidth * static_cast<float>(duration.size())) / 2.0f;
+      for (size_t index = 0; index < duration.size(); ++index) {
+        DrawWidgetText(graphics, std::wstring(1, duration[index]),
+            Gdiplus::RectF(durationLeft + cellWidth * static_cast<float>(index),
+                          286, cellWidth, 42),
+            28.0f, Gdiplus::Color(255, 240, 139, 35));
+      }
     }
   }
 
