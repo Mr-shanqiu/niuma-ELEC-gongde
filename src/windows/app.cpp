@@ -577,11 +577,10 @@ bool FlushOffwork() {
     success = saved && success;
     wrote = true;
   }
-  if (wrote && !WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str())) {
-    // Keep the snapshots retryable if flushing the profile cache failed.
-    for (auto& entry : gOffwork.days) entry.second.dirty = true;
-    gOffwork.settingsDirty = true;
-    success = false;
+  if (wrote) {
+    // Cache invalidation can return zero even after successful profile writes.
+    // Only the individual writes above determine failure and retry state.
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
   }
   // Failed storage is retried at the next interval or lifecycle event, not 1 Hz.
   gOffwork.lastFlush = GetTickCount64();
