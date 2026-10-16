@@ -1860,9 +1860,7 @@ void DrawCalendarText(Gdiplus::Graphics& graphics, const std::wstring& text,
   graphics.DrawString(text.c_str(), -1, &font, rect, &format, &brush);
 }
 
-void PaintMeritCalendar(HWND window) {
-  PAINTSTRUCT paint = {};
-  HDC dc = BeginPaint(window, &paint);
+void DrawMeritCalendar(HDC dc) {
   Gdiplus::Graphics graphics(dc);
   const float scale = static_cast<float>(gState.dpi) / 96.0f;
   graphics.ScaleTransform(scale, scale);
@@ -1932,12 +1930,43 @@ void PaintMeritCalendar(HWND window) {
           12, accent, true, L"Consolas");
     }
   }
+  graphics.Flush(Gdiplus::FlushIntentionSync);
+}
+
+void PaintMeritCalendar(HWND window) {
+  PAINTSTRUCT paint = {};
+  HDC dc = BeginPaint(window, &paint);
+  RECT client = {};
+  GetClientRect(window, &client);
+  const int width = client.right - client.left;
+  const int height = client.bottom - client.top;
+  if (dc == nullptr || width <= 0 || height <= 0) {
+    EndPaint(window, &paint);
+    return;
+  }
+
+  HDC bufferDc = CreateCompatibleDC(dc);
+  HBITMAP bitmap = bufferDc ? CreateCompatibleBitmap(dc, width, height) : nullptr;
+  HGDIOBJ previousBitmap = bitmap ? SelectObject(bufferDc, bitmap) : nullptr;
+  const bool buffered = previousBitmap != nullptr && previousBitmap != HGDI_ERROR;
+  if (buffered) {
+    // Publish a complete frame instead of exposing the cleared background.
+    DrawMeritCalendar(bufferDc);
+    BitBlt(dc, 0, 0, width, height, bufferDc, 0, 0, SRCCOPY);
+    SelectObject(bufferDc, previousBitmap);
+  } else {
+    // Keep the calendar usable if a backing bitmap cannot be allocated.
+    DrawMeritCalendar(dc);
+  }
+  if (bitmap) DeleteObject(bitmap);
+  if (bufferDc) DeleteDC(bufferDc);
   EndPaint(window, &paint);
 }
 
 LRESULT CALLBACK CalendarWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   (void)wParam;
   switch (message) {
+    case WM_ERASEBKGND: return 1;
     case WM_PAINT: PaintMeritCalendar(window); return 0;
     case WM_LBUTTONUP: {
       const int x = MulDiv(GET_X_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
@@ -2920,7 +2949,7 @@ int WINAPI wWinMain(
   calendarClass.lpfnWndProc = CalendarWindowProcedure;
   calendarClass.hInstance = instance;
   calendarClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-  calendarClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+  calendarClass.hbrBackground = nullptr;
   calendarClass.lpszClassName = kCalendarClass;
   if (RegisterClassExW(&calendarClass) == 0) {
     ReleaseAllPngResources();
