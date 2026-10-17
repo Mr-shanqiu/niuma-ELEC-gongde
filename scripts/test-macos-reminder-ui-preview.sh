@@ -33,6 +33,17 @@ screencapture -x "$screenshot_path"
 dimensions=$(sips -g pixelWidth -g pixelHeight "$screenshot_path")
 grep -Eq 'pixelWidth: [1-9][0-9]*' <<<"$dimensions"
 grep -Eq 'pixelHeight: [1-9][0-9]*' <<<"$dimensions"
+sleep 6
+kill -0 "$preview_pid" 2>/dev/null || { echo "The app exited before auto-dismissal could be checked." >&2; exit 1; }
+screencapture -x "${screenshot_path%.png}-dismissed.png"
 wait "$preview_pid"
+python3 - "$acceptance_root/NiuMaMerit/Reminders/state.dat" <<'PY_CHECK'
+import pathlib,re,sys
+text=pathlib.Path(sys.argv[1]).read_text()
+assert re.search(r"^daily\t[0-9]{4}-[0-9]{2}-[0-9]{2}\t1$", text, re.M), "daily quota changed"
+assert re.search(r"^segment\t1$", text, re.M), "segment lock cleared"
+assert len(re.findall(r"^id\t", text, re.M)) == 1, "ID history changed"
+print("MACOS_REMINDER_UI_LEDGER_PASSED quota=1 history=1")
+PY_CHECK
 preview_pid=
 echo "MACOS_REMINDER_UI_PREVIEW_PASSED"

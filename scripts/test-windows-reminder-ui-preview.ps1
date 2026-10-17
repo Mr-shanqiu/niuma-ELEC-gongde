@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$ExecutablePath,
-  [Parameter(Mandatory = $true)][string]$ScreenshotPath
+  [Parameter(Mandatory = $true)][string]$ScreenshotPath,
+  [ValidateSet('Auto', 'Close')][string]$DismissMode = 'Auto'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,8 +38,30 @@ public static class NiuMaReminderPreviewWindows {
   public static extern bool GetWindowRect(IntPtr window, out RECT rect);
   [DllImport("user32.dll")]
   public static extern int GetSystemMetrics(int index);
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetDlgItem(IntPtr window, int item);
+  [DllImport("user32.dll")]
+  public static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 }
 '@
+
+Add-Type -AssemblyName System.Drawing
+function Save-PreviewScreenshot([string]$TargetPath) {
+  $screenWidth = [NiuMaReminderPreviewWindows]::GetSystemMetrics(0)
+  $screenHeight = [NiuMaReminderPreviewWindows]::GetSystemMetrics(1)
+  if ($screenWidth -le 0 -or $screenHeight -le 0) { throw 'The runner has no capturable display.' }
+  $bitmap = New-Object System.Drawing.Bitmap($screenWidth, $screenHeight)
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size)
+    $bitmap.Save($TargetPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
+
+}
+$previewClock = [Diagnostics.Stopwatch]::StartNew()
 
 $process = Start-Process -FilePath $ExecutablePath `
   -ArgumentList @('--isolated-acceptance', '--reminder-ui-preview') `
@@ -64,19 +87,7 @@ try {
   }
   Write-Output "preview_pid=$($process.Id) pet_handle=$pet bubble_handle=$bubble"
 
-  Add-Type -AssemblyName System.Drawing
-  $screenWidth = [NiuMaReminderPreviewWindows]::GetSystemMetrics(0)
-  $screenHeight = [NiuMaReminderPreviewWindows]::GetSystemMetrics(1)
-  if ($screenWidth -le 0 -or $screenHeight -le 0) { throw 'The runner has no capturable display.' }
-  $bitmap = New-Object System.Drawing.Bitmap($screenWidth, $screenHeight)
-  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-  try {
-    $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size)
-    $bitmap.Save($ScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
-  } finally {
-    $graphics.Dispose()
-    $bitmap.Dispose()
-  }
+  Save-PreviewScreenshot $ScreenshotPath
 
   if ($pet -eq [IntPtr]::Zero -or $bubble -eq [IntPtr]::Zero -or
       -not [NiuMaReminderPreviewWindows]::IsWindowVisible($pet) -or
@@ -95,6 +106,23 @@ try {
     throw 'The isolated preview produced an empty window.'
   }
 
+  if ($DismissMode -eq 'Close') {
+    $closeButton = [NiuMaReminderPreviewWindows]::GetDlgItem($bubble, 4101)
+    if ($closeButton -eq [IntPtr]::Zero) { throw 'The reminder close button is missing.' }
+    [NiuMaReminderPreviewWindows]::SendMessage($closeButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+  }
+  $dismissDeadline = [DateTime]::UtcNow.AddSeconds($(if ($DismissMode -eq 'Auto') { 10 } else { 2 }))
+  while ([NiuMaReminderPreviewWindows]::IsWindowVisible($bubble) -and [DateTime]::UtcNow -lt $dismissDeadline) {
+    Start-Sleep -Milliseconds 100
+    $process.Refresh()
+    if ($process.HasExited) { throw 'The app exited before reminder dismissal could be verified.' }
+  }
+  if ([NiuMaReminderPreviewWindows]::IsWindowVisible($bubble)) { throw "Reminder did not dismiss in $DismissMode mode." }
+  $process.Refresh()
+  if ($process.HasExited) { throw 'The preview app must remain alive after the bubble closes.' }
+  if ($DismissMode -eq 'Auto' -and $previewClock.Elapsed.TotalSeconds -lt 7) { throw 'The reminder auto-dismissed too early.' }
+  Save-PreviewScreenshot ([IO.Path]::ChangeExtension($ScreenshotPath, '.dismissed.png'))
+
   if (-not $process.WaitForExit(20000)) { throw 'The preview app did not exit on its bounded acceptance timer.' }
   if ($process.ExitCode -ne 0) { throw "Preview process exited with code $($process.ExitCode)" }
   $statePath = Join-Path $acceptanceRoot 'data.ini'
@@ -103,7 +131,13 @@ try {
   if ($stateText -notmatch '(?m)^total=0\s*$') {
     throw 'The isolated UI preview changed the merit total.'
   }
-  Write-Output "WINDOWS_REMINDER_UI_PREVIEW_PASSED pet=$($petRect.Right - $petRect.Left)x$($petRect.Bottom - $petRect.Top) bubble=$($bubbleRect.Right - $bubbleRect.Left)x$($bubbleRect.Bottom - $bubbleRect.Top)"
+  $historyText = Get-Content -Raw -LiteralPath (Join-Path $acceptanceRoot 'Reminders\state.dat')
+  if ($historyText -notmatch '(?m)^daily\t[0-9]{4}-[0-9]{2}-[0-9]{2}\t1$' -or
+      $historyText -notmatch '(?m)^segment\t1$' -or
+      [regex]::Matches($historyText, '(?m)^id\t').Count -ne 1) {
+    throw 'Closing the reminder changed the reserved quota, segment lock, or ID history.'
+  }
+  Write-Output "WINDOWS_REMINDER_UI_PREVIEW_PASSED dismiss=$DismissMode quota=1 history=1 pet=$($petRect.Right - $petRect.Left)x$($petRect.Bottom - $petRect.Top) bubble=$($bubbleRect.Right - $bubbleRect.Left)x$($bubbleRect.Bottom - $bubbleRect.Top)"
 } finally {
   $process.Refresh()
   if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }

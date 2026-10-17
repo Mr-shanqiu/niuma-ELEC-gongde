@@ -59,14 +59,22 @@ jobs:
             -ExecutablePath "build-reminder-tests\Release\niuma-merit.exe" `
             -ScreenshotPath "build-reminder-tests\reminder-ui-preview.png"
 
+      - name: Close reminder bubble without refunding its quota
+        shell: powershell
+        run: |
+          & ./scripts/test-windows-reminder-ui-preview.ps1 `
+            -ExecutablePath "build-reminder-tests\Release\niuma-merit.exe" `
+            -ScreenshotPath "build-reminder-tests\reminder-ui-close-preview.png" `
+            -DismissMode Close
+
       - name: Retain isolated reminder UI screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-reminder-ui-preview
           path: |
-            build-reminder-tests/reminder-ui-preview.png
-            build-reminder-tests/reminder-ui-preview.txt
+            build-reminder-tests/reminder-ui-*.png
+            build-reminder-tests/reminder-ui-*.txt
           if-no-files-found: ignore
           retention-days: 7
 
