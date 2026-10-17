@@ -21,6 +21,16 @@ public static class NiuMaReminderPreviewWindows {
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
   public static extern IntPtr FindWindow(string className, string windowName);
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+  public static IntPtr FindProcessWindowByClass(string className, int expectedProcessId) {
+    // PowerShell can coerce $null to an empty string for a string parameter.
+    // Pass the title's null pointer inside C# so titled windows also match.
+    IntPtr window = FindWindow(className, null);
+    uint processId;
+    GetWindowThreadProcessId(window, out processId);
+    return processId == (uint)expectedProcessId ? window : IntPtr.Zero;
+  }
   [DllImport("user32.dll", SetLastError=true)]
   public static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll", SetLastError=true)]
@@ -40,8 +50,8 @@ try {
   while ([DateTime]::UtcNow -lt $deadline) {
     $process.Refresh()
     if ($process.HasExited) { throw "Preview process exited early with code $($process.ExitCode)" }
-    $pet = [NiuMaReminderPreviewWindows]::FindWindow('NiuMaMeritWindow', $null)
-    $bubble = [NiuMaReminderPreviewWindows]::FindWindow('NiuMaMeritReminder', $null)
+    $pet = [NiuMaReminderPreviewWindows]::FindProcessWindowByClass('NiuMaMeritWindow', $process.Id)
+    $bubble = [NiuMaReminderPreviewWindows]::FindProcessWindowByClass('NiuMaMeritReminder', $process.Id)
     if ($pet -ne [IntPtr]::Zero -and $bubble -ne [IntPtr]::Zero -and
         [NiuMaReminderPreviewWindows]::IsWindowVisible($pet) -and
         [NiuMaReminderPreviewWindows]::IsWindowVisible($bubble)) { break }
