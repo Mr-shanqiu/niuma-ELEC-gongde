@@ -1448,9 +1448,10 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
   GetLocalTime(&local);
   char date[16]{};
   std::snprintf(date, sizeof(date), "%04u-%02u-%02u", local.wYear, local.wMonth, local.wDay);
-  wchar_t geo[GEO_NAME_MAX_LENGTH]{};
+  constexpr int geoNameBufferLength = 4;  // Two-letter ISO code plus NUL; three-digit M.49 plus NUL.
+  wchar_t geo[geoNameBufferLength]{};
   char region[3] = "*";
-  if (GetUserDefaultGeoName(geo, GEO_NAME_MAX_LENGTH) == 3 &&
+  if (GetUserDefaultGeoName(geo, geoNameBufferLength) == 3 &&
       geo[0] >= L'A' && geo[0] <= L'Z' && geo[1] >= L'A' && geo[1] <= L'Z') {
     region[0] = static_cast<char>(geo[0]);
     region[1] = static_cast<char>(geo[1]);
