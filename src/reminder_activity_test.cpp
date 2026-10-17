@@ -301,7 +301,7 @@ static int RunWindowsReservationChild(int argc, wchar_t** argv) {
   wchar_t* end = nullptr;
   const long long now = _wcstoi64(argv[5], &end, 10);
   if (end == argv[5] || *end != L'\0') return 6;
-  ReminderStore store(std::filesystem::path(argv[2]));
+  ReminderStore store{std::filesystem::path(argv[2])};
   const auto result = store.TryReserve(id.c_str(), localDate.c_str(), false, now);
   return result == StoreResult::Success ? 0 :
       result == StoreResult::LimitReached ? 1 : 2;
