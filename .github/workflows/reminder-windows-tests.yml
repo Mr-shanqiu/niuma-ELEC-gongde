@@ -65,7 +65,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-reminder-ui-preview
-          path: build-reminder-tests/reminder-ui-preview.png
+          path: |
+            build-reminder-tests/reminder-ui-preview.png
+            build-reminder-tests/reminder-ui-preview.txt
           if-no-files-found: ignore
           retention-days: 7
 

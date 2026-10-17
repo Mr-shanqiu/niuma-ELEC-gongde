@@ -4,6 +4,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ExecutablePath = (Resolve-Path -LiteralPath $ExecutablePath).Path
+$ScreenshotPath = [IO.Path]::GetFullPath($ScreenshotPath)
+$diagnosticPath = [IO.Path]::ChangeExtension($ScreenshotPath, '.txt')
+$previousAcceptanceRoot = $env:NIUMA_ACCEPTANCE_ROOT
 
 $acceptanceRoot = Join-Path $env:TEMP ("NiuMaMerit-ReminderAcceptance-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $acceptanceRoot | Out-Null
@@ -32,7 +36,7 @@ $process = Start-Process -FilePath $ExecutablePath `
 try {
   $pet = [IntPtr]::Zero
   $bubble = [IntPtr]::Zero
-  $deadline = [DateTime]::UtcNow.AddSeconds(15)
+  $deadline = [DateTime]::UtcNow.AddSeconds(6)
   while ([DateTime]::UtcNow -lt $deadline) {
     $process.Refresh()
     if ($process.HasExited) { throw "Preview process exited early with code $($process.ExitCode)" }
@@ -43,6 +47,27 @@ try {
         [NiuMaReminderPreviewWindows]::IsWindowVisible($bubble)) { break }
     Start-Sleep -Milliseconds 200
   }
+  $statusPath = Join-Path $acceptanceRoot 'preview-status.txt'
+  if (Test-Path -LiteralPath $statusPath) {
+    Copy-Item -LiteralPath $statusPath -Destination $diagnosticPath
+    Get-Content -LiteralPath $diagnosticPath | Write-Output
+  }
+  Write-Output "preview_pid=$($process.Id) pet_handle=$pet bubble_handle=$bubble"
+
+  Add-Type -AssemblyName System.Drawing
+  $screenWidth = [NiuMaReminderPreviewWindows]::GetSystemMetrics(0)
+  $screenHeight = [NiuMaReminderPreviewWindows]::GetSystemMetrics(1)
+  if ($screenWidth -le 0 -or $screenHeight -le 0) { throw 'The runner has no capturable display.' }
+  $bitmap = New-Object System.Drawing.Bitmap($screenWidth, $screenHeight)
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size)
+    $bitmap.Save($ScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
+
   if ($pet -eq [IntPtr]::Zero -or $bubble -eq [IntPtr]::Zero -or
       -not [NiuMaReminderPreviewWindows]::IsWindowVisible($pet) -or
       -not [NiuMaReminderPreviewWindows]::IsWindowVisible($bubble)) {
@@ -60,20 +85,6 @@ try {
     throw 'The isolated preview produced an empty window.'
   }
 
-  Add-Type -AssemblyName System.Drawing
-  $screenWidth = [NiuMaReminderPreviewWindows]::GetSystemMetrics(0)
-  $screenHeight = [NiuMaReminderPreviewWindows]::GetSystemMetrics(1)
-  if ($screenWidth -le 0 -or $screenHeight -le 0) { throw 'The runner has no capturable display.' }
-  $bitmap = New-Object System.Drawing.Bitmap($screenWidth, $screenHeight)
-  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-  try {
-    $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size)
-    $bitmap.Save($ScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
-  } finally {
-    $graphics.Dispose()
-    $bitmap.Dispose()
-  }
-
   if (-not $process.WaitForExit(20000)) { throw 'The preview app did not exit on its bounded acceptance timer.' }
   if ($process.ExitCode -ne 0) { throw "Preview process exited with code $($process.ExitCode)" }
   $statePath = Join-Path $acceptanceRoot 'data.ini'
@@ -86,5 +97,6 @@ try {
 } finally {
   $process.Refresh()
   if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+  $env:NIUMA_ACCEPTANCE_ROOT = $previousAcceptanceRoot
   Remove-Item -Path $acceptanceRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

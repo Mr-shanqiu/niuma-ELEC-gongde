@@ -1515,9 +1515,15 @@ std::size_t ReminderRandomBelow(std::size_t upper) {
   return value % bound;
 }
 
-void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger) {
+void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger,
+                               const char** acceptanceStage = nullptr) {
+  const auto stage = [acceptanceStage](const char* value) {
+    if (acceptanceStage != nullptr) *acceptanceStage = value;
+  };
+  stage("store-or-existing-window");
   if (!gState.reminderStore || gReminderWindow != nullptr) return;
   const std::int64_t nowUtc = static_cast<std::int64_t>(std::time(nullptr));
+  stage("segment-save");
   if (gState.reminderStore->SetSegmentConsumed(true, nowUtc) !=
       niuma::reminder::StoreResult::Success) {
     gState.reminderStorageFault = true;
@@ -1548,6 +1554,7 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
   context.minute_of_day = local.wHour * 60 + local.wMinute;
   std::unordered_set<std::string> recentIds;
   bool warmUsedToday = false;
+  stage("selection-history");
   if (!gState.reminderStore->ReadSelectionHistory(date, nowUtc, &recentIds, &warmUsedToday)) {
     if (!gState.reminderClockGuard.guarded() &&
         !gState.reminderStore->ClockGuard(nowUtc, date))
@@ -1561,13 +1568,16 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
       catalogView);
   const auto* item = niuma::reminder::SelectItem(candidates, warmUsedToday,
       ReminderRandomBelow);
+  stage("no-eligible-copy");
   if (item == nullptr) return;
   const std::wstring text = ReminderWide(item->text);
+  stage("utf8-conversion");
   if (text.empty()) return;
 
   gReminderText = text;
   const int width = ScaleDip(340, gState.dpi);
   const int height = ReminderBubbleHeight(gReminderText);
+  stage("window-create");
   HWND popup = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
       kReminderClass, L"", WS_POPUP, 0, 0, width, height, gState.window, nullptr,
       GetModuleHandleW(nullptr), nullptr);
@@ -1575,11 +1585,13 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
     gReminderText.clear();
     return;
   }
+  stage("window-position");
   if (!PositionReminderWindow(popup)) {
     DestroyWindow(popup);
     gReminderText.clear();
     return;
   }
+  stage("reservation");
   const auto reserved = gState.reminderStore->TryReserve(item->id, date,
       std::strcmp(item->tone, "warm") == 0, nowUtc);
   if (reserved != niuma::reminder::StoreResult::Success) {
@@ -1596,6 +1608,7 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
   SetTimer(popup, kReminderDismissTimer, 8000, nullptr);
   ShowWindow(popup, SW_SHOWNOACTIVATE);
   InvalidateRect(popup, nullptr, TRUE);
+  stage("shown");
 }
 
 LRESULT CALLBACK KeyboardHook(
@@ -3805,7 +3818,19 @@ int WINAPI wWinMain(
   MSG message = {};
   if (IsMainWindowAlive(window)) {
     if (gReminderPreviewAcceptance) {
-      PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger::HighIntensity);
+      const char* previewStage = "not-started";
+      PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger::HighIntensity,
+          &previewStage);
+      const DWORD previewError = GetLastError();
+      const std::wstring reportPath = gAcceptanceRoot + L"\\preview-status.txt";
+      if (FILE* report = _wfopen(reportPath.c_str(), L"wb")) {
+        std::fprintf(report, "stage=%s\nwin32_error=%lu\npet_visible=%d\nbubble_visible=%d\nstorage_fault=%d\n",
+            previewStage, static_cast<unsigned long>(previewError),
+            IsWindowVisible(window) != FALSE,
+            gReminderWindow != nullptr && IsWindowVisible(gReminderWindow) != FALSE,
+            gState.reminderStorageFault);
+        std::fclose(report);
+      }
       SetTimer(window, kAcceptanceExitTimer, 12000, nullptr);
     }
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
