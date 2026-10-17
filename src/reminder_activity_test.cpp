@@ -182,6 +182,33 @@ static ActivitySampler::Trigger RunSingleSecondBurstLimiterBoundary() {
   return sampler.Evaluate(310'000, true);
 }
 
+// Cross-platform P-256/SHA-256 positive vector from an ephemeral OpenSSL key.
+// Only its public key and signature are retained; this is not a publishing key.
+static void TestCatalogP256KnownVector() {
+  std::vector<std::uint8_t> public_xy;
+  std::vector<std::uint8_t> signature;
+  assert(DecodeBase64("AOQaIt2kk5rilG++ZKnt478zIJZTm1TW6LbCwASrdI+d4WE1WpdVXdc9G0yofWL7WEnhdwDxEHDiJwpSQNcf5Q==", &public_xy));
+  assert(DecodeBase64("fnxmtQhTyJUuCaDbpgIzFoXuZkfwtxqcIDLgyHDFAxPGbHPGqENfdmLxFNZmX1dwFWBVLyLrVVRNYyCke7LWxw==", &signature));
+  const auto message = CatalogSignatureMessage("catalog signature fixture");
+  assert(VerifyCatalogP256(public_xy, message, signature));
+  auto changed_message = message;
+  changed_message.back() ^= 1;
+  assert(!VerifyCatalogP256(public_xy, changed_message, signature));
+  changed_message = message;
+  changed_message.front() ^= 1;
+  assert(!VerifyCatalogP256(public_xy, changed_message, signature));
+  auto changed_signature = signature;
+  changed_signature.front() ^= 1;
+  assert(!VerifyCatalogP256(public_xy, message, changed_signature));
+  auto changed_key = public_xy;
+  changed_key.front() ^= 1;
+  assert(!VerifyCatalogP256(changed_key, message, signature));
+  signature.pop_back();
+  assert(!VerifyCatalogP256(public_xy, message, signature));
+  public_xy.pop_back();
+  assert(!VerifyCatalogP256(public_xy, message, changed_signature));
+}
+
 #if defined(__APPLE__)
 static void TestCatalogP256() {
   int bits_value = 256;
@@ -491,6 +518,7 @@ int main() {
   assert(JsonParser(largeEnvelope).Parse(&parsedLargeEnvelope, &parseError, 4,
       2 * 1024 * 1024));
   assert(!VerifyCatalogP256({}, {}, {}));
+  TestCatalogP256KnownVector();
 #if defined(__APPLE__)
   TestCatalogP256();
 #endif
