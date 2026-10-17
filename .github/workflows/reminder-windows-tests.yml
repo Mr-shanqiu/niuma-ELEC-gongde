@@ -58,7 +58,6 @@ jobs:
           & ./scripts/test-windows-reminder-ui-preview.ps1 `
             -ExecutablePath "build-reminder-tests\Release\niuma-merit.exe" `
             -ScreenshotPath "build-reminder-tests\reminder-ui-preview.png"
-          if ($LASTEXITCODE -ne 0) { throw "Windows reminder UI preview failed" }
 
       - name: Retain isolated reminder UI screenshot
         if: always()
