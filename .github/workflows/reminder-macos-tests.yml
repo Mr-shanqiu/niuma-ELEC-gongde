@@ -1,0 +1,54 @@
+name: Reminder macOS Tests
+
+on:
+  pull_request:
+    paths:
+      - 'CMakeLists.txt'
+      - '.github/workflows/reminder-macos-tests.yml'
+      - '.github/workflows/reminder-windows-tests.yml'
+      - '.github/workflows/windows-build.yml'
+      - 'assets/reminders/**'
+      - 'scripts/audit-offline.sh'
+      - 'scripts/audit-macos-offline-binary.sh'
+      - 'scripts/build-reminder-catalog.py'
+      - 'src/reminder_*'
+      - 'src/offwork_clock.h'
+      - 'src/macos/**'
+      - 'src/windows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-reminder-core:
+    runs-on: macos-15
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure Release tests
+        shell: bash
+        run: cmake -S . -B build-reminder-tests -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build reminder tests
+        shell: bash
+        run: cmake --build build-reminder-tests --target niuma-reminder-activity-test --parallel 2
+
+      - name: Run reminder tests
+        shell: bash
+        run: ctest --test-dir build-reminder-tests --output-on-failure --no-tests=error
+
+      - name: Compile macOS client integration
+        shell: bash
+        run: cmake --build build-reminder-tests --target niuma-merit --parallel 2
+
+      - name: Audit macOS client network imports
+        shell: bash
+        run: ./scripts/audit-macos-offline-binary.sh build-reminder-tests/niuma-merit.app/Contents/MacOS/niuma-merit
+
+      - name: Verify offline input boundary
+        shell: bash
+        run: ./scripts/audit-offline.sh

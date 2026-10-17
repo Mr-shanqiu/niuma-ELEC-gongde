@@ -9,32 +9,48 @@
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <commdlg.h>
 #include <gdiplus.h>
 #include <objidl.h>
 #include <bcrypt.h>
 
 #include "appearance_pack.h"
 #include "app_version.h"
+#include "../offwork_clock.h"
+#include "../reminder_activity.h"
+#include "../reminder_geometry.h"
+#include "../reminder_policy.h"
+#include "../reminder_status.h"
+#include "../reminder_store.h"
+#include "../reminder_catalog_store.h"
+#include "../reminder_catalog_trust.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cwchar>
+#include <ctime>
+#include <cstdio>
 #include <limits>
+#include <map>
 #include <memory>
+#include <iterator>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "comdlg32.lib")
 
 namespace {
 
 constexpr wchar_t kWindowClass[] = L"NiuMaMeritWindow";
 constexpr wchar_t kPickerClass[] = L"NiuMaMeritAppearancePicker";
 constexpr wchar_t kCalendarClass[] = L"NiuMaMeritCalendar";
+constexpr wchar_t kReminderClass[] = L"NiuMaMeritReminder";
 constexpr wchar_t kMutexName[] = L"Local\\NiuMaMeritCounter";
 constexpr wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -44,6 +60,10 @@ constexpr UINT kScrollMessage = WM_APP + 2;
 constexpr ULONG_PTR kAppearancePackCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
 constexpr UINT_PTR kDayTimer = 2;
+constexpr UINT_PTR kOffworkTimer = 3;
+constexpr UINT_PTR kReminderTimer = 4;
+constexpr UINT_PTR kReminderDismissTimer = 5;
+constexpr UINT kOffworkSessionChange = 0x02B1;  // WM_WTSSESSION_CHANGE
 constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
 constexpr int kLuckyCatBaseResource = 104;
@@ -56,6 +76,7 @@ constexpr int kDesignWidth = 240;
 constexpr int kDesignHeight = 250;
 constexpr int kWindowDipWidth = 120;
 constexpr int kWindowDipHeight = 125;
+constexpr int kOffworkDipHeight = 44;
 constexpr ULONGLONG kScrollGestureGapMs = 180;
 constexpr ULONGLONG kTempoResetGapMs = 600;
 constexpr int kDefaultStrikeMs = 220;
@@ -74,6 +95,16 @@ constexpr UINT_PTR kMenuLaunchAtLogin = 2;
 constexpr UINT_PTR kMenuAppearance = 3;
 constexpr UINT_PTR kMenuCalendar = 4;
 constexpr UINT_PTR kMenuQuit = 5;
+constexpr UINT_PTR kMenuCountStatus = 6;
+constexpr UINT_PTR kMenuGuide = 7;
+constexpr UINT_PTR kMenuOffwork = 8;
+constexpr UINT_PTR kMenuReminderCatalog = 9;
+constexpr wchar_t kCountStatusClass[] = L"NiuMaMeritCountStatus";
+constexpr int kStatusText = 4001;
+constexpr int kStatusStart = 4002;
+constexpr int kStatusRetry = 4003;
+constexpr int kStatusClose = 4004;
+constexpr int kReminderClose = 4101;
 
 bool IsChineseUi() {
   return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;
@@ -130,11 +161,53 @@ struct AppState {
   int strikeDurationMs = kDefaultStrikeMs;
   bool dirty = false;
   bool timerRunning = false;
+  niuma::reminder::ActivitySampler reminderActivity;
+  niuma::reminder::WallClockGuard reminderClockGuard;
+  bool reminderStorageFault = false;
+  enum class ReminderPauseKind { None, Sleep, SessionLock } reminderPauseKind = ReminderPauseKind::None;
+  ULONGLONG reminderPauseTick = 0;
+  ULONGLONG reminderPauseAwake = 0;
+  bool reminderPauseAwakeValid = false;
+  std::unique_ptr<niuma::reminder::ReminderStore> reminderStore;
+  std::unique_ptr<niuma::reminder::CatalogUpdateStore> catalogStore;
+  std::shared_ptr<niuma::reminder::ValidatedCatalog> reminderCatalog;
+  bool reminderCatalogCommitUncertain = false;
   MeritScene selectedScene = MeritScene::Woodfish;
   std::string selectedPackId;
 };
 
 AppState gState;
+HWND gReminderWindow = nullptr;
+std::wstring gReminderText;
+ULONGLONG gReminderDismissAt = 0;
+
+// Ephemeral event counts and monotonic relative times only. Never inspect
+// hook payloads or foreground windows.
+struct CountingCheck {
+  HWND window = nullptr;
+  bool observedCount = false;
+  bool deliveryFault = false;
+  DWORD keyboardError = ERROR_SUCCESS;
+  DWORD mouseError = ERROR_SUCCESS;
+  bool active = false;
+  bool counting = false;
+  unsigned int generation = 0;
+  unsigned int listenerGeneration = 0;
+  ULONGLONG starts = 0;
+  ULONGLONG ends = 0;
+  ULONGLONG lastRelative = 0;
+  std::uint64_t keys = 0;
+  std::uint64_t clicks = 0;
+  std::uint64_t scrolls = 0;
+  std::uint64_t handled = 0;
+  std::uint64_t expected = 0;
+  std::uint64_t counted = 0;
+  std::wstring result;
+};
+
+CountingCheck gCountingCheck;
+std::vector<std::string> gNewlyImportedIds;
+std::vector<std::string> gLastImportedIds;
 PngResource gFish;
 PngResource gMallet;
 PngResource gLuckyCatBase;
@@ -161,6 +234,49 @@ struct CalendarState {
 };
 
 CalendarState gCalendar;
+
+// Separate from merit counts and their save/animation timer. A missing record
+// means "not recorded", never a claim that the user left work on time.
+struct OffworkDayRecord {
+  bool present = false;
+  bool dirty = false;
+  int seconds = 0;
+  int targetMinutes = 18 * 60;
+  std::time_t updatedAt = 0;
+};
+
+struct OffworkState {
+  bool enabled = false;
+  int hour = 18;
+  int minute = 0;
+  bool settingsDirty = false;
+  bool timerRunning = false;
+  bool suspended = false;
+  bool baselineValid = false;
+  bool awakeClockValid = false;
+  ULONGLONG lastTick = 0;
+  ULONGLONG lastAwake = 0;
+  ULONGLONG lastFlush = 0;
+  LONG zoneBias = 0;
+  niuma::OffworkSnapshot snapshot;
+  std::map<std::wstring, OffworkDayRecord> days;
+  HMODULE sessionLibrary = nullptr;
+  HWND dialog = nullptr;
+};
+
+OffworkState gOffwork;
+
+int MainWindowDipHeight() {
+  return kWindowDipHeight + (gOffwork.enabled ? kOffworkDipHeight : 0);
+}
+
+std::wstring OffworkWide(const std::string& value) {
+  return std::wstring(value.begin(), value.end());
+}
+
+std::wstring OffworkTimeText(int seconds) {
+  return OffworkWide(niuma::OffworkDuration(seconds));
+}
 
 void EnableBestDpiAwareness() {
   using SetContextFn = BOOL(WINAPI*)(HANDLE);
@@ -416,6 +532,288 @@ std::uint64_t ReadIniTotal() {
   return end == value ? 0 : static_cast<std::uint64_t>(result);
 }
 
+void LoadOffworkSettings() {
+  const std::wstring path = DataPath();
+  if (!path.empty()) {
+    gOffwork.enabled = GetPrivateProfileIntW(L"offwork", L"enabled", 0, path.c_str()) == 1;
+    const int hour = static_cast<int>(GetPrivateProfileIntW(L"offwork", L"hour", 18, path.c_str()));
+    const int minute = static_cast<int>(GetPrivateProfileIntW(L"offwork", L"minute", 0, path.c_str()));
+    gOffwork.hour = hour >= 0 && hour < 24 ? hour : 18;
+    gOffwork.minute = minute >= 0 && minute < 60 ? minute : 0;
+  }
+  gOffwork.lastFlush = GetTickCount64();
+}
+
+OffworkDayRecord& OffworkDay(const std::wstring& key) {
+  const auto found = gOffwork.days.find(key);
+  if (found != gOffwork.days.end()) return found->second;
+  OffworkDayRecord record;
+  const std::wstring path = DataPath();
+  if (!path.empty()) {
+    wchar_t value[128] = {};
+    GetPrivateProfileStringW(L"offwork_daily", key.c_str(), L"", value,
+        static_cast<DWORD>(std::size(value)), path.c_str());
+    long long updated = 0;
+    if (swscanf_s(value, L"%d,%d,%lld", &record.seconds,
+                  &record.targetMinutes, &updated) == 3 &&
+        record.seconds > 0 && record.seconds <= 172800 &&
+        record.targetMinutes >= 0 && record.targetMinutes < 1440 && updated > 0) {
+      record.present = true;
+      record.updatedAt = static_cast<std::time_t>(updated);
+    }
+  }
+  return gOffwork.days.emplace(key, record).first->second;
+}
+
+void UpdateOffworkDay(const niuma::OffworkSnapshot& snapshot, int seconds,
+                      std::time_t updatedAt) {
+  auto& record = OffworkDay(OffworkWide(snapshot.dayKey));
+  const bool present = seconds > 0;
+  if (record.present == present && (!present ||
+      (record.seconds == seconds && record.targetMinutes == snapshot.targetMinutes &&
+       record.updatedAt == updatedAt))) return;
+  record.present = present;
+  record.seconds = seconds;
+  record.targetMinutes = snapshot.targetMinutes;
+  record.updatedAt = updatedAt;
+  record.dirty = true;
+}
+
+bool FlushOffwork() {
+  const std::wstring path = DataPath();
+  if (path.empty()) return false;
+  bool success = true;
+  bool wrote = false;
+  if (gOffwork.settingsDirty) {
+    const bool enabledSaved = WritePrivateProfileStringW(L"offwork", L"enabled",
+        gOffwork.enabled ? L"1" : L"0", path.c_str()) != FALSE;
+    const bool hourSaved = WritePrivateProfileStringW(L"offwork", L"hour",
+        std::to_wstring(gOffwork.hour).c_str(), path.c_str()) != FALSE;
+    const bool minuteSaved = WritePrivateProfileStringW(L"offwork", L"minute",
+        std::to_wstring(gOffwork.minute).c_str(), path.c_str()) != FALSE;
+    success = enabledSaved && hourSaved && minuteSaved;
+    gOffwork.settingsDirty = !success;
+    wrote = true;
+  }
+  for (auto& entry : gOffwork.days) {
+    auto& record = entry.second;
+    if (!record.dirty) continue;
+    // Version-one daily value: elapsed seconds, target minute, actual sample time.
+    const std::wstring value = std::to_wstring(record.seconds) + L"," +
+        std::to_wstring(record.targetMinutes) + L"," +
+        std::to_wstring(static_cast<long long>(record.updatedAt));
+    const bool saved = WritePrivateProfileStringW(L"offwork_daily", entry.first.c_str(),
+        record.present ? value.c_str() : nullptr, path.c_str()) != FALSE;
+    record.dirty = !saved;
+    success = saved && success;
+    wrote = true;
+  }
+  if (wrote) {
+    // Cache invalidation can return zero even after successful profile writes.
+    // Only the individual writes above determine failure and retry state.
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+  }
+  // Failed storage is retried at the next interval or lifecycle event, not 1 Hz.
+  gOffwork.lastFlush = GetTickCount64();
+  return success;
+}
+
+bool OffworkAwakeTime(ULONGLONG& value) {
+  using QueryFn = BOOL(WINAPI*)(PULONGLONG);
+  static const auto query = reinterpret_cast<QueryFn>(
+      GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "QueryUnbiasedInterruptTime"));
+  return query && query(&value);
+}
+
+void PersistReminderUnlockIfNeeded(bool wasConsumed) {
+  if (!wasConsumed || gState.reminderActivity.segment_consumed()) return;
+  const auto result = gState.reminderStore
+      ? gState.reminderStore->SetSegmentConsumed(false,
+          static_cast<std::int64_t>(std::time(nullptr)))
+      : niuma::reminder::StoreResult::IoError;
+  if (result != niuma::reminder::StoreResult::Success) {
+    gState.reminderStorageFault = true;
+    gState.reminderActivity.RestoreSegmentConsumed(true);
+  } else {
+    gState.reminderStorageFault = false;
+  }
+}
+
+void BeginReminderPause(AppState::ReminderPauseKind kind) {
+  if (gState.reminderActivity.suspended()) return;
+  gState.reminderPauseKind = kind;
+  gState.reminderPauseTick = GetTickCount64();
+  gState.reminderPauseAwakeValid = OffworkAwakeTime(gState.reminderPauseAwake);
+  gState.reminderActivity.BeginSuspend(gState.reminderPauseTick);
+}
+
+void ResumeReminderPause(bool fromSystemSleep) {
+  const ULONGLONG now = GetTickCount64();
+  const bool paired = gState.reminderActivity.suspended() &&
+      gState.reminderPauseKind != AppState::ReminderPauseKind::None;
+  bool durationTrusted = false;
+  ULONGLONG inactiveDuration = 0;
+  if (paired && now >= gState.reminderPauseTick) {
+    const ULONGLONG elapsed = now - gState.reminderPauseTick;
+    if (gState.reminderPauseKind == AppState::ReminderPauseKind::SessionLock) {
+      durationTrusted = true;
+      inactiveDuration = elapsed;
+    } else if (fromSystemSleep && gState.reminderPauseKind == AppState::ReminderPauseKind::Sleep) {
+      ULONGLONG awakeNow = 0;
+      if (gState.reminderPauseAwakeValid && OffworkAwakeTime(awakeNow) &&
+          awakeNow >= gState.reminderPauseAwake) {
+        durationTrusted = niuma::reminder::EstimateSleepDurationMs(elapsed,
+            awakeNow - gState.reminderPauseAwake, true, &inactiveDuration);
+      }
+    }
+  }
+  const bool wasConsumed = gState.reminderActivity.segment_consumed();
+  gState.reminderActivity.ResumeFromSuspend(now, paired, durationTrusted,
+      inactiveDuration);
+  PersistReminderUnlockIfNeeded(wasConsumed);
+  gState.reminderPauseKind = AppState::ReminderPauseKind::None;
+  gState.reminderPauseTick = 0;
+  gState.reminderPauseAwake = 0;
+  gState.reminderPauseAwakeValid = false;
+}
+
+void InterruptReminderObservation() {
+  if (gState.reminderActivity.suspended()) return;
+  const bool wasConsumed = gState.reminderActivity.segment_consumed();
+  gState.reminderActivity.ResumeFromSuspend(GetTickCount64(), false, false, 0);
+  PersistReminderUnlockIfNeeded(wasConsumed);
+  gState.reminderPauseKind = AppState::ReminderPauseKind::None;
+  gState.reminderPauseTick = 0;
+  gState.reminderPauseAwake = 0;
+  gState.reminderPauseAwakeValid = false;
+}
+
+std::string CurrentReminderLocalDate() {
+  SYSTEMTIME local{};
+  GetLocalTime(&local);
+  char date[16]{};
+  std::snprintf(date, sizeof(date), "%04u-%02u-%02u",
+      local.wYear, local.wMonth, local.wDay);
+  return date;
+}
+
+void NotifyReminderClockChange() {
+  const auto nowUtc = static_cast<std::int64_t>(std::time(nullptr));
+  const ULONGLONG nowMs = GetTickCount64();
+  const auto transition = gState.reminderClockGuard.NotifyClockChange(nowUtc, nowMs);
+  if (transition == niuma::reminder::WallClockGuard::Transition::Guarded &&
+      gState.reminderStore) {
+    if (gState.reminderStore->SetClockGuard(true, nowUtc,
+            CurrentReminderLocalDate().c_str()) !=
+        niuma::reminder::StoreResult::Success) gState.reminderStorageFault = true;
+  }
+  gState.reminderActivity.ResetForListenerRestart();
+}
+
+void ApplyReminderClockTransition(niuma::reminder::WallClockGuard::Transition transition,
+                                  std::int64_t nowUtc) {
+  if (transition == niuma::reminder::WallClockGuard::Transition::Guarded) {
+    if (gState.reminderStore && gState.reminderStore->SetClockGuard(true, nowUtc,
+            CurrentReminderLocalDate().c_str()) !=
+        niuma::reminder::StoreResult::Success) {
+      gState.reminderStorageFault = true;
+    }
+    gState.reminderActivity.ResetForListenerRestart();
+  } else if (transition == niuma::reminder::WallClockGuard::Transition::Recovered) {
+    const auto result = gState.reminderStore
+        ? gState.reminderStore->SetClockGuard(false, nowUtc,
+            CurrentReminderLocalDate().c_str())
+        : niuma::reminder::StoreResult::Success;
+    if (result != niuma::reminder::StoreResult::Success) {
+      gState.reminderStorageFault = true;
+      gState.reminderClockGuard.RestoreGuard();
+    } else {
+      gState.reminderStorageFault = false;
+    }
+  }
+}
+
+void RefreshOffwork(bool allowMidnight = true, bool flush = false) {
+  if (!gOffwork.enabled || gOffwork.suspended) {
+    if (flush) FlushOffwork();
+    return;
+  }
+  // The display and record always share exactly one wall-clock sample.
+  const auto snapshot = niuma::EvaluateOffwork(std::time(nullptr), gOffwork.hour, gOffwork.minute);
+  const ULONGLONG tick = GetTickCount64();
+  ULONGLONG awake = 0;
+  const bool hasAwake = OffworkAwakeTime(awake);
+  TIME_ZONE_INFORMATION zone = {};
+  const DWORD zoneId = GetTimeZoneInformation(&zone);
+  const LONG bias = zone.Bias + (zoneId == TIME_ZONE_ID_DAYLIGHT ? zone.DaylightBias : zone.StandardBias);
+  if (!snapshot.valid) {
+    gOffwork.snapshot = snapshot;
+    gOffwork.baselineValid = false;
+    if (flush) FlushOffwork();
+    return;
+  }
+  const auto& previous = gOffwork.snapshot;
+  const bool changedDay = previous.valid && previous.dayKey != snapshot.dayKey;
+  if (changedDay) {
+    const ULONGLONG elapsed = tick - gOffwork.lastTick;
+    const double wallSeconds = std::difftime(snapshot.sampledAt, previous.sampledAt);
+    const bool continuouslyAwake = hasAwake && gOffwork.awakeClockValid
+        ? awake >= gOffwork.lastAwake &&
+          std::fabs(static_cast<double>(awake - gOffwork.lastAwake) / 10000.0 -
+                    static_cast<double>(elapsed)) < 1000.0
+        : elapsed <= 5000;
+    // No yesterday/missing-day synthesis after sleep, restart, timezone or clock
+    // changes. Only an observed continuous transition gets the 23:59:59 value.
+    if (allowMidnight && gOffwork.baselineValid && continuouslyAwake &&
+        bias == gOffwork.zoneBias && wallSeconds >= 0 &&
+        std::fabs(wallSeconds - static_cast<double>(elapsed) / 1000.0) < 2.0 &&
+        snapshot.sampledAt >= previous.nextMidnightAt &&
+        niuma::EvaluateOffwork(previous.nextMidnightAt, gOffwork.hour, gOffwork.minute).dayKey == snapshot.dayKey) {
+      UpdateOffworkDay(previous, niuma::OffworkFinalDaySeconds(previous), previous.nextMidnightAt - 1);
+    }
+    FlushOffwork();
+  }
+  gOffwork.snapshot = snapshot;
+  gOffwork.lastTick = tick;
+  gOffwork.lastAwake = awake;
+  gOffwork.awakeClockValid = hasAwake;
+  gOffwork.zoneBias = bias;
+  gOffwork.baselineValid = true;
+  UpdateOffworkDay(snapshot, snapshot.overtimeSeconds, snapshot.sampledAt);
+  if (flush || changedDay || tick - gOffwork.lastFlush >= 60000) FlushOffwork();
+  if (gCalendar.window) InvalidateRect(gCalendar.window, nullptr, FALSE);
+}
+
+bool SyncOffworkTimer() {
+  const bool run = gOffwork.enabled && !gOffwork.suspended;
+  if (!run && gOffwork.timerRunning) {
+    KillTimer(gState.window, kOffworkTimer);
+    gOffwork.timerRunning = false;
+  } else if (run && !gOffwork.timerRunning && gState.window) {
+    gOffwork.timerRunning = SetTimer(gState.window, kOffworkTimer, 1000, nullptr) != 0;
+  }
+  return !run || gOffwork.timerRunning;
+}
+
+void RegisterOffworkSessionNotifications(HWND window) {
+  gOffwork.sessionLibrary = LoadLibraryW(L"wtsapi32.dll");
+  if (!gOffwork.sessionLibrary) return;
+  using RegisterFn = BOOL(WINAPI*)(HWND, DWORD);
+  const auto registerSession = reinterpret_cast<RegisterFn>(
+      GetProcAddress(gOffwork.sessionLibrary, "WTSRegisterSessionNotification"));
+  if (registerSession) registerSession(window, 0);  // This session only.
+}
+
+void UnregisterOffworkSessionNotifications(HWND window) {
+  if (!gOffwork.sessionLibrary) return;
+  using UnregisterFn = BOOL(WINAPI*)(HWND);
+  const auto unregisterSession = reinterpret_cast<UnregisterFn>(
+      GetProcAddress(gOffwork.sessionLibrary, "WTSUnRegisterSessionNotification"));
+  if (unregisterSession) unregisterSession(window);
+  FreeLibrary(gOffwork.sessionLibrary);
+  gOffwork.sessionLibrary = nullptr;
+}
+
 void SaveState() {
   const std::wstring path = DataPath();
   if (path.empty() || gState.window == nullptr) {
@@ -540,6 +938,27 @@ void DrawCenteredText(Gdiplus::Graphics& graphics,
       text.c_str(), -1, &font, rect, &format, &brush);
 }
 
+void DrawWidgetText(Gdiplus::Graphics& graphics,
+                    const std::wstring& text,
+                    const Gdiplus::RectF& rect,
+                    float fontSize,
+                    const Gdiplus::Color& color,
+                    Gdiplus::FontStyle style = Gdiplus::FontStyleRegular) {
+  Gdiplus::FontFamily family(L"Microsoft YaHei UI");
+  Gdiplus::StringFormat format;
+  format.SetAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+  Gdiplus::GraphicsPath glyphs;
+  glyphs.AddString(text.c_str(), -1, &family, style, fontSize, rect, &format);
+  // Outline glyphs only; the surrounding layered surface stays transparent.
+  Gdiplus::Pen outline(Gdiplus::Color(190, 24, 24, 24), 1.5f);
+  outline.SetLineJoin(Gdiplus::LineJoinRound);
+  graphics.DrawPath(&outline, &glyphs);
+  Gdiplus::SolidBrush fill(color);
+  graphics.FillPath(&fill, &glyphs);
+}
+
 void DrawSceneArtwork(
     Gdiplus::Graphics& graphics, MeritScene scene, float strikeAmount) {
   using Gdiplus::GraphicsState;
@@ -647,11 +1066,11 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
   }
 
   const std::wstring totalText = std::to_wstring(gState.todayTotal);
-  float totalFont = totalText.size() > 24 ? 20.0f :
-                    totalText.size() > 18 ? 24.0f : 30.0f;
-  DrawCenteredText(graphics, totalText,
-                   Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), totalFont, 255,
-                   L"Consolas");
+  float totalFont = totalText.size() > 24 ? 18.0f :
+                    totalText.size() > 18 ? 22.0f : 26.0f;
+  DrawWidgetText(graphics, totalText,
+                 Gdiplus::RectF(0.0f, 0.0f, 240.0f, 40.0f), totalFont,
+                 Gdiplus::Color(255, 240, 139, 35));
 }
 
 void RenderLayeredWindow(ULONGLONG now) {
@@ -699,6 +1118,27 @@ void RenderLayeredWindow(ULONGLONG now) {
         static_cast<float>(kDesignWidth);
     graphics.ScaleTransform(scale, scale);
     DrawScene(graphics, now);
+    if (gOffwork.enabled) {
+      // Match the merit text without painting a panel over the desktop.
+      const auto& snapshot = gOffwork.snapshot;
+      const wchar_t* label = !snapshot.valid ? UiText(L"时间不可用", L"Time unavailable") :
+          snapshot.overtime ? UiText(L"已加班", L"Overtime") : UiText(L"距下班", L"Until off work");
+      const std::wstring duration = snapshot.valid ? OffworkTimeText(snapshot.overtime
+          ? snapshot.overtimeSeconds : snapshot.remainingSeconds) : L"--:--:--";
+      DrawWidgetText(graphics, label, Gdiplus::RectF(12, 258, 216, 28),
+                     20.0f, Gdiplus::Color(255, 248, 244, 235),
+                     Gdiplus::FontStyleRegular);
+      // Fixed character cells keep every digit in place without a second font.
+      const float cellWidth = 17.0f;
+      const float durationLeft =
+          (240.0f - cellWidth * static_cast<float>(duration.size())) / 2.0f;
+      for (size_t index = 0; index < duration.size(); ++index) {
+        DrawWidgetText(graphics, std::wstring(1, duration[index]),
+            Gdiplus::RectF(durationLeft + cellWidth * static_cast<float>(index),
+                          286, cellWidth, 42),
+            24.0f, Gdiplus::Color(255, 240, 139, 35));
+      }
+    }
   }
 
   RECT rect = {};
@@ -729,6 +1169,7 @@ void CountOneOperation() {
   if (EnsureCurrentDay()) {
     RenderLayeredWindow(GetTickCount64());
   }
+  if (gCountingCheck.counting) ++gCountingCheck.expected;
   if (gState.total == std::numeric_limits<std::uint64_t>::max()) {
     return;
   }
@@ -751,6 +1192,7 @@ void CountOneOperation() {
 
   gState.lastInputTime = now;
   ++gState.total;
+  if (gCountingCheck.counting) ++gCountingCheck.counted;
   if (gState.todayTotal < std::numeric_limits<std::uint64_t>::max()) {
     ++gState.todayTotal;
   }
@@ -783,37 +1225,571 @@ void CountScrollGesture() {
   }
 }
 
+void QueueGlobalInput(UINT message, unsigned int kind) {
+  const ULONGLONG now = GetTickCount64();
+  const bool observing = gCountingCheck.active &&
+      now >= gCountingCheck.starts && now < gCountingCheck.ends;
+  if (observing) {
+    if (kind == 1) ++gCountingCheck.keys;
+    else if (kind == 2) ++gCountingCheck.clicks;
+    else ++gCountingCheck.scrolls;
+    gCountingCheck.lastRelative = now - gCountingCheck.starts;
+  }
+  if (!PostMessageW(gState.window, message, gCountingCheck.listenerGeneration,
+          observing ? static_cast<LPARAM>(gCountingCheck.generation) : 0)) {
+    gCountingCheck.deliveryFault = true;
+  }
+}
+
+void SampleReminderInput(niuma::reminder::ActivitySampler::Event event) {
+  gState.reminderActivity.Observe(event, GetTickCount64());
+}
+
+std::wstring ReminderWide(const char* text) {
+  if (text == nullptr || *text == '\0') return {};
+  const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1,
+      nullptr, 0);
+  if (length <= 1) return {};
+  std::wstring result(static_cast<std::size_t>(length), L'\0');
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1,
+          result.data(), length) != length) return {};
+  result.resize(static_cast<std::size_t>(length - 1));
+  return result;
+}
+
+int ReminderBubbleHeight(const std::wstring& text) {
+  const int dpi = static_cast<int>(gState.dpi);
+  const int width = ScaleDip(340, gState.dpi) - 2 * ScaleDip(12, gState.dpi);
+  HFONT font = CreateFontW(-MulDiv(14, dpi, 96), 0, 0, 0, FW_MEDIUM,
+      FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+      CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+  HDC dc = GetDC(nullptr);
+  RECT measured{0, 0, width, 0};
+  int textHeight = ScaleDip(80, gState.dpi);
+  if (dc != nullptr) {
+    HGDIOBJ previous = font ? SelectObject(dc, font) : nullptr;
+    if (DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &measured,
+            DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX) != 0) {
+      textHeight = measured.bottom - measured.top;
+    }
+    if (font) SelectObject(dc, previous);
+    ReleaseDC(nullptr, dc);
+  }
+  if (font) DeleteObject(font);
+  return ScaleDip(12 + 24 + 4 + 12, gState.dpi) + textHeight;
+}
+
+bool PositionReminderWindow(HWND popup) {
+  if (popup == nullptr || gState.window == nullptr) return false;
+  RECT work{};
+  MONITORINFO monitor{};
+  monitor.cbSize = sizeof(monitor);
+  const HMONITOR screen = MonitorFromWindow(gState.window, MONITOR_DEFAULTTONEAREST);
+  if (GetMonitorInfoW(screen, &monitor)) work = monitor.rcWork;
+  else if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) return false;
+  const int width = ScaleDip(340, gState.dpi);
+  const int height = ReminderBubbleHeight(gReminderText);
+  const int margin = ScaleDip(18, gState.dpi);
+  RECT widget{};
+  if (!GetWindowRect(gState.window, &widget)) return false;
+  const auto placement = niuma::reminder::PlaceBubble(
+      {static_cast<double>(widget.left), static_cast<double>(widget.top),
+          static_cast<double>(widget.right - widget.left),
+          static_cast<double>(widget.bottom - widget.top)},
+      {static_cast<double>(work.left), static_cast<double>(work.top),
+          static_cast<double>(work.right - work.left),
+          static_cast<double>(work.bottom - work.top)},
+      width, height, margin, niuma::reminder::VerticalAxis::Down);
+  return SetWindowPos(popup, HWND_TOPMOST, static_cast<int>(placement.x),
+      static_cast<int>(placement.y), width, height,
+      SWP_NOACTIVATE) != FALSE;
+}
+
+LRESULT CALLBACK ReminderWindowProcedure(HWND window, UINT message,
+                                         WPARAM wParam, LPARAM lParam) {
+  switch (message) {
+    case WM_CREATE: {
+      HWND label = CreateWindowExW(WS_EX_TRANSPARENT, L"STATIC", gReminderText.c_str(),
+          WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX | SS_EDITCONTROL,
+          ScaleDip(12, gState.dpi), ScaleDip(40, gState.dpi), ScaleDip(316, gState.dpi),
+          ScaleDip(80, gState.dpi), window, reinterpret_cast<HMENU>(kReminderClose + 1),
+          GetModuleHandleW(nullptr), nullptr);
+      HWND close = CreateWindowExW(WS_EX_NOACTIVATE, L"BUTTON",
+          UiText(L"关闭", L"Close"), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+          0, 0, ScaleDip(54, gState.dpi), ScaleDip(24, gState.dpi), window,
+          reinterpret_cast<HMENU>(kReminderClose), GetModuleHandleW(nullptr), nullptr);
+      if (label == nullptr || close == nullptr) return -1;
+      HFONT font = CreateFontW(-MulDiv(14, static_cast<int>(gState.dpi), 96), 0, 0, 0,
+          FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+          CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+      if (font != nullptr) {
+        SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+        SendMessageW(close, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+        SetPropW(window, L"NiuMaReminderFont", font);
+      }
+      return 0;
+    }
+    case WM_SIZE: {
+      RECT bounds{};
+      GetClientRect(window, &bounds);
+      const int margin = ScaleDip(12, gState.dpi);
+      const int closeWidth = ScaleDip(54, gState.dpi);
+      const int closeHeight = ScaleDip(24, gState.dpi);
+      const int textTop = margin + closeHeight + ScaleDip(4, gState.dpi);
+      HWND label = GetDlgItem(window, kReminderClose + 1);
+      HWND close = GetDlgItem(window, kReminderClose);
+      if (label != nullptr) MoveWindow(label, margin, textTop,
+          bounds.right - margin * 2, bounds.bottom - textTop - margin, TRUE);
+      if (close != nullptr) MoveWindow(close, bounds.right - closeWidth - margin,
+          margin, closeWidth, closeHeight, TRUE);
+      return 0;
+    }
+    case WM_DPICHANGED: {
+      const UINT dpi = HIWORD(wParam);
+      if (dpi != 0) gState.dpi = dpi;
+      const HFONT font = CreateFontW(-MulDiv(14, static_cast<int>(gState.dpi), 96),
+          0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+          OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+          DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+      HWND label = GetDlgItem(window, kReminderClose + 1);
+      HWND close = GetDlgItem(window, kReminderClose);
+      if (font != nullptr) {
+        if (label != nullptr) SendMessageW(label, WM_SETFONT,
+            reinterpret_cast<WPARAM>(font), TRUE);
+        if (close != nullptr) SendMessageW(close, WM_SETFONT,
+            reinterpret_cast<WPARAM>(font), TRUE);
+        if (HFONT oldFont = reinterpret_cast<HFONT>(
+                RemovePropW(window, L"NiuMaReminderFont")))
+          DeleteObject(oldFont);
+        SetPropW(window, L"NiuMaReminderFont", font);
+      }
+      return 0;
+    }
+    case WM_NCHITTEST:
+      return HTCLIENT;
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_CTLCOLORSTATIC: {
+      HDC dc = reinterpret_cast<HDC>(wParam);
+      SetBkMode(dc, TRANSPARENT);
+      SetTextColor(dc, RGB(58, 48, 35));
+      return reinterpret_cast<LRESULT>(GetStockObject(NULL_BRUSH));
+    }
+    case WM_PAINT: {
+      PAINTSTRUCT paint{};
+      HDC dc = BeginPaint(window, &paint);
+      RECT bounds{};
+      GetClientRect(window, &bounds);
+      HBRUSH background = CreateSolidBrush(RGB(255, 250, 230));
+      FillRect(dc, &bounds, background);
+      DeleteObject(background);
+      HPEN border = CreatePen(PS_SOLID, 1, RGB(214, 196, 155));
+      HGDIOBJ oldPen = SelectObject(dc, border);
+      HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+      RoundRect(dc, 0, 0, bounds.right, bounds.bottom, 14, 14);
+      SelectObject(dc, oldBrush);
+      SelectObject(dc, oldPen);
+      DeleteObject(border);
+      SetBkMode(dc, TRANSPARENT);
+      SetTextColor(dc, RGB(58, 48, 35));
+      HFONT font = CreateFontW(-MulDiv(14, static_cast<int>(gState.dpi), 96), 0, 0, 0,
+          FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+          CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+      HGDIOBJ oldFont = SelectObject(dc, font);
+      SelectObject(dc, oldFont);
+      DeleteObject(font);
+      EndPaint(window, &paint);
+      return 0;
+    }
+    case WM_COMMAND:
+      if (LOWORD(wParam) == kReminderClose) DestroyWindow(window);
+      return 0;
+    case WM_TIMER:
+      if (wParam == kReminderDismissTimer) {
+        KillTimer(window, kReminderDismissTimer);
+        DestroyWindow(window);
+        return 0;
+      }
+      break;
+    case WM_DESTROY:
+      if (gReminderWindow == window) {
+        gReminderWindow = nullptr;
+        gReminderText.clear();
+        gReminderDismissAt = 0;
+      }
+      if (HFONT font = reinterpret_cast<HFONT>(RemovePropW(window, L"NiuMaReminderFont")))
+        DeleteObject(font);
+      return 0;
+  }
+  return DefWindowProcW(window, message, wParam, lParam);
+}
+
+std::size_t ReminderRandomBelow(std::size_t upper) {
+  if (upper <= 1) return 0;
+  std::uint32_t value = 0;
+  const std::uint32_t bound = static_cast<std::uint32_t>(upper);
+  const std::uint32_t threshold = static_cast<std::uint32_t>(-bound) % bound;
+  do {
+    if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&value), sizeof(value),
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return 0;
+  } while (value < threshold);
+  return value % bound;
+}
+
+void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger) {
+  if (!gState.reminderStore || gReminderWindow != nullptr) return;
+  const std::int64_t nowUtc = static_cast<std::int64_t>(std::time(nullptr));
+  if (gState.reminderStore->SetSegmentConsumed(true, nowUtc) !=
+      niuma::reminder::StoreResult::Success) {
+    gState.reminderStorageFault = true;
+    return;
+  }
+  SYSTEMTIME local{};
+  GetLocalTime(&local);
+  char date[16]{};
+  std::snprintf(date, sizeof(date), "%04u-%02u-%02u", local.wYear, local.wMonth, local.wDay);
+  wchar_t geo[GEO_NAME_MAX_LENGTH]{};
+  char region[3] = "*";
+  if (GetUserDefaultGeoName(geo, GEO_NAME_MAX_LENGTH) == 3 &&
+      geo[0] >= L'A' && geo[0] <= L'Z' && geo[1] >= L'A' && geo[1] <= L'Z') {
+    region[0] = static_cast<char>(geo[0]);
+    region[1] = static_cast<char>(geo[1]);
+  }
+  niuma::reminder::SelectionContext context;
+  context.locale = IsChineseUi() ? niuma::reminder::Locale::Chinese : niuma::reminder::Locale::English;
+  context.region = region;
+  context.trigger = trigger == niuma::reminder::ActivitySampler::Trigger::HighIntensity ? 2U : 1U;
+  context.overtime = gOffwork.enabled && !gOffwork.suspended && gOffwork.snapshot.valid
+      ? (gOffwork.snapshot.overtime ? niuma::reminder::Overtime::Yes : niuma::reminder::Overtime::No)
+      : niuma::reminder::Overtime::Unknown;
+  context.year = local.wYear;
+  context.month = local.wMonth;
+  context.day = local.wDay;
+  context.minute_of_day = local.wHour * 60 + local.wMinute;
+  std::unordered_set<std::string> recentIds;
+  bool warmUsedToday = false;
+  if (!gState.reminderStore->ReadSelectionHistory(date, nowUtc, &recentIds, &warmUsedToday)) {
+    if (!gState.reminderClockGuard.guarded() &&
+        !gState.reminderStore->ClockGuard(nowUtc, date))
+      gState.reminderStorageFault = true;
+    return;
+  }
+  const niuma::reminder::CatalogView catalogView = gState.reminderCatalog
+      ? gState.reminderCatalog->view() : niuma::reminder::kBuiltinCatalogView;
+  const auto candidates = niuma::reminder::EligibleItems(context,
+      [&recentIds](const char* id) { return recentIds.find(id) != recentIds.end(); },
+      catalogView);
+  const auto* item = niuma::reminder::SelectItem(candidates, warmUsedToday,
+      ReminderRandomBelow);
+  if (item == nullptr) return;
+  const std::wstring text = ReminderWide(item->text);
+  if (text.empty()) return;
+
+  gReminderText = text;
+  const int width = ScaleDip(340, gState.dpi);
+  const int height = ReminderBubbleHeight(gReminderText);
+  HWND popup = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      kReminderClass, L"", WS_POPUP, 0, 0, width, height, gState.window, nullptr,
+      GetModuleHandleW(nullptr), nullptr);
+  if (popup == nullptr) {
+    gReminderText.clear();
+    return;
+  }
+  if (!PositionReminderWindow(popup)) {
+    DestroyWindow(popup);
+    gReminderText.clear();
+    return;
+  }
+  const auto reserved = gState.reminderStore->TryReserve(item->id, date,
+      std::strcmp(item->tone, "warm") == 0, nowUtc);
+  if (reserved != niuma::reminder::StoreResult::Success) {
+    if (reserved == niuma::reminder::StoreResult::IoError ||
+        reserved == niuma::reminder::StoreResult::InvalidState)
+      gState.reminderStorageFault = true;
+    DestroyWindow(popup);
+    gReminderText.clear();
+    return;
+  }
+  gState.reminderStorageFault = false;
+  gReminderWindow = popup;
+  gReminderDismissAt = GetTickCount64() + 8000;
+  SetTimer(popup, kReminderDismissTimer, 8000, nullptr);
+  ShowWindow(popup, SW_SHOWNOACTIVATE);
+  InvalidateRect(popup, nullptr, TRUE);
+}
+
 LRESULT CALLBACK KeyboardHook(
     int code, WPARAM message, LPARAM data) {
-  (void)data;
-  if (code == HC_ACTION &&
-      (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) &&
-      gState.window != nullptr) {
-    PostMessageW(gState.window, kCountMessage, 0, 0);
+  if (code == HC_ACTION && gState.window != nullptr) {
+    const auto* event = reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
+    const bool reminderInputAllowed = event != nullptr &&
+        (event->flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) == 0;
+    if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
+      if (reminderInputAllowed)
+        SampleReminderInput(niuma::reminder::ActivitySampler::Event::KeyDown);
+      QueueGlobalInput(kCountMessage, 1);
+    } else if (message == WM_KEYUP || message == WM_SYSKEYUP) {
+      if (reminderInputAllowed)
+        SampleReminderInput(niuma::reminder::ActivitySampler::Event::KeyUp);
+    }
   }
   return CallNextHookEx(gState.keyboardHook, code, message, data);
 }
 
 LRESULT CALLBACK MouseHook(
     int code, WPARAM message, LPARAM data) {
-  (void)data;
+  bool reminderInputAllowed = false;
+  if (code == HC_ACTION && data != 0) {
+    const auto* event = reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
+    reminderInputAllowed =
+        (event->flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED)) == 0;
+  }
   if (code == HC_ACTION && gState.window != nullptr) {
     switch (message) {
       case WM_LBUTTONDOWN:
       case WM_RBUTTONDOWN:
       case WM_MBUTTONDOWN:
       case WM_XBUTTONDOWN:
-        PostMessageW(gState.window, kCountMessage, 0, 0);
+        if (reminderInputAllowed)
+          SampleReminderInput(niuma::reminder::ActivitySampler::Event::Click);
+        QueueGlobalInput(kCountMessage, 2);
         break;
       case WM_MOUSEWHEEL:
       case WM_MOUSEHWHEEL:
-        PostMessageW(gState.window, kScrollMessage, 0, 0);
+        if (reminderInputAllowed)
+          SampleReminderInput(niuma::reminder::ActivitySampler::Event::ScrollPulse);
+        QueueGlobalInput(kScrollMessage, 3);
         break;
       default:
         break;
     }
   }
   return CallNextHookEx(gState.mouseHook, code, message, data);
+}
+
+void CountGlobalDelivery(bool scroll, LPARAM generation, WPARAM listenerGeneration) {
+  const std::uint64_t before = gState.total;
+  gCountingCheck.counting = generation != 0 &&
+      static_cast<unsigned int>(generation) == gCountingCheck.generation;
+  if (gCountingCheck.counting) ++gCountingCheck.handled;
+  if (scroll) CountScrollGesture();
+  else CountOneOperation();
+  gCountingCheck.counting = false;
+  if (gState.total > before && listenerGeneration == gCountingCheck.listenerGeneration)
+    gCountingCheck.observedCount = true;
+}
+
+void RestartGlobalListeners() {
+  ++gCountingCheck.listenerGeneration;
+  if (gState.keyboardHook != nullptr) UnhookWindowsHookEx(gState.keyboardHook);
+  if (gState.mouseHook != nullptr) UnhookWindowsHookEx(gState.mouseHook);
+  gState.reminderActivity.ResetForListenerRestart();
+  gCountingCheck.observedCount = false;
+  gCountingCheck.deliveryFault = false;
+  HINSTANCE instance = GetModuleHandleW(nullptr);
+  gState.keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
+  gCountingCheck.keyboardError = gState.keyboardHook ? ERROR_SUCCESS : GetLastError();
+  gState.mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
+  gCountingCheck.mouseError = gState.mouseHook ? ERROR_SUCCESS : GetLastError();
+}
+
+std::wstring CountingStatusTitle() {
+  if (!gState.keyboardHook && !gState.mouseHook)
+    return UiText(L"仅点击小伙伴计数", L"Pet-click Counting Only");
+  if (!gState.keyboardHook || !gState.mouseHook)
+    return UiText(L"待检查：部分监听未建立", L"Check Needed: Partial Listener");
+  if (gCountingCheck.deliveryFault)
+    return UiText(L"待检查：监听与计数结果不一致", L"Check Needed: Counting Mismatch");
+  if (!gCountingCheck.observedCount)
+    return UiText(L"待检查：监听已建立，尚未观察到计数",
+                  L"Check Pending: Listener Ready, No Count Observed");
+  return UiText(L"全局监听已收到事件并计数", L"Global Events Received and Counted");
+}
+
+void RefreshCountingStatus() {
+  if (!gCountingCheck.window) return;
+  const ULONGLONG now = GetTickCount64();
+  const std::uint64_t events =
+      gCountingCheck.keys + gCountingCheck.clicks + gCountingCheck.scrolls;
+  if (gCountingCheck.active && now >= gCountingCheck.ends) {
+    gCountingCheck.active = false;
+    if (events == 0) {
+      gCountingCheck.observedCount = false;
+      gCountingCheck.result = UiText(
+          L"未观察到输入，不能判断失败。若确实在其他应用操作过，请重试监听后再测；否则可直接重新自检。",
+          L"No input observed; this is not a failure verdict. If you used another app, retry the listener and check again; otherwise repeat the check.");
+    } else if (gCountingCheck.handled != events ||
+               gCountingCheck.expected != gCountingCheck.counted) {
+      gCountingCheck.deliveryFault = true;
+      gCountingCheck.result = UiText(
+          L"收到事件，但计数未完全更新。请重试监听；总数已达上限时也不会继续增加。",
+          L"Events arrived but counts did not fully update. Retry the listener; counts also stop at the numeric limit.");
+    } else if (gCountingCheck.expected == 0) {
+      gCountingCheck.result = UiText(
+          L"只观察到同一段连续滚动，未开始新手势；停一下再试，不判失败。",
+          L"Only an existing scroll gesture was observed. Pause and retry; no failure inferred.");
+    } else {
+      gCountingCheck.deliveryFault = false;
+      gCountingCheck.result = UiText(
+          L"本次观察到的输入已计数。未发生的输入类型未判断；请自行确认刚才已切到其他应用。",
+          L"Observed inputs were counted. Unused input types are not assessed; please confirm you switched to another app.");
+    }
+  }
+  std::wstring progress = gCountingCheck.result.empty()
+      ? UiText(L"尚未开始自检。", L"No check started.") : gCountingCheck.result;
+  if (gCountingCheck.active) {
+    if (now < gCountingCheck.starts) {
+      progress = UiText(L"准备中：请切换到其他应用。2 秒后开始记录。",
+                        L"Get ready: switch to another app. Recording starts after 2 seconds.");
+    } else {
+      progress = UiText(L"记录中，剩余秒数：", L"Recording; seconds left: ") +
+          std::to_wstring((gCountingCheck.ends - now + 999) / 1000);
+    }
+  }
+  std::wstring text = CountingStatusTitle();
+  text += UiText(
+      L"\r\n\r\n点击开始后切到其他应用，按几次键、点击或滚动；10 秒后回来。程序不读取当前应用，请自行确认已切换。\r\n\r\n",
+      L"\r\n\r\nStart, switch to another app, type, click or scroll, then return after 10 seconds. The app does not inspect the active app; please confirm you switched.\r\n\r\n");
+  text += progress;
+  text += UiText(L"\r\n\r\n收到按键事件：", L"\r\n\r\nKey events received: ") + std::to_wstring(gCountingCheck.keys);
+  text += UiText(L"\r\n鼠标按键：", L"\r\nMouse clicks: ") + std::to_wstring(gCountingCheck.clicks);
+  text += UiText(L"\r\n滚动事件：", L"\r\nScroll events: ") + std::to_wstring(gCountingCheck.scrolls);
+  text += UiText(L"\r\n按规则应增加：", L"\r\nExpected count increase: ") + std::to_wstring(gCountingCheck.expected);
+  text += UiText(L"；实际增加：", L"; actual increase: ") + std::to_wstring(gCountingCheck.counted);
+  text += UiText(L"\r\n最后事件距开始的毫秒数：", L"\r\nLast event, milliseconds after start: ") +
+      std::to_wstring(gCountingCheck.lastRelative);
+  text += UiText(L"（无事件时为 0）。连续滚动按一次手势计数。", L" (0 if none). Continuous scrolling counts as one gesture.");
+  text += UiText(L"\r\n\r\n键盘监听句柄：", L"\r\n\r\nKeyboard listener handle: ");
+  text += gState.keyboardHook ? UiText(L"已建立", L"created") : UiText(L"未建立", L"unavailable");
+  text += UiText(L"；鼠标监听句柄：", L"; mouse listener handle: ");
+  text += gState.mouseHook ? UiText(L"已建立", L"created") : UiText(L"未建立", L"unavailable");
+  if (!gState.keyboardHook)
+    text += UiText(L"；键盘错误码 ", L"; keyboard error ") + std::to_wstring(gCountingCheck.keyboardError);
+  if (!gState.mouseHook)
+    text += UiText(L"；鼠标错误码 ", L"; mouse error ") + std::to_wstring(gCountingCheck.mouseError);
+  text += UiText(
+      L"。句柄存在不保证仍在收到输入，请以实际自检为准。\r\n\r\nWindows 安全桌面、会话切换或监听超时可能影响监听。可点“重试监听”，不需要开启 macOS 权限，也不要求管理员提权或关闭安全保护。\r\n\r\n自检仅在内存中保留事件次数与相对时间；不读取或保存具体键值、内容、坐标、应用或窗口信息。不联网。",
+      L". A handle alone does not prove input is still arriving; use the check.\r\n\r\nWindows secure desktops, session changes or listener timeouts can affect input. Retry the listener; no macOS permissions, elevation or disabling security is required.\r\n\r\nOnly event counts and relative times are kept in memory, never key values, contents, coordinates, apps or window information. No networking.");
+  SetDlgItemTextW(gCountingCheck.window, kStatusText, text.c_str());
+  EnableWindow(GetDlgItem(gCountingCheck.window, kStatusStart), !gCountingCheck.active);
+}
+
+void LayoutCountingStatus(HWND window) {
+  RECT client = {};
+  GetClientRect(window, &client);
+  const UINT dpi = gState.dpi ? gState.dpi : 96;
+  const int margin = ScaleDip(16, dpi);
+  const int buttonHeight = ScaleDip(32, dpi);
+  const int bottom = client.bottom - margin - buttonHeight;
+  MoveWindow(GetDlgItem(window, kStatusText), margin, margin,
+      std::max(1, static_cast<int>(client.right) - 2 * margin),
+      std::max(1, bottom - 2 * margin), TRUE);
+  const int width = std::max(1, (static_cast<int>(client.right) - 4 * margin) / 3);
+  for (int i = 0; i < 3; ++i) {
+    MoveWindow(GetDlgItem(window, kStatusStart + i),
+        margin + i * (width + margin), bottom, width, buttonHeight, TRUE);
+  }
+}
+
+LRESULT CALLBACK CountingStatusProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+  switch (message) {
+    case WM_CREATE:
+      gCountingCheck.window = window;
+      CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+          WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+          0, 0, 1, 1, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusText)),
+          GetModuleHandleW(nullptr), nullptr);
+      CreateWindowW(L"BUTTON", UiText(L"开始 10 秒自检", L"Start 10-second Check"),
+          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 1, 1,
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusStart)), GetModuleHandleW(nullptr), nullptr);
+      CreateWindowW(L"BUTTON", UiText(L"重试监听", L"Retry Listener"),
+          WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 1, 1,
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusRetry)), GetModuleHandleW(nullptr), nullptr);
+      CreateWindowW(L"BUTTON", UiText(L"关闭", L"Close"),
+          WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 1, 1,
+          window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusClose)), GetModuleHandleW(nullptr), nullptr);
+      for (int id = kStatusText; id <= kStatusClose; ++id)
+        SendDlgItemMessageW(window, id, WM_SETFONT,
+            reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+      SetTimer(window, 1, 1000, nullptr);
+      LayoutCountingStatus(window);
+      RefreshCountingStatus();
+      return 0;
+    case WM_SIZE:
+      LayoutCountingStatus(window);
+      return 0;
+    case WM_GETMINMAXINFO: {
+      auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);
+      const UINT dpi = gState.dpi ? gState.dpi : 96;
+      limits->ptMinTrackSize.x = ScaleDip(500, dpi);
+      limits->ptMinTrackSize.y = ScaleDip(400, dpi);
+      return 0;
+    }
+    case WM_TIMER:
+      RefreshCountingStatus();
+      return 0;
+    case WM_COMMAND:
+      if (LOWORD(wParam) == kStatusStart && !gCountingCheck.active) {
+        ++gCountingCheck.generation;
+        if (gCountingCheck.generation == 0) ++gCountingCheck.generation;
+        gCountingCheck.keys = gCountingCheck.clicks = gCountingCheck.scrolls = 0;
+        gCountingCheck.handled = gCountingCheck.expected = gCountingCheck.counted = 0;
+        gCountingCheck.lastRelative = 0;
+        gCountingCheck.result.clear();
+        gCountingCheck.starts = GetTickCount64() + 2000;
+        gCountingCheck.ends = gCountingCheck.starts + 10000;
+        gCountingCheck.active = true;
+        RefreshCountingStatus();
+        return 0;
+      }
+      if (LOWORD(wParam) == kStatusRetry) {
+        gCountingCheck.active = false;
+        ++gCountingCheck.generation;
+        gCountingCheck.result = UiText(L"监听已重试，请重新开始自检。", L"Listener retried. Start a new check.");
+        RestartGlobalListeners();
+        RefreshCountingStatus();
+        return 0;
+      }
+      if (LOWORD(wParam) == kStatusClose || LOWORD(wParam) == IDCANCEL) {
+        DestroyWindow(window);
+        return 0;
+      }
+      break;
+    case WM_CLOSE:
+      DestroyWindow(window);
+      return 0;
+    case WM_DESTROY:
+      KillTimer(window, 1);
+      if (gCountingCheck.active)
+        gCountingCheck.result = UiText(L"自检已取消，未作故障判断。", L"Check cancelled; no failure inferred.");
+      gCountingCheck.active = false;
+      gCountingCheck.window = nullptr;
+      return 0;
+  }
+  return DefWindowProcW(window, message, wParam, lParam);
+}
+
+void ShowCountingStatus(HWND owner) {
+  if (!gCountingCheck.window) {
+    WNDCLASSEXW cls = {};
+    cls.cbSize = sizeof(cls);
+    cls.hInstance = GetModuleHandleW(nullptr);
+    cls.lpfnWndProc = CountingStatusProcedure;
+    cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    cls.lpszClassName = kCountStatusClass;
+    if (!RegisterClassExW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return;
+    const UINT dpi = gState.dpi ? gState.dpi : 96;
+    gCountingCheck.window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT,
+        kCountStatusClass, UiText(L"计数状态与自检", L"Counting Status & Check"),
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+        CW_USEDEFAULT, CW_USEDEFAULT, ScaleDip(640, dpi), ScaleDip(570, dpi),
+        owner, nullptr, cls.hInstance, nullptr);
+  }
+  if (!gCountingCheck.window) return;
+  ShowWindow(gCountingCheck.window, SW_SHOW);
+  SetForegroundWindow(gCountingCheck.window);
+  RefreshCountingStatus();
 }
 
 bool IsMainWindowAlive(HWND owner) {
@@ -824,25 +1800,41 @@ bool ShowPrivacyNotice(HWND owner) {
   return MessageBoxW(
       owner,
       UiText(
+          L"1. 按住小伙伴拖动，放到喜欢的位置。\n"
+          L"2. 右键小伙伴，可以换形象、看日历和退出。\n"
+          L"3. Windows 通常无需额外授权；需要帮助时，右键打开“关于”，查看 Windows 权限与计数帮助。\n\n"
           L"牛马电子功德只统计按键、鼠标按键和滚轮手势发生的次数。\n\n"
           L"程序不会读取、保存或上传按键内容、鼠标位置、当前应用、"
           L"剪贴板或屏幕内容；程序不包含联网功能。",
+          L"1. Drag your companion to move it.\n"
+          L"2. Right-click it to change appearance, view the calendar, or quit.\n"
+          L"3. Windows normally needs no extra permission. Open About for Windows permissions and counting help.\n\n"
           L"NiuMa Merit counts only keyboard presses, mouse button presses, "
           L"and scroll gestures.\n\nIt does not read, save, or upload key content, "
           L"mouse positions, the current app, clipboard data, or screen content. "
           L"The app has no network features."),
-      UiText(L"隐私说明", L"Privacy"), MB_OK | MB_ICONINFORMATION) == IDOK;
+      UiText(L"先记住三件事", L"Three Things to Get Started"), MB_OK | MB_ICONINFORMATION) == IDOK;
+}
+
+constexpr int kAboutHelpLink = 3090;
+
+const wchar_t* AboutDouyinCaption() {
+  return UiText(L"欢迎关注开发者抖音，一起交流产品的奇思妙想\n抖音号：1872941388",
+                L"Follow the developer on Douyin and share creative product ideas\nDouyin ID: 1872941388");
 }
 
 struct AboutDialogState {
   std::wstring text;
   PngResource douyin;
   HWND viewport = nullptr;
+  HWND helpLink = nullptr;
   HFONT font = nullptr;
   WNDPROC buttonProcedure = nullptr;
   int padding = 16;
   int lineHeight = 16;
   int textHeight = 0;
+  int helpHeight = 0;
+  int promoHeight = 0;
   int imageWidth = 260;
   int imageHeight = 260;
   int contentWidth = 0;
@@ -867,6 +1859,11 @@ void ScrollAboutContent(AboutDialogState& state, int x, int y) {
   SetScrollInfo(state.viewport, SB_HORZ, &info, TRUE);
   info.nPos = state.scrollY;
   SetScrollInfo(state.viewport, SB_VERT, &info, TRUE);
+  if (state.helpLink) {
+    MoveWindow(state.helpLink, state.padding - state.scrollX,
+        state.padding * 2 + state.textHeight - state.scrollY,
+        std::max(1, state.contentWidth - state.padding * 2), state.helpHeight, TRUE);
+  }
   InvalidateRect(state.viewport, nullptr, FALSE);
 }
 
@@ -888,10 +1885,16 @@ void MeasureAboutContent(AboutDialogState& state) {
   GetTextMetricsW(dc, &metrics);
   state.lineHeight = std::max(1, static_cast<int>(metrics.tmHeight +
                                                metrics.tmExternalLeading));
+  RECT promo = {0, 0, state.contentWidth - state.padding * 2, 0};
+  DrawTextW(dc, AboutDouyinCaption(), -1, &promo,
+            DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_CENTER);
+  state.promoHeight = static_cast<int>(promo.bottom) + 4;
   SelectObject(dc, oldFont);
   ReleaseDC(state.viewport, dc);
   state.textHeight = static_cast<int>(measured.bottom) + 4;
-  state.contentHeight = state.padding * 3 + state.textHeight + state.imageHeight;
+  state.helpHeight = state.lineHeight + state.padding;
+  state.contentHeight = state.padding * 5 + state.textHeight +
+                        state.helpHeight + state.promoHeight + state.imageHeight;
 
   SCROLLINFO info = {};
   info.cbSize = sizeof(info);
@@ -914,6 +1917,69 @@ bool IsAboutScrollKey(WPARAM key) {
          key == VK_PRIOR || key == VK_NEXT || key == VK_HOME || key == VK_END;
 }
 
+void DrawAboutContent(HWND window, HDC dc, const RECT& client,
+                      const AboutDialogState& state) {
+  FillRect(dc, &client, GetSysColorBrush(COLOR_3DFACE));
+  HGDIOBJ oldFont = SelectObject(dc, state.font);
+  SetBkMode(dc, TRANSPARENT);
+  SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+  RECT text = {state.padding - state.scrollX,
+               state.padding - state.scrollY,
+               state.contentWidth - state.padding - state.scrollX,
+               state.padding + state.textHeight - state.scrollY};
+  DrawTextW(dc, state.text.c_str(), -1, &text, DT_WORDBREAK | DT_NOPREFIX);
+  RECT promo = {state.padding - state.scrollX,
+      state.padding * 3 + state.textHeight + state.helpHeight - state.scrollY,
+      state.contentWidth - state.padding - state.scrollX,
+      state.padding * 3 + state.textHeight + state.helpHeight + state.promoHeight - state.scrollY};
+  DrawTextW(dc, AboutDouyinCaption(), -1, &promo,
+            DT_WORDBREAK | DT_NOPREFIX | DT_CENTER);
+  SelectObject(dc, oldFont);
+  if (state.douyin.image && state.douyin.image->GetWidth() != 0 &&
+      state.douyin.image->GetHeight() != 0) {
+    Gdiplus::Graphics graphics(dc);
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.DrawImage(state.douyin.image.get(), Gdiplus::RectF(
+        static_cast<float>((state.contentWidth - state.imageWidth) / 2 -
+                           state.scrollX),
+        static_cast<float>(state.padding * 4 + state.textHeight + state.helpHeight + state.promoHeight -
+                           state.scrollY),
+        static_cast<float>(state.imageWidth),
+        static_cast<float>(state.imageHeight)));
+    graphics.Flush(Gdiplus::FlushIntentionSync);
+  }
+  if (GetFocus() == window) DrawFocusRect(dc, &client);
+}
+
+void PaintAboutContent(HWND window, const AboutDialogState& state) {
+  PAINTSTRUCT paint = {};
+  HDC dc = BeginPaint(window, &paint);
+  RECT client = {};
+  GetClientRect(window, &client);
+  const int width = client.right - client.left;
+  const int height = client.bottom - client.top;
+  if (dc == nullptr || width <= 0 || height <= 0) {
+    EndPaint(window, &paint);
+    return;
+  }
+
+  HDC bufferDc = CreateCompatibleDC(dc);
+  HBITMAP bitmap = bufferDc ? CreateCompatibleBitmap(dc, width, height) : nullptr;
+  HGDIOBJ previousBitmap = bitmap ? SelectObject(bufferDc, bitmap) : nullptr;
+  const bool buffered = previousBitmap != nullptr && previousBitmap != HGDI_ERROR;
+  if (buffered) {
+    // Present text, background and QR image together, never a cleared frame.
+    DrawAboutContent(window, bufferDc, client, state);
+    BitBlt(dc, 0, 0, width, height, bufferDc, 0, 0, SRCCOPY);
+    SelectObject(bufferDc, previousBitmap);
+  } else {
+    DrawAboutContent(window, dc, client, state);
+  }
+  if (bitmap) DeleteObject(bitmap);
+  if (bufferDc) DeleteDC(bufferDc);
+  EndPaint(window, &paint);
+}
+
 LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
                                        WPARAM wParam, LPARAM lParam) {
   auto* state = reinterpret_cast<AboutDialogState*>(
@@ -927,6 +1993,57 @@ LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
   }
   if (!state) return DefWindowProcW(window, message, wParam, lParam);
   switch (message) {
+    case WM_CREATE:
+      state->helpLink = CreateWindowExW(0, L"BUTTON",
+          UiText(L"Windows 权限与计数帮助", L"Windows permissions and counting help"),
+          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+          0, 0, 1, 1, window, reinterpret_cast<HMENU>(kAboutHelpLink),
+          GetModuleHandleW(nullptr), nullptr);
+      if (!state->helpLink) return -1;
+      SendMessageW(state->helpLink, WM_SETFONT,
+          reinterpret_cast<WPARAM>(state->font), TRUE);
+      MeasureAboutContent(*state);
+      return 0;
+    case WM_COMMAND:
+      if (LOWORD(wParam) == kAboutHelpLink && HIWORD(wParam) == BN_CLICKED) {
+        ShellExecuteW(window, L"open", L"https://gongde.zqscreen.cn/help-windows.html",
+            nullptr, nullptr, SW_SHOWNORMAL);
+        return 0;
+      }
+      break;
+    case WM_SETCURSOR:
+      if (reinterpret_cast<HWND>(wParam) == state->helpLink && LOWORD(lParam) == HTCLIENT) {
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        return TRUE;
+      }
+      break;
+    case WM_DRAWITEM: {
+      const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+      if (!draw || draw->CtlID != kAboutHelpLink) break;
+      FillRect(draw->hDC, &draw->rcItem, GetSysColorBrush(COLOR_3DFACE));
+      HGDIOBJ oldFont = SelectObject(draw->hDC, state->font);
+      const COLORREF color = GetSysColor(COLOR_HOTLIGHT);
+      SetBkMode(draw->hDC, TRANSPARENT);
+      SetTextColor(draw->hDC, color);
+      const wchar_t* label = UiText(L"Windows 权限与计数帮助",
+                                    L"Windows permissions and counting help");
+      RECT text = draw->rcItem;
+      DrawTextW(draw->hDC, label, -1, &text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+      SIZE size = {};
+      GetTextExtentPoint32W(draw->hDC, label, static_cast<int>(std::wcslen(label)), &size);
+      HPEN pen = CreatePen(PS_SOLID, 1, color);
+      if (pen) {
+        HGDIOBJ oldPen = SelectObject(draw->hDC, pen);
+        const int y = draw->rcItem.top + (draw->rcItem.bottom - draw->rcItem.top - size.cy) / 2 + size.cy - 1;
+        MoveToEx(draw->hDC, draw->rcItem.left, y, nullptr);
+        LineTo(draw->hDC, std::min(draw->rcItem.right, draw->rcItem.left + size.cx), y);
+        SelectObject(draw->hDC, oldPen);
+        DeleteObject(pen);
+      }
+      if (draw->itemState & ODS_FOCUS) DrawFocusRect(draw->hDC, &draw->rcItem);
+      SelectObject(draw->hDC, oldFont);
+      return TRUE;
+    }
     case WM_SIZE:
       MeasureAboutContent(*state);
       return 0;
@@ -1012,35 +2129,7 @@ LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
     case WM_ERASEBKGND:
       return 1;
     case WM_PAINT: {
-      PAINTSTRUCT paint = {};
-      HDC dc = BeginPaint(window, &paint);
-      RECT client = {};
-      GetClientRect(window, &client);
-      FillRect(dc, &client, GetSysColorBrush(COLOR_3DFACE));
-      HGDIOBJ oldFont = SelectObject(dc, state->font);
-      SetBkMode(dc, TRANSPARENT);
-      SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
-      RECT text = {state->padding - state->scrollX,
-                   state->padding - state->scrollY,
-                   state->contentWidth - state->padding - state->scrollX,
-                   state->padding + state->textHeight - state->scrollY};
-      DrawTextW(dc, state->text.c_str(), -1, &text,
-                DT_WORDBREAK | DT_NOPREFIX);
-      SelectObject(dc, oldFont);
-      if (state->douyin.image && state->douyin.image->GetWidth() != 0 &&
-          state->douyin.image->GetHeight() != 0) {
-        Gdiplus::Graphics graphics(dc);
-        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-        graphics.DrawImage(state->douyin.image.get(), Gdiplus::RectF(
-            static_cast<float>((state->contentWidth - state->imageWidth) / 2 -
-                               state->scrollX),
-            static_cast<float>(state->padding * 2 + state->textHeight -
-                               state->scrollY),
-            static_cast<float>(state->imageWidth),
-            static_cast<float>(state->imageHeight)));
-      }
-      if (GetFocus() == window) DrawFocusRect(dc, &client);
-      EndPaint(window, &paint);
+      PaintAboutContent(window, *state);
       return 0;
     }
   }
@@ -1138,8 +2227,8 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
         EndDialog(window, -1);
         return TRUE;
       }
-      if (!CreateWindowExW(0, contentClass.lpszClassName, state->text.c_str(),
-                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_HSCROLL,
+      if (!CreateWindowExW(WS_EX_CONTROLPARENT, contentClass.lpszClassName, state->text.c_str(),
+                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_HSCROLL | WS_CLIPCHILDREN,
                            0, 0, 1, 1, window, nullptr, instance, state)) {
         EndDialog(window, -1);
         return TRUE;
@@ -1210,8 +2299,46 @@ void ShowAboutDialog(HWND owner) {
         L"telemetry, or automatic updates.\n\nClient source code is available under GPLv3."
         L"\n\nOfficial website:\n";
   text += L"https://gongde.zqscreen.cn/";
-  text += UiText(L"\n\n欢迎关注开发者抖音\n@山丘 / 抖音号：1872941388",
-                 L"\n\nFollow the developer on Douyin\n@Shanqiu / Douyin ID: 1872941388");
+  const std::string statusDate = CurrentReminderLocalDate();
+  const auto statusNowUtc = static_cast<std::int64_t>(std::time(nullptr));
+  const bool statusClockGuarded = gState.reminderStore &&
+      (gState.reminderClockGuard.guarded() ||
+       gState.reminderStore->ClockGuard(statusNowUtc, statusDate.c_str()));
+  const auto reminderState = niuma::reminder::ClassifyRuntimeStatus(
+      gState.reminderStore != nullptr, gState.reminderStorageFault,
+      statusClockGuarded, gState.keyboardHook != nullptr && gState.mouseHook != nullptr);
+  const wchar_t* reminderStatus = UiText(
+      L"本地活动监测已就绪；是否提醒仍取决于活动阈值、间隔、地区和当天可用内容。",
+      L"Local activity monitoring is ready. A reminder still depends on activity thresholds, timing, region, and eligible messages.");
+  switch (reminderState) {
+    case niuma::reminder::RuntimeStatus::StorageUnavailable:
+      reminderStatus = UiText(L"本地提醒记录不可用，提醒暂时停用；功德计数和其他功能照常。",
+          L"Local reminder history is unavailable, so reminders are paused. Counting and other features continue.");
+      break;
+    case niuma::reminder::RuntimeStatus::StorageFault:
+      reminderStatus = UiText(L"此前本地提醒记录写入失败，本段提醒已跳过；后续符合条件的新活动段仍可尝试。",
+          L"A previous local reminder-history write failed, so that activity segment was skipped. A later eligible segment can still try.");
+      break;
+    case niuma::reminder::RuntimeStatus::ClockGuarded:
+      reminderStatus = UiText(L"本机时间或提醒历史正在保护校验；状态稳定后才会恢复提醒。",
+          L"The local clock or reminder history is under a protective check. Reminders resume after the state is stable.");
+      break;
+    case niuma::reminder::RuntimeStatus::ListenerUnavailable:
+      reminderStatus = UiText(L"全局输入监听未就绪，暂时无法依据活动触发提醒。",
+          L"Global input monitoring is not ready, so activity cannot trigger reminders.");
+      break;
+    case niuma::reminder::RuntimeStatus::Ready:
+      break;
+  }
+  text += UiText(L"\n\n提醒状态：", L"\n\nReminder status: ");
+  text += reminderStatus;
+  if (gState.reminderCatalogCommitUncertain) {
+    text += UiText(
+        L"\n文案库：当前进程使用的内容已验签，但恢复文件的本地持久状态未能确认；下次启动会重新验签并尝试恢复。",
+        L"Catalog: The content used in this session has a valid signature, but local durability of its recovery files could not be confirmed. The app will reverify and retry recovery on next launch.");
+  }
+  text += UiText(L"\n\nWindows 通常无需额外授权。若在其他应用中没有计数，请查看下方权限与计数帮助。",
+                L"\n\nWindows normally needs no extra permission. If input in other apps is not counted, see the help link below.");
   AboutDialogState state;
   state.text = text;
   const HMODULE module = GetModuleHandleW(nullptr);
@@ -1239,7 +2366,8 @@ void ShowAboutDialog(HWND owner) {
   }
   if (DialogBoxParamW(module, MAKEINTRESOURCEW(3000), owner,
                       AboutDialogProcedure, reinterpret_cast<LPARAM>(&state)) == -1) {
-    MessageBoxW(owner, text.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
+    const std::wstring fallback = text + L"\n\nhttps://gongde.zqscreen.cn/help-windows.html\n\n" + AboutDouyinCaption();
+    MessageBoxW(owner, fallback.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
                 MB_OK | MB_ICONINFORMATION);
   }
 }
@@ -1255,8 +2383,9 @@ const wchar_t* SceneTitle(MeritScene scene) {
 
 void DrawCalendarText(Gdiplus::Graphics& graphics, const std::wstring& text,
                       const Gdiplus::RectF& rect, float size,
-                      const Gdiplus::Color& color, bool bold = false) {
-  Gdiplus::Font font(L"Microsoft YaHei UI", size,
+                      const Gdiplus::Color& color, bool bold = false,
+                      const wchar_t* family = L"Microsoft YaHei UI") {
+  Gdiplus::Font font(family, size,
       bold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
   Gdiplus::StringFormat format;
   format.SetAlignment(Gdiplus::StringAlignmentCenter);
@@ -1266,9 +2395,7 @@ void DrawCalendarText(Gdiplus::Graphics& graphics, const std::wstring& text,
   graphics.DrawString(text.c_str(), -1, &font, rect, &format, &brush);
 }
 
-void PaintMeritCalendar(HWND window) {
-  PAINTSTRUCT paint = {};
-  HDC dc = BeginPaint(window, &paint);
+void DrawMeritCalendar(HDC dc) {
   Gdiplus::Graphics graphics(dc);
   const float scale = static_cast<float>(gState.dpi) / 96.0f;
   graphics.ScaleTransform(scale, scale);
@@ -1299,7 +2426,7 @@ void PaintMeritCalendar(HWND window) {
 
   const wchar_t* zhWeekdays[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
   const wchar_t* enWeekdays[] = {L"MON", L"TUE", L"WED", L"THU", L"FRI", L"SAT", L"SUN"};
-  const float left = 14, top = 112, cellWidth = 76, cellHeight = 51;
+  const float left = 14, top = 112, cellWidth = 76, cellHeight = 72;
   for (int column = 0; column < 7; ++column) {
     DrawCalendarText(graphics, IsChineseUi() ? zhWeekdays[column] : enWeekdays[column],
         Gdiplus::RectF(left + column * cellWidth, 94, cellWidth, 20), 11, muted, true);
@@ -1329,13 +2456,52 @@ void PaintMeritCalendar(HWND window) {
     DrawCalendarText(graphics, dateText,
         Gdiplus::RectF(cell.X + 2, cell.Y + 27, cell.Width - 4, 16),
         10, muted, false);
+    const auto& overtime = OffworkDay(key);
+    if (overtime.present) {
+      DrawCalendarText(graphics, UiText(L"自动加班", L"Auto overtime"),
+          Gdiplus::RectF(cell.X + 2, cell.Y + 42, cell.Width - 4, 11), 8, accent);
+      DrawCalendarText(graphics, OffworkTimeText(overtime.seconds),
+          Gdiplus::RectF(cell.X + 2, cell.Y + 53, cell.Width - 4, 14),
+          12, accent, true, L"Consolas");
+    }
   }
+  graphics.Flush(Gdiplus::FlushIntentionSync);
+}
+
+void PaintMeritCalendar(HWND window) {
+  PAINTSTRUCT paint = {};
+  HDC dc = BeginPaint(window, &paint);
+  RECT client = {};
+  GetClientRect(window, &client);
+  const int width = client.right - client.left;
+  const int height = client.bottom - client.top;
+  if (dc == nullptr || width <= 0 || height <= 0) {
+    EndPaint(window, &paint);
+    return;
+  }
+
+  HDC bufferDc = CreateCompatibleDC(dc);
+  HBITMAP bitmap = bufferDc ? CreateCompatibleBitmap(dc, width, height) : nullptr;
+  HGDIOBJ previousBitmap = bitmap ? SelectObject(bufferDc, bitmap) : nullptr;
+  const bool buffered = previousBitmap != nullptr && previousBitmap != HGDI_ERROR;
+  if (buffered) {
+    // Publish a complete frame instead of exposing the cleared background.
+    DrawMeritCalendar(bufferDc);
+    BitBlt(dc, 0, 0, width, height, bufferDc, 0, 0, SRCCOPY);
+    SelectObject(bufferDc, previousBitmap);
+  } else {
+    // Keep the calendar usable if a backing bitmap cannot be allocated.
+    DrawMeritCalendar(dc);
+  }
+  if (bitmap) DeleteObject(bitmap);
+  if (bufferDc) DeleteDC(bufferDc);
   EndPaint(window, &paint);
 }
 
 LRESULT CALLBACK CalendarWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   (void)wParam;
   switch (message) {
+    case WM_ERASEBKGND: return 1;
     case WM_PAINT: PaintMeritCalendar(window); return 0;
     case WM_LBUTTONUP: {
       const int x = MulDiv(GET_X_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
@@ -1359,7 +2525,7 @@ void ShowMeritCalendar(HWND owner) {
     SYSTEMTIME now = {};
     GetLocalTime(&now);
     gCalendar.year = now.wYear; gCalendar.month = now.wMonth;
-    RECT desired = {0, 0, ScaleDip(560, gState.dpi), ScaleDip(430, gState.dpi)};
+    RECT desired = {0, 0, ScaleDip(560, gState.dpi), ScaleDip(552, gState.dpi)};
     AdjustWindowRectEx(&desired, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_TOOLWINDOW);
     gCalendar.window = CreateWindowExW(
         WS_EX_TOOLWINDOW, kCalendarClass, UiText(L"功德日历", L"Merit Calendar"),
@@ -1446,9 +2612,33 @@ void PaintAppearancePicker(HWND window) {
     }
     graphics.DrawImage(&thumbnail, Gdiplus::RectF(
         static_cast<float>(card.left + ScaleDip(20, dpi)),
-        static_cast<float>(card.top + ScaleDip(3, dpi)),
+        static_cast<float>(card.top + ScaleDip(22, dpi)),
         static_cast<float>(ScaleDip(116, dpi)),
-        static_cast<float>(ScaleDip(96, dpi))));
+        static_cast<float>(ScaleDip(76, dpi))));
+    std::wstring badge;
+    if (index == CurrentPickerIndex()) badge = UiText(L"当前", L"Current");
+    if (index > 0) {
+      const auto& id = gAppearanceCatalog.packs()[static_cast<size_t>(index - 1)]->id;
+      if (std::find(gNewlyImportedIds.begin(), gNewlyImportedIds.end(), id) != gNewlyImportedIds.end()) {
+        if (!badge.empty()) badge += L" / ";
+        badge += UiText(L"本次新增", L"New");
+      } else if (std::find(gLastImportedIds.begin(), gLastImportedIds.end(), id) != gLastImportedIds.end()) {
+        if (!badge.empty()) badge += L" / ";
+        badge += UiText(L"本次导入", L"Imported");
+      }
+    }
+    if (!badge.empty()) {
+      Gdiplus::Font badgeFont(L"Microsoft YaHei UI", static_cast<float>(ScaleDip(11, dpi)),
+          Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+      Gdiplus::SolidBrush badgeInk(Gdiplus::Color(255, 51, 92, 68));
+      Gdiplus::StringFormat badgeFormat;
+      badgeFormat.SetAlignment(Gdiplus::StringAlignmentCenter);
+      graphics.DrawString(badge.c_str(), -1, &badgeFont,
+          Gdiplus::RectF(static_cast<float>(card.left + ScaleDip(4, dpi)),
+              static_cast<float>(card.top + ScaleDip(4, dpi)),
+              static_cast<float>(card.right - card.left - ScaleDip(8, dpi)),
+              static_cast<float>(ScaleDip(18, dpi))), &badgeFormat, &badgeInk);
+    }
 
     Gdiplus::Font font(L"Microsoft YaHei UI", static_cast<float>(ScaleDip(14, dpi)),
                        Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
@@ -1570,7 +2760,20 @@ LRESULT CALLBACK PickerWindowProcedure(
 
 void ShowAppearancePicker(HWND owner) {
   gPicker.pendingIndex = CurrentPickerIndex();
+  if (gPicker.window && IsWindow(gPicker.window)) {
+    InvalidateRect(gPicker.window, nullptr, FALSE);
+    SetForegroundWindow(gPicker.window);
+    return;
+  }
   gPicker.scrollRow = std::max(0, gPicker.pendingIndex / 2 - 2);
+  for (size_t i = 0; i < gAppearanceCatalog.packs().size(); ++i) {
+    if (std::find(gLastImportedIds.begin(), gLastImportedIds.end(),
+            gAppearanceCatalog.packs()[i]->id) != gLastImportedIds.end()) {
+      gPicker.scrollRow = static_cast<int>((i + 1) / 2);
+      break;
+    }
+  }
+  gPicker.scrollRow = std::min(gPicker.scrollRow, std::max(0, (PickerItemCount() + 1) / 2 - 3));
   gPicker.confirmed = false;
   const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
   RECT desired = {0, 0, ScaleDip(360, dpi), ScaleDip(538, dpi)};
@@ -1649,45 +2852,86 @@ std::wstring AppearancePackArgument() {
 
 void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
                           bool showSuccess) {
+  const bool batch = niuma::IsAppearanceBatchPath(sourcePath);
+  if (GetFileAttributesW(sourcePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    MessageBoxW(owner,
+        UiText(L"文件不存在或无法读取，请重新选择原文件。原有形象和功德未改变。",
+               L"File missing or unreadable. Select the original file again. Existing packs and counts are unchanged."),
+        WindowTitle(), MB_OK | MB_ICONWARNING);
+    return;
+  }
+  std::vector<std::string> previousIds;
+  for (const auto& pack : gAppearanceCatalog.packs()) previousIds.push_back(pack->id);
   std::wstring error;
-  std::vector<std::string> installedIds;
+  std::vector<std::string> installedIds, duplicates;
   bool installed = false;
-  if (niuma::IsAppearanceBatchPath(sourcePath)) {
+  if (batch) {
     installed = gAppearanceCatalog.InstallBatch(
-        sourcePath, AppearanceDirectory(), &installedIds, &error);
+        sourcePath, AppearanceDirectory(), &installedIds, &error, &duplicates);
   } else {
     std::string id;
+    bool duplicate = false;
     installed = gAppearanceCatalog.Install(
-        sourcePath, AppearanceDirectory(), &id, &error);
+        sourcePath, AppearanceDirectory(), &id, &error, &duplicate);
     if (installed) installedIds.push_back(id);
+    if (installed && duplicate) duplicates.push_back(id);
   }
-  if (!installed) {
-    MessageBoxW(owner, error.c_str(),
-                UiText(L"形象包导入失败", L"Appearance Pack Import Failed"),
-                MB_OK | MB_ICONERROR);
-    return;
+  gNewlyImportedIds.clear();
+  gLastImportedIds.clear();
+  std::wstring details;
+  for (const auto& id : installedIds) {
+    const auto* pack = gAppearanceCatalog.Find(id);
+    if (!pack) {
+      error += UiText(L"\n已保存的形象未能加载，未启用；原文件保留。",
+                      L"\nA saved pack could not be loaded; it was not enabled; files were kept.");
+      continue;
+    }
+    if (std::find(gLastImportedIds.begin(), gLastImportedIds.end(), id) != gLastImportedIds.end()) continue;
+    gLastImportedIds.push_back(id);
+    details += L"\n" + (IsChineseUi() ? pack->nameZh : pack->nameEn) + L" : ";
+    if (std::find(duplicates.begin(), duplicates.end(), id) != duplicates.end()) {
+      details += UiText(L"重复包，已保留原形象", L"Duplicate; existing pack kept");
+    } else if (std::find(previousIds.begin(), previousIds.end(), id) != previousIds.end()) {
+      details += UiText(L"已更新", L"Updated");
+    } else {
+      gNewlyImportedIds.push_back(id);
+      details += UiText(L"本次新增", L"New in this import");
+    }
   }
-  const std::string& installedId = installedIds.back();
-  if (gAppearanceCatalog.Find(installedId) == nullptr) {
-    MessageBoxW(owner,
-        UiText(L"形象包导入后无法重新读取。",
-               L"The imported appearance pack could not be reloaded."),
-        UiText(L"形象包导入失败", L"Appearance Pack Import Failed"),
-        MB_OK | MB_ICONERROR);
-    return;
+  const bool singleEnabled = !batch && installed && gLastImportedIds.size() == 1;
+  if (singleEnabled) {
+    gState.selectedPackId = gLastImportedIds.front();
+    gState.dirty = true;
+    SaveState();
   }
-  gState.selectedPackId = installedId;
-  gState.dirty = true;
-  SaveState();
+  // Refresh the current pack without implicitly selecting the last batch member.
   RenderLayeredWindow(GetTickCount64());
-  if (showSuccess) {
-    const std::wstring message = installedIds.size() > 1
-        ? std::to_wstring(installedIds.size()) +
-          UiText(L" 个形象已导入。可在“更换形象”中切换。",
-                 L" packs imported. Switch between them in Change Appearance.")
-        : UiText(L"形象包已安全导入并启用。",
-                 L"The appearance pack was safely imported and enabled.");
-    MessageBoxW(owner, message.c_str(), WindowTitle(), MB_OK | MB_ICONINFORMATION);
+  if (gPicker.window && IsWindow(gPicker.window)) {
+    gPicker.pendingIndex = CurrentPickerIndex();
+    InvalidateRect(gPicker.window, nullptr, FALSE);
+  }
+  std::wstring message = singleEnabled
+      ? UiText(L"导入完成，已启用此形象。", L"Imported and enabled.")
+      : UiText(L"当前形象未改变。只有确认选择后才会切换。", L"Current appearance unchanged. Confirm a selection to switch.");
+  message += UiText(L"\n本次可用形象：", L"\nPacks available from this import: ") +
+      std::to_wstring(gLastImportedIds.size()) + details;
+  if (!installed || !error.empty()) {
+    message += UiText(L"\n\n未完成 / 损坏或校验失败：\n", L"\n\nNot completed / damaged or failed verification:\n");
+    message += error.empty() ? UiText(L"形象包无法加载。", L"Pack unavailable.") : error;
+    message += UiText(L"\n其他正常形象、功德和日历不受影响。可重新选择原文件或重新下载。",
+                     L"\nOther valid packs, counts and calendar are unchanged. Select the original file or download it again.");
+  }
+  const bool canChoose = !gLastImportedIds.empty();
+  if (canChoose && !singleEnabled)
+    message += UiText(L"\n\n现在打开形象列表选择吗？", L"\n\nOpen the appearance list to choose now?");
+  if (showSuccess || !installed || !error.empty()) {
+    const int response = MessageBoxW(owner, message.c_str(),
+        !installed ? (canChoose ? UiText(L"部分形象已导入", L"Some Packs Imported")
+                               : UiText(L"未能导入形象", L"No Packs Imported"))
+                   : WindowTitle(),
+        (canChoose && !singleEnabled ? MB_YESNO : MB_OK) |
+        (!installed || !error.empty() ? MB_ICONWARNING : MB_ICONINFORMATION));
+    if (response == IDYES && IsMainWindowAlive(owner)) ShowAppearancePicker(owner);
   }
 }
 
@@ -1695,7 +2939,7 @@ bool ShowPrivacyNoticeIfNeeded(HWND owner) {
   if (!IsMainWindowAlive(owner)) return false;
   const std::wstring path = DataPath();
   if (!path.empty() &&
-      GetPrivateProfileIntW(L"state", L"privacy_shown", 0, path.c_str()) == 1) {
+      GetPrivateProfileIntW(L"state", L"basic_guide_shown", 0, path.c_str()) == 1) {
     return true;
   }
 
@@ -1703,6 +2947,7 @@ bool ShowPrivacyNoticeIfNeeded(HWND owner) {
   if (!path.empty()) {
     WritePrivateProfileStringW(
         L"state", L"privacy_shown", L"1", path.c_str());
+    WritePrivateProfileStringW(L"state", L"basic_guide_shown", L"1", path.c_str());
   }
   return true;
 }
@@ -1757,11 +3002,205 @@ void ApplyWindowDpi(HWND window) {
 
   gState.dpi = windowDpi;
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
-  gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
+  gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
   RECT rect = {};
   GetWindowRect(window, &rect);
   SetWindowPos(window, nullptr, rect.left, rect.top, gState.windowWidth,
                gState.windowHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void ResizeOffworkWindow() {
+  gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
+  // Preserve the pet's top-left unless the extra band would leave the work area.
+  SetWindowPos(gState.window, nullptr, 0, 0, gState.windowWidth, gState.windowHeight,
+      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+  ClampWindowToWorkArea();
+  RenderLayeredWindow(GetTickCount64());
+}
+
+constexpr int kOffworkEnable = 5101;
+constexpr int kOffworkHour = 5102;
+constexpr int kOffworkMinute = 5103;
+
+INT_PTR CALLBACK OffworkDialogProcedure(HWND window, UINT message, WPARAM wParam, LPARAM) {
+  switch (message) {
+    case WM_INITDIALOG: {
+      gOffwork.dialog = window;
+      SetWindowTextW(window, UiText(L"下班倒计时", L"Off-work Countdown"));
+      const UINT dpi = gState.dpi ? gState.dpi : 96;
+      const auto control = [window, dpi](const wchar_t* cls, const wchar_t* text,
+          DWORD style, int x, int y, int width, int height, int id) {
+        HWND child = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+            ScaleDip(x, dpi), ScaleDip(y, dpi), ScaleDip(width, dpi), ScaleDip(height, dpi),
+            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
+        SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(
+            GetWindowLongPtrW(window, GWLP_USERDATA)), TRUE);
+        return child;
+      };
+      const HFONT font = CreateFontW(-ScaleDip(14, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
+          FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+          DEFAULT_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei UI");
+      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(font ? font :
+          GetStockObject(DEFAULT_GUI_FONT)));
+      SetWindowLongPtrW(window, DWLP_USER, reinterpret_cast<LONG_PTR>(font));
+      control(L"BUTTON", UiText(L"启用下班倒计时", L"Enable off-work countdown"),
+          BS_AUTOCHECKBOX | WS_TABSTOP, 20, 18, 370, 28, kOffworkEnable);
+      control(L"STATIC", UiText(L"每日下班时间（24 小时制）", L"Daily off-work time (24-hour)"),
+          0, 20, 58, 370, 24, -1);
+      control(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+          20, 88, 82, 230, kOffworkHour);
+      control(L"STATIC", L":", SS_CENTER, 106, 90, 20, 24, -1);
+      control(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+          130, 88, 82, 230, kOffworkMinute);
+      for (int value = 0; value < 60; ++value) {
+        wchar_t text[4] = {};
+        swprintf_s(text, L"%02d", value);
+        if (value < 24) SendDlgItemMessageW(window, kOffworkHour, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+        SendDlgItemMessageW(window, kOffworkMinute, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+      }
+      SendDlgItemMessageW(window, kOffworkHour, CB_SETCURSEL, gOffwork.hour, 0);
+      SendDlgItemMessageW(window, kOffworkMinute, CB_SETCURSEL, gOffwork.minute, 0);
+      CheckDlgButton(window, kOffworkEnable, gOffwork.enabled ? BST_CHECKED : BST_UNCHECKED);
+      EnableWindow(GetDlgItem(window, kOffworkHour), gOffwork.enabled);
+      EnableWindow(GetDlgItem(window, kOffworkMinute), gOffwork.enabled);
+      control(L"STATIC", UiText(
+          L"每天按本地日期计算，超过设定时间即为加班。\r\n运行时自动记录到功德日历，不代表实际劳动。\r\n关闭后停止更新，保留时间设定及已有记录。\r\n完全本地，不依赖账号、网络或输入权限。",
+          L"Uses each local date, including weekends.\r\nAfter the target, overtime is saved automatically while\r\nrunning; this does not measure actual work. Turning it\r\noff keeps settings and records. No account, network\r\nor input permission is required."),
+          0, 20, 132, 380, 116, -1);
+      control(L"BUTTON", UiText(L"取消", L"Cancel"), WS_TABSTOP | BS_PUSHBUTTON,
+          214, 266, 86, 32, IDCANCEL);
+      control(L"BUTTON", UiText(L"保存", L"Save"), WS_TABSTOP | BS_DEFPUSHBUTTON,
+          310, 266, 86, 32, IDOK);
+      RECT rect = {0, 0, ScaleDip(416, dpi), ScaleDip(318, dpi)};
+      AdjustWindowRectEx(&rect, WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME,
+          FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+      MONITORINFO monitor = {sizeof(monitor)};
+      GetMonitorInfoW(MonitorFromWindow(GetWindow(window, GW_OWNER), MONITOR_DEFAULTTONEAREST), &monitor);
+      const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+      SetWindowPos(window, nullptr,
+          monitor.rcWork.left + std::max(0, static_cast<int>(monitor.rcWork.right - monitor.rcWork.left - width) / 2),
+          monitor.rcWork.top + std::max(0, static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top - height) / 2),
+          width, height, SWP_NOZORDER);
+      return TRUE;
+    }
+    case WM_COMMAND:
+      if (LOWORD(wParam) == kOffworkEnable && HIWORD(wParam) == BN_CLICKED) {
+        const bool enabled = IsDlgButtonChecked(window, kOffworkEnable) == BST_CHECKED;
+        EnableWindow(GetDlgItem(window, kOffworkHour), enabled);
+        EnableWindow(GetDlgItem(window, kOffworkMinute), enabled);
+        return TRUE;
+      }
+      if (LOWORD(wParam) == IDOK) {
+        const int hour = static_cast<int>(SendDlgItemMessageW(window, kOffworkHour, CB_GETCURSEL, 0, 0));
+        const int minute = static_cast<int>(SendDlgItemMessageW(window, kOffworkMinute, CB_GETCURSEL, 0, 0));
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return TRUE;
+        // Pending controls never touch live settings until Save is pressed.
+        RefreshOffwork(true, true);
+        gOffwork.hour = hour;
+        gOffwork.minute = minute;
+        gOffwork.enabled = IsDlgButtonChecked(window, kOffworkEnable) == BST_CHECKED;
+        gOffwork.settingsDirty = true;
+        gOffwork.baselineValid = false;
+        gOffwork.snapshot = {};
+        RefreshOffwork(false);
+        const bool saved = FlushOffwork();
+        const bool ticking = SyncOffworkTimer();
+        ResizeOffworkWindow();
+        if (!saved || !ticking) MessageBoxW(window,
+            !saved ? UiText(L"本次设置已在内存生效，但未能写入本地文件；程序会稍后重试。",
+                            L"Settings are active in memory, but local saving failed. The app will retry.") :
+                     UiText(L"无法启动逐秒刷新，请关闭并重新开启下班倒计时。",
+                            L"The refresh timer could not start. Turn the countdown off and on again."),
+            WindowTitle(), MB_OK | MB_ICONWARNING);
+        EndDialog(window, IDOK);
+        return TRUE;
+      }
+      if (LOWORD(wParam) == IDCANCEL) {
+        EndDialog(window, IDCANCEL);
+        return TRUE;
+      }
+      break;
+    case WM_CLOSE:
+      EndDialog(window, IDCANCEL);
+      return TRUE;
+    case WM_DESTROY: {
+      const auto font = reinterpret_cast<HFONT>(GetWindowLongPtrW(window, DWLP_USER));
+      if (font) DeleteObject(font);
+      gOffwork.dialog = nullptr;
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+void ShowOffworkSettings(HWND owner) {
+  // Native resource-free modal dialog; no second permanent floating window.
+  alignas(DWORD) WORD storage[64] = {};
+  auto* dialog = reinterpret_cast<DLGTEMPLATE*>(storage);
+  dialog->style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME;
+  dialog->dwExtendedStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
+  dialog->cx = 240;
+  dialog->cy = 180;
+  if (DialogBoxIndirectParamW(GetModuleHandleW(nullptr), dialog, owner,
+                              OffworkDialogProcedure, 0) == -1) {
+    MessageBoxW(owner, UiText(L"无法打开下班倒计时设置。", L"Unable to open countdown settings."),
+        WindowTitle(), MB_OK | MB_ICONERROR);
+  }
+}
+
+void ShowReminderCatalogUpdate(HWND owner) {
+  if (!gState.catalogStore) return;
+  wchar_t filename[32768]{};
+  static constexpr wchar_t filter[] =
+      L"Official message catalog (*.nmgtext)\0*.nmgtext\0\0";
+  OPENFILENAMEW dialog{};
+  dialog.lStructSize = sizeof(dialog);
+  dialog.hwndOwner = owner;
+  dialog.lpstrFilter = filter;
+  dialog.lpstrFile = filename;
+  dialog.nMaxFile = static_cast<DWORD>(std::size(filename));
+  dialog.lpstrTitle = UiText(L"选择官方文案库文件", L"Choose an Official Message Catalog");
+  dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
+      OFN_HIDEREADONLY | OFN_EXPLORER;
+  dialog.lpstrDefExt = L"nmgtext";
+  if (!GetOpenFileNameW(&dialog)) return;
+
+  auto result = gState.catalogStore->InstallFile(std::filesystem::path(filename),
+      niuma::reminder::OfficialCatalogSignatureVerifier());
+  if (result.status == niuma::reminder::CatalogInstallStatus::Installed ||
+      result.status == niuma::reminder::CatalogInstallStatus::AlreadyInstalled) {
+    gState.reminderCatalog = result.catalog;
+    size_t chinese = 0, english = 0;
+    for (const auto& item : gState.reminderCatalog->items) {
+      if (std::strcmp(item.language, "zh-CN") == 0) ++chinese;
+      else if (std::strcmp(item.language, "en") == 0) ++english;
+    }
+    wchar_t message[256]{};
+    swprintf_s(message, std::size(message), UiText(
+        L"文案库版本 %u 已就绪（中文 %zu 条，英文 %zu 条）。提醒历史保持不变。",
+        L"Message catalog version %u is ready (%zu Chinese, %zu English). Reminder history is unchanged."),
+        gState.reminderCatalog->content_version, chinese, english);
+    MessageBoxW(owner, message, UiText(L"文案库已更新", L"Messages Updated"),
+        MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+    return;
+  }
+  const wchar_t* message = UiText(
+      L"文件未安装，当前文案库和提醒历史保持不变。请确认文件来自官方并且版本较新。",
+      L"The file was not installed. Your current catalog and reminder history are unchanged. Check that it is an official, newer catalog.");
+  if (result.status == niuma::reminder::CatalogInstallStatus::CommitUncertain)
+    message = UiText(L"文案库文件已完成本地替换，但系统未确认目录写入已持久保存。当前进程仍使用原文案库；重启后会按本地签名验证结果加载。请勿把本次提示视为已完成更新。提醒历史保持不变。",
+                     L"The catalog files were replaced locally, but the system could not confirm durable directory storage. This process keeps using the previous catalog; after restart, the app will load whichever local catalog passes signature verification. Treat the update as unconfirmed. Reminder history is unchanged.");
+  else if (result.status == niuma::reminder::CatalogInstallStatus::UntrustedSignature)
+    message = UiText(L"签名无效或发布密钥不受信任，当前文案库保持不变。",
+                     L"The signature is invalid or its publisher key is not trusted. Your current catalog is unchanged.");
+  else if (result.status == niuma::reminder::CatalogInstallStatus::Downgrade)
+    message = UiText(L"此文案库版本较旧，不能覆盖已安装的新版本。",
+                     L"This catalog is older than the highest installed version and cannot replace it.");
+  else if (result.status == niuma::reminder::CatalogInstallStatus::SameVersionDifferentContent)
+    message = UiText(L"相同版本号对应了不同内容，文件未安装。",
+                     L"This version number is already associated with different content. The file was not installed.");
+  MessageBoxW(owner, message, UiText(L"无法更新文案库", L"Could Not Update Messages"),
+      MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
 }
 
 void ShowContextMenu(HWND window, POINT screenPoint) {
@@ -1779,6 +3218,11 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
               UiText(L"更换形象", L"Change Appearance"));
   AppendMenuW(menu, MF_STRING, kMenuCalendar,
               UiText(L"功德日历…", L"Merit Calendar…"));
+  AppendMenuW(menu,
+              MF_STRING | (gOffwork.enabled ? MF_CHECKED : MF_UNCHECKED), kMenuOffwork,
+              UiText(L"下班倒计时…", L"Off-work Countdown..."));
+  AppendMenuW(menu, MF_STRING, kMenuReminderCatalog,
+              UiText(L"更新官方文案库…", L"Update Official Messages..."));
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kMenuQuit, UiText(L"退出", L"Exit"));
 
@@ -1803,6 +3247,10 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     ShowAppearancePicker(window);
   } else if (command == static_cast<int>(kMenuCalendar)) {
     ShowMeritCalendar(window);
+  } else if (command == static_cast<int>(kMenuOffwork)) {
+    ShowOffworkSettings(window);
+  } else if (command == static_cast<int>(kMenuReminderCatalog)) {
+    ShowReminderCatalogUpdate(window);
   } else if (command == static_cast<int>(kMenuQuit)) {
     DestroyWindow(window);
   }
@@ -1816,11 +3264,11 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case kCountMessage:
-      CountOneOperation();
+      CountGlobalDelivery(false, lParam, wParam);
       return 0;
 
     case kScrollMessage:
-      CountScrollGesture();
+      CountGlobalDelivery(true, lParam, wParam);
       return 0;
 
     case WM_COPYDATA: {
@@ -1839,7 +3287,36 @@ LRESULT CALLBACK WindowProcedure(
     }
 
     case WM_TIMER: {
+      if (wParam == kReminderTimer) {
+        const ULONGLONG now = GetTickCount64();
+        const auto nowUtc = static_cast<std::int64_t>(std::time(nullptr));
+        const auto clockTransition = gState.reminderClockGuard.Observe(nowUtc, now);
+        ApplyReminderClockTransition(clockTransition, nowUtc);
+        if (gReminderWindow != nullptr && gReminderDismissAt != 0 &&
+            now >= gReminderDismissAt) {
+          KillTimer(gReminderWindow, kReminderDismissTimer);
+          DestroyWindow(gReminderWindow);
+        }
+        const bool listenerHealthy = gState.keyboardHook != nullptr &&
+            gState.mouseHook != nullptr && !gState.reminderClockGuard.guarded();
+        const bool wasConsumed = gState.reminderActivity.segment_consumed();
+        const auto trigger = gState.reminderActivity.Evaluate(now, listenerHealthy);
+        const bool isConsumed = gState.reminderActivity.segment_consumed();
+        if (wasConsumed && !isConsumed) PersistReminderUnlockIfNeeded(wasConsumed);
+        if (trigger != niuma::reminder::ActivitySampler::Trigger::None)
+          PresentReminderForTrigger(trigger);
+        return 0;
+      }
+      if (wParam == kOffworkTimer) {
+        if (gOffwork.enabled && !gOffwork.suspended) {
+          RefreshOffwork();
+          RenderLayeredWindow(GetTickCount64());
+        }
+        return 0;
+      }
       if (wParam == kDayTimer) {
+        // Retry failed local saves even when the countdown itself is disabled.
+        if (GetTickCount64() - gOffwork.lastFlush >= 60000) FlushOffwork();
         if (EnsureCurrentDay()) RenderLayeredWindow(GetTickCount64());
         if (gCalendar.window != nullptr) InvalidateRect(gCalendar.window, nullptr, FALSE);
         return 0;
@@ -1874,20 +3351,79 @@ LRESULT CALLBACK WindowProcedure(
       const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
       gState.dpi = newDpi == 0 ? 96 : newDpi;
       gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
-      gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
+      gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
       SetWindowPos(
           window, nullptr, suggested->left, suggested->top,
           gState.windowWidth, gState.windowHeight,
           SWP_NOZORDER | SWP_NOACTIVATE);
       ClampWindowToWorkArea();
       RenderLayeredWindow(GetTickCount64());
+      if (gReminderWindow != nullptr) PositionReminderWindow(gReminderWindow);
       return 0;
     }
 
     case WM_DISPLAYCHANGE:
+      gOffwork.baselineValid = false;
+      RefreshOffwork(false, true);
       ClampWindowToWorkArea();
       RenderLayeredWindow(GetTickCount64());
+      if (gReminderWindow != nullptr) PositionReminderWindow(gReminderWindow);
       return 0;
+
+    case WM_MOVE:
+      if (gReminderWindow != nullptr) PositionReminderWindow(gReminderWindow);
+      return 0;
+
+    case WM_TIMECHANGE:
+      NotifyReminderClockChange();
+      gOffwork.baselineValid = false;
+      RefreshOffwork(false, true);
+      RenderLayeredWindow(GetTickCount64());
+      return 0;
+
+    case WM_SETTINGCHANGE:
+      gOffwork.baselineValid = false;
+      InterruptReminderObservation();
+      RefreshOffwork(false, true);
+      RenderLayeredWindow(GetTickCount64());
+      return 0;
+
+    case kOffworkSessionChange:
+      if (wParam == 0x7) {  // WTS_SESSION_LOCK
+        BeginReminderPause(AppState::ReminderPauseKind::SessionLock);
+      } else if (wParam == 0x8) {  // WTS_SESSION_UNLOCK
+        ResumeReminderPause(false);
+      } else {
+        InterruptReminderObservation();
+      }
+      gOffwork.baselineValid = false;
+      RefreshOffwork(false, true);
+      RenderLayeredWindow(GetTickCount64());
+      return 0;
+
+    case WM_POWERBROADCAST:
+      if (wParam == PBT_APMSUSPEND) {
+        BeginReminderPause(AppState::ReminderPauseKind::Sleep);
+        RefreshOffwork(false, true);
+        gOffwork.baselineValid = false;
+        gOffwork.suspended = true;
+        SyncOffworkTimer();
+      } else if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND) {
+        ResumeReminderPause(true);
+        gOffwork.suspended = false;
+        gOffwork.baselineValid = false;
+        RefreshOffwork(false, true);
+        SyncOffworkTimer();
+        RenderLayeredWindow(GetTickCount64());
+      }
+      return TRUE;
+
+    case WM_NCLBUTTONDOWN:
+    case WM_NCRBUTTONDOWN:
+    case WM_NCMBUTTONDOWN:
+    case WM_NCXBUTTONDOWN:
+      if (!gState.mouseHook) CountOneOperation();
+      break;
 
     case WM_NCHITTEST:
       return HTCAPTION;
@@ -1914,14 +3450,26 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
     }
 
+    case WM_QUERYENDSESSION:
+      RefreshOffwork(true, true);
+      return TRUE;
+
     case WM_ENDSESSION:
       if (wParam != 0) {
+        RefreshOffwork(true, true);
         SaveState();
       }
       return 0;
 
     case WM_DESTROY:
+      RefreshOffwork(true, true);
+      KillTimer(window, kOffworkTimer);
+      gOffwork.timerRunning = false;
+      UnregisterOffworkSessionNotifications(window);
+      if (gOffwork.dialog) EndDialog(gOffwork.dialog, IDCANCEL);
+      if (gCountingCheck.window) DestroyWindow(gCountingCheck.window);
       KillTimer(window, kDayTimer);
+      KillTimer(window, kReminderTimer);
       if (gState.timerRunning) {
         KillTimer(window, kAnimationTimer);
         gState.timerRunning = false;
@@ -2001,8 +3549,9 @@ int WINAPI wWinMain(
   }
 
   std::wstring catalogError;
-  if (!gAppearanceCatalog.Reload(AppearanceDirectory(), &catalogError)) {
-    MessageBoxW(nullptr, catalogError.c_str(), WindowTitle(), MB_OK | MB_ICONERROR);
+  const bool catalogLoaded = gAppearanceCatalog.Reload(AppearanceDirectory(), &catalogError);
+  if (!catalogLoaded || !catalogError.empty()) {
+    MessageBoxW(nullptr, catalogError.c_str(), WindowTitle(), MB_OK | MB_ICONWARNING);
   }
 
   WNDCLASSEXW windowClass = {};
@@ -2043,7 +3592,7 @@ int WINAPI wWinMain(
   calendarClass.lpfnWndProc = CalendarWindowProcedure;
   calendarClass.hInstance = instance;
   calendarClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-  calendarClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+  calendarClass.hbrBackground = nullptr;
   calendarClass.lpszClassName = kCalendarClass;
   if (RegisterClassExW(&calendarClass) == 0) {
     ReleaseAllPngResources();
@@ -2054,9 +3603,19 @@ int WINAPI wWinMain(
     return 1;
   }
 
+  WNDCLASSEXW reminderClass = {};
+  reminderClass.cbSize = sizeof(reminderClass);
+  reminderClass.lpfnWndProc = ReminderWindowProcedure;
+  reminderClass.hInstance = instance;
+  reminderClass.hCursor = LoadCursorW(nullptr, IDC_HAND);
+  reminderClass.hbrBackground = nullptr;
+  reminderClass.lpszClassName = kReminderClass;
+  RegisterClassExW(&reminderClass);
+
   gState.dpi = SystemDpi();
+  LoadOffworkSettings();
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
-  gState.windowHeight = ScaleDip(kWindowDipHeight, gState.dpi);
+  gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
   gState.total = ReadIniTotal();
   EnsureCurrentDay();
   const long selectedScene = ReadIniLong(L"selected_scene", 0);
@@ -2064,7 +3623,11 @@ int WINAPI wWinMain(
       ? static_cast<MeritScene>(selectedScene)
       : MeritScene::Woodfish;
   gState.selectedPackId = ReadSelectedPackId();
-  if (gAppearanceCatalog.Find(gState.selectedPackId) == nullptr) {
+  if (!gState.selectedPackId.empty() && gAppearanceCatalog.Find(gState.selectedPackId) == nullptr) {
+    MessageBoxW(nullptr,
+        UiText(L"上次使用的形象文件缺失或未通过校验，暂时显示木鱼。原文件、功德和日历不删除；可重新导入原包。",
+               L"The previous appearance is missing or failed verification. Woodfish is shown for now. Original files, counts and calendar are kept; re-import the pack."),
+        WindowTitle(), MB_OK | MB_ICONWARNING);
     gState.selectedPackId.clear();
   }
 
@@ -2099,12 +3662,38 @@ int WINAPI wWinMain(
   // that actually hosts the window, which can differ from the system DPI.
   ApplyWindowDpi(window);
   ClampWindowToWorkArea();
+  RefreshOffwork(false, true);
+  const std::wstring dataPath = DataPath();
+  if (!dataPath.empty()) {
+    const auto reminderDirectory = std::filesystem::path(dataPath).parent_path() / L"Reminders";
+    gState.reminderStore = std::make_unique<niuma::reminder::ReminderStore>(reminderDirectory);
+    gState.catalogStore = std::make_unique<niuma::reminder::CatalogUpdateStore>(
+        reminderDirectory / L"Catalog");
+    gState.reminderCatalog = gState.catalogStore->Load(
+        niuma::reminder::OfficialCatalogSignatureVerifier(), nullptr,
+        &gState.reminderCatalogCommitUncertain);
+    gState.reminderActivity.RestoreSegmentConsumed(gState.reminderStore->SegmentConsumed());
+  }
+  const auto reminderStartupUtc = static_cast<std::int64_t>(std::time(nullptr));
+  const ULONGLONG reminderStartupTick = GetTickCount64();
+  const std::string reminderStartupDate = CurrentReminderLocalDate();
+  const bool persistedClockGuard = gState.reminderStore &&
+      gState.reminderStore->ClockGuard(reminderStartupUtc, reminderStartupDate.c_str());
+  gState.reminderClockGuard.Start(reminderStartupUtc, reminderStartupTick,
+      persistedClockGuard);
   RenderLayeredWindow(GetTickCount64());
   ShowWindow(window, SW_SHOWNOACTIVATE);
   SetWindowPos(
       window, HWND_TOPMOST, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
   SetTimer(window, kDayTimer, 30000, nullptr);
+  SetTimer(window, kReminderTimer, 1000, nullptr);
+  RegisterOffworkSessionNotifications(window);
+  if (!SyncOffworkTimer()) {
+    MessageBoxW(window, UiText(L"无法启动下班倒计时逐秒刷新，请在设置中关闭后重新开启。",
+        L"The countdown refresh timer could not start. Turn it off and on in settings."),
+        WindowTitle(), MB_OK | MB_ICONWARNING);
+  }
 
   wchar_t executable[MAX_PATH] = {};
   if (GetModuleFileNameW(nullptr, executable,
@@ -2114,25 +3703,17 @@ int WINAPI wWinMain(
   }
 
   ConfigureLaunchAtLogin();
-  if (PrepareClientStartup(window, pendingAppearancePack)) {
-    gState.keyboardHook =
-        SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
-    gState.mouseHook =
-        SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
-    if (gState.keyboardHook == nullptr || gState.mouseHook == nullptr) {
-      MessageBoxW(
-          window, UiText(L"无法启动全局键盘或鼠标计数。",
-                         L"Unable to start global keyboard or mouse counting."), WindowTitle(),
-          MB_OK | MB_ICONERROR);
-      if (IsMainWindowAlive(window)) DestroyWindow(window);
-    }
-  } else if (IsMainWindowAlive(window)) {
+  RestartGlobalListeners();
+  if (!PrepareClientStartup(window, pendingAppearancePack) && IsMainWindowAlive(window)) {
     DestroyWindow(window);
   }
+  // A listener failure leaves click-only/partial counting and a reachable retry
+  // entry, instead of terminating the client and losing its recovery path.
 
   MSG message = {};
   if (IsMainWindowAlive(window)) {
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+      if (gCountingCheck.window && IsDialogMessageW(gCountingCheck.window, &message)) continue;
       TranslateMessage(&message);
       DispatchMessageW(&message);
     }
