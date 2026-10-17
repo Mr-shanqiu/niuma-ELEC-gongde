@@ -23,6 +23,12 @@ EXCEL_EPOCH = dt.date(1899, 12, 30)
 SIGNING_DOMAIN = b"NMG-TEXT-v1\0"
 
 
+class WorkbookRow(dict):
+    def __init__(self, *args, formula_columns=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.formula_columns = set(formula_columns)
+
+
 def workbook_sheets(path):
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
@@ -42,7 +48,7 @@ def workbook_sheets(path):
             root = ET.fromstring(archive.read(target))
             rows = []
             for row in root.findall("m:sheetData/m:row", NS):
-                values = {}
+                values = WorkbookRow()
                 formulas = {}
                 for cell in row.findall("m:c", NS):
                     column = re.match(r"[A-Z]+", cell.attrib["r"]).group(0)
@@ -57,6 +63,7 @@ def workbook_sheets(path):
                     formula = cell.find("m:f", NS)
                     if formula is not None:
                         formulas[column] = formula.text or ""
+                values.formula_columns = set(formulas)
                 rows.append(values)
             output[sheet.attrib["name"]] = rows
         return output
@@ -83,28 +90,55 @@ def regions(value):
     return sorted(set(parts))
 
 
-def make_item(row, language):
-    if language == "zh-CN":
-        item_id, category, tone, original, status, edit = (
-            row.get("A", ""), row.get("B", ""), row.get("C", ""),
-            row.get("D", ""), row.get("E", ""), row.get("F", ""))
-        final = row.get("H", "") or edit or original
-        trigger, overtime, festival = row.get("J", ""), row.get("K", ""), row.get("L", "")
-        start, end, before, after = row.get("M", ""), row.get("N", ""), row.get("O", "0"), row.get("P", "0")
-        item_regions = ["*"]
-    else:
-        item_id, category, tone, original, status, edit = (
-            row.get("A", ""), row.get("B", ""), row.get("C", ""),
-            row.get("D", ""), row.get("F", ""), row.get("G", ""))
-        final = row.get("I", "") or edit or original
-        trigger, overtime, festival = row.get("K", ""), row.get("L", ""), row.get("M", "")
-        start, end, before, after = row.get("N", ""), row.get("O", ""), row.get("P", "0"), row.get("Q", "0")
-        item_regions = regions(row.get("T", "*"))
+def named_item_rows(rows, language):
+    names = {
+        "id": "稳定ID", "category": "分类", "tone": "语气",
+        "original": "文案原稿" if language == "zh-CN" else "英文原稿",
+        "edit": "修改稿" if language == "zh-CN" else "英文修改稿",
+        "trigger": "活动触发", "overtime": "加班条件", "festival": "节日编码",
+        "start": "开始时刻", "end": "结束时刻", "before": "节前天数", "after": "节后天数",
+    }
+    if language == "en":
+        names["regions"] = "适用地区"
+    headers = [(index, row) for index, row in enumerate(rows)
+               if "稳定ID" in row.values()]
+    if len(headers) != 1:
+        raise ValueError(f"expected one named item header for {language}")
+    header_index, header = headers[0]
+    columns = {}
+    for field, label in names.items():
+        found = [column for column, value in header.items() if value == label]
+        if len(found) != 1 or found[0] in getattr(header, "formula_columns", set()):
+            raise ValueError(f"missing, repeated or formula header {label!r} for {language}")
+        columns[field] = found[0]
+    output = []
+    prefix = "nm.zh." if language == "zh-CN" else "nm.en."
+    for row in rows[header_index + 1:]:
+        item = {field: row.get(column, "") for field, column in columns.items()}
+        if not item["id"].startswith("nm.") and not item["original"] and not item["edit"]:
+            continue  # Workbook notes/empty layout rows are not content rows.
+        if not item["id"].startswith(prefix):
+            raise ValueError(f"unexpected stable ID {item['id']!r} for {language}")
+        if any(columns[field] in getattr(row, "formula_columns", set())
+               for field in ("original", "edit")):
+            raise ValueError(f"formula source text is not allowed for {item['id']}")
+        output.append(item)
+    return output
 
-    if not item_id or not final:
-        raise ValueError(f"missing id or final text for {language} row {row}")
-    # The user explicitly asked to include every current line, irrespective of
-    # workbook review/export state. The status is intentionally not a filter.
+
+def make_item(row, language):
+    item_id, category, tone = row["id"], row["category"], row["tone"]
+    original, edit = row["original"], row["edit"]
+    # Never trust an Excel cached formula result for the final/export columns.
+    # Current user authorization includes every row regardless of review status.
+    final = edit.strip() or original.strip()
+    trigger, overtime, festival = row["trigger"], row["overtime"], row["festival"]
+    start, end = row["start"], row["end"]
+    before, after = row["before"], row["after"]
+    item_regions = ["*"] if language == "zh-CN" else regions(row["regions"])
+
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", item_id) or not final:
+        raise ValueError(f"missing id or final text for {language}: {item_id!r}")
     if category not in ("普通", "节日") or tone not in ("幽默", "温情"):
         raise ValueError(f"unknown category/tone for {item_id}: {category!r}/{tone!r}")
     if trigger == "两者均可":
@@ -131,6 +165,8 @@ def make_item(row, language):
         "after_days": int(after),
         "regions": item_regions,
     }
+    if not item_regions or not 0 <= item["before_days"] <= 7 or not 0 <= item["after_days"] <= 7:
+        raise ValueError(f"invalid region list or festival offsets for {item_id}")
     if not 4 <= len(item["text"]) <= (80 if language == "zh-CN" else 160):
         raise ValueError(f"text length outside v1 limits for {item_id}: {len(item['text'])}")
     if item["local_time"]["start_minute"] >= item["local_time"]["end_minute"]:
@@ -268,11 +304,80 @@ def sign_catalog(payload, key_path, key_id):
     return encoded
 
 
+def validate_publication(catalog, previous=None, copy_edit_ids=()):
+    version = catalog["content_version"]
+    if type(version) is not int or not 1 <= version <= 0xFFFFFFFF:
+        raise ValueError("content_version must be a positive uint32 integer")
+    calendar_version = catalog["calendar_version"]
+    if not isinstance(calendar_version, str) or not 1 <= len(calendar_version.encode("utf-8")) <= 64:
+        raise ValueError("calendar_version must contain 1-64 UTF-8 bytes")
+    ids = [item["id"] for item in catalog["items"]]
+    if len(ids) != len(set(ids)) or not 1 <= len(ids) <= 3000:
+        raise ValueError("catalog must contain 1-3000 unique item IDs")
+    counts = {language: sum(item["language"] == language for item in catalog["items"])
+              for language in ("zh-CN", "en")}
+    if version == 1 and counts != {"zh-CN": 800, "en": 800}:
+        raise ValueError(f"initial catalog must include all approved 800 lines per language: {counts}")
+    if not all(counts.values()) or sum(counts.values()) != len(ids):
+        raise ValueError("catalog must contain both supported languages only")
+    acknowledgments = set(copy_edit_ids)
+    if previous is None:
+        if version != 1:
+            raise ValueError("updates require --previous-catalog for version/ID continuity checks")
+        if acknowledgments:
+            raise ValueError("copy-edit IDs require a previous catalog")
+        return {"copy_edited_ids": [], "retired_ids": []}
+    if (previous.get("schema_version") != 2 or
+            previous.get("catalog_id") != catalog["catalog_id"] or
+            type(previous.get("content_version")) is not int or
+            not 1 <= previous["content_version"] < version):
+        raise ValueError("previous catalog must match schema/catalog ID and have a lower version")
+    previous_items = previous.get("items")
+    if not isinstance(previous_items, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get("id"), str) or
+            not isinstance(item.get("text"), str) for item in previous_items):
+        raise ValueError("previous catalog has invalid item IDs/text")
+    old = {item["id"]: item for item in previous_items}
+    if len(old) != len(previous_items):
+        raise ValueError("previous catalog repeats an item ID")
+    changed = {item["id"] for item in catalog["items"]
+               if item["id"] in old and item["text"] != old[item["id"]]["text"]}
+    if changed != acknowledgments:
+        missing = sorted(changed - acknowledgments)
+        extra = sorted(acknowledgments - changed)
+        raise ValueError(f"changed text needs explicit minor-copy-edit acknowledgment; "
+                         f"substantive new sentences need new IDs. missing={missing}, unused={extra}")
+    return {"copy_edited_ids": sorted(changed), "retired_ids": sorted(set(old) - set(ids))}
+
+
+def read_previous_catalog(path):
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key in previous catalog: {key}")
+            result[key] = value
+        return result
+    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
+    if not isinstance(value, dict):
+        raise ValueError("previous catalog must be a JSON object")
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--chinese-workbook", required=True, type=Path)
     parser.add_argument("--english-workbook", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--content-version", type=int, default=1,
+                        help="positive uint32 content version; updates must increase it")
+    parser.add_argument("--calendar-version", default="2026-2040-v1",
+                        help="calendar data version, 1-64 UTF-8 bytes")
+    parser.add_argument("--previous-catalog", type=Path,
+                        help="previous complete runtime JSON; required for versions above 1")
+    parser.add_argument("--copy-edit-id", action="append", default=[],
+                        help="ID explicitly reviewed as a minor text edit; repeat per ID. "
+                             "Substantive replacement sentences must receive new IDs")
     parser.add_argument("--header", type=Path,
                         help="also emit a compiled, offline C++ catalog header")
     parser.add_argument("--signing-key", type=Path,
@@ -288,10 +393,8 @@ def main():
 
     chinese_sheets = workbook_sheets(args.chinese_workbook)
     english_sheets = workbook_sheets(args.english_workbook)
-    chinese_rows = [row for row in chinese_sheets["文案总表"] if row.get("A", "").startswith("nm.zh.")]
-    english_rows = [row for row in english_sheets["英文总表"] if row.get("A", "").startswith("nm.en.")]
-    if len(chinese_rows) != 800 or len(english_rows) != 800:
-        raise ValueError(f"expected 800 lines per language; got zh={len(chinese_rows)} en={len(english_rows)}")
+    chinese_rows = named_item_rows(chinese_sheets["文案总表"], "zh-CN")
+    english_rows = named_item_rows(english_sheets["英文总表"], "en")
     items = [make_item(row, "zh-CN") for row in chinese_rows]
     items.extend(make_item(row, "en") for row in english_rows)
     ids = [item["id"] for item in items]
@@ -309,14 +412,17 @@ def main():
     catalog = {
         "schema_version": 2,
         "catalog_id": "official.multilingual",
-        "content_version": 1,
-        "calendar_version": "2026-2040-v1",
+        "content_version": args.content_version,
+        "calendar_version": args.calendar_version,
         "calendar_year_start": 2026,
         "calendar_year_end": 2040,
         "languages": ["zh-CN", "en"],
         "items": items,
         "calendars": holidays,
     }
+    publication = validate_publication(catalog,
+        read_previous_catalog(args.previous_catalog) if args.previous_catalog else None,
+        args.copy_edit_id)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     payload = (json.dumps(catalog, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     if len(payload) > 1024 * 1024:
@@ -358,7 +464,7 @@ def main():
                 cpp_string(holiday["type"]), str(holiday.get("month", 0)),
                 str(holiday.get("day", 0)), cpp_string(dates)
             ]) + "},")
-        lines.extend(["};", "inline constexpr std::size_t kCalendarCount = sizeof(kCalendars) / sizeof(kCalendars[0]);", "inline constexpr CatalogView kBuiltinCatalogView{kCatalogItems, kCatalogItemCount, kCalendars, kCalendarCount, 1};", "}  // namespace niuma::reminder", ""])
+        lines.extend(["};", "inline constexpr std::size_t kCalendarCount = sizeof(kCalendars) / sizeof(kCalendars[0]);", "inline constexpr CatalogView kBuiltinCatalogView{kCatalogItems, kCatalogItemCount, kCalendars, kCalendarCount, " + str(catalog["content_version"]) + "};", "}  // namespace niuma::reminder", ""])
         args.header.parent.mkdir(parents=True, exist_ok=True)
         args.header.write_text("\n".join(lines), encoding="utf-8")
     if args.envelope_output:
@@ -366,6 +472,8 @@ def main():
         args.envelope_output.parent.mkdir(parents=True, exist_ok=True)
         args.envelope_output.write_bytes(envelope)
     print(f"wrote {len(items)} lines and {len(holidays)} calendars to {args.output}")
+    if args.previous_catalog:
+        print("publication continuity: " + json.dumps(publication, ensure_ascii=True))
     if args.envelope_output:
         print(f"signed official catalog version {catalog['content_version']} to {args.envelope_output}")
 

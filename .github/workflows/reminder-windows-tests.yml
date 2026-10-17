@@ -9,6 +9,7 @@ on:
       - 'assets/reminders/**'
       - 'scripts/audit-offline.sh'
       - 'scripts/build-reminder-catalog.py'
+      - 'scripts/test-build-reminder-catalog.py'
       - 'scripts/test-windows-reminder-ui-preview.ps1'
       - 'src/reminder_*'
       - 'src/offwork_clock.h'
@@ -27,6 +28,12 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Verify catalog publisher continuity and workbook parsing
+        shell: powershell
+        run: |
+          python scripts/test-build-reminder-catalog.py
+          if ($LASTEXITCODE -ne 0) { throw "Catalog publisher regression failed" }
 
       - name: Configure Visual Studio x64
         shell: powershell

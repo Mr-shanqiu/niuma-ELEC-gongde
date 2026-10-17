@@ -11,6 +11,7 @@ on:
       - 'scripts/audit-offline.sh'
       - 'scripts/audit-macos-offline-binary.sh'
       - 'scripts/build-reminder-catalog.py'
+      - 'scripts/test-build-reminder-catalog.py'
       - 'scripts/test-macos-reminder-ui-preview.sh'
       - 'src/reminder_*'
       - 'src/offwork_clock.h'
@@ -29,6 +30,10 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Verify catalog publisher continuity and workbook parsing
+        shell: bash
+        run: python3 scripts/test-build-reminder-catalog.py
 
       - name: Configure Release tests
         shell: bash
