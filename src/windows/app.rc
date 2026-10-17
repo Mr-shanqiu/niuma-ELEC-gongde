@@ -17,9 +17,9 @@
 103 ICON "appicon.ico"
 
 // Native About dialog; strings are localized by app.cpp, not by the RC compiler.
-// WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT.
+// WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN | DS_MODALFRAME | DS_SETFONT.
 3000 DIALOGEX 0, 0, 310, 300
-STYLE 0x80C800C0
+STYLE 0x82C800C0
 CAPTION "About NiuMa Merit"
 FONT 9, "Segoe UI"
 BEGIN

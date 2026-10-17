@@ -44,6 +44,16 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Run reminder core tests in Release configuration
+        shell: powershell
+        run: |
+          cmake -S . -B build-reminder-tests -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Reminder test configuration failed" }
+          cmake --build build-reminder-tests --config Release --target niuma-reminder-activity-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Reminder test build failed" }
+          ctest --test-dir build-reminder-tests -C Release --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw "Reminder core tests failed" }
+
       - name: Build Release package
         shell: powershell
         run: ./scripts/build-windows.ps1 -ExpectedVersion $env:VERSION

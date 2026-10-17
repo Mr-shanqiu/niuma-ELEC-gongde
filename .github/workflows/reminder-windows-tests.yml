@@ -1,0 +1,128 @@
+name: Reminder Windows Tests
+
+on:
+  pull_request:
+    paths:
+      - 'CMakeLists.txt'
+      - '.github/workflows/reminder-windows-tests.yml'
+      - '.github/workflows/windows-build.yml'
+      - 'assets/reminders/**'
+      - 'scripts/audit-offline.sh'
+      - 'scripts/build-reminder-catalog.py'
+      - 'scripts/test-build-reminder-catalog.py'
+      - 'scripts/check-runtime-network.py'
+      - 'scripts/test-windows-reminder-ui-preview.ps1'
+      - 'src/reminder_*'
+      - 'src/offwork_clock.h'
+      - 'src/macos/**'
+      - 'src/windows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-reminder-core:
+    runs-on: windows-2022
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify catalog publisher continuity and workbook parsing
+        shell: powershell
+        run: |
+          python scripts/test-build-reminder-catalog.py
+          if ($LASTEXITCODE -ne 0) { throw "Catalog publisher regression failed" }
+
+      - name: Verify runtime endpoint observer positive and negative controls
+        shell: powershell
+        run: |
+          python scripts/check-runtime-network.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Runtime endpoint observer control failed" }
+
+      - name: Configure Visual Studio x64
+        shell: powershell
+        run: |
+          cmake -S . -B build-reminder-tests -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Reminder test configuration failed" }
+
+      - name: Build Release reminder tests
+        shell: powershell
+        run: |
+          cmake --build build-reminder-tests --config Release --target niuma-reminder-activity-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Reminder test build failed" }
+
+      - name: Run reminder tests
+        shell: powershell
+        run: |
+          ctest --test-dir build-reminder-tests -C Release --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw "Reminder core tests failed" }
+
+      - name: Compile Windows client integration
+        shell: powershell
+        run: |
+          cmake --build build-reminder-tests --config Release --target niuma-merit --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Windows client integration build failed" }
+
+      - name: Show reminder bubble in isolated runner profile
+        shell: powershell
+        run: |
+          & ./scripts/test-windows-reminder-ui-preview.ps1 `
+            -ExecutablePath "build-reminder-tests\Release\niuma-merit.exe" `
+            -ScreenshotPath "build-reminder-tests\reminder-ui-preview.png"
+
+      - name: Close reminder bubble without refunding its quota
+        shell: powershell
+        run: |
+          & ./scripts/test-windows-reminder-ui-preview.ps1 `
+            -ExecutablePath "build-reminder-tests\Release\niuma-merit.exe" `
+            -ScreenshotPath "build-reminder-tests\reminder-ui-close-preview.png" `
+            -DismissMode Close
+
+      - name: Retain isolated reminder UI screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-reminder-ui-preview
+          path: |
+            build-reminder-tests/reminder-ui-*.png
+            build-reminder-tests/reminder-ui-*.txt
+            build-reminder-tests/reminder-ui-*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Verify offline input boundary
+        shell: bash
+        run: ./scripts/audit-offline.sh
+
+      - name: Bind candidate executable to checked source
+        shell: powershell
+        run: |
+          $checkedOutCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw "Could not identify candidate source" }
+          $sourceHashes = @{}
+          $sourcePaths = git ls-files -- CMakeLists.txt VERSION src/windows 'src/reminder_*' src/offwork_clock.h assets/woodfish.png assets/mallet.png assets/developer-douyin.png assets/appicon.ico
+          if ($LASTEXITCODE -ne 0) { throw "Could not enumerate candidate source" }
+          foreach ($sourcePath in $sourcePaths) {
+            $sourceHashes[$sourcePath] = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          @{
+            kind = 'unsigned-client-acceptance-candidate'
+            checkedOutCommit = $checkedOutCommit.Trim()
+            prHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+            version = (Get-Content VERSION -Raw).Trim()
+            executableSha256 = (Get-FileHash -LiteralPath 'build-reminder-tests\Release\niuma-merit.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+            sourceSha256 = $sourceHashes
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 'build-reminder-tests\windows-candidate.json'
+
+      - name: Retain controlled Windows acceptance candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-reminder-client-candidate
+          path: |
+            build-reminder-tests/Release/niuma-merit.exe
+            build-reminder-tests/windows-candidate.json
+          if-no-files-found: error
+          retention-days: 7
