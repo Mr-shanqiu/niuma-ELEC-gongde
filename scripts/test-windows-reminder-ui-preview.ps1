@@ -73,6 +73,9 @@ try {
   $networkObserver = Start-Process -FilePath (Get-Command python -ErrorAction Stop).Source `
     -ArgumentList @(('"' + $observerScript + '"'), '--pid', $process.Id, '--duration', '7',
       '--report', ('"' + $networkReport + '"')) -PassThru -NoNewWindow
+  # Retain the process handle while it is alive. Windows PowerShell otherwise
+  # may return a null ExitCode when WaitForExit first runs after a short child exits.
+  $networkObserver.Handle | Out-Null
   $pet = [IntPtr]::Zero
   $bubble = [IntPtr]::Zero
   $deadline = [DateTime]::UtcNow.AddSeconds(6)
@@ -131,8 +134,9 @@ try {
 
   if (-not $process.WaitForExit(20000)) { throw 'The preview app did not exit on its bounded acceptance timer.' }
   if ($process.ExitCode -ne 0) { throw "Preview process exited with code $($process.ExitCode)" }
-  if (-not $networkObserver.WaitForExit(10000) -or $networkObserver.ExitCode -ne 0) {
-    throw 'Runtime endpoint sampling did not complete successfully.'
+  $observerExited = $networkObserver.WaitForExit(10000)
+  if (-not $observerExited -or $null -eq $networkObserver.ExitCode -or $networkObserver.ExitCode -ne 0) {
+    throw "Runtime endpoint sampling failed: exited=$observerExited exit_code=$($networkObserver.ExitCode)"
   }
   $networkResult = Get-Content -Raw -LiteralPath $networkReport | ConvertFrom-Json
   if ($networkResult.status -ne 'passed' -or $networkResult.samples -lt 3 -or
