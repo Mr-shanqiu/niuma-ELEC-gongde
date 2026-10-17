@@ -1481,6 +1481,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
   if (gReminderPreviewAcceptance) {
     [self presentReminderForTrigger:niuma::reminder::ActivitySampler::Trigger::HighIntensity];
+    // Keep the preview process bounded on CI; this path is available only when
+    // the explicit isolated-acceptance flags and an empty private temp root pass.
+    [NSApp performSelector:@selector(terminate:) withObject:nil afterDelay:12.0];
   }
 }
 

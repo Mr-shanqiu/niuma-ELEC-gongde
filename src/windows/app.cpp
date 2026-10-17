@@ -52,6 +52,7 @@ constexpr wchar_t kPickerClass[] = L"NiuMaMeritAppearancePicker";
 constexpr wchar_t kCalendarClass[] = L"NiuMaMeritCalendar";
 constexpr wchar_t kReminderClass[] = L"NiuMaMeritReminder";
 constexpr wchar_t kMutexName[] = L"Local\\NiuMaMeritCounter";
+constexpr wchar_t kAcceptanceMutexName[] = L"Local\\NiuMaMeritCounter.Acceptance";
 constexpr wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr wchar_t kRunValue[] = L"NiuMaMerit";
@@ -63,6 +64,7 @@ constexpr UINT_PTR kDayTimer = 2;
 constexpr UINT_PTR kOffworkTimer = 3;
 constexpr UINT_PTR kReminderTimer = 4;
 constexpr UINT_PTR kReminderDismissTimer = 5;
+constexpr UINT_PTR kAcceptanceExitTimer = 6;
 constexpr UINT kOffworkSessionChange = 0x02B1;  // WM_WTSSESSION_CHANGE
 constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
@@ -180,6 +182,9 @@ AppState gState;
 HWND gReminderWindow = nullptr;
 std::wstring gReminderText;
 ULONGLONG gReminderDismissAt = 0;
+bool gIsolatedAcceptance = false;
+bool gReminderPreviewAcceptance = false;
+std::wstring gAcceptanceRoot;
 
 // Ephemeral event counts and monotonic relative times only. Never inspect
 // hook payloads or foreground windows.
@@ -317,7 +322,80 @@ int ScaleDip(int dip, UINT dpi) {
   return MulDiv(dip, static_cast<int>(dpi), 96);
 }
 
+std::wstring TrimDirectorySeparators(std::wstring value) {
+  while (value.size() > 3 &&
+      (value.back() == L'\\' || value.back() == L'/')) value.pop_back();
+  return value;
+}
+
+bool IsPrivateEmptyAcceptanceDirectory(const std::wstring& requestedPath,
+                                       std::wstring* canonicalPath) {
+  if (requestedPath.empty() || canonicalPath == nullptr) return false;
+  wchar_t tempBuffer[MAX_PATH]{};
+  const DWORD tempLength = GetTempPathW(
+      static_cast<DWORD>(std::size(tempBuffer)), tempBuffer);
+  if (tempLength == 0 || tempLength >= std::size(tempBuffer)) return false;
+  wchar_t fullTempBuffer[MAX_PATH]{};
+  const DWORD fullTempLength = GetFullPathNameW(tempBuffer,
+      static_cast<DWORD>(std::size(fullTempBuffer)), fullTempBuffer, nullptr);
+  wchar_t fullRootBuffer[MAX_PATH]{};
+  const DWORD fullRootLength = GetFullPathNameW(requestedPath.c_str(),
+      static_cast<DWORD>(std::size(fullRootBuffer)), fullRootBuffer, nullptr);
+  if (fullTempLength == 0 || fullTempLength >= std::size(fullTempBuffer) ||
+      fullRootLength == 0 || fullRootLength >= std::size(fullRootBuffer)) return false;
+  const std::wstring tempRoot = TrimDirectorySeparators(fullTempBuffer);
+  const std::wstring root = TrimDirectorySeparators(fullRootBuffer);
+  if (root.size() <= tempRoot.size() ||
+      CompareStringOrdinal(root.c_str(), static_cast<int>(tempRoot.size()),
+          tempRoot.c_str(), static_cast<int>(tempRoot.size()), TRUE) != CSTR_EQUAL ||
+      (root[tempRoot.size()] != L'\\' && root[tempRoot.size()] != L'/')) return false;
+  const DWORD attributes = GetFileAttributesW(root.c_str());
+  if (attributes == INVALID_FILE_ATTRIBUTES ||
+      (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+      (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return false;
+  WIN32_FIND_DATAW entry{};
+  const std::wstring pattern = root + L"\\*";
+  HANDLE find = FindFirstFileW(pattern.c_str(), &entry);
+  if (find == INVALID_HANDLE_VALUE) return false;
+  bool empty = true;
+  do {
+    if (wcscmp(entry.cFileName, L".") != 0 && wcscmp(entry.cFileName, L"..") != 0) {
+      empty = false;
+      break;
+    }
+  } while (FindNextFileW(find, &entry));
+  FindClose(find);
+  if (!empty) return false;
+  *canonicalPath = root;
+  return true;
+}
+
+bool InitializeAcceptanceContext() {
+  int argumentCount = 0;
+  LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+  if (arguments == nullptr) return false;
+  bool isolated = false;
+  bool preview = false;
+  for (int index = 1; index < argumentCount; ++index) {
+    if (wcscmp(arguments[index], L"--isolated-acceptance") == 0) isolated = true;
+    if (wcscmp(arguments[index], L"--reminder-ui-preview") == 0) preview = true;
+  }
+  LocalFree(arguments);
+  wchar_t rootBuffer[MAX_PATH]{};
+  const DWORD rootLength = GetEnvironmentVariableW(
+      L"NIUMA_ACCEPTANCE_ROOT", rootBuffer,
+      static_cast<DWORD>(std::size(rootBuffer)));
+  if (!isolated && !preview && rootLength == 0) return true;
+  if (!isolated || !preview || rootLength == 0 ||
+      rootLength >= std::size(rootBuffer) ||
+      !IsPrivateEmptyAcceptanceDirectory(rootBuffer, &gAcceptanceRoot)) return false;
+  gIsolatedAcceptance = true;
+  gReminderPreviewAcceptance = true;
+  return true;
+}
+
 std::wstring DataPath() {
+  if (gIsolatedAcceptance) return gAcceptanceRoot + L"\\data.ini";
   static const std::wstring path = [] {
     wchar_t folder[MAX_PATH] = {};
     if (FAILED(SHGetFolderPathW(
@@ -482,6 +560,7 @@ void SaveLaunchAtLoginPreference(bool enabled) {
 }
 
 void ConfigureLaunchAtLogin() {
+  if (gIsolatedAcceptance) return;
   const std::wstring path = DataPath();
   if (path.empty()) {
     return;
@@ -3288,6 +3367,11 @@ LRESULT CALLBACK WindowProcedure(
     }
 
     case WM_TIMER: {
+      if (wParam == kAcceptanceExitTimer && gReminderPreviewAcceptance) {
+        KillTimer(window, kAcceptanceExitTimer);
+        DestroyWindow(window);
+        return 0;
+      }
       if (wParam == kReminderTimer) {
         const ULONGLONG now = GetTickCount64();
         const auto nowUtc = static_cast<std::int64_t>(std::time(nullptr));
@@ -3490,11 +3574,13 @@ LRESULT CALLBACK WindowProcedure(
 
 int WINAPI wWinMain(
     HINSTANCE instance, HINSTANCE, PWSTR, int) {
+  if (!InitializeAcceptanceContext()) return 2;
   EnableBestDpiAwareness();
 
   const std::wstring pendingAppearancePack = AppearancePackArgument();
 
-  gState.mutex = CreateMutexW(nullptr, TRUE, kMutexName);
+  gState.mutex = CreateMutexW(nullptr, TRUE,
+      gIsolatedAcceptance ? kAcceptanceMutexName : kMutexName);
   if (gState.mutex == nullptr) {
     return 1;
   }
@@ -3526,9 +3612,9 @@ int WINAPI wWinMain(
   Gdiplus::GdiplusStartupInput startupInput;
   if (Gdiplus::GdiplusStartup(
           &gState.gdiplusToken, &startupInput, nullptr) != Gdiplus::Ok) {
-    ReleaseMutex(gState.mutex);
-    CloseHandle(gState.mutex);
-    if (SUCCEEDED(comResult)) {
+      ReleaseMutex(gState.mutex);
+      CloseHandle(gState.mutex);
+      if (SUCCEEDED(comResult)) {
       CoUninitialize();
     }
     return 1;
@@ -3689,23 +3775,28 @@ int WINAPI wWinMain(
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
   SetTimer(window, kDayTimer, 30000, nullptr);
   SetTimer(window, kReminderTimer, 1000, nullptr);
-  RegisterOffworkSessionNotifications(window);
+  if (!gIsolatedAcceptance) RegisterOffworkSessionNotifications(window);
   if (!SyncOffworkTimer()) {
     MessageBoxW(window, UiText(L"无法启动下班倒计时逐秒刷新，请在设置中关闭后重新开启。",
         L"The countdown refresh timer could not start. Turn it off and on in settings."),
         WindowTitle(), MB_OK | MB_ICONWARNING);
   }
 
-  wchar_t executable[MAX_PATH] = {};
-  if (GetModuleFileNameW(nullptr, executable,
-                         static_cast<DWORD>(std::size(executable))) != 0) {
-    std::wstring associationError;
-    niuma::RegisterAppearancePackAssociation(executable, &associationError);
+  if (!gIsolatedAcceptance) {
+    wchar_t executable[MAX_PATH] = {};
+    if (GetModuleFileNameW(nullptr, executable,
+                           static_cast<DWORD>(std::size(executable))) != 0) {
+      std::wstring associationError;
+      niuma::RegisterAppearancePackAssociation(executable, &associationError);
+    }
   }
 
-  ConfigureLaunchAtLogin();
-  RestartGlobalListeners();
-  if (!PrepareClientStartup(window, pendingAppearancePack) && IsMainWindowAlive(window)) {
+  if (!gIsolatedAcceptance) {
+    ConfigureLaunchAtLogin();
+    RestartGlobalListeners();
+  }
+  if (!gIsolatedAcceptance &&
+      !PrepareClientStartup(window, pendingAppearancePack) && IsMainWindowAlive(window)) {
     DestroyWindow(window);
   }
   // A listener failure leaves click-only/partial counting and a reachable retry
@@ -3713,6 +3804,10 @@ int WINAPI wWinMain(
 
   MSG message = {};
   if (IsMainWindowAlive(window)) {
+    if (gReminderPreviewAcceptance) {
+      PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger::HighIntensity);
+      SetTimer(window, kAcceptanceExitTimer, 12000, nullptr);
+    }
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
       if (gCountingCheck.window && IsDialogMessageW(gCountingCheck.window, &message)) continue;
       TranslateMessage(&message);
