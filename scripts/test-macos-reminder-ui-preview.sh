@@ -11,6 +11,10 @@ chmod 700 "$acceptance_root"
 export NIUMA_ACCEPTANCE_ROOT="$acceptance_root"
 export NIUMA_PACK_ROOT="$acceptance_root/AppearancePacks"
 cleanup() {
+  if [[ -n "${observer_pid:-}" ]] && kill -0 "$observer_pid" 2>/dev/null; then
+    kill -TERM "$observer_pid" 2>/dev/null || true
+    wait "$observer_pid" 2>/dev/null || true
+  fi
   if [[ -n "${preview_pid:-}" ]] && kill -0 "$preview_pid" 2>/dev/null; then
     kill -TERM "$preview_pid" 2>/dev/null || true
     wait "$preview_pid" 2>/dev/null || true
@@ -21,6 +25,9 @@ trap cleanup EXIT
 
 "$binary_path" --isolated-acceptance --reminder-ui-preview &
 preview_pid=$!
+python3 "$(dirname "$0")/check-runtime-network.py" --pid "$preview_pid" \
+  --duration 7 --report "${screenshot_path%.png}-network.json" &
+observer_pid=$!
 sleep 3
 kill -0 "$preview_pid" 2>/dev/null || {
   wait "$preview_pid" || true
@@ -36,6 +43,8 @@ grep -Eq 'pixelHeight: [1-9][0-9]*' <<<"$dimensions"
 sleep 6
 kill -0 "$preview_pid" 2>/dev/null || { echo "The app exited before auto-dismissal could be checked." >&2; exit 1; }
 screencapture -x "${screenshot_path%.png}-dismissed.png"
+wait "$observer_pid"
+observer_pid=
 wait "$preview_pid"
 python3 - "$acceptance_root/NiuMaMerit/Reminders/state.dat" <<'PY_CHECK'
 import pathlib,re,sys

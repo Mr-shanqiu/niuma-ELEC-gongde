@@ -66,7 +66,13 @@ $previewClock = [Diagnostics.Stopwatch]::StartNew()
 $process = Start-Process -FilePath $ExecutablePath `
   -ArgumentList @('--isolated-acceptance', '--reminder-ui-preview') `
   -WorkingDirectory (Split-Path -Parent $ExecutablePath) -PassThru
+$networkObserver = $null
 try {
+  $observerScript = Join-Path $PSScriptRoot 'check-runtime-network.py'
+  $networkReport = [IO.Path]::ChangeExtension($ScreenshotPath, '.network.json')
+  $networkObserver = Start-Process -FilePath (Get-Command python -ErrorAction Stop).Source `
+    -ArgumentList @(('"' + $observerScript + '"'), '--pid', $process.Id, '--duration', '7',
+      '--report', ('"' + $networkReport + '"')) -PassThru -NoNewWindow
   $pet = [IntPtr]::Zero
   $bubble = [IntPtr]::Zero
   $deadline = [DateTime]::UtcNow.AddSeconds(6)
@@ -125,6 +131,12 @@ try {
 
   if (-not $process.WaitForExit(20000)) { throw 'The preview app did not exit on its bounded acceptance timer.' }
   if ($process.ExitCode -ne 0) { throw "Preview process exited with code $($process.ExitCode)" }
+  if (-not $networkObserver.WaitForExit(10000) -or $networkObserver.ExitCode -ne 0) {
+    throw 'Runtime endpoint sampling did not complete successfully.'
+  }
+  $networkResult = Get-Content -Raw -LiteralPath $networkReport | ConvertFrom-Json
+  if ($networkResult.status -ne 'passed' -or $networkResult.samples -lt 3 -or
+      $networkResult.detected_endpoints -ne 0) { throw 'Runtime endpoint report failed its assertions.' }
   $statePath = Join-Path $acceptanceRoot 'data.ini'
   if (-not (Test-Path $statePath)) { throw 'The preview did not save its isolated state.' }
   $stateText = Get-Content -Raw -Path $statePath
@@ -139,6 +151,10 @@ try {
   }
   Write-Output "WINDOWS_REMINDER_UI_PREVIEW_PASSED dismiss=$DismissMode quota=1 history=1 pet=$($petRect.Right - $petRect.Left)x$($petRect.Bottom - $petRect.Top) bubble=$($bubbleRect.Right - $bubbleRect.Left)x$($bubbleRect.Bottom - $bubbleRect.Top)"
 } finally {
+  if ($null -ne $networkObserver) {
+    $networkObserver.Refresh()
+    if (-not $networkObserver.HasExited) { Stop-Process -Id $networkObserver.Id -Force -ErrorAction SilentlyContinue }
+  }
   $process.Refresh()
   if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
   $env:NIUMA_ACCEPTANCE_ROOT = $previousAcceptanceRoot

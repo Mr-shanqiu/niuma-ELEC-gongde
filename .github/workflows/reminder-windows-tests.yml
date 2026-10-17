@@ -10,6 +10,7 @@ on:
       - 'scripts/audit-offline.sh'
       - 'scripts/build-reminder-catalog.py'
       - 'scripts/test-build-reminder-catalog.py'
+      - 'scripts/check-runtime-network.py'
       - 'scripts/test-windows-reminder-ui-preview.ps1'
       - 'src/reminder_*'
       - 'src/offwork_clock.h'
@@ -34,6 +35,12 @@ jobs:
         run: |
           python scripts/test-build-reminder-catalog.py
           if ($LASTEXITCODE -ne 0) { throw "Catalog publisher regression failed" }
+
+      - name: Verify runtime endpoint observer positive and negative controls
+        shell: powershell
+        run: |
+          python scripts/check-runtime-network.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Runtime endpoint observer control failed" }
 
       - name: Configure Visual Studio x64
         shell: powershell
@@ -82,6 +89,7 @@ jobs:
           path: |
             build-reminder-tests/reminder-ui-*.png
             build-reminder-tests/reminder-ui-*.txt
+            build-reminder-tests/reminder-ui-*.json
           if-no-files-found: ignore
           retention-days: 7
 
