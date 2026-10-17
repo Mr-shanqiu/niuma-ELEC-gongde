@@ -209,6 +209,80 @@ static void TestCatalogP256KnownVector() {
   assert(!VerifyCatalogP256(public_xy, message, changed_signature));
 }
 
+// This signed fixture binds the exact UTF-8 updatePayload below. It exercises
+// envelope parsing, the production crypto verifier, durable install and recovery.
+// The ephemeral test private key was never retained or used as a publishing key.
+static void TestRealSignedCatalogStore(const std::string& payload,
+                                      const std::filesystem::path& directory) {
+  std::vector<std::uint8_t> public_xy;
+  assert(DecodeBase64("GE5yFsTviiQC3NW+AdRU6Ai+kE5SFmaRKx9HI1j6bESvC8adLIpkmXEkzcj7NVljdrsR+xdXKyWahsvlkDjI5g==", &public_xy));
+  const auto verify = MakeCatalogSignatureVerifier({{"test-integration-p256", public_xy}});
+  const std::string signature2 = "MeOhyVqsPyLYAeyKsHZZHkFYRcNt1XSIKcVypYpx+K09zzluMTu/t0KtTg8/PKQ37ZHwyl0ugLusWuqk2ubGUQ==";
+  const std::string signature3 = "rbgyDizvVCjnzJIn1AVA1EnaxPQffh9weI9dzbk0JE35tdoyoH4iVql80H6DhN2jWX5SYYIFjlSlJ/2dL2kDQw==";
+  const auto envelope = [](const std::string& bytes, const std::string& signature) {
+    return "{\"format\":\"nmgtext-envelope-v1\",\"key_id\":\"test-integration-p256\","
+        "\"payload_b64\":\"" + EncodeBase64(bytes) + "\",\"signature_b64\":\"" +
+        signature + "\"}";
+  };
+  std::filesystem::create_directories(directory);
+  const auto source = directory / "source.nmgtext";
+  {
+    std::ofstream file(source, std::ios::binary);
+    file << envelope(payload, signature2);
+    assert(file.good());
+  }
+  CatalogUpdateStore store(directory / "catalog");
+  ReminderStore history(directory / "history");
+  constexpr std::int64_t now = 1'800'000'000;
+  assert(history.SetSegmentConsumed(true, now) == StoreResult::Success);
+  assert(history.TryReserve("nm.en.9001", "2027-01-15", false, now) == StoreResult::Success);
+  auto installed = store.InstallFile(source, verify);
+  assert(installed.status == CatalogInstallStatus::Installed && installed.catalog &&
+      installed.catalog->content_version == 2 && installed.catalog->items.size() == 2);
+  auto loaded = store.Load(verify);
+  assert(loaded && loaded->content_version == 2 && loaded->items.size() == 2);
+  assert(store.InstallFile(source, verify).status == CatalogInstallStatus::AlreadyInstalled);
+  auto changed_payload = payload;
+  const auto text = changed_payload.find("A useful work joke.");
+  assert(text != std::string::npos);
+  changed_payload[text] ^= 1;
+  assert(store.Install(envelope(changed_payload, signature2), verify).status ==
+      CatalogInstallStatus::UntrustedSignature);
+  auto unknown_key = envelope(payload, signature2);
+  const auto key = unknown_key.find("test-integration-p256");
+  assert(key != std::string::npos);
+  unknown_key.replace(key, std::strlen("test-integration-p256"), "unknown-test-key");
+  assert(store.Install(unknown_key, verify).status == CatalogInstallStatus::UntrustedSignature);
+  std::vector<std::uint8_t> changed_signature;
+  assert(DecodeBase64(signature2, &changed_signature));
+  changed_signature.front() ^= 1;
+  assert(store.Install(envelope(payload, EncodeBase64(std::string(
+      changed_signature.begin(), changed_signature.end()))), verify).status ==
+      CatalogInstallStatus::UntrustedSignature);
+  assert(store.Load(verify)->content_version == 2);
+  auto newer = payload;
+  const auto version = newer.find("\"content_version\":2");
+  assert(version != std::string::npos);
+  newer.replace(version, std::strlen("\"content_version\":2"), "\"content_version\":3");
+  assert(store.Install(envelope(newer, signature3), verify).status == CatalogInstallStatus::Installed);
+  assert(store.Load(verify)->content_version == 3);
+  {
+    std::ofstream corrupt(directory / "catalog" / "official.nmgtext", std::ios::binary);
+    corrupt << "corrupted current package";
+    assert(corrupt.good());
+  }
+  bool recovered = false;
+  loaded = store.Load(verify, &recovered);
+  assert(recovered && loaded && loaded->content_version == 2);
+  assert(store.Install(envelope(payload, signature2), verify).status == CatalogInstallStatus::Downgrade);
+  assert(store.Install(envelope(newer, signature3), verify).status == CatalogInstallStatus::Installed);
+  assert(store.Load(verify)->content_version == 3);
+  std::unordered_set<std::string> recent;
+  bool warm = true;
+  assert(history.ReadSelectionHistory("2027-01-15", now + 1, &recent, &warm));
+  assert(recent.count("nm.en.9001") == 1 && !warm && history.SegmentConsumed());
+}
+
 #if defined(__APPLE__)
 static void TestCatalogP256() {
   int bits_value = 256;
@@ -536,6 +610,7 @@ int main() {
       ("reminder-catalog-store-" + std::to_string(
           std::chrono::steady_clock::now().time_since_epoch().count()));
   std::filesystem::remove_all(catalogDirectory);
+  TestRealSignedCatalogStore(updatePayload, catalogDirectory / "real-p256-chain");
   CatalogUpdateStore catalogStore(catalogDirectory);
   ReminderStore catalogHistoryStore(catalogDirectory / "reminder-history");
   const CatalogSignatureVerifier testVerifier = [](
