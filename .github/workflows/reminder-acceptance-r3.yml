@@ -3,6 +3,7 @@ name: Build Unified Acceptance R3
 on:
   pull_request:
     paths:
+      - '.gitattributes'
       - 'src/**'
       - 'scripts/prepare-reminder-import-acceptance.py'
       - 'scripts/test-windows-acceptance-r2.ps1'
