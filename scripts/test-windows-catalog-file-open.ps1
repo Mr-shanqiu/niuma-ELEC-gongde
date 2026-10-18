@@ -14,6 +14,20 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public class CatalogOpenNative {
+  private delegate bool EnumWindowProc(IntPtr h, IntPtr p);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc f, IntPtr p);
+  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+  public static IntPtr Dialog(int pid) {
+    IntPtr result = IntPtr.Zero;
+    EnumWindows((h, p) => {
+      uint owner; GetWindowThreadProcessId(h, out owner);
+      var name = new System.Text.StringBuilder(256); GetClassName(h, name, 256);
+      if (owner == pid && name.ToString() == "#32770") { result = h; return false; }
+      return true;
+    }, IntPtr.Zero);
+    return result;
+  }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowW(string c, string t);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int n);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
@@ -38,14 +52,13 @@ function Wait-Client {
 function Wait-Dialog($Process) {
   $deadline = [DateTime]::UtcNow.AddSeconds(15)
   do {
-    $condition = New-Object Windows.Automation.AndCondition(
-      (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ProcessIdProperty, $Process.Id)),
-      (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ClassNameProperty, '#32770')))
-    $dialog = [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
-    if ($null -ne $dialog) { return $dialog }
+    $handle = [CatalogOpenNative]::Dialog($Process.Id)
+    if ($handle -ne [IntPtr]::Zero) { return [Windows.Automation.AutomationElement]::FromHandle($handle) }
     Start-Sleep -Milliseconds 150
   } while ([DateTime]::UtcNow -lt $deadline)
-  throw 'Import result dialog did not appear.'
+  @{pid=$Process.Id; clientProcesses=@(Clients | ForEach-Object { @{pid=$_.Id;path=$_.Path} }); catalogExists=(Test-Path $catalog)} |
+    ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'MISSING_DIALOG.json')
+  throw 'Import result dialog did not appear.' 
 }
 function Finish-Dialog($Process, [string]$Name, [bool]$Success) {
   $dialog = Wait-Dialog $Process
