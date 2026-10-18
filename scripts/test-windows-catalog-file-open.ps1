@@ -54,7 +54,7 @@ function Wait-Dialog($Process) {
   $deadline = [DateTime]::UtcNow.AddSeconds(15)
   do {
     $handle = [CatalogOpenNative]::Dialog($Process.Id)
-    if ($handle -ne [IntPtr]::Zero) { return [Windows.Automation.AutomationElement]::FromHandle($handle) }
+    if ($handle -ne [IntPtr]::Zero) { return @{window=$handle; element=[Windows.Automation.AutomationElement]::FromHandle($handle)} }
     Start-Sleep -Milliseconds 150
   } while ([DateTime]::UtcNow -lt $deadline)
   @{pid=$Process.Id; clientProcesses=@(Clients | ForEach-Object { @{pid=$_.Id;path=$_.Path} }); catalogExists=(Test-Path $catalog)} |
@@ -62,7 +62,8 @@ function Wait-Dialog($Process) {
   throw 'Import result dialog did not appear.' 
 }
 function Finish-Dialog($Process, [string]$Name, [bool]$Success) {
-  $dialog = Wait-Dialog $Process
+  $opened = Wait-Dialog $Process
+  $dialog = $opened.element
   $text = (@($dialog.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)) |
     ForEach-Object { $_.Current.Name }) -join "`n"
   if ($Success) {
@@ -74,8 +75,8 @@ function Finish-Dialog($Process, [string]$Name, [bool]$Success) {
     $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size)
     $bitmap.Save((Join-Path $EvidenceDirectory ($Name + '.png')), [Drawing.Imaging.ImageFormat]::Png)
   } finally { $graphics.Dispose(); $bitmap.Dispose() }
-  $script:records += @{case=$Name; dialog=$dialog.Current.Name; text=$text; pid=$Process.Id}
-  $button = [CatalogOpenNative]::GetDlgItem([IntPtr]$dialog.Current.NativeWindowHandle, 1)
+  $script:records += @{case=$Name; dialog=$dialog.Current.Name; text=$text; pid=$Process.Id; nativeHandle=$opened.window.ToInt64(); automationHandle=$dialog.Current.NativeWindowHandle}
+  $button = [CatalogOpenNative]::GetDlgItem($opened.window, 1)
   if ($button -eq [IntPtr]::Zero) { throw 'Import result OK button is missing.' }
   [CatalogOpenNative]::PostMessage($button, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
   $deadline = [DateTime]::UtcNow.AddSeconds(5)
