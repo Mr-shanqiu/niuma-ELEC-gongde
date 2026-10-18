@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an isolated small-builtin import candidate without editing product sources."""
+"""Prepare one small-builtin client for the complete reminder acceptance journey."""
 
 import argparse
 from collections import Counter
@@ -128,18 +128,30 @@ def main():
                  "  if (!isolated || rootLength == 0 ||")
     replace_once(source / "src/windows/app.cpp", "  gReminderPreviewAcceptance = true;",
                  "  gReminderPreviewAcceptance = preview;")
+    # Normal acceptance keeps the real data profile and global listeners. Match
+    # macOS's listener-acceptance flag so testing cannot rewrite login startup.
+    replace_once(source / "src/windows/app.cpp", "bool gReminderPreviewAcceptance = false;",
+                 "bool gReminderPreviewAcceptance = false;\nbool gListenerAcceptance = false;")
+    replace_once(source / "src/windows/app.cpp",
+                 '    if (wcscmp(arguments[index], L"--reminder-ui-preview") == 0) preview = true;',
+                 '    if (wcscmp(arguments[index], L"--reminder-ui-preview") == 0) preview = true;\n'
+                 '    if (wcscmp(arguments[index], L"--listener-acceptance") == 0) gListenerAcceptance = true;')
+    replace_once(source / "src/windows/app.cpp",
+                 "    ConfigureLaunchAtLogin();\n    RestartGlobalListeners();",
+                 "    if (!gListenerAcceptance) ConfigureLaunchAtLogin();\n    RestartGlobalListeners();")
     modified = {name: hashlib.sha256((source / name).read_bytes()).hexdigest()
                 for name, sha in original.items()
                 if hashlib.sha256((source / name).read_bytes()).hexdigest() != sha}
     if set(modified) != {"src/reminder_catalog_data.h", "src/macos/app.mm", "src/windows/app.cpp"}:
         raise ValueError("unexpected acceptance source changes")
-    manifest = {"kind": "small-builtin-import-acceptance-only", "source_commit": commit,
+    manifest = {"kind": "unified-reminder-acceptance", "source_commit": commit,
                 "builtin_counts": {"zh-CN": 20, "en": 20},
                 "full_counts": dict(counts), "content_version": full["content_version"],
                 "ids": sorted(ids), "original_source_sha256": original,
                 "acceptance_overlay_sha256": modified,
                 "changed_behavior": ["40 built-in messages", "read-only active-library counts in About",
-                                     "Windows manual isolated UI without the preview timer"],
+                                     "Windows manual isolated UI without the preview timer",
+                                     "Windows --listener-acceptance keeps real listeners/profile without rewriting login startup"],
                 "production_assets_modified": False, "production_sources_modified": False,
                 "launched": False, "installed": False, "published": False}
     (output / "SOURCE_BINDING.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
