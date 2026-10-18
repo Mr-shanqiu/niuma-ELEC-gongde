@@ -2610,20 +2610,24 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
        @"本软件不包含网络请求、遥测或自动更新。\n\n"
        @"在其他应用中计数，需要允许本应用使用“输入监控”。\n"
+       @"如仍未正常计数，可联系开发者或扫码进粉丝群寻求帮助。\n"
        @"Mac 权限与计数帮助\n\n"
        @"官方网站：\n"
        @"https://gongde.zqscreen.cn/\n\n"
-       @"欢迎关注开发者抖音，一起交流产品的奇思妙想\n"
+       @"扫码进粉丝群，免费领取权益包。\n"
+       @"和我一起学习 AI，创建并上架你的专属形象包。\n"
        @"抖音号：1872941388",
       @"Version %@\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
        @"The app contains no network requests, telemetry, or automatic updates.\n\n"
        @"Counting in other apps requires Input Monitoring permission.\n"
+       @"If input is still not being counted, contact the developer or scan the Douyin code to join the fan group for help.\n"
        @"Mac permissions and counting help\n\n"
        @"Official website:\n"
        @"https://gongde.zqscreen.cn/\n\n"
-       @"Follow the developer on Douyin and share creative product ideas\n"
+       @"Scan with Douyin to join the fan group and claim free benefit packs.\n"
+       @"Learn AI with me, and create and publish your own appearance packs.\n"
        @"Douyin ID: 1872941388"), version];
   NSString *douyinPath = [NSBundle.mainBundle pathForResource:@"developer-douyin" ofType:@"png"];
   NSImage *douyinImage = douyinPath ? [[NSImage alloc] initWithContentsOfFile:douyinPath] : nil;
@@ -2644,8 +2648,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
         NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)} range:helpRange];
   }
   NSRange promoRange = [aboutText rangeOfString:UiText(
-      @"欢迎关注开发者抖音，一起交流产品的奇思妙想",
-      @"Follow the developer on Douyin and share creative product ideas")];
+      @"扫码进粉丝群，免费领取权益包。",
+      @"Scan with Douyin to join the fan group and claim free benefit packs.")];
   if (promoRange.location != NSNotFound) {
     NSMutableParagraphStyle *promoStyle = [[NSMutableParagraphStyle alloc] init];
     promoStyle.alignment = NSTextAlignmentCenter;
@@ -2675,7 +2679,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     code.image = douyinImage;
     code.imageScaling = NSImageScaleProportionallyUpOrDown;
     code.imageAlignment = NSImageAlignCenter;
-    code.toolTip = UiText(@"使用抖音扫一扫，关注开发者", @"Scan with Douyin to find the developer");
+    code.toolTip = UiText(@"使用抖音扫一扫，进粉丝群领取权益包或寻求帮助",
+                         @"Scan with Douyin to join the fan group for benefit packs or help");
     code.accessibilityLabel = UiText(@"开发者抖音码，抖音号 1872941388",
                                      @"Developer Douyin code, ID 1872941388");
     [content addSubview:code];

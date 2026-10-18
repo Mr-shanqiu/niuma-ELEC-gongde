@@ -1,0 +1,61 @@
+name: Windows R5 About and Proportional Previews
+
+on:
+  pull_request:
+    paths:
+      - 'src/windows/app.cpp'
+      - 'scripts/prepare-reminder-import-acceptance.py'
+      - 'scripts/test-windows-acceptance-r2.ps1'
+      - 'installer/windows/niuma-merit-unified-acceptance-r5.iss'
+      - 'installer/windows/startup-choice.iss'
+      - '.github/workflows/windows-acceptance-r5.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-r5:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the R5 about and preview corrections
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = '.local-work/candidates/win-r5'
+          python scripts/prepare-reminder-import-acceptance.py --revision R5 --output $root
+          if ($LASTEXITCODE -ne 0) { throw 'R5 source preparation failed' }
+          cmake -S "$root/source" -B "$root/build" -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'R5 configuration failed' }
+          cmake --build "$root/build" --config Release --target niuma-merit --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'R5 compilation failed' }
+      - name: Package the one page R5 installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD '.local-work/candidates/win-r5'
+          $output = "$root/output"
+          New-Item -ItemType Directory -Path $output | Out-Null
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'Installer compiler unavailable' }
+          }
+          $client = "$root/build/Release/niuma-merit.exe"
+          & $iscc "/DClientExecutable=$client" "/DAcceptanceOutputDir=$output" 'installer/windows/niuma-merit-unified-acceptance-r5.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'R5 installer compilation failed' }
+          Copy-Item $client $output
+          Copy-Item "$root/SOURCE_BINDING.json" $output
+          Copy-Item "$root/fixtures/small-builtin.json" $output
+          Get-ChildItem $output -File | ForEach-Object {
+            @{filename=$_.Name; bytes=$_.Length; sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 "$output/BUILD_RECEIPT.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-unified-acceptance-r5
+          path: .local-work/candidates/win-r5/output/*
+          if-no-files-found: error
+          retention-days: 7

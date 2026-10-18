@@ -1911,8 +1911,8 @@ bool ShowPrivacyNotice(HWND owner) {
 constexpr int kAboutHelpLink = 3090;
 
 const wchar_t* AboutDouyinCaption() {
-  return UiText(L"欢迎关注开发者抖音，一起交流产品的奇思妙想\n抖音号：1872941388",
-                L"Follow the developer on Douyin and share creative product ideas\nDouyin ID: 1872941388");
+  return UiText(L"扫码进粉丝群，免费领取权益包。\n和我一起学习 AI，创建并上架你的专属形象包。\n抖音号：1872941388",
+                L"Scan with Douyin to join the fan group and claim free benefit packs.\nLearn AI with me, and create and publish your own appearance packs.\nDouyin ID: 1872941388");
 }
 
 struct AboutDialogState {
@@ -2391,8 +2391,8 @@ void ShowAboutDialog(HWND owner) {
         L"telemetry, or automatic updates."
         L"\n\nOfficial website:\n";
   text += L"https://gongde.zqscreen.cn/";
-  text += UiText(L"\n\nWindows 通常无需额外授权。若在其他应用中没有计数，请查看下方权限与计数帮助。",
-                L"\n\nWindows normally needs no extra permission. If input in other apps is not counted, see the help link below.");
+  text += UiText(L"\n\n如未正常计数，可联系开发者，或扫描下方抖音码进粉丝群寻求帮助。",
+                L"\n\nIf input is not being counted, contact the developer or scan the Douyin code below to join the fan group for help.");
   AboutDialogState state;
   state.text = text;
   const HMODULE module = GetModuleHandleW(nullptr);
@@ -2512,7 +2512,7 @@ void DrawMeritCalendar(HDC dc) {
         10, muted, false);
     const auto& overtime = OffworkDay(key);
     if (overtime.present) {
-      DrawCalendarText(graphics, UiText(L"自动加班", L"Auto overtime"),
+      DrawCalendarText(graphics, UiText(L"今日加班", L"Today's OT"),
           Gdiplus::RectF(cell.X + 2, cell.Y + 42, cell.Width - 4, 11), 8, accent);
       DrawCalendarText(graphics, OffworkTimeText(overtime.seconds),
           Gdiplus::RectF(cell.X + 2, cell.Y + 53, cell.Width - 4, 14),
@@ -2664,11 +2664,17 @@ void DrawAppearancePicker(HDC dc, HDC updateDc, const RECT& client) {
           thumbnailGraphics,
           *gAppearanceCatalog.packs()[static_cast<size_t>(index - 1)], 0.0f);
     }
+    // Fit the original canvas inside the preview area without stretching it.
+    const float previewWidth = static_cast<float>(ScaleDip(116, dpi));
+    const float previewHeight = static_cast<float>(ScaleDip(76, dpi));
+    const float previewScale = std::min(previewWidth / thumbnail.GetWidth(),
+                                        previewHeight / thumbnail.GetHeight());
+    const float imageWidth = thumbnail.GetWidth() * previewScale;
+    const float imageHeight = thumbnail.GetHeight() * previewScale;
     graphics.DrawImage(&thumbnail, Gdiplus::RectF(
-        static_cast<float>(card.left + ScaleDip(20, dpi)),
-        static_cast<float>(card.top + ScaleDip(22, dpi)),
-        static_cast<float>(ScaleDip(116, dpi)),
-        static_cast<float>(ScaleDip(76, dpi))));
+        static_cast<float>(card.left + ScaleDip(20, dpi)) + (previewWidth - imageWidth) / 2,
+        static_cast<float>(card.top + ScaleDip(22, dpi)) + (previewHeight - imageHeight) / 2,
+        imageWidth, imageHeight));
     std::wstring badge;
     if (index == CurrentPickerIndex()) badge = UiText(L"当前", L"Current");
     if (index > 0) {
