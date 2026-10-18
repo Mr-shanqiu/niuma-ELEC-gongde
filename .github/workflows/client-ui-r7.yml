@@ -1,20 +1,6 @@
 name: R7 Native Client UI and Installer
 
 on:
-  pull_request:
-    paths:
-      - 'src/macos/**'
-      - 'src/windows/**'
-      - 'assets/appicon.icns'
-      - 'installer/macos/**'
-      - 'installer/windows/niuma-merit-unified-acceptance-r7.iss'
-      - 'installer/windows/startup-choice.iss'
-      - 'scripts/build-macos-installer.sh'
-      - 'scripts/prepare-reminder-import-acceptance.py'
-      - 'scripts/prepare-native-ui-gallery.py'
-      - 'scripts/capture-windows-ui-gallery.ps1'
-      - 'scripts/test-macos-installer.mm'
-      - '.github/workflows/client-ui-r7.yml'
   workflow_dispatch:
 
 permissions:

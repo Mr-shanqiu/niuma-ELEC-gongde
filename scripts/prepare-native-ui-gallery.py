@@ -24,13 +24,23 @@ static LANGID WINAPI NiuMaGalleryLanguage() { return MAKELANGID(LANG_CHINESE, SU
 #include "app-main.cpp"
 #undef wWinMain
 
+LRESULT CALLBACK GalleryCalendarProbe(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                                      UINT_PTR, DWORD_PTR) {
+  if (message == WM_APP + 71)
+    return niuma::CalendarMonthRange::Month(gCalendar.year, gCalendar.month);
+  return DefSubclassProc(window, message, wParam, lParam);
+}
+
 LRESULT CALLBACK GalleryHook(int code, WPARAM wParam, LPARAM lParam) {
   if (code >= 0 && wParam == PM_REMOVE) {
     auto* message = reinterpret_cast<MSG*>(lParam);
     if (message->message == WM_APP + 70 && gIsolatedAcceptance) {
       const WPARAM action = message->wParam;
       message->message = WM_NULL;
-      if (action == 1) ShowMeritCalendar(gState.window);
+      if (action == 1) {
+        ShowMeritCalendar(gState.window);
+        SetWindowSubclass(gCalendar.window, GalleryCalendarProbe, 901, 0);
+      }
       else if (action == 2) ShowAppearancePicker(gState.window);
       else if (action == 3) ShowOffworkSettings(gState.window);
       else if (action == 4) ShowAboutDialog(gState.window);

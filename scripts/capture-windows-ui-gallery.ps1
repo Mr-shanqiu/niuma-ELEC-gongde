@@ -24,6 +24,7 @@ public static class NiuMaGallery {
  [DllImport("gdi32.dll")] public static extern IntPtr CreateRectRgn(int l,int t,int r,int b);
  [DllImport("gdi32.dll")] public static extern bool PtInRegion(IntPtr region,int x,int y);
  [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+ [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
  public static IntPtr Find(int pid,string cls) {
   IntPtr found=IntPtr.Zero;
   EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);var b=new System.Text.StringBuilder(128);GetClassName(h,b,128);
@@ -67,6 +68,38 @@ try {
  foreach($case in $cases) {
   [NiuMaGallery]::PostMessage($main,0x8046,[IntPtr]$case.action,[IntPtr]::Zero)|Out-Null
   $window=Wait-Window $case.class
+  if($case.action -eq 1) {
+   $today=[DateTime]::Today
+   $currentMonth=$today.Year*12+$today.Month-1
+   $scale=[NiuMaGallery]::GetDpiForWindow($window)/96.0
+   $cy=[int][Math]::Round(90*$scale)
+   $previousX=[int][Math]::Round(46*$scale)
+   $nextX=[int][Math]::Round(514*$scale)
+   $previousPoint=[IntPtr](($cy -shl 16) -bor $previousX)
+   $nextPoint=[IntPtr](($cy -shl 16) -bor $nextX)
+   foreach($point in @($previousPoint,$nextPoint)) {
+    [NiuMaGallery]::SendMessage($window,0x202,[IntPtr]::Zero,$point)|Out-Null
+    if([NiuMaGallery]::SendMessage($window,0x8047,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne $currentMonth){throw 'Empty calendar browsed outside current month'}
+   }
+   [NiuMaGallery]::SendMessage($window,0x10,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
+   $meritDay=$today.AddMonths(-3).ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)
+   $overtimeDay=$today.AddMonths(-5).ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)
+   $zeroDay=$today.AddMonths(-8).ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)
+   $futureDay=$today.AddMonths(1).ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)
+   $sample=[DateTimeOffset]::Now.ToUnixTimeSeconds()
+   $ini="[daily]`r`n$meritDay=5`r`n$zeroDay=0`r`n$futureDay=1`r`ninvalid-day=9`r`n[offwork_daily]`r`n$overtimeDay=3600,1080,$sample`r`n$zeroDay=0,1080,$sample`r`n"
+   [IO.File]::WriteAllText((Join-Path $root 'data.ini'),$ini,[Text.Encoding]::Unicode)
+   [NiuMaGallery]::PostMessage($main,0x8046,[IntPtr]1,[IntPtr]::Zero)|Out-Null
+   $window=Wait-Window $case.class
+   for($i=0;$i -lt 80;$i++){[NiuMaGallery]::SendMessage($window,0x202,[IntPtr]::Zero,$previousPoint)|Out-Null}
+   $earliestMonth=$today.AddMonths(-5).Year*12+$today.AddMonths(-5).Month-1
+   if([NiuMaGallery]::SendMessage($window,0x8047,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne $earliestMonth){throw 'Earliest valid recorded month boundary failed'}
+   [NiuMaGallery]::SendMessage($window,0x202,[IntPtr]::Zero,$nextPoint)|Out-Null
+   if([NiuMaGallery]::SendMessage($window,0x8047,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne $earliestMonth+1){throw 'Empty month inside history range became inaccessible'}
+   for($i=0;$i -lt 80;$i++){[NiuMaGallery]::SendMessage($window,0x202,[IntPtr]::Zero,$nextPoint)|Out-Null}
+   if([NiuMaGallery]::SendMessage($window,0x8047,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne $currentMonth){throw 'Current month boundary failed'}
+   @{status='passed';emptyHistoryCurrentOnly=$true;earliestRecordedMonth=$earliestMonth;currentMonth=$currentMonth;emptyGapsBrowsable=$true;repeatedBoundaryClicks=80;zeroAndInvalidAndFutureIgnored=$true;realProfileUsed=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 (Join-Path $OutputDirectory 'CALENDAR_BOUNDS.json')
+  }
   Capture-Window $window $case.name ($case.close -eq -1)
   if($case.action -in @(1,4,5)) {
    $region=[NiuMaGallery]::CreateRectRgn(0,0,0,0)

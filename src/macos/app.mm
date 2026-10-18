@@ -3,6 +3,7 @@
 #import <mach/mach_time.h>
 #import "appearance_pack.mm"
 #include "../offwork_clock.h"
+#include "../calendar_month_range.h"
 #include "../reminder_activity.h"
 #include "../reminder_geometry.h"
 #include "../reminder_policy.h"
@@ -419,6 +420,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)count;
 - (void)countScrollGesture;
 - (void)showContextMenu:(NSEvent *)event;
+- (NSMenu *)contextMenu;
 - (void)startStrikeWithDuration:(NSTimeInterval)duration;
 - (void)animate:(NSTimer *)timer;
 - (void)showPermissionIntroIfNeeded;
@@ -723,12 +725,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 @end
 
-@interface MeritCalendarView : NSView
+@interface MeritCalendarView : NSView {
+  niuma::CalendarMonthRange _monthRange;
+}
+@property(nonatomic, strong) NSButton *previousButton;
+@property(nonatomic, strong) NSButton *nextButton;
 @property(nonatomic, weak) MeritController *controller;
 @property(nonatomic) NSInteger year;
 @property(nonatomic) NSInteger month;
 - (void)showCurrentMonth;
 - (void)shiftMonth:(NSInteger)delta;
+- (void)reloadMonthRange;
+- (void)refreshNavigation;
 @end
 
 @implementation MeritCalendarView
@@ -740,19 +748,44 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
   self.year = parts.year;
   self.month = parts.month;
+  [self reloadMonthRange];
+  [self refreshNavigation];
   [self setNeedsDisplay:YES];
 }
 
+- (void)reloadMonthRange {
+  NSDateComponents *now = [NSCalendar.currentCalendar
+      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
+  _monthRange = niuma::CalendarMonthRange((int)now.year, (int)now.month);
+  for (NSString *key in self.controller.dailyTotals) {
+    if ([self.controller.dailyTotals[key] longLongValue] > 0 && key.UTF8String)
+      _monthRange.IncludeRecordedDay(std::string_view(key.UTF8String));
+  }
+  for (NSString *key in self.controller.offworkDailySnapshots) {
+    if ([self.controller offworkRecordForDay:key] && key.UTF8String)
+      _monthRange.IncludeRecordedDay(std::string_view(key.UTF8String));
+  }
+}
+
+- (void)refreshNavigation {
+  NSDateComponents *now = [NSCalendar.currentCalendar
+      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
+  if (_monthRange.last != niuma::CalendarMonthRange::Month((int)now.year, (int)now.month))
+    [self reloadMonthRange];
+  const int selected = _monthRange.Clamp(
+      niuma::CalendarMonthRange::Month((int)self.year, (int)self.month));
+  self.year = selected / 12; self.month = selected % 12 + 1;
+  self.previousButton.enabled = _monthRange.CanShift(selected, -1);
+  self.nextButton.enabled = _monthRange.CanShift(selected, 1);
+}
+
 - (void)shiftMonth:(NSInteger)delta {
-  NSDateComponents *parts = [[NSDateComponents alloc] init];
-  parts.year = self.year;
-  parts.month = self.month + delta;
-  parts.day = 1;
-  NSDate *date = [NSCalendar.currentCalendar dateFromComponents:parts];
-  NSDateComponents *normalized = [NSCalendar.currentCalendar
-      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:date];
-  self.year = normalized.year;
-  self.month = normalized.month;
+  [self refreshNavigation];
+  const int current = niuma::CalendarMonthRange::Month((int)self.year, (int)self.month);
+  const int next = _monthRange.Shift(current, delta < 0 ? -1 : delta > 0 ? 1 : 0);
+  if (next == current) return;
+  self.year = next / 12; self.month = next % 12 + 1;
+  [self refreshNavigation];
   [self setNeedsDisplay:YES];
 }
 
@@ -776,6 +809,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSColor *ink = NMUiInk();
   NSColor *muted = NMUiMuted();
   NSColor *accent = NMUiBlue();
+  [self refreshNavigation];
   NSString *monthTitle = IsChineseUI()
       ? [NSString stringWithFormat:@"%ld 年 %ld 月", (long)self.year, (long)self.month]
       : [NSString stringWithFormat:@"%ld / %02ld", (long)self.year, (long)self.month];
@@ -2309,13 +2343,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.animationTimer = nil;
 }
 
-- (void)showContextMenu:(NSEvent *)event {
+- (NSMenu *)contextMenu {
   NSMenu *menu = [[NSMenu alloc] init];
   NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:UiText(@"关于牛马电子功德", @"About NiuMa Merit")
                                                 action:@selector(showAbout:)
                                          keyEquivalent:@""];
   about.target = self;
-  [menu addItem:about];
   NSMenuItem *launchAtLogin = [[NSMenuItem alloc]
       initWithTitle:UiText(@"登录后自动启动", @"Start at Login")
              action:@selector(toggleLaunchAtLogin:)
@@ -2325,41 +2358,33 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   launchAtLogin.state = self.isLaunchAtLoginEnabled
       ? NSControlStateValueOn
       : NSControlStateValueOff;
-  [menu addItem:launchAtLogin];
   NSMenuItem *appearance = [[NSMenuItem alloc] initWithTitle:UiText(@"更换形象", @"Change Appearance")
                                                      action:@selector(showAppearancePicker:)
                                               keyEquivalent:@""];
   appearance.target = self;
-  [menu addItem:appearance];
   NSMenuItem *calendar = [[NSMenuItem alloc]
       initWithTitle:UiText(@"功德日历…", @"Merit Calendar…")
              action:@selector(showMeritCalendar:)
       keyEquivalent:@""];
   calendar.target = self;
-  [menu addItem:calendar];
   NSMenuItem *offwork = [[NSMenuItem alloc]
       initWithTitle:UiText(@"下班倒计时…", @"Off-work Countdown…")
              action:@selector(showOffworkSettings:) keyEquivalent:@""];
   offwork.target = self;
   offwork.state = self.offworkEnabled ? NSControlStateValueOn : NSControlStateValueOff;
-  [menu addItem:offwork];
-  [menu addItem:NSMenuItem.separatorItem];
   NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:UiText(@"退出", @"Quit")
                                                 action:@selector(terminate:)
                                          keyEquivalent:@""];
   quit.target = NSApp;
-  [menu addItem:quit];
 
   // The compact pet window is only 120 points wide. Keep the native menu
   // independent from that canvas size and leave room for checkmarks/padding.
-  [menu removeAllItems];
-  [menu addItem:appearance]; [menu addItem:calendar]; [menu addItem:offwork];
-  [menu addItem:NSMenuItem.separatorItem]; [menu addItem:launchAtLogin];
-  [menu addItem:NSMenuItem.separatorItem]; [menu addItem:about]; [menu addItem:quit];
+  // Every command is a normal native row; separator rows would add uneven gaps.
+  NSArray<NSMenuItem *> *entries = @[appearance, calendar, offwork, launchAtLogin, about, quit];
+  for (NSMenuItem *item in entries) [menu addItem:item];
   NSFont *menuFont = [NSFont systemFontOfSize:14];
   menu.font = menuFont;
   if (@available(macOS 11.0, *)) {
-    NSArray *entries = @[appearance, calendar, offwork, launchAtLogin, about, quit];
     NSArray *symbols = @[@"person.crop.square", @"calendar", @"clock", @"power", @"info.circle", @"rectangle.portrait.and.arrow.right"];
     for (NSUInteger index = 0; index < entries.count; ++index) {
       NSImage *image = [NSImage imageWithSystemSymbolName:symbols[index] accessibilityDescription:nil];
@@ -2374,7 +2399,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     }].width);
   }
   menu.minimumWidth = MAX(240.0, widestTitle + 64.0);
-  [NSMenu popUpContextMenu:menu withEvent:event forView:self.view];
+  return menu;
+}
+
+- (void)showContextMenu:(NSEvent *)event {
+  [NSMenu popUpContextMenu:[self contextMenu] withEvent:event forView:self.view];
 }
 
 - (BOOL)importOfficialMessagesAtPath:(NSString *)filename {
@@ -2451,6 +2480,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     NSButton *next = [[NSButton alloc] initWithFrame:NSMakeRect(492, 18, 44, 28)];
     next.title = @">"; next.tag = 1; next.target = self;
     next.action = @selector(shiftCalendarMonth:);
+    previous.accessibilityLabel = UiText(@"上个月", @"Previous month");
+    next.accessibilityLabel = UiText(@"下个月", @"Next month");
+    self.calendarView.previousButton = previous;
+    self.calendarView.nextButton = next;
     [self.calendarView addSubview:previous];
     [self.calendarView addSubview:next];
     self.calendarWindow = [[NSWindow alloc] initWithContentRect:frame
@@ -2463,6 +2496,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     NMUiWindow(self.calendarWindow);
     [self.calendarWindow center];
   }
+  [self.calendarView reloadMonthRange];
+  [self.calendarView refreshNavigation];
+  [self.calendarView setNeedsDisplay:YES];
   [NSApp activateIgnoringOtherApps:YES];
   [self.calendarWindow makeKeyAndOrderFront:nil];
 }

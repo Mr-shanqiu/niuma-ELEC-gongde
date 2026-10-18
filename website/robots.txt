@@ -1,6 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /api/
-Disallow: /admin/
-
-Sitemap: https://gongde.zqscreen.cn/sitemap.xml

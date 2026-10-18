@@ -23,7 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ref", default="HEAD")
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--revision", choices=("R1", "R2", "R3", "R4", "R5", "R6", "R7"), default="R1")
+    parser.add_argument("--revision", choices=("R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"), default="R1")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     output = args.output.resolve()
@@ -114,7 +114,7 @@ def main():
                  "    ConfigureLaunchAtLogin();\n    RestartGlobalListeners();",
                  "    if (!gListenerAcceptance) ConfigureLaunchAtLogin();\n    RestartGlobalListeners();")
     expected_modified = {"src/reminder_catalog_data.h", "src/windows/app.cpp"}
-    if args.revision in ("R2", "R3", "R4", "R5", "R6", "R7"):
+    if args.revision in ("R2", "R3", "R4", "R5", "R6", "R7", "R8"):
         replace_once(source / "src/windows/app.cpp",
                      '  return UiText(L"牛马电子功德", L"NiuMa Merit");',
                      f'  return UiText(L"牛马电子功德【综合验收·{args.revision}】", L"NiuMa Merit [Unified Acceptance {args.revision}]");')
@@ -140,10 +140,10 @@ def main():
             if text.count(old) != 1:
                 raise ValueError("unexpected bundle label")
             text = text.replace(old, f"<key>{key}</key><string>NiuMa Merit [Unified Acceptance {args.revision}]</string>")
-        if args.revision == "R7":
+        if args.revision in ("R7", "R8"):
             text = text.replace('<key>CFBundleVersion</key><string>904.0</string>',
-                                '<key>CFBundleVersion</key><string>904.7</string>')
-            text = text.replace('</dict>', '<key>NiuMaInstallName</key><string>牛马电子功德-综合验收-20261019-R7.app</string>\n</dict>')
+                                f'<key>CFBundleVersion</key><string>904.{args.revision[1:]}</string>')
+            text = text.replace('</dict>\n</plist>', f'<key>NiuMaInstallName</key><string>牛马电子功德-综合验收-20261019-{args.revision}.app</string>\n</dict>\n</plist>')
         path.write_text(text, encoding="utf-8")
         expected_modified.add(relative)
     modified = {name: hashlib.sha256((source / name).read_bytes()).hexdigest()

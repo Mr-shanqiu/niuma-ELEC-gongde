@@ -17,6 +17,7 @@
 #include "appearance_pack.h"
 #include "app_version.h"
 #include "../offwork_clock.h"
+#include "../calendar_month_range.h"
 #include "../reminder_activity.h"
 #include "../reminder_geometry.h"
 #include "../reminder_policy.h"
@@ -236,6 +237,7 @@ struct CalendarState {
   HWND window = nullptr;
   int year = 0;
   int month = 0;
+  niuma::CalendarMonthRange range;
 };
 
 CalendarState gCalendar;
@@ -2478,7 +2480,44 @@ void DrawCalendarText(Gdiplus::Graphics& graphics, const std::wstring& text,
   graphics.DrawString(text.c_str(), -1, &font, rect, &format, &brush);
 }
 
+void ReloadCalendarRange() {
+  SYSTEMTIME now{}; GetLocalTime(&now);
+  gCalendar.range = niuma::CalendarMonthRange(now.wYear, now.wMonth);
+  // Enumerate recorded keys once on opening/month rollover, never on every count.
+  const std::wstring path = DataPath();
+  if (!path.empty()) {
+    for (const wchar_t* section : {L"daily", L"offwork_daily"}) {
+      std::vector<wchar_t> names(1024);
+      for (;;) {
+        const DWORD copied = GetPrivateProfileStringW(section, nullptr, L"", names.data(),
+            static_cast<DWORD>(names.size()), path.c_str());
+        if (copied < names.size() - 2) break;
+        if (names.size() > MAXDWORD / 2) return;
+        names.resize(names.size() * 2);
+      }
+      for (const wchar_t* key = names.data(); *key; key += std::wcslen(key) + 1) {
+        const bool recorded = wcscmp(section, L"daily") == 0
+            ? ReadDailyTotal(key) > 0 : OffworkDay(key).present;
+        if (recorded) gCalendar.range.IncludeRecordedDay(std::wstring_view(key));
+      }
+    }
+  }
+  // Include an unflushed in-memory overtime snapshot without writing any data.
+  for (const auto& entry : gOffwork.days)
+    if (entry.second.present) gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
+}
+
+void RefreshCalendarNavigation() {
+  SYSTEMTIME now{}; GetLocalTime(&now);
+  if (gCalendar.range.last != niuma::CalendarMonthRange::Month(now.wYear, now.wMonth))
+    ReloadCalendarRange();
+  const int selected = gCalendar.range.Clamp(
+      niuma::CalendarMonthRange::Month(gCalendar.year, gCalendar.month));
+  gCalendar.year = selected / 12; gCalendar.month = selected % 12 + 1;
+}
+
 void DrawMeritCalendar(HDC dc) {
+  RefreshCalendarNavigation();
   Gdiplus::Graphics graphics(dc);
   const float scale = static_cast<float>(gState.dpi) / 96.0f;
   graphics.ScaleTransform(scale, scale);
@@ -2497,8 +2536,12 @@ void DrawMeritCalendar(HDC dc) {
   if (IsChineseUi()) swprintf_s(monthTitle, L"%d 年 %d 月", gCalendar.year, gCalendar.month);
   else swprintf_s(monthTitle, L"%d / %02d", gCalendar.year, gCalendar.month);
   DrawCalendarText(graphics, monthTitle, Gdiplus::RectF(90, 18, 380, 34), 22, ink, true);
-  DrawCalendarText(graphics, L"<", Gdiplus::RectF(22, 18, 48, 34), 20, ink, true);
-  DrawCalendarText(graphics, L">", Gdiplus::RectF(490, 18, 48, 34), 20, ink, true);
+  const int selectedMonth = niuma::CalendarMonthRange::Month(gCalendar.year, gCalendar.month);
+  const Gdiplus::Color disabled(255, 194, 194, 201);
+  DrawCalendarText(graphics, L"<", Gdiplus::RectF(22, 18, 48, 34), 20,
+      gCalendar.range.CanShift(selectedMonth, -1) ? ink : disabled, true);
+  DrawCalendarText(graphics, L">", Gdiplus::RectF(490, 18, 48, 34), 20,
+      gCalendar.range.CanShift(selectedMonth, 1) ? ink : disabled, true);
 
   std::uint64_t monthTotal = 0;
   for (int day = 1; day <= DaysInMonth(gCalendar.year, gCalendar.month); ++day) {
@@ -2598,9 +2641,11 @@ LRESULT CALLBACK CalendarWindowProcedure(HWND window, UINT message, WPARAM wPara
       const int x = MulDiv(GET_X_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
       const int y = MulDiv(GET_Y_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
       if (y >= 64 && y <= 112 && (x <= 82 || x >= 478)) {
-        gCalendar.month += x <= 82 ? -1 : 1;
-        if (gCalendar.month == 0) { gCalendar.month = 12; --gCalendar.year; }
-        if (gCalendar.month == 13) { gCalendar.month = 1; ++gCalendar.year; }
+        RefreshCalendarNavigation();
+        const int current = niuma::CalendarMonthRange::Month(gCalendar.year, gCalendar.month);
+        const int next = gCalendar.range.Shift(current, x <= 82 ? -1 : 1);
+        if (next == current) return 0;
+        gCalendar.year = next / 12; gCalendar.month = next % 12 + 1;
         InvalidateRect(window, nullptr, FALSE);
       }
       return 0;
@@ -2625,6 +2670,8 @@ void ShowMeritCalendar(HWND owner) {
         owner, nullptr, GetModuleHandleW(nullptr), nullptr);
   }
   if (gCalendar.window != nullptr) {
+    ReloadCalendarRange();
+    RefreshCalendarNavigation();
     niuma::ui::Apply(gCalendar.window);
     niuma::ui::Card(gCalendar.window, UiText(L"功德日历", L"Merit Calendar"), UiText(L"关闭", L"Close"));
     ShowWindow(gCalendar.window, SW_SHOW);

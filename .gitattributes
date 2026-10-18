@@ -1,2 +1,0 @@
-# Signed message packages must retain their exact published bytes on Windows.
-*.nmgtext -text
