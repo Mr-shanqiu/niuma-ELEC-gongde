@@ -35,6 +35,9 @@ var
   PreferenceFile: String;
   PackageSize: Int64;
 begin
+  WizardForm.Font.Name := 'Segoe UI';
+  WizardForm.Font.Size := 10;
+  WizardForm.Color := $00F7F5F5;
   PreferenceFile := ExpandConstant('{localappdata}\NiuMaMerit\data.ini');
   StartAtLoginCheckbox := TNewCheckBox.Create(WizardForm);
   StartAtLoginCheckbox.Parent := WizardForm.SelectDirPage;
@@ -49,6 +52,7 @@ begin
   LocalOnlyLabel.Parent := WizardForm.SelectDirPage;
   LocalOnlyLabel.Left := StartAtLoginCheckbox.Left;
   LocalOnlyLabel.Top := StartAtLoginCheckbox.Top + StartAtLoginCheckbox.Height + ScaleY(12);
+  LocalOnlyLabel.Font.Color := $0076766E;
   LocalOnlyLabel.Caption := CustomMessage('LocalOnly');
   if FileSize64(ExpandConstant('{srcexe}'), PackageSize) then
     LocalOnlyLabel.Caption := FmtMessage(CustomMessage('InstallerSize'), [Format('%.1f', [PackageSize / 1000000.0])]) + ' · ' + LocalOnlyLabel.Caption;

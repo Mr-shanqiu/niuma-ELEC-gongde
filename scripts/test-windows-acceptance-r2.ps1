@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$InstallerPath,
   [Parameter(Mandatory = $true)][string]$ClientPath,
   [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
-  [ValidateSet('R2', 'R3', 'R4')][string]$CandidateRevision = 'R2',
+  [ValidateSet('R2', 'R3', 'R4', 'R5', 'R6')][string]$CandidateRevision = 'R2',
   [switch]$RequireSinglePage
 )
 

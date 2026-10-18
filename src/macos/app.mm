@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <unordered_set>
+#import "ui_theme.h"
 
 // Explicit acceptance launches never consult the user's product preferences.
 // The pack root must be an empty, private directory supplied by the runner;
@@ -509,17 +510,19 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                     rect:(NSRect)rect
                     font:(NSFont *)font
                    color:(NSColor *)color {
-  NSColor *glow = [color colorWithAlphaComponent:0.45];
+  NSColor *glow = [NSColor colorWithCalibratedWhite:0 alpha:.8];
   NSMutableParagraphStyle *center = [[NSMutableParagraphStyle alloc] init];
   center.alignment = NSTextAlignmentCenter;
   NSShadow *shadow = [[NSShadow alloc] init];
   shadow.shadowColor = glow;
   shadow.shadowOffset = NSMakeSize(0, -1);
-  shadow.shadowBlurRadius = 3;
+  shadow.shadowBlurRadius = 2;
   NSDictionary *attributes = @{
     NSFontAttributeName: font,
     NSForegroundColorAttributeName: color,
     NSParagraphStyleAttributeName: center,
+    NSStrokeColorAttributeName: [NSColor colorWithCalibratedWhite:0 alpha:.7],
+    NSStrokeWidthAttributeName: @(-2.5),
     NSShadowAttributeName: shadow
   };
   [text drawInRect:rect withAttributes:attributes];
@@ -705,9 +708,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
   [ctx restoreGraphicsState];
   if (!self.previewOnly && controller.offworkEnabled) {
-    NSColor *color = controller.offworkIsOvertime
-        ? [NSColor colorWithCalibratedRed:.91 green:.46 blue:.13 alpha:1]
-        : [NSColor colorWithCalibratedWhite:.42 alpha:1];
+    NSColor *color = [NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1];
     [self drawCenteredText:controller.offworkDisplayLabel ?: UiText(@"距下班", @"Until off work")
                      rect:NSMakeRect(0, 55, kWindowWidth, 28)
                      font:[NSFont systemFontOfSize:24 weight:NSFontWeightMedium]
@@ -769,12 +770,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)drawRect:(NSRect)dirtyRect {
   (void)dirtyRect;
-  [[NSColor colorWithCalibratedRed:.97 green:.94 blue:.88 alpha:1] setFill];
+  [NMUiCanvas() setFill];
   NSRectFill(self.bounds);
 
-  NSColor *ink = [NSColor colorWithCalibratedRed:.24 green:.18 blue:.12 alpha:1];
-  NSColor *muted = [NSColor colorWithCalibratedRed:.49 green:.42 blue:.34 alpha:1];
-  NSColor *accent = [NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1];
+  NSColor *ink = NMUiInk();
+  NSColor *muted = NMUiMuted();
+  NSColor *accent = NMUiBlue();
   NSString *monthTitle = IsChineseUI()
       ? [NSString stringWithFormat:@"%ld 年 %ld 月", (long)self.year, (long)self.month]
       : [NSString stringWithFormat:@"%ld / %02ld", (long)self.year, (long)self.month];
@@ -821,7 +822,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     NSString *key = [NSString stringWithFormat:@"%04ld-%02ld-%02ld",
         (long)self.year, (long)self.month, (long)day];
     if ([key isEqualToString:todayKey]) {
-      [[NSColor colorWithCalibratedRed:.95 green:.77 blue:.49 alpha:.38] setFill];
+      [[NSColor colorWithCalibratedRed:.89 green:.94 blue:1 alpha:1] setFill];
       [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(cell, 2, 3) xRadius:9 yRadius:9] fill];
     }
     unsigned long long value = self.controller.dailyTotals[key].unsignedLongLongValue;
@@ -1122,6 +1123,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     save.frame = NSMakeRect(328, 20, 88, 30);
     save.keyEquivalent = @"\r";
     [content addSubview:save];
+    NMUiWindow(self.offworkSettingsWindow);
     [self.offworkSettingsWindow center];
   }
   if (!self.offworkSettingsWindow.isVisible) {
@@ -1165,7 +1167,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)showCalendarDay:(NSString *)key {
   [self refreshOffworkAllowRollover:YES];
-  NSAlert *alert = [[NSAlert alloc] init];
+  NSAlert *alert = [[NMUiAlert alloc] init];
   alert.messageText = key;
   NSString *merit = [NSString stringWithFormat:@"%@ %llu", UiText(@"功德", @"Merit"),
       self.dailyTotals[key].unsignedLongLongValue];
@@ -1290,7 +1292,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [defaults setBool:YES forKey:kLaunchAtLoginConfigured];
     [defaults setBool:enabled forKey:kLaunchAtLoginEnabled];
   } else if (showError) {
-    NSAlert *alert = [[NSAlert alloc] init];
+    NSAlert *alert = [[NMUiAlert alloc] init];
     alert.messageText = UiText(@"无法修改登录启动项", @"Unable to change login startup");
     alert.informativeText = error.localizedDescription ?:
         UiText(@"请稍后重试。", @"Please try again later.");
@@ -1443,7 +1445,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [self startOffworkTimer];
   [self.window orderFrontRegardless];
   if (previousAppearanceMissing || self.appearanceLoadError) {
-    NSAlert *notice = [[NSAlert alloc] init];
+    NSAlert *notice = [[NMUiAlert alloc] init];
     notice.alertStyle = NSAlertStyleWarning;
     notice.messageText = UiText(@"部分本地形象未能加载", @"Some Local Packs Are Unavailable");
     notice.informativeText = self.appearanceLoadError.localizedDescription ?: UiText(
@@ -1477,6 +1479,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSRunLoopCommonModes];
     [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSModalPanelRunLoopMode];
     [self installEventTap];
+    [self performSelector:@selector(showPermissionIntroIfNeeded) withObject:nil afterDelay:.7];
   }
   if (gReminderPreviewAcceptance) {
     [self presentReminderForTrigger:niuma::reminder::ActivitySampler::Trigger::HighIntensity];
@@ -1586,7 +1589,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
   [application replyToOpenOrPrint:failures.count || !catalogsSucceeded
       ? NSApplicationDelegateReplyFailure : NSApplicationDelegateReplySuccess];
-  NSAlert *alert = [[NSAlert alloc] init];
+  NSAlert *alert = [[NMUiAlert alloc] init];
   alert.alertStyle = failures.count ? NSAlertStyleWarning : NSAlertStyleInformational;
   alert.messageText = singleEnabled
       ? UiText(@"导入完成，已启用此形象", @"Imported and Enabled")
@@ -1668,14 +1671,20 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)showPermissionIntroIfNeeded {
-  if (gIsolatedAcceptance || [MeritPreferences() boolForKey:@"basicGuideShown"]) return;
-  [self showFirstUseGuide:nil];
-  [MeritPreferences() setBool:YES forKey:@"basicGuideShown"];
+  if (gIsolatedAcceptance || [self hasLiveEventTap]) return;
+  NMUiAlert *alert = [[NMUiAlert alloc] init];
+  alert.messageText = UiText(@"还差一步：开启输入监控", @"One more step: allow Input Monitoring");
+  alert.informativeText = UiText(
+      @"在系统设置中，为当前牛马电子功德开启“输入监控”，再按系统提示退出并重新打开。\n\n只统计操作次数，不读取你输入的内容。开关已开启仍不计数时，请移除旧条目，再添加“应用程序”里的当前应用。",
+      @"In System Settings, enable Input Monitoring for this copy of NiuMa Merit, then quit and reopen when macOS asks.\n\nOnly operation counts are used; typed content is never read. If an old enabled entry still does not work, remove it and add the current app from Applications.");
+  [alert addButtonWithTitle:UiText(@"去开启输入监控", @"Open Input Monitoring")];
+  [alert addButtonWithTitle:UiText(@"稍后", @"Later")];
+  if ([alert runModal] == NSAlertFirstButtonReturn) [self requestListenPermission];
 }
 
 - (void)showFirstUseGuide:(id)sender {
   (void)sender;
-  NSAlert *alert = [[NSAlert alloc] init];
+  NSAlert *alert = [[NMUiAlert alloc] init];
   alert.messageText = UiText(@"先记住三件事", @"Three Things to Get Started");
   alert.informativeText = UiText(
       @"1. 按住小伙伴拖动，放到喜欢的位置。\n"
@@ -1840,13 +1849,16 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (message.length == 0) return;
   NSScreen *screen = self.window.screen ?: NSScreen.mainScreen;
   if (!screen) return;
-  const CGFloat width = 340;
-  NSFont *font = [NSFont systemFontOfSize:14 weight:NSFontWeightMedium];
-  NSDictionary *attributes = @{NSFontAttributeName: font};
-  NSRect textBounds = [message boundingRectWithSize:NSMakeSize(width - 32, 200)
+  const CGFloat width = 260;
+  NSFont *font = [NSFont systemFontOfSize:15 weight:NSFontWeightMedium];
+  NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+  paragraph.minimumLineHeight = 22; paragraph.maximumLineHeight = 22;
+  NSDictionary *attributes = @{NSFontAttributeName: font,
+      NSForegroundColorAttributeName:NMUiInk(), NSParagraphStyleAttributeName:paragraph};
+  NSRect textBounds = [message boundingRectWithSize:NSMakeSize(width - 60, CGFLOAT_MAX)
       options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
       attributes:attributes];
-  const CGFloat height = std::max(78.0, std::ceil(NSHeight(textBounds)) + 48.0);
+  const CGFloat height = std::max(64.0, std::ceil(NSHeight(textBounds)) + 40.0);
   NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, width, height)
       styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
       backing:NSBackingStoreBuffered defer:NO];
@@ -1856,19 +1868,24 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   panel.hidesOnDeactivate = NO;
   panel.becomesKeyOnlyIfNeeded = YES;
   panel.hasShadow = YES;
-  panel.backgroundColor = NSColor.windowBackgroundColor;
+  panel.backgroundColor = NSColor.clearColor;
+  panel.opaque = NO;
+  panel.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
   panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorTransient;
-  NSView *content = panel.contentView;
+  NMUiBubbleView *content = [[NMUiBubbleView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+  panel.contentView = content;
   NSTextField *label = [NSTextField wrappingLabelWithString:message];
-  label.frame = NSMakeRect(16, 12, width - 32, height - 48);
+  label.attributedStringValue = [[NSAttributedString alloc] initWithString:message attributes:attributes];
+  label.frame = NSMakeRect(20, 20, width - 60, height - 40);
   label.font = font;
   label.maximumNumberOfLines = 0;
   label.lineBreakMode = NSLineBreakByWordWrapping;
   [content addSubview:label];
   NSButton *close = [NSButton buttonWithTitle:@"×" target:self action:@selector(dismissReminder:)];
   close.frame = NSMakeRect(width - 36, height - 36, 24, 24);
-  close.bezelStyle = NSBezelStyleCircular;
-  close.font = [NSFont systemFontOfSize:12 weight:NSFontWeightSemibold];
+  close.bordered = NO;
+  close.font = [NSFont systemFontOfSize:16 weight:NSFontWeightRegular];
+  if (@available(macOS 10.14, *)) close.contentTintColor = NMUiMuted();
   close.accessibilityLabel = UiText(@"关闭提醒", @"Close reminder");
   [content addSubview:close];
   self.reminderPanel = panel;
@@ -1909,8 +1926,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   const auto placement = niuma::reminder::PlaceBubble(
       {NSMinX(mainFrame), NSMinY(mainFrame), NSWidth(mainFrame), NSHeight(mainFrame)},
       {NSMinX(visible), NSMinY(visible), NSWidth(visible), NSHeight(visible)},
-      width, height, 8, niuma::reminder::VerticalAxis::Up);
+      width, height, 10, niuma::reminder::VerticalAxis::Up);
   [panel setFrameOrigin:NSMakePoint(placement.x, placement.y)];
+  if ([panel.contentView isKindOfClass:NMUiBubbleView.class]) {
+    NMUiBubbleView *bubble = (NMUiBubbleView *)panel.contentView;
+    bubble.companionPoint = NSMakePoint(NSMidX(mainFrame) - placement.x, NSMidY(mainFrame) - placement.y);
+    bubble.needsDisplay = YES;
+  }
 }
 
 - (void)reminderScreensDidChange:(NSNotification *)notification {
@@ -1961,6 +1983,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     close.frame = NSMakeRect(442, 18, 118, 32);
     close.autoresizingMask = NSViewMinXMargin;
     [content addSubview:close];
+    NMUiWindow(self.countStatusWindow);
     [self.countStatusWindow center];
   }
   [self.countStatusWindow makeKeyAndOrderFront:nil];
@@ -2324,7 +2347,20 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
   // The compact pet window is only 120 points wide. Keep the native menu
   // independent from that canvas size and leave room for checkmarks/padding.
-  NSFont *menuFont = [NSFont menuFontOfSize:0];
+  [menu removeAllItems];
+  [menu addItem:appearance]; [menu addItem:calendar]; [menu addItem:offwork];
+  [menu addItem:NSMenuItem.separatorItem]; [menu addItem:launchAtLogin];
+  [menu addItem:NSMenuItem.separatorItem]; [menu addItem:about]; [menu addItem:quit];
+  NSFont *menuFont = [NSFont systemFontOfSize:14];
+  menu.font = menuFont;
+  if (@available(macOS 11.0, *)) {
+    NSArray *entries = @[appearance, calendar, offwork, launchAtLogin, about, quit];
+    NSArray *symbols = @[@"person.crop.square", @"calendar", @"clock", @"power", @"info.circle", @"rectangle.portrait.and.arrow.right"];
+    for (NSUInteger index = 0; index < entries.count; ++index) {
+      NSImage *image = [NSImage imageWithSystemSymbolName:symbols[index] accessibilityDescription:nil];
+      image.size = NSMakeSize(16, 16); ((NSMenuItem *)entries[index]).image = image;
+    }
+  }
   CGFloat widestTitle = 0;
   for (NSMenuItem *item in menu.itemArray) {
     if (item.isSeparatorItem) continue;
@@ -2332,13 +2368,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       NSFontAttributeName: menuFont
     }].width);
   }
-  menu.minimumWidth = MAX(220.0, widestTitle + 56.0);
+  menu.minimumWidth = MAX(240.0, widestTitle + 64.0);
   [NSMenu popUpContextMenu:menu withEvent:event forView:self.view];
 }
 
 - (BOOL)importOfficialMessagesAtPath:(NSString *)filename {
   if (!_catalogStore) {
-    NSAlert *alert = [[NSAlert alloc] init];
+    NSAlert *alert = [[NMUiAlert alloc] init];
     alert.messageText = UiText(@"无法导入文案包", @"Could Not Import Messages");
     alert.informativeText = UiText(@"本地文案库暂不可用，请退出应用后重试。",
         @"The local message catalog is unavailable. Quit the app and try again.");
@@ -2362,7 +2398,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                @"Message catalog version %u is ready (%lu Chinese, %lu English). Reminder history is unchanged."),
         _reminderCatalog->content_version, static_cast<unsigned long>(chinese),
         static_cast<unsigned long>(english)];
-    NSAlert *alert = [[NSAlert alloc] init];
+    NSAlert *alert = [[NMUiAlert alloc] init];
     alert.messageText = UiText(@"文案包已导入", @"Messages Imported");
     alert.informativeText = message;
     [alert addButtonWithTitle:UiText(@"好", @"OK")];
@@ -2383,7 +2419,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   else if (result.status == niuma::reminder::CatalogInstallStatus::SameVersionDifferentContent)
     message = UiText(@"相同版本号对应了不同内容，文件未安装。",
                      @"This version number is already associated with different content. The file was not installed.");
-  NSAlert *alert = [[NSAlert alloc] init];
+  NSAlert *alert = [[NMUiAlert alloc] init];
   alert.messageText = UiText(@"无法导入文案包", @"Could Not Import Messages");
   alert.informativeText = message;
   [alert addButtonWithTitle:UiText(@"好", @"OK")];
@@ -2419,6 +2455,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.calendarWindow.contentView = self.calendarView;
     self.calendarWindow.releasedWhenClosed = NO;
     if (gIsolatedAcceptance) self.calendarWindow.restorable = NO;
+    NMUiWindow(self.calendarWindow);
     [self.calendarWindow center];
   }
   [NSApp activateIgnoringOtherApps:YES];
@@ -2442,7 +2479,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&error];
   self.appearanceLoadError = error;
   if (error && self.window) {
-    NSAlert *alert = [[NSAlert alloc] init];
+    NSAlert *alert = [[NMUiAlert alloc] init];
     alert.alertStyle = NSAlertStyleWarning;
     alert.messageText = UiText(@"本地形象加载失败", @"Unable to Load Local Packs");
     alert.informativeText = error.localizedDescription;
@@ -2502,7 +2539,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       [thumbnail addRepresentation:rep];
     }
     NSInteger row = i / 2;
-    NSButton *button = [[NSButton alloc] initWithFrame:NSMakeRect((i % 2) * 168,
+    NSButton *button = [[NMUiCardButton alloc] initWithFrame:NSMakeRect((i % 2) * 168,
         gridHeight - (row + 1) * 154 - row * 8, 156, 154)];
     NSMutableArray<NSString *> *badges = [NSMutableArray array];
     if ([item[@"id"] isEqualToString:self.selectedAppearanceId])
@@ -2555,7 +2592,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
   self.pendingAppearanceId = self.selectedAppearanceId;
   while (YES) {
-    NSAlert *alert = [[NSAlert alloc] init];
+    NSAlert *alert = [[NMUiAlert alloc] init];
     alert.messageText = UiText(@"更换形象", @"Change Appearance");
     alert.informativeText = UiText(@"当前 = 正在显示；本次新增 = 新加入。选择后点确认才会切换。",
                                    @"Current = displayed now; New = newly added. Confirm your selection to switch.");
@@ -2586,7 +2623,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     }
     NSError *error = nil;
     if (![NMAppearancePackStore removePack:pack error:&error]) {
-      NSAlert *failure = [[NSAlert alloc] init];
+      NSAlert *failure = [[NMUiAlert alloc] init];
       failure.messageText = UiText(@"无法删除形象包", @"Unable to Remove Appearance Pack");
       failure.informativeText = error.localizedDescription ?: @"";
       [failure runModal];
@@ -2602,7 +2639,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)showAbout:(id)sender {
   (void)sender;
-  NSAlert *alert = [[NSAlert alloc] init];
+  NSAlert *alert = [[NMUiAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
   NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?";
   NSString *aboutText = [NSString stringWithFormat:UiText(

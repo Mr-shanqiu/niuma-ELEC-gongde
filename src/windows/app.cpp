@@ -38,6 +38,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include "ui_theme.h"
 
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "ole32.lib")
@@ -1337,8 +1338,8 @@ std::wstring ReminderWide(const char* text) {
 
 int ReminderBubbleHeight(const std::wstring& text) {
   const int dpi = static_cast<int>(gState.dpi);
-  const int width = ScaleDip(340, gState.dpi) - 2 * ScaleDip(12, gState.dpi);
-  HFONT font = CreateFontW(-MulDiv(14, dpi, 96), 0, 0, 0, FW_MEDIUM,
+  const int width = ScaleDip(260 - 60, gState.dpi);
+  HFONT font = CreateFontW(-MulDiv(15, dpi, 96), 0, 0, 0, FW_MEDIUM,
       FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
       CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
   HDC dc = GetDC(nullptr);
@@ -1354,7 +1355,7 @@ int ReminderBubbleHeight(const std::wstring& text) {
     ReleaseDC(nullptr, dc);
   }
   if (font) DeleteObject(font);
-  return ScaleDip(12 + 24 + 4 + 12, gState.dpi) + textHeight;
+  return std::max(ScaleDip(64, gState.dpi), textHeight + ScaleDip(40, gState.dpi));
 }
 
 bool PositionReminderWindow(HWND popup) {
@@ -1365,9 +1366,9 @@ bool PositionReminderWindow(HWND popup) {
   const HMONITOR screen = MonitorFromWindow(gState.window, MONITOR_DEFAULTTONEAREST);
   if (GetMonitorInfoW(screen, &monitor)) work = monitor.rcWork;
   else if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) return false;
-  const int width = ScaleDip(340, gState.dpi);
+  const int width = ScaleDip(260, gState.dpi);
   const int height = ReminderBubbleHeight(gReminderText);
-  const int margin = ScaleDip(18, gState.dpi);
+  const int margin = ScaleDip(10, gState.dpi);
   RECT widget{};
   if (!GetWindowRect(gState.window, &widget)) return false;
   const auto placement = niuma::reminder::PlaceBubble(
@@ -1378,6 +1379,27 @@ bool PositionReminderWindow(HWND popup) {
           static_cast<double>(work.right - work.left),
           static_cast<double>(work.bottom - work.top)},
       width, height, margin, niuma::reminder::VerticalAxis::Down);
+  const int inset = ScaleDip(6, gState.dpi);
+  HRGN region = CreateRoundRectRgn(inset, inset, width - inset + 1, height - inset + 1,
+      ScaleDip(36, gState.dpi), ScaleDip(36, gState.dpi));
+  POINT tail[3]{};
+  const int targetX = (widget.left + widget.right) / 2 - static_cast<int>(placement.x);
+  const int targetY = (widget.top + widget.bottom) / 2 - static_cast<int>(placement.y);
+  const int span = ScaleDip(7, gState.dpi);
+  if (targetY < 0 || targetY > height) {
+    const int x = std::clamp(targetX, ScaleDip(28, gState.dpi), width - ScaleDip(28, gState.dpi));
+    const int y = targetY < 0 ? inset : height - inset;
+    tail[0] = {x - span, y}; tail[1] = {x + span, y}; tail[2] = {x + span / 2, targetY < 0 ? 0 : height};
+  } else {
+    const int y = std::clamp(targetY, ScaleDip(28, gState.dpi), height - ScaleDip(28, gState.dpi));
+    const int x = targetX < 0 ? inset : width - inset;
+    tail[0] = {x, y - span}; tail[1] = {x, y + span}; tail[2] = {targetX < 0 ? 0 : width, y + span / 2};
+  }
+  HRGN triangle = CreatePolygonRgn(tail, 3, WINDING);
+  if (region && triangle) CombineRgn(region, region, triangle, RGN_OR);
+  if (triangle) DeleteObject(triangle);
+  if (region && !SetWindowRgn(popup, region, TRUE)) DeleteObject(region);
+  niuma::ui::WindowChrome(popup);
   return SetWindowPos(popup, HWND_TOPMOST, static_cast<int>(placement.x),
       static_cast<int>(placement.y), width, height,
       SWP_NOACTIVATE) != FALSE;
@@ -1389,15 +1411,15 @@ LRESULT CALLBACK ReminderWindowProcedure(HWND window, UINT message,
     case WM_CREATE: {
       HWND label = CreateWindowExW(WS_EX_TRANSPARENT, L"STATIC", gReminderText.c_str(),
           WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX | SS_EDITCONTROL,
-          ScaleDip(12, gState.dpi), ScaleDip(40, gState.dpi), ScaleDip(316, gState.dpi),
+          ScaleDip(20, gState.dpi), ScaleDip(18, gState.dpi), ScaleDip(200, gState.dpi),
           ScaleDip(80, gState.dpi), window, reinterpret_cast<HMENU>(kReminderClose + 1),
           GetModuleHandleW(nullptr), nullptr);
       HWND close = CreateWindowExW(WS_EX_NOACTIVATE, L"BUTTON",
-          UiText(L"关闭", L"Close"), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-          0, 0, ScaleDip(54, gState.dpi), ScaleDip(24, gState.dpi), window,
+          L"\x00d7", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+          0, 0, ScaleDip(24, gState.dpi), ScaleDip(24, gState.dpi), window,
           reinterpret_cast<HMENU>(kReminderClose), GetModuleHandleW(nullptr), nullptr);
       if (label == nullptr || close == nullptr) return -1;
-      HFONT font = CreateFontW(-MulDiv(14, static_cast<int>(gState.dpi), 96), 0, 0, 0,
+      HFONT font = CreateFontW(-MulDiv(15, static_cast<int>(gState.dpi), 96), 0, 0, 0,
           FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
           CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
       if (font != nullptr) {
@@ -1405,27 +1427,28 @@ LRESULT CALLBACK ReminderWindowProcedure(HWND window, UINT message,
         SendMessageW(close, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         SetPropW(window, L"NiuMaReminderFont", font);
       }
+      SetWindowSubclass(close, niuma::ui::ButtonProcedure, 61, 0);
       return 0;
     }
     case WM_SIZE: {
       RECT bounds{};
       GetClientRect(window, &bounds);
-      const int margin = ScaleDip(12, gState.dpi);
-      const int closeWidth = ScaleDip(54, gState.dpi);
+      const int margin = ScaleDip(20, gState.dpi);
+      const int closeWidth = ScaleDip(24, gState.dpi);
       const int closeHeight = ScaleDip(24, gState.dpi);
-      const int textTop = margin + closeHeight + ScaleDip(4, gState.dpi);
+      const int textTop = ScaleDip(18, gState.dpi);
       HWND label = GetDlgItem(window, kReminderClose + 1);
       HWND close = GetDlgItem(window, kReminderClose);
       if (label != nullptr) MoveWindow(label, margin, textTop,
-          bounds.right - margin * 2, bounds.bottom - textTop - margin, TRUE);
-      if (close != nullptr) MoveWindow(close, bounds.right - closeWidth - margin,
-          margin, closeWidth, closeHeight, TRUE);
+          bounds.right - ScaleDip(60, gState.dpi), bounds.bottom - textTop - margin, TRUE);
+      if (close != nullptr) MoveWindow(close, bounds.right - closeWidth - ScaleDip(12, gState.dpi),
+          ScaleDip(12, gState.dpi), closeWidth, closeHeight, TRUE);
       return 0;
     }
     case WM_DPICHANGED: {
       const UINT dpi = HIWORD(wParam);
       if (dpi != 0) gState.dpi = dpi;
-      const HFONT font = CreateFontW(-MulDiv(14, static_cast<int>(gState.dpi), 96),
+      const HFONT font = CreateFontW(-MulDiv(15, static_cast<int>(gState.dpi), 96),
           0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
           OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
           DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
@@ -1450,7 +1473,7 @@ LRESULT CALLBACK ReminderWindowProcedure(HWND window, UINT message,
     case WM_CTLCOLORSTATIC: {
       HDC dc = reinterpret_cast<HDC>(wParam);
       SetBkMode(dc, TRANSPARENT);
-      SetTextColor(dc, RGB(58, 48, 35));
+      SetTextColor(dc, niuma::ui::kInk);
       return reinterpret_cast<LRESULT>(GetStockObject(NULL_BRUSH));
     }
     case WM_PAINT: {
@@ -1458,10 +1481,10 @@ LRESULT CALLBACK ReminderWindowProcedure(HWND window, UINT message,
       HDC dc = BeginPaint(window, &paint);
       RECT bounds{};
       GetClientRect(window, &bounds);
-      HBRUSH background = CreateSolidBrush(RGB(255, 250, 230));
+      HBRUSH background = CreateSolidBrush(RGB(255, 255, 255));
       FillRect(dc, &bounds, background);
       DeleteObject(background);
-      HPEN border = CreatePen(PS_SOLID, 1, RGB(214, 196, 155));
+      HPEN border = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
       HGDIOBJ oldPen = SelectObject(dc, border);
       HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
       RoundRect(dc, 0, 0, bounds.right, bounds.bottom, 14, 14);
@@ -1806,6 +1829,7 @@ LRESULT CALLBACK CountingStatusProcedure(HWND window, UINT message, WPARAM wPara
       SetTimer(window, 1, 1000, nullptr);
       LayoutCountingStatus(window);
       RefreshCountingStatus();
+      niuma::ui::Apply(window);
       return 0;
     case WM_SIZE:
       LayoutCountingStatus(window);
@@ -1868,7 +1892,7 @@ void ShowCountingStatus(HWND owner) {
     cls.hInstance = GetModuleHandleW(nullptr);
     cls.lpfnWndProc = CountingStatusProcedure;
     cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    cls.hbrBackground = niuma::ui::CanvasBrush();
     cls.lpszClassName = kCountStatusClass;
     if (!RegisterClassExW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return;
     const UINT dpi = gState.dpi ? gState.dpi : 96;
@@ -1889,7 +1913,7 @@ bool IsMainWindowAlive(HWND owner) {
 }
 
 bool ShowPrivacyNotice(HWND owner) {
-  return MessageBoxW(
+  return niuma::ui::Message(
       owner,
       UiText(
           L"1. 按住小伙伴拖动，放到喜欢的位置。\n"
@@ -2011,7 +2035,7 @@ bool IsAboutScrollKey(WPARAM key) {
 
 void DrawAboutContent(HWND window, HDC dc, const RECT& client,
                       const AboutDialogState& state) {
-  FillRect(dc, &client, GetSysColorBrush(COLOR_3DFACE));
+  FillRect(dc, &client, niuma::ui::CanvasBrush());
   HGDIOBJ oldFont = SelectObject(dc, state.font);
   SetBkMode(dc, TRANSPARENT);
   SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
@@ -2112,7 +2136,7 @@ LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
     case WM_DRAWITEM: {
       const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
       if (!draw || draw->CtlID != kAboutHelpLink) break;
-      FillRect(draw->hDC, &draw->rcItem, GetSysColorBrush(COLOR_3DFACE));
+      FillRect(draw->hDC, &draw->rcItem, niuma::ui::CanvasBrush());
       HGDIOBJ oldFont = SelectObject(draw->hDC, state->font);
       const COLORREF color = GetSysColor(COLOR_HOTLIGHT);
       SetBkMode(draw->hDC, TRANSPARENT);
@@ -2304,6 +2328,7 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
             static_cast<double>(state->imageHeight) * state->douyin.image->GetWidth()
             / state->douyin.image->GetHeight())));
       }
+      niuma::ui::Apply(window);
       const HWND textControl = GetDlgItem(window, 3001);
       state->font = reinterpret_cast<HFONT>(
           SendMessageW(textControl, WM_GETFONT, 0, 0));
@@ -2325,6 +2350,7 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
         EndDialog(window, -1);
         return TRUE;
       }
+      niuma::ui::Apply(window);
       ShowWindow(textControl, SW_HIDE);
       ShowWindow(GetDlgItem(window, 3002), SW_HIDE);
       state->buttonProcedure = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
@@ -2348,6 +2374,7 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
                    work.left + (work.right - work.left - width) / 2,
                    work.top + (work.bottom - work.top - height) / 2,
                    width, height, SWP_NOZORDER);
+      niuma::ui::Apply(window);
       SetFocus(GetDlgItem(window, IDOK));
       return FALSE;
     }
@@ -2421,7 +2448,7 @@ void ShowAboutDialog(HWND owner) {
   if (DialogBoxParamW(module, MAKEINTRESOURCEW(3000), owner,
                       AboutDialogProcedure, reinterpret_cast<LPARAM>(&state)) == -1) {
     const std::wstring fallback = text + L"\n\nhttps://gongde.zqscreen.cn/help-windows.html\n\n" + AboutDouyinCaption();
-    MessageBoxW(owner, fallback.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
+    niuma::ui::Message(owner, fallback.c_str(), UiText(L"关于牛马电子功德", L"About NiuMa Merit"),
                 MB_OK | MB_ICONINFORMATION);
   }
 }
@@ -2453,10 +2480,10 @@ void DrawMeritCalendar(HDC dc) {
   Gdiplus::Graphics graphics(dc);
   const float scale = static_cast<float>(gState.dpi) / 96.0f;
   graphics.ScaleTransform(scale, scale);
-  graphics.Clear(Gdiplus::Color(255, 248, 240, 225));
-  const Gdiplus::Color ink(255, 61, 46, 31);
-  const Gdiplus::Color muted(255, 126, 107, 87);
-  const Gdiplus::Color accent(255, 199, 99, 31);
+  graphics.Clear(Gdiplus::Color(255, 245, 245, 247));
+  const Gdiplus::Color ink(255, 29, 29, 31);
+  const Gdiplus::Color muted(255, 110, 110, 118);
+  const Gdiplus::Color accent(255, 0, 112, 245);
 
   wchar_t monthTitle[32] = {};
   if (IsChineseUi()) swprintf_s(monthTitle, L"%d 年 %d 月", gCalendar.year, gCalendar.month);
@@ -2493,8 +2520,10 @@ void DrawMeritCalendar(HDC dc) {
     const Gdiplus::RectF cell(left + column * cellWidth, top + row * cellHeight,
                               cellWidth - 2, cellHeight - 3);
     if (today.wYear == gCalendar.year && today.wMonth == gCalendar.month && today.wDay == day) {
-      Gdiplus::SolidBrush highlight(Gdiplus::Color(96, 242, 196, 125));
-      graphics.FillRectangle(&highlight, cell);
+      Gdiplus::SolidBrush highlight(Gdiplus::Color(255, 226, 239, 255));
+      Gdiplus::GraphicsPath dayPath;
+      niuma::ui::RoundPath(dayPath, cell, 12);
+      graphics.FillPath(&highlight, &dayPath);
     }
     wchar_t key[16] = {};
     swprintf_s(key, L"%04d-%02d-%02d", gCalendar.year, gCalendar.month, day);
@@ -2588,6 +2617,7 @@ void ShowMeritCalendar(HWND owner) {
         owner, nullptr, GetModuleHandleW(nullptr), nullptr);
   }
   if (gCalendar.window != nullptr) {
+    niuma::ui::Apply(gCalendar.window);
     ShowWindow(gCalendar.window, SW_SHOW);
     SetForegroundWindow(gCalendar.window);
     InvalidateRect(gCalendar.window, nullptr, FALSE);
@@ -2625,7 +2655,7 @@ RECT PickerCardRect(int index, UINT dpi) {
 }
 
 void DrawAppearancePicker(HDC dc, HDC updateDc, const RECT& client) {
-  FillRect(dc, &client, reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
+  FillRect(dc, &client, niuma::ui::CanvasBrush());
   Gdiplus::Graphics graphics(dc);
   graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
   graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
@@ -2639,18 +2669,20 @@ void DrawAppearancePicker(HDC dc, HDC updateDc, const RECT& client) {
         !RectVisible(updateDc, &card)) continue;
     const bool selected = index == gPicker.pendingIndex;
     Gdiplus::SolidBrush background(selected
-        ? Gdiplus::Color(255, 255, 244, 226)
-        : Gdiplus::Color(255, 250, 250, 250));
+        ? Gdiplus::Color(255, 230, 241, 255)
+        : Gdiplus::Color(255, 255, 255, 255));
     Gdiplus::Pen border(selected
-        ? Gdiplus::Color(255, 224, 119, 31)
-        : Gdiplus::Color(255, 205, 205, 205),
-        selected ? static_cast<float>(ScaleDip(3, dpi)) : 1.0f);
+        ? Gdiplus::Color(255, 0, 112, 245)
+        : Gdiplus::Color(255, 222, 224, 230),
+        selected ? static_cast<float>(ScaleDip(2, dpi)) : 1.0f);
     const Gdiplus::RectF cardRect(
         static_cast<float>(card.left), static_cast<float>(card.top),
         static_cast<float>(card.right - card.left),
         static_cast<float>(card.bottom - card.top));
-    graphics.FillRectangle(&background, cardRect);
-    graphics.DrawRectangle(&border, cardRect);
+    Gdiplus::GraphicsPath cardPath;
+    niuma::ui::RoundPath(cardPath, cardRect, static_cast<float>(ScaleDip(14, dpi)));
+    graphics.FillPath(&background, &cardPath);
+    graphics.DrawPath(&border, &cardPath);
 
     Gdiplus::Bitmap thumbnail(240, 250, PixelFormat32bppARGB);
     Gdiplus::Graphics thumbnailGraphics(&thumbnail);
@@ -2690,7 +2722,7 @@ void DrawAppearancePicker(HDC dc, HDC updateDc, const RECT& client) {
     if (!badge.empty()) {
       Gdiplus::Font badgeFont(L"Microsoft YaHei UI", static_cast<float>(ScaleDip(11, dpi)),
           Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-      Gdiplus::SolidBrush badgeInk(Gdiplus::Color(255, 51, 92, 68));
+      Gdiplus::SolidBrush badgeInk(Gdiplus::Color(255, 0, 95, 210));
       Gdiplus::StringFormat badgeFormat;
       badgeFormat.SetAlignment(Gdiplus::StringAlignmentCenter);
       graphics.DrawString(badge.c_str(), -1, &badgeFont,
@@ -2705,7 +2737,7 @@ void DrawAppearancePicker(HDC dc, HDC updateDc, const RECT& client) {
     Gdiplus::StringFormat format;
     format.SetAlignment(Gdiplus::StringAlignmentCenter);
     format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    Gdiplus::SolidBrush text(Gdiplus::Color(255, 62, 52, 43));
+    Gdiplus::SolidBrush text(Gdiplus::Color(255, 29, 29, 31));
     const std::wstring title = PickerItemTitle(index);
     graphics.DrawString(title.c_str(), -1, &font,
         Gdiplus::RectF(static_cast<float>(card.left),
@@ -2818,7 +2850,7 @@ LRESULT CALLBACK PickerWindowProcedure(
       }
       if (LOWORD(wParam) == kPickerDeleteButton) {
         if (gPicker.pendingIndex == 0) {
-          MessageBoxW(window,
+          niuma::ui::Message(window,
               UiText(L"内置形象不能删除。", L"Built-in appearances cannot be deleted."),
               WindowTitle(), MB_OK | MB_ICONINFORMATION);
           return 0;
@@ -2826,13 +2858,13 @@ LRESULT CALLBACK PickerWindowProcedure(
         const size_t packIndex = static_cast<size_t>(gPicker.pendingIndex - 1);
         if (packIndex >= gAppearanceCatalog.packs().size()) return 0;
         const std::string id = gAppearanceCatalog.packs()[packIndex]->id;
-        if (MessageBoxW(window,
+        if (niuma::ui::Message(window,
                 UiText(L"删除所选的本地形象包？",
                        L"Delete the selected local appearance pack?"),
                 WindowTitle(), MB_YESNO | MB_ICONQUESTION) != IDYES) return 0;
         std::wstring error;
         if (!gAppearanceCatalog.Delete(id, &error)) {
-          MessageBoxW(window, error.c_str(), WindowTitle(), MB_OK | MB_ICONERROR);
+          niuma::ui::Message(window, error.c_str(), WindowTitle(), MB_OK | MB_ICONERROR);
           return 0;
         }
         if (gState.selectedPackId == id) {
@@ -2902,6 +2934,7 @@ void ShowAppearancePicker(HWND owner) {
       pickerX, pickerY,
       width, height, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
   if (gPicker.window == nullptr) return;
+  niuma::ui::Apply(gPicker.window);
   EnableWindow(owner, FALSE);
   ShowWindow(gPicker.window, SW_SHOW);
   MSG message = {};
@@ -2960,7 +2993,7 @@ void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
                           bool showSuccess) {
   const bool batch = niuma::IsAppearanceBatchPath(sourcePath);
   if (GetFileAttributesW(sourcePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-    MessageBoxW(owner,
+    niuma::ui::Message(owner,
         UiText(L"文件不存在或无法读取，请重新选择原文件。原有形象和功德未改变。",
                L"File missing or unreadable. Select the original file again. Existing packs and counts are unchanged."),
         WindowTitle(), MB_OK | MB_ICONWARNING);
@@ -3031,7 +3064,7 @@ void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
   if (canChoose && !singleEnabled)
     message += UiText(L"\n\n现在打开形象列表选择吗？", L"\n\nOpen the appearance list to choose now?");
   if (showSuccess || !installed || !error.empty()) {
-    const int response = MessageBoxW(owner, message.c_str(),
+    const int response = niuma::ui::Message(owner, message.c_str(),
         !installed ? (canChoose ? UiText(L"部分形象已导入", L"Some Packs Imported")
                                : UiText(L"未能导入形象", L"No Packs Imported"))
                    : WindowTitle(),
@@ -3188,6 +3221,7 @@ INT_PTR CALLBACK OffworkDialogProcedure(HWND window, UINT message, WPARAM wParam
       MONITORINFO monitor = {sizeof(monitor)};
       GetMonitorInfoW(MonitorFromWindow(GetWindow(window, GW_OWNER), MONITOR_DEFAULTTONEAREST), &monitor);
       const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+      niuma::ui::Apply(window);
       SetWindowPos(window, nullptr,
           monitor.rcWork.left + std::max(0, static_cast<int>(monitor.rcWork.right - monitor.rcWork.left - width) / 2),
           monitor.rcWork.top + std::max(0, static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top - height) / 2),
@@ -3217,7 +3251,7 @@ INT_PTR CALLBACK OffworkDialogProcedure(HWND window, UINT message, WPARAM wParam
         const bool saved = FlushOffwork();
         const bool ticking = SyncOffworkTimer();
         ResizeOffworkWindow();
-        if (!saved || !ticking) MessageBoxW(window,
+        if (!saved || !ticking) niuma::ui::Message(window,
             !saved ? UiText(L"本次设置已在内存生效，但未能写入本地文件；程序会稍后重试。",
                             L"Settings are active in memory, but local saving failed. The app will retry.") :
                      UiText(L"无法启动逐秒刷新，请关闭并重新开启下班倒计时。",
@@ -3254,14 +3288,14 @@ void ShowOffworkSettings(HWND owner) {
   dialog->cy = 180;
   if (DialogBoxIndirectParamW(GetModuleHandleW(nullptr), dialog, owner,
                               OffworkDialogProcedure, 0) == -1) {
-    MessageBoxW(owner, UiText(L"无法打开下班倒计时设置。", L"Unable to open countdown settings."),
+    niuma::ui::Message(owner, UiText(L"无法打开下班倒计时设置。", L"Unable to open countdown settings."),
         WindowTitle(), MB_OK | MB_ICONERROR);
   }
 }
 
 void ImportOfficialMessages(HWND owner, const std::wstring& filename) {
   if (!gState.catalogStore) {
-    MessageBoxW(owner,
+    niuma::ui::Message(owner,
         UiText(L"本地文案库暂不可用，请退出应用后重试。",
                L"The local message catalog is unavailable. Quit the app and try again."),
         UiText(L"无法导入文案包", L"Could Not Import Messages"),
@@ -3283,7 +3317,7 @@ void ImportOfficialMessages(HWND owner, const std::wstring& filename) {
         L"文案库版本 %u 已就绪（中文 %zu 条，英文 %zu 条）。提醒历史保持不变。",
         L"Message catalog version %u is ready (%zu Chinese, %zu English). Reminder history is unchanged."),
         gState.reminderCatalog->content_version, chinese, english);
-    MessageBoxW(owner, message, UiText(L"文案包已导入", L"Messages Imported"),
+    niuma::ui::Message(owner, message, UiText(L"文案包已导入", L"Messages Imported"),
         MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
     return;
   }
@@ -3302,7 +3336,7 @@ void ImportOfficialMessages(HWND owner, const std::wstring& filename) {
   else if (result.status == niuma::reminder::CatalogInstallStatus::SameVersionDifferentContent)
     message = UiText(L"相同版本号对应了不同内容，文件未安装。",
                      L"This version number is already associated with different content. The file was not installed.");
-  MessageBoxW(owner, message, UiText(L"无法导入文案包", L"Could Not Import Messages"),
+  niuma::ui::Message(owner, message, UiText(L"无法导入文案包", L"Could Not Import Messages"),
       MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
 }
 
@@ -3311,21 +3345,25 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   if (menu == nullptr) {
     return;
   }
-  AppendMenuW(menu, MF_STRING, kMenuAbout,
-              UiText(L"关于牛马电子功德", L"About NiuMa Merit"));
-  AppendMenuW(
-      menu,
-      MF_STRING | (IsLaunchAtLoginEnabled() ? MF_CHECKED : MF_UNCHECKED),
-      kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"));
-  AppendMenuW(menu, MF_STRING, kMenuAppearance,
-              UiText(L"更换形象", L"Change Appearance"));
-  AppendMenuW(menu, MF_STRING, kMenuCalendar,
-              UiText(L"功德日历…", L"Merit Calendar…"));
-  AppendMenuW(menu,
-              MF_STRING | (gOffwork.enabled ? MF_CHECKED : MF_UNCHECKED), kMenuOffwork,
-              UiText(L"下班倒计时…", L"Off-work Countdown..."));
-  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, kMenuQuit, UiText(L"退出", L"Exit"));
+  std::vector<niuma::ui::MenuItem> items;
+  items.reserve(8);
+  const auto append = [&](UINT_PTR id, const wchar_t* text, const wchar_t* icon,
+                           bool checked = false, bool separator = false) {
+    items.push_back({text, icon, checked, separator});
+    AppendMenuW(menu, MF_OWNERDRAW | (separator ? MF_SEPARATOR : 0) |
+        (checked ? MF_CHECKED : 0), id, reinterpret_cast<const wchar_t*>(&items.back()));
+  };
+  append(kMenuAppearance, UiText(L"更换形象", L"Change Appearance"), L"\xE77B");
+  append(kMenuCalendar, UiText(L"功德日历…", L"Merit Calendar…"), L"\xE787");
+  append(kMenuOffwork, UiText(L"下班倒计时…", L"Off-work Countdown…"), L"\xE823", gOffwork.enabled);
+  append(0, L"", L"", false, true);
+  append(kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"), L"\xE7F4", IsLaunchAtLoginEnabled());
+  append(0, L"", L"", false, true);
+  append(kMenuAbout, UiText(L"关于牛马电子功德", L"About NiuMa Merit"), L"\xE946");
+  append(kMenuQuit, UiText(L"退出", L"Exit"), L"\xE8AC");
+  MENUINFO style{}; style.cbSize = sizeof(style); style.fMask = MIM_BACKGROUND | MIM_STYLE;
+  style.hbrBack = niuma::ui::WhiteBrush(); style.dwStyle = MNS_NOCHECK;
+  SetMenuInfo(menu, &style);
 
   const int command = TrackPopupMenu(
       menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
@@ -3339,7 +3377,7 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     if (SetLaunchAtLoginEnabled(enabled)) {
       SaveLaunchAtLoginPreference(enabled);
     } else {
-      MessageBoxW(window,
+      niuma::ui::Message(window,
                   UiText(L"无法修改登录启动项，请稍后重试。",
                          L"Unable to change login startup. Please try again."),
                   WindowTitle(), MB_OK | MB_ICONERROR);
@@ -3358,6 +3396,12 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
 LRESULT CALLBACK WindowProcedure(
     HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
+    case WM_MEASUREITEM:
+      if (niuma::ui::MeasureMenu(reinterpret_cast<MEASUREITEMSTRUCT*>(lParam), gState.dpi)) return TRUE;
+      break;
+    case WM_DRAWITEM:
+      if (niuma::ui::DrawMenu(reinterpret_cast<DRAWITEMSTRUCT*>(lParam), gState.dpi)) return TRUE;
+      break;
     case WM_CREATE:
       gState.window = window;
       return 0;
@@ -3643,7 +3687,7 @@ int WINAPI wWinMain(
   }
 
   if (!LoadAllPngResources()) {
-    MessageBoxW(
+    niuma::ui::Message(
         nullptr, UiText(L"形象资源加载失败。",
                         L"Appearance resources could not be loaded."), WindowTitle(),
         MB_OK | MB_ICONERROR);
@@ -3660,7 +3704,7 @@ int WINAPI wWinMain(
   std::wstring catalogError;
   const bool catalogLoaded = gAppearanceCatalog.Reload(AppearanceDirectory(), &catalogError);
   if (!catalogLoaded || !catalogError.empty()) {
-    MessageBoxW(nullptr, catalogError.c_str(), WindowTitle(), MB_OK | MB_ICONWARNING);
+    niuma::ui::Message(nullptr, catalogError.c_str(), WindowTitle(), MB_OK | MB_ICONWARNING);
   }
 
   WNDCLASSEXW windowClass = {};
@@ -3685,7 +3729,7 @@ int WINAPI wWinMain(
   pickerClass.lpfnWndProc = PickerWindowProcedure;
   pickerClass.hInstance = instance;
   pickerClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-  pickerClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+  pickerClass.hbrBackground = niuma::ui::CanvasBrush();
   pickerClass.lpszClassName = kPickerClass;
   if (RegisterClassExW(&pickerClass) == 0) {
     ReleaseAllPngResources();
@@ -3733,7 +3777,7 @@ int WINAPI wWinMain(
       : MeritScene::Woodfish;
   gState.selectedPackId = ReadSelectedPackId();
   if (!gState.selectedPackId.empty() && gAppearanceCatalog.Find(gState.selectedPackId) == nullptr) {
-    MessageBoxW(nullptr,
+    niuma::ui::Message(nullptr,
         UiText(L"上次使用的形象文件缺失或未通过校验，暂时显示木鱼。原文件、功德和日历不删除；可重新导入原包。",
                L"The previous appearance is missing or failed verification. Woodfish is shown for now. Original files, counts and calendar are kept; re-import the pack."),
         WindowTitle(), MB_OK | MB_ICONWARNING);
@@ -3799,7 +3843,7 @@ int WINAPI wWinMain(
   SetTimer(window, kReminderTimer, 1000, nullptr);
   if (!gIsolatedAcceptance) RegisterOffworkSessionNotifications(window);
   if (!SyncOffworkTimer()) {
-    MessageBoxW(window, UiText(L"无法启动下班倒计时逐秒刷新，请在设置中关闭后重新开启。",
+    niuma::ui::Message(window, UiText(L"无法启动下班倒计时逐秒刷新，请在设置中关闭后重新开启。",
         L"The countdown refresh timer could not start. Turn it off and on in settings."),
         WindowTitle(), MB_OK | MB_ICONWARNING);
   }
