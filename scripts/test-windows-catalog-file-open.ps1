@@ -18,17 +18,17 @@ public class CatalogOpenNative {
   [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc f, IntPtr p);
   [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
-  public static IntPtr Dialog(int pid) {
+  public static IntPtr ForProcess(int pid, string className) {
     IntPtr result = IntPtr.Zero;
     EnumWindows((h, p) => {
       uint owner; GetWindowThreadProcessId(h, out owner);
       var name = new System.Text.StringBuilder(256); GetClassName(h, name, 256);
-      if (owner == pid && name.ToString() == "#32770") { result = h; return false; }
+      if (owner == pid && name.ToString() == className) { result = h; return false; }
       return true;
     }, IntPtr.Zero);
     return result;
   }
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowW(string c, string t);
+  public static IntPtr Dialog(int pid) { return ForProcess(pid, "#32770"); }
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int n);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
 }
@@ -84,7 +84,9 @@ function Finish-Dialog($Process, [string]$Name, [bool]$Success) {
 }
 function Stop-Client($Process) {
   $Process.Refresh()
-  [CatalogOpenNative]::PostMessage(([CatalogOpenNative]::FindWindowW('NiuMaMeritWindow', $null)), 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+  $main = [CatalogOpenNative]::ForProcess($Process.Id, 'NiuMaMeritWindow')
+  if ($main -eq [IntPtr]::Zero) { throw 'The client main window is missing.' }
+  [CatalogOpenNative]::PostMessage($main, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
   if (-not $Process.WaitForExit(10000)) { throw 'Client did not close normally.' }
 }
 
