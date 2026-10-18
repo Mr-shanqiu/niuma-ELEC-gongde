@@ -35,7 +35,7 @@ begin
   StartAtLoginCheckbox.Height := ScaleY(22);
   StartAtLoginCheckbox.Caption := CustomMessage('StartAtLogin');
   { New installations default on; upgrades keep the user's saved choice. }
-  StartAtLoginCheckbox.Checked := GetIniInt('state', 'autostart_enabled', 1, PreferenceFile) <> 0;
+  StartAtLoginCheckbox.Checked := GetIniString('state', 'autostart_enabled', '1', PreferenceFile) <> '0';
   LocalOnlyLabel := TNewStaticText.Create(WizardForm);
   LocalOnlyLabel.Parent := WizardForm.SelectDirPage;
   LocalOnlyLabel.Left := StartAtLoginCheckbox.Left;
