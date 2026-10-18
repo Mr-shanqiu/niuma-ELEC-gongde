@@ -10,6 +10,9 @@ chinesetraditional.StartAtLogin=登录后自动启动
 english.LocalOnly=Runs locally. No internet connection required.
 chinesesimp.LocalOnly=本地运行，无需联网。
 chinesetraditional.LocalOnly=本地运行，无需联网。
+english.InstallerSize=Installer: %1 MB
+chinesesimp.InstallerSize=安装包：%1 MB
+chinesetraditional.InstallerSize=安装包：%1 MB
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "NiuMaMerit"; ValueData: """{app}\niuma-merit.exe""{#StartupArguments} --autostart"; Flags: uninsdeletevalue; Check: StartAtLoginSelected
@@ -27,6 +30,7 @@ var
 procedure InitializeWizard;
 var
   PreferenceFile: String;
+  PackageSize: Int64;
 begin
   PreferenceFile := ExpandConstant('{localappdata}\NiuMaMerit\data.ini');
   StartAtLoginCheckbox := TNewCheckBox.Create(WizardForm);
@@ -43,6 +47,9 @@ begin
   LocalOnlyLabel.Left := StartAtLoginCheckbox.Left;
   LocalOnlyLabel.Top := StartAtLoginCheckbox.Top + StartAtLoginCheckbox.Height + ScaleY(12);
   LocalOnlyLabel.Caption := CustomMessage('LocalOnly');
+  if FileSize64(ExpandConstant('{srcexe}'), PackageSize) then
+    LocalOnlyLabel.Caption := FmtMessage(CustomMessage('InstallerSize'),
+      [Format('%.1f', [PackageSize / 1000000.0])]) + ' · ' + LocalOnlyLabel.Caption;
 end;
 
 function StartAtLoginSelected: Boolean;

@@ -92,6 +92,7 @@ foreach ($case in @(
       if (($captions -join "`n") -match '桌面快捷|desktop shortcut|Three Things|三件事') { throw 'Unwanted onboarding option.' }
       $checkbox = @($controls | Where-Object { $_.Current.Name -match '^(登录后自动启动|Start automatically when I sign in)$' })
       if ($checkbox.Count -eq 1) {
+        if (($captions -join "`n") -notmatch '(安装包：|Installer: )\d+\.\d MB') { throw 'Installer size is missing from the destination page.' }
         if ($checked) { throw 'Startup choice shown on more than one page.' }
         $state = [R2Window]::SendMessage([IntPtr]$checkbox[0].Current.NativeWindowHandle, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero).ToInt32()
         if (($state -eq 1) -ne $case.initial) { throw 'Installer ignored the default or previous choice.' }
