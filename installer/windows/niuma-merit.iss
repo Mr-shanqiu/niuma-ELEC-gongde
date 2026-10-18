@@ -18,6 +18,7 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={localappdata}\Programs\NiumaMerit
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+DisableFinishedPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\..\dist
@@ -51,8 +52,7 @@ Source: "..\..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
-[Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "NiuMaMerit"; Flags: uninsdeletevalue
-
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchApp,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifsilent
+
+#include "startup-choice.iss"

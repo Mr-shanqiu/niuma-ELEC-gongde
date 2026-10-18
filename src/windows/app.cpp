@@ -3047,7 +3047,6 @@ bool ShowPrivacyNoticeIfNeeded(HWND owner) {
 
 bool PrepareClientStartup(HWND owner, const std::wstring& pendingAppearancePack) {
   if (!IsMainWindowAlive(owner)) return false;
-  if (!StartedAutomatically() && !ShowPrivacyNoticeIfNeeded(owner)) return false;
   if (!IsMainWindowAlive(owner)) return false;
   if (!pendingAppearancePack.empty()) {
     ImportAppearancePack(owner, pendingAppearancePack, true);

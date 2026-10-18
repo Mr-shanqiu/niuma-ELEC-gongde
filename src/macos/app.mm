@@ -1475,9 +1475,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSRunLoopCommonModes];
     [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSModalPanelRunLoopMode];
     [self installEventTap];
-    if (!self.launchedAutomatically &&
-        ![NSProcessInfo.processInfo.arguments containsObject:@"--listener-acceptance"])
-      [self showPermissionIntroIfNeeded];
   }
   if (gReminderPreviewAcceptance) {
     [self presentReminderForTrigger:niuma::reminder::ActivitySampler::Trigger::HighIntensity];

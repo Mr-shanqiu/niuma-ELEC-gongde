@@ -1,0 +1,82 @@
+name: Unified Acceptance R2 Installation Journey
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/reminder-acceptance-r2.yml'
+      - 'installer/windows/startup-choice.iss'
+      - 'installer/windows/niuma-merit-unified-acceptance-r2.iss'
+      - 'scripts/test-windows-acceptance-r2.ps1'
+      - 'scripts/prepare-reminder-import-acceptance.py'
+      - 'src/windows/app.cpp'
+      - 'src/macos/app.mm'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-r2:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the single small-builtin acceptance application
+        shell: powershell
+        run: |
+          python scripts/prepare-reminder-import-acceptance.py --revision R2 --output .local-work/candidates/unified-r2
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate preparation failed' }
+      - name: Compile the acceptance client
+        shell: powershell
+        run: |
+          $root = '.local-work/candidates/unified-r2'
+          cmake -S "$root/source" -B "$root/build" -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Configuration failed' }
+          cmake --build "$root/build" --config Release --target niuma-merit --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+      - name: Package R2 and the production template with their shared startup choice
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD '.local-work/candidates/unified-r2'
+          $output = Join-Path $root 'output'
+          New-Item -ItemType Directory -Path $output | Out-Null
+          $client = Join-Path $root 'build/Release/niuma-merit.exe'
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'Installer compiler setup failed' }
+          }
+          & $iscc "/DClientExecutable=$client" "/DAcceptanceOutputDir=$output" 'installer/windows/niuma-merit-unified-acceptance-r2.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'R2 packaging failed' }
+          # Compile the production template in a disposable directory, never publish it.
+          New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
+          Copy-Item -LiteralPath $client -Destination 'dist/niuma-merit.exe'
+          & $iscc '/DMyAppVersion=0.9.4' "/O$root/production-template-check" 'installer/windows/niuma-merit.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Production template failed' }
+          $installer = @(Get-ChildItem $output -Filter '*.exe')
+          if ($installer.Count -ne 1) { throw 'Expected one R2 installer' }
+          @{
+            sourceCommit = (git rev-parse HEAD).Trim()
+            clientSha256 = (Get-FileHash $client -Algorithm SHA256).Hash.ToLowerInvariant()
+            installerSha256 = (Get-FileHash $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            builtinChinese = 20
+            builtinEnglish = 20
+            published = $false
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 "$output/BUILD_RECEIPT.json"
+          Copy-Item "$root/SOURCE_BINDING.json" $output
+          Copy-Item "$root/fixtures/small-builtin.json" $output
+          Copy-Item $client "$output/niuma-merit.exe"
+      - name: Exercise interactive install, opt-out persistence and first launch
+        shell: powershell
+        run: |
+          $output = Join-Path $PWD '.local-work/candidates/unified-r2/output'
+          $installer = @(Get-ChildItem $output -Filter '*.exe')
+          & ./scripts/test-windows-acceptance-r2.ps1 -InstallerPath $installer[0].FullName -ClientPath "$output/niuma-merit.exe" -EvidenceDirectory "$output/journey-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-unified-acceptance-r2
+          path: .local-work/candidates/unified-r2/output/*
+          if-no-files-found: error
+          retention-days: 7

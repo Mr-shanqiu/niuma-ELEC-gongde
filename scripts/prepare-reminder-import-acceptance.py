@@ -23,6 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ref", default="HEAD")
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--revision", choices=("R1", "R2"), default="R1")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     output = args.output.resolve()
@@ -139,12 +140,41 @@ def main():
     replace_once(source / "src/windows/app.cpp",
                  "    ConfigureLaunchAtLogin();\n    RestartGlobalListeners();",
                  "    if (!gListenerAcceptance) ConfigureLaunchAtLogin();\n    RestartGlobalListeners();")
+    expected_modified = {"src/reminder_catalog_data.h", "src/macos/app.mm", "src/windows/app.cpp"}
+    if args.revision == "R2":
+        replace_once(source / "src/windows/app.cpp",
+                     '  return UiText(L"牛马电子功德", L"NiuMa Merit");',
+                     '  return UiText(L"牛马电子功德【综合验收·R2】", L"NiuMa Merit [Unified Acceptance R2]");')
+        for name, label in (
+                ("en", "NiuMa Merit [Unified Acceptance R2]"),
+                ("zh-Hans", "牛马电子功德【综合验收·R2】"),
+                ("zh-Hant", "牛馬電子功德【綜合驗收·R2】")):
+            relative = f"src/macos/{name}.lproj/InfoPlist.strings"
+            path = source / relative
+            text = path.read_text(encoding="utf-8")
+            for key in ("CFBundleName", "CFBundleDisplayName"):
+                text, count = re.subn(r'("' + key + r'"\s*=\s*)"[^"\n]*"',
+                                      lambda match: match[1] + json.dumps(label, ensure_ascii=False), text)
+                if count != 1:
+                    raise ValueError("unexpected localized bundle label")
+            path.write_text(text, encoding="utf-8")
+            expected_modified.add(relative)
+        relative = "src/macos/Info.plist.in"
+        path = source / relative
+        text = path.read_text(encoding="utf-8")
+        for key in ("CFBundleName", "CFBundleDisplayName"):
+            old = f"<key>{key}</key><string>NiuMa Merit</string>"
+            if text.count(old) != 1:
+                raise ValueError("unexpected bundle label")
+            text = text.replace(old, f"<key>{key}</key><string>NiuMa Merit [Unified Acceptance R2]</string>")
+        path.write_text(text, encoding="utf-8")
+        expected_modified.add(relative)
     modified = {name: hashlib.sha256((source / name).read_bytes()).hexdigest()
                 for name, sha in original.items()
                 if hashlib.sha256((source / name).read_bytes()).hexdigest() != sha}
-    if set(modified) != {"src/reminder_catalog_data.h", "src/macos/app.mm", "src/windows/app.cpp"}:
+    if set(modified) != expected_modified:
         raise ValueError("unexpected acceptance source changes")
-    manifest = {"kind": "unified-reminder-acceptance", "source_commit": commit,
+    manifest = {"kind": "unified-reminder-acceptance", "revision": args.revision, "source_commit": commit,
                 "builtin_counts": {"zh-CN": 20, "en": 20},
                 "full_counts": dict(counts), "content_version": full["content_version"],
                 "ids": sorted(ids), "original_source_sha256": original,
