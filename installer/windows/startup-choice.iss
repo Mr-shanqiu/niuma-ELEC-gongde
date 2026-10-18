@@ -48,8 +48,7 @@ begin
   LocalOnlyLabel.Top := StartAtLoginCheckbox.Top + StartAtLoginCheckbox.Height + ScaleY(12);
   LocalOnlyLabel.Caption := CustomMessage('LocalOnly');
   if FileSize64(ExpandConstant('{srcexe}'), PackageSize) then
-    LocalOnlyLabel.Caption := FmtMessage(CustomMessage('InstallerSize'),
-      [Format('%.1f', [PackageSize / 1000000.0])]) + ' · ' + LocalOnlyLabel.Caption;
+    LocalOnlyLabel.Caption := FmtMessage(CustomMessage('InstallerSize'), [Format('%.1f', [PackageSize / 1000000.0])]) + ' · ' + LocalOnlyLabel.Caption;
 end;
 
 function StartAtLoginSelected: Boolean;
