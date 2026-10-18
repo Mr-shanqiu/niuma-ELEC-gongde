@@ -58,7 +58,7 @@ constexpr wchar_t kRunKey[] =
 constexpr wchar_t kRunValue[] = L"NiuMaMerit";
 constexpr UINT kCountMessage = WM_APP + 1;
 constexpr UINT kScrollMessage = WM_APP + 2;
-constexpr ULONG_PTR kAppearancePackCopyData = 0x4E4D4750;
+constexpr ULONG_PTR kPackFileCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
 constexpr UINT_PTR kDayTimer = 2;
 constexpr UINT_PTR kOffworkTimer = 3;
@@ -100,7 +100,6 @@ constexpr UINT_PTR kMenuQuit = 5;
 constexpr UINT_PTR kMenuCountStatus = 6;
 constexpr UINT_PTR kMenuGuide = 7;
 constexpr UINT_PTR kMenuOffwork = 8;
-constexpr UINT_PTR kMenuReminderCatalog = 9;
 constexpr wchar_t kCountStatusClass[] = L"NiuMaMeritCountStatus";
 constexpr int kStatusText = 4001;
 constexpr int kStatusStart = 4002;
@@ -2383,53 +2382,15 @@ void ShowAboutDialog(HWND owner) {
   std::wstring text = IsChineseUi()
       ? L"牛马电子功德 v" + version + L"\n\n"
         L"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、"
-        L"鼠标位置或窗口信息。\n所有数据仅保存在本机，本软件不包含网络请求、"
-        L"遥测或自动更新。\n\n客户端源代码依 GPLv3 许可证开放。\n\n官方网站：\n"
+        L"鼠标位置或窗口信息。\n本软件不包含网络请求、"
+        L"遥测或自动更新。\n\n官方网站：\n"
       : L"NiuMa Merit v" + version + L"\n\n"
         L"Counts keyboard presses, mouse button presses, and scroll gestures without "
         L"reading specific content, mouse positions, or window information.\n"
-        L"All data stays on this computer. The app contains no network requests, "
-        L"telemetry, or automatic updates.\n\nClient source code is available under GPLv3."
+        L"The app contains no network requests, "
+        L"telemetry, or automatic updates."
         L"\n\nOfficial website:\n";
   text += L"https://gongde.zqscreen.cn/";
-  const std::string statusDate = CurrentReminderLocalDate();
-  const auto statusNowUtc = static_cast<std::int64_t>(std::time(nullptr));
-  const bool statusClockGuarded = gState.reminderStore &&
-      (gState.reminderClockGuard.guarded() ||
-       gState.reminderStore->ClockGuard(statusNowUtc, statusDate.c_str()));
-  const auto reminderState = niuma::reminder::ClassifyRuntimeStatus(
-      gState.reminderStore != nullptr, gState.reminderStorageFault,
-      statusClockGuarded, gState.keyboardHook != nullptr && gState.mouseHook != nullptr);
-  const wchar_t* reminderStatus = UiText(
-      L"本地活动监测已就绪；是否提醒仍取决于活动阈值、间隔、地区和当天可用内容。",
-      L"Local activity monitoring is ready. A reminder still depends on activity thresholds, timing, region, and eligible messages.");
-  switch (reminderState) {
-    case niuma::reminder::RuntimeStatus::StorageUnavailable:
-      reminderStatus = UiText(L"本地提醒记录不可用，提醒暂时停用；功德计数和其他功能照常。",
-          L"Local reminder history is unavailable, so reminders are paused. Counting and other features continue.");
-      break;
-    case niuma::reminder::RuntimeStatus::StorageFault:
-      reminderStatus = UiText(L"此前本地提醒记录写入失败，本段提醒已跳过；后续符合条件的新活动段仍可尝试。",
-          L"A previous local reminder-history write failed, so that activity segment was skipped. A later eligible segment can still try.");
-      break;
-    case niuma::reminder::RuntimeStatus::ClockGuarded:
-      reminderStatus = UiText(L"本机时间或提醒历史正在保护校验；状态稳定后才会恢复提醒。",
-          L"The local clock or reminder history is under a protective check. Reminders resume after the state is stable.");
-      break;
-    case niuma::reminder::RuntimeStatus::ListenerUnavailable:
-      reminderStatus = UiText(L"全局输入监听未就绪，暂时无法依据活动触发提醒。",
-          L"Global input monitoring is not ready, so activity cannot trigger reminders.");
-      break;
-    case niuma::reminder::RuntimeStatus::Ready:
-      break;
-  }
-  text += UiText(L"\n\n提醒状态：", L"\n\nReminder status: ");
-  text += reminderStatus;
-  if (gState.reminderCatalogCommitUncertain) {
-    text += UiText(
-        L"\n文案库：当前进程使用的内容已验签，但恢复文件的本地持久状态未能确认；下次启动会重新验签并尝试恢复。",
-        L"Catalog: The content used in this session has a valid signature, but local durability of its recovery files could not be confirmed. The app will reverify and retry recovery on next launch.");
-  }
   text += UiText(L"\n\nWindows 通常无需额外授权。若在其他应用中没有计数，请查看下方权限与计数帮助。",
                 L"\n\nWindows normally needs no extra permission. If input in other apps is not counted, see the help link below.");
   AboutDialogState state;
@@ -2926,7 +2887,7 @@ void ShowAppearancePicker(HWND owner) {
   }
 }
 
-std::wstring AppearancePackArgument() {
+std::wstring ImportFileArgument() {
   int argumentCount = 0;
   LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
   if (arguments == nullptr) return {};
@@ -2934,7 +2895,8 @@ std::wstring AppearancePackArgument() {
   for (int index = 1; index < argumentCount; ++index) {
     const std::wstring argument(arguments[index]);
     if (niuma::IsAppearancePackPath(argument) ||
-        niuma::IsAppearanceBatchPath(argument)) {
+        niuma::IsAppearanceBatchPath(argument) ||
+        niuma::reminder::IsCatalogPackagePath(std::filesystem::path(argument))) {
       result = argument;
       break;
     }
@@ -3045,12 +3007,18 @@ bool ShowPrivacyNoticeIfNeeded(HWND owner) {
   return true;
 }
 
-bool PrepareClientStartup(HWND owner, const std::wstring& pendingAppearancePack) {
+void ImportOfficialMessages(HWND owner, const std::wstring& filename);
+
+void ImportPackageFile(HWND owner, const std::wstring& filename) {
+  if (niuma::reminder::IsCatalogPackagePath(std::filesystem::path(filename)))
+    ImportOfficialMessages(owner, filename);
+  else
+    ImportAppearancePack(owner, filename, true);
+}
+
+bool PrepareClientStartup(HWND owner, const std::wstring& pendingImportFile) {
   if (!IsMainWindowAlive(owner)) return false;
-  if (!IsMainWindowAlive(owner)) return false;
-  if (!pendingAppearancePack.empty()) {
-    ImportAppearancePack(owner, pendingAppearancePack, true);
-  }
+  if (!pendingImportFile.empty()) ImportPackageFile(owner, pendingImportFile);
   return IsMainWindowAlive(owner);
 }
 
@@ -3240,23 +3208,15 @@ void ShowOffworkSettings(HWND owner) {
   }
 }
 
-void ShowReminderCatalogUpdate(HWND owner) {
-  if (!gState.catalogStore) return;
-  wchar_t filename[32768]{};
-  static constexpr wchar_t filter[] =
-      L"Official message catalog (*.nmgtext)\0*.nmgtext\0\0";
-  OPENFILENAMEW dialog{};
-  dialog.lStructSize = sizeof(dialog);
-  dialog.hwndOwner = owner;
-  dialog.lpstrFilter = filter;
-  dialog.lpstrFile = filename;
-  dialog.nMaxFile = static_cast<DWORD>(std::size(filename));
-  dialog.lpstrTitle = UiText(L"选择官方文案库文件", L"Choose an Official Message Catalog");
-  dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
-      OFN_HIDEREADONLY | OFN_EXPLORER;
-  dialog.lpstrDefExt = L"nmgtext";
-  if (!GetOpenFileNameW(&dialog)) return;
-
+void ImportOfficialMessages(HWND owner, const std::wstring& filename) {
+  if (!gState.catalogStore) {
+    MessageBoxW(owner,
+        UiText(L"本地文案库暂不可用，请退出应用后重试。",
+               L"The local message catalog is unavailable. Quit the app and try again."),
+        UiText(L"无法导入文案包", L"Could Not Import Messages"),
+        MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+    return;
+  }
   auto result = gState.catalogStore->InstallFile(std::filesystem::path(filename),
       niuma::reminder::OfficialCatalogSignatureVerifier());
   if (result.status == niuma::reminder::CatalogInstallStatus::Installed ||
@@ -3272,7 +3232,7 @@ void ShowReminderCatalogUpdate(HWND owner) {
         L"文案库版本 %u 已就绪（中文 %zu 条，英文 %zu 条）。提醒历史保持不变。",
         L"Message catalog version %u is ready (%zu Chinese, %zu English). Reminder history is unchanged."),
         gState.reminderCatalog->content_version, chinese, english);
-    MessageBoxW(owner, message, UiText(L"文案库已更新", L"Messages Updated"),
+    MessageBoxW(owner, message, UiText(L"文案包已导入", L"Messages Imported"),
         MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
     return;
   }
@@ -3280,8 +3240,8 @@ void ShowReminderCatalogUpdate(HWND owner) {
       L"文件未安装，当前文案库和提醒历史保持不变。请确认文件来自官方并且版本较新。",
       L"The file was not installed. Your current catalog and reminder history are unchanged. Check that it is an official, newer catalog.");
   if (result.status == niuma::reminder::CatalogInstallStatus::CommitUncertain)
-    message = UiText(L"文案库文件已完成本地替换，但系统未确认目录写入已持久保存。当前进程仍使用原文案库；重启后会按本地签名验证结果加载。请勿把本次提示视为已完成更新。提醒历史保持不变。",
-                     L"The catalog files were replaced locally, but the system could not confirm durable directory storage. This process keeps using the previous catalog; after restart, the app will load whichever local catalog passes signature verification. Treat the update as unconfirmed. Reminder history is unchanged.");
+    message = UiText(L"文案库文件已完成本地替换，但系统未确认目录写入已持久保存。当前进程仍使用原文案库；重启后会按本地签名验证结果加载。请勿把本次提示视为已完成导入。提醒历史保持不变。",
+                     L"The catalog files were replaced locally, but the system could not confirm durable directory storage. This process keeps using the previous catalog; after restart, the app will load whichever local catalog passes signature verification. Treat the import as unconfirmed. Reminder history is unchanged.");
   else if (result.status == niuma::reminder::CatalogInstallStatus::UntrustedSignature)
     message = UiText(L"签名无效或发布密钥不受信任，当前文案库保持不变。",
                      L"The signature is invalid or its publisher key is not trusted. Your current catalog is unchanged.");
@@ -3291,7 +3251,7 @@ void ShowReminderCatalogUpdate(HWND owner) {
   else if (result.status == niuma::reminder::CatalogInstallStatus::SameVersionDifferentContent)
     message = UiText(L"相同版本号对应了不同内容，文件未安装。",
                      L"This version number is already associated with different content. The file was not installed.");
-  MessageBoxW(owner, message, UiText(L"无法更新文案库", L"Could Not Update Messages"),
+  MessageBoxW(owner, message, UiText(L"无法导入文案包", L"Could Not Import Messages"),
       MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
 }
 
@@ -3313,8 +3273,6 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   AppendMenuW(menu,
               MF_STRING | (gOffwork.enabled ? MF_CHECKED : MF_UNCHECKED), kMenuOffwork,
               UiText(L"下班倒计时…", L"Off-work Countdown..."));
-  AppendMenuW(menu, MF_STRING, kMenuReminderCatalog,
-              UiText(L"更新官方文案库…", L"Update Official Messages..."));
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kMenuQuit, UiText(L"退出", L"Exit"));
 
@@ -3341,8 +3299,6 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     ShowMeritCalendar(window);
   } else if (command == static_cast<int>(kMenuOffwork)) {
     ShowOffworkSettings(window);
-  } else if (command == static_cast<int>(kMenuReminderCatalog)) {
-    ShowReminderCatalogUpdate(window);
   } else if (command == static_cast<int>(kMenuQuit)) {
     DestroyWindow(window);
   }
@@ -3365,16 +3321,19 @@ LRESULT CALLBACK WindowProcedure(
 
     case WM_COPYDATA: {
       const auto* copy = reinterpret_cast<const COPYDATASTRUCT*>(lParam);
-      if (copy == nullptr || copy->dwData != kAppearancePackCopyData ||
+      if (copy == nullptr || copy->dwData != kPackFileCopyData ||
           copy->lpData == nullptr || copy->cbData < sizeof(wchar_t) ||
+          copy->cbData > 32768 * sizeof(wchar_t) ||
           copy->cbData % sizeof(wchar_t) != 0) return FALSE;
       const auto* path = static_cast<const wchar_t*>(copy->lpData);
       const size_t codeUnits = copy->cbData / sizeof(wchar_t);
       if (path[codeUnits - 1] != L'\0') return FALSE;
-      const std::wstring sourcePath(path);
+      const std::wstring sourcePath(path, codeUnits - 1);
+      if (sourcePath.find(L'\0') != std::wstring::npos) return FALSE;
       if (!niuma::IsAppearancePackPath(sourcePath) &&
-          !niuma::IsAppearanceBatchPath(sourcePath)) return FALSE;
-      ImportAppearancePack(window, sourcePath, true);
+          !niuma::IsAppearanceBatchPath(sourcePath) &&
+          !niuma::reminder::IsCatalogPackagePath(std::filesystem::path(sourcePath))) return FALSE;
+      ImportPackageFile(window, sourcePath);
       return TRUE;
     }
 
@@ -3589,7 +3548,7 @@ int WINAPI wWinMain(
   if (!InitializeAcceptanceContext()) return 2;
   EnableBestDpiAwareness();
 
-  const std::wstring pendingAppearancePack = AppearancePackArgument();
+  const std::wstring pendingImportFile = ImportFileArgument();
 
   gState.mutex = CreateMutexW(nullptr, TRUE,
       gIsolatedAcceptance ? kAcceptanceMutexName : kMutexName);
@@ -3597,7 +3556,7 @@ int WINAPI wWinMain(
     return 1;
   }
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
-    if (!pendingAppearancePack.empty()) {
+    if (!pendingImportFile.empty()) {
       HWND existingWindow = nullptr;
       for (int attempt = 0; attempt < 20 && existingWindow == nullptr; ++attempt) {
         existingWindow = FindWindowW(kWindowClass, nullptr);
@@ -3605,10 +3564,10 @@ int WINAPI wWinMain(
       }
       if (existingWindow != nullptr) {
         COPYDATASTRUCT copy = {};
-        copy.dwData = kAppearancePackCopyData;
+        copy.dwData = kPackFileCopyData;
         copy.cbData = static_cast<DWORD>(
-            (pendingAppearancePack.size() + 1) * sizeof(wchar_t));
-        copy.lpData = const_cast<wchar_t*>(pendingAppearancePack.c_str());
+            (pendingImportFile.size() + 1) * sizeof(wchar_t));
+        copy.lpData = const_cast<wchar_t*>(pendingImportFile.c_str());
         SendMessageTimeoutW(existingWindow, WM_COPYDATA, 0,
                             reinterpret_cast<LPARAM>(&copy),
                             SMTO_ABORTIFHUNG, 5000, nullptr);
@@ -3799,7 +3758,7 @@ int WINAPI wWinMain(
     if (GetModuleFileNameW(nullptr, executable,
                            static_cast<DWORD>(std::size(executable))) != 0) {
       std::wstring associationError;
-      niuma::RegisterAppearancePackAssociation(executable, &associationError);
+      niuma::RegisterPackFileAssociations(executable, &associationError);
     }
   }
 
@@ -3808,7 +3767,7 @@ int WINAPI wWinMain(
     RestartGlobalListeners();
   }
   if (!gIsolatedAcceptance &&
-      !PrepareClientStartup(window, pendingAppearancePack) && IsMainWindowAlive(window)) {
+      !PrepareClientStartup(window, pendingImportFile) && IsMainWindowAlive(window)) {
     DestroyWindow(window);
   }
   // A listener failure leaves click-only/partial counting and a reachable retry

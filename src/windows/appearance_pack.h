@@ -84,8 +84,8 @@ class AppearanceCatalog {
 
 bool IsAppearancePackPath(const std::wstring& path);
 bool IsAppearanceBatchPath(const std::wstring& path);
-bool RegisterAppearancePackAssociation(const std::wstring& executable,
-                                       std::wstring* error);
+bool RegisterPackFileAssociations(const std::wstring& executable,
+                                  std::wstring* error);
 void DrawAppearancePack(Gdiplus::Graphics& graphics,
                         const AppearancePack& pack,
                         float progress);

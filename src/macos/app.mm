@@ -308,6 +308,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   std::shared_ptr<niuma::reminder::ValidatedCatalog> _reminderCatalog;
   bool _reminderCatalogCommitUncertain;
 }
+@property(nonatomic) BOOL readyForOpenedFiles;
+@property(nonatomic, strong) NSMutableArray<NSString *> *pendingOpenFiles;
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) MeritView *view;
 @property(nonatomic, strong) NSTimer *animationTimer;
@@ -426,7 +428,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)handleEventTapDisabled:(CGEventType)type;
 - (void)showAbout:(id)sender;
 - (void)showAppearancePicker:(id)sender;
-- (void)updateOfficialMessages:(id)sender;
+- (BOOL)importOfficialMessagesAtPath:(NSString *)filename;
 - (void)showMeritCalendar:(id)sender;
 - (void)shiftCalendarMonth:(NSButton *)sender;
 - (void)ensureCurrentDay;
@@ -1482,18 +1484,34 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     // the explicit isolated-acceptance flags and an empty private temp root pass.
     [NSApp performSelector:@selector(terminate:) withObject:nil afterDelay:12.0];
   }
+  self.readyForOpenedFiles = YES;
+  NSArray<NSString *> *pending = [self.pendingOpenFiles copy];
+  self.pendingOpenFiles = nil;
+  if (pending.count) [self application:NSApp openFiles:pending];
 }
 
 - (void)application:(NSApplication *)application openFiles:(NSArray<NSString *> *)filenames {
-  // Launch arguments and unrelated documents are not appearance archives.
+  // Finder can deliver a document before launch has initialized the stores.
+  if (!self.readyForOpenedFiles) {
+    if (!self.pendingOpenFiles) self.pendingOpenFiles = [NSMutableArray array];
+    [self.pendingOpenFiles addObjectsFromArray:filenames];
+    return;
+  }
+  BOOL handledCatalog = NO, catalogsSucceeded = YES;
   NSMutableArray<NSString *> *archives = [NSMutableArray array];
   for (NSString *filename in filenames) {
     NSString *extension = filename.pathExtension.lowercaseString;
+    if ([extension isEqualToString:@"nmgtext"]) {
+      handledCatalog = YES;
+      if (![self importOfficialMessagesAtPath:filename]) catalogsSucceeded = NO;
+      continue;
+    }
     if ([extension isEqualToString:@"nmgpack"] ||
         [extension isEqualToString:@"nmgpacks"]) [archives addObject:filename];
   }
   if (archives.count == 0) {
-    [application replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
+    [application replyToOpenOrPrint:handledCatalog && catalogsSucceeded
+        ? NSApplicationDelegateReplySuccess : NSApplicationDelegateReplyFailure];
     return;
   }
   filenames = archives;
@@ -1566,7 +1584,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.pendingAppearanceId = self.selectedAppearanceId;
     self.appearancePickerAlert.accessoryView = [self appearanceGrid];
   }
-  [application replyToOpenOrPrint:failures.count
+  [application replyToOpenOrPrint:failures.count || !catalogsSucceeded
       ? NSApplicationDelegateReplyFailure : NSApplicationDelegateReplySuccess];
   NSAlert *alert = [[NSAlert alloc] init];
   alert.alertStyle = failures.count ? NSAlertStyleWarning : NSAlertStyleInformational;
@@ -2297,12 +2315,6 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   offwork.target = self;
   offwork.state = self.offworkEnabled ? NSControlStateValueOn : NSControlStateValueOff;
   [menu addItem:offwork];
-  NSMenuItem *messages = [[NSMenuItem alloc]
-      initWithTitle:UiText(@"更新官方文案库…", @"Update Official Messages…")
-             action:@selector(updateOfficialMessages:) keyEquivalent:@""];
-  messages.target = self;
-  messages.enabled = _catalogStore != nullptr;
-  [menu addItem:messages];
   [menu addItem:NSMenuItem.separatorItem];
   NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:UiText(@"退出", @"Quit")
                                                 action:@selector(terminate:)
@@ -2324,18 +2336,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [NSMenu popUpContextMenu:menu withEvent:event forView:self.view];
 }
 
-- (void)updateOfficialMessages:(id)sender {
-  (void)sender;
-  if (!_catalogStore) return;
-  NSOpenPanel *panel = [NSOpenPanel openPanel];
-  panel.title = UiText(@"选择官方文案库文件", @"Choose an Official Message Catalog");
-  panel.allowedFileTypes = @[@"nmgtext"];
-  panel.canChooseFiles = YES;
-  panel.canChooseDirectories = NO;
-  panel.allowsMultipleSelection = NO;
-  if ([panel runModal] != NSModalResponseOK || panel.URL == nil) return;
+- (BOOL)importOfficialMessagesAtPath:(NSString *)filename {
+  if (!_catalogStore) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = UiText(@"无法导入文案包", @"Could Not Import Messages");
+    alert.informativeText = UiText(@"本地文案库暂不可用，请退出应用后重试。",
+        @"The local message catalog is unavailable. Quit the app and try again.");
+    [alert addButtonWithTitle:UiText(@"好", @"OK")];
+    [alert runModal];
+    return NO;
+  }
   auto result = _catalogStore->InstallFile(
-      std::filesystem::path(panel.URL.fileSystemRepresentation),
+      std::filesystem::path(filename.fileSystemRepresentation),
       niuma::reminder::OfficialCatalogSignatureVerifier());
   if (result.status == niuma::reminder::CatalogInstallStatus::Installed ||
       result.status == niuma::reminder::CatalogInstallStatus::AlreadyInstalled) {
@@ -2351,17 +2363,17 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
         _reminderCatalog->content_version, static_cast<unsigned long>(chinese),
         static_cast<unsigned long>(english)];
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = UiText(@"文案库已更新", @"Messages Updated");
+    alert.messageText = UiText(@"文案包已导入", @"Messages Imported");
     alert.informativeText = message;
     [alert addButtonWithTitle:UiText(@"好", @"OK")];
     [alert runModal];
-    return;
+    return YES;
   }
   NSString *message = UiText(@"文件未安装，当前文案库和提醒历史保持不变。请确认文件来自官方并且版本较新。",
                              @"The file was not installed. Your current catalog and reminder history are unchanged. Check that it is an official, newer catalog.");
   if (result.status == niuma::reminder::CatalogInstallStatus::CommitUncertain)
-    message = UiText(@"文案库文件已完成本地替换，但系统未确认目录写入已持久保存。当前进程仍使用原文案库；重启后会按本地签名验证结果加载。请勿把本次提示视为已完成更新。提醒历史保持不变。",
-                     @"The catalog files were replaced locally, but the system could not confirm durable directory storage. This process keeps using the previous catalog; after restart, the app will load whichever local catalog passes signature verification. Treat the update as unconfirmed. Reminder history is unchanged.");
+    message = UiText(@"文案库文件已完成本地替换，但系统未确认目录写入已持久保存。当前进程仍使用原文案库；重启后会按本地签名验证结果加载。请勿把本次提示视为已完成导入。提醒历史保持不变。",
+                     @"The catalog files were replaced locally, but the system could not confirm durable directory storage. This process keeps using the previous catalog; after restart, the app will load whichever local catalog passes signature verification. Treat the import as unconfirmed. Reminder history is unchanged.");
   else if (result.status == niuma::reminder::CatalogInstallStatus::UntrustedSignature)
     message = UiText(@"签名无效或发布密钥不受信任，当前文案库保持不变。",
                      @"The signature is invalid or its publisher key is not trusted. Your current catalog is unchanged.");
@@ -2372,10 +2384,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     message = UiText(@"相同版本号对应了不同内容，文件未安装。",
                      @"This version number is already associated with different content. The file was not installed.");
   NSAlert *alert = [[NSAlert alloc] init];
-  alert.messageText = UiText(@"无法更新文案库", @"Could Not Update Messages");
+  alert.messageText = UiText(@"无法导入文案包", @"Could Not Import Messages");
   alert.informativeText = message;
   [alert addButtonWithTitle:UiText(@"好", @"OK")];
   [alert runModal];
+  return NO;
 }
 
 - (void)toggleLaunchAtLogin:(id)sender {
@@ -2595,10 +2608,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSString *aboutText = [NSString stringWithFormat:UiText(
       @"版本 %@\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
-       @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
+       @"本软件不包含网络请求、遥测或自动更新。\n\n"
        @"在其他应用中计数，需要允许本应用使用“输入监控”。\n"
        @"Mac 权限与计数帮助\n\n"
-       @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"官方网站：\n"
        @"https://gongde.zqscreen.cn/\n\n"
        @"欢迎关注开发者抖音，一起交流产品的奇思妙想\n"
@@ -2606,51 +2618,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       @"Version %@\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
-       @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"
+       @"The app contains no network requests, telemetry, or automatic updates.\n\n"
        @"Counting in other apps requires Input Monitoring permission.\n"
        @"Mac permissions and counting help\n\n"
-       @"Client source code is available under GPLv3.\n\n"
        @"Official website:\n"
        @"https://gongde.zqscreen.cn/\n\n"
        @"Follow the developer on Douyin and share creative product ideas\n"
        @"Douyin ID: 1872941388"), version];
-  const std::int64_t statusNowUtc = static_cast<std::int64_t>(NSDate.date.timeIntervalSince1970);
-  NSString *statusDate = DateKeyForDate(NSDate.date);
-  const bool statusClockGuarded = _reminderStore && (_reminderClockGuard.guarded() ||
-      _reminderStore->ClockGuard(statusNowUtc, statusDate.UTF8String));
-  const auto reminderState = niuma::reminder::ClassifyRuntimeStatus(
-      _reminderStore != nullptr, _reminderStorageFault, statusClockGuarded,
-      [self hasLiveEventTap]);
-  NSString *reminderStatus = nil;
-  switch (reminderState) {
-    case niuma::reminder::RuntimeStatus::StorageUnavailable:
-      reminderStatus = UiText(@"本地提醒记录不可用，提醒暂时停用；功德计数和其他功能照常。",
-          @"Local reminder history is unavailable, so reminders are paused. Counting and other features continue.");
-      break;
-    case niuma::reminder::RuntimeStatus::StorageFault:
-      reminderStatus = UiText(@"此前本地提醒记录写入失败，本段提醒已跳过；后续符合条件的新活动段仍可尝试。",
-          @"A previous local reminder-history write failed, so that activity segment was skipped. A later eligible segment can still try.");
-      break;
-    case niuma::reminder::RuntimeStatus::ClockGuarded:
-      reminderStatus = UiText(@"本机时间或提醒历史正在保护校验；状态稳定后才会恢复提醒。",
-          @"The local clock or reminder history is under a protective check. Reminders resume after the state is stable.");
-      break;
-    case niuma::reminder::RuntimeStatus::ListenerUnavailable:
-      reminderStatus = UiText(@"输入监控未就绪，暂时无法依据全局活动触发提醒。可在系统设置允许后重试。",
-          @"Input Monitoring is not ready, so global activity cannot trigger reminders. Enable it in System Settings and retry.");
-      break;
-    case niuma::reminder::RuntimeStatus::Ready:
-      reminderStatus = UiText(@"本地活动监测已就绪；是否提醒仍取决于活动阈值、间隔、地区和当天可用内容。",
-          @"Local activity monitoring is ready. A reminder still depends on activity thresholds, timing, region, and eligible messages.");
-      break;
-  }
-  aboutText = [aboutText stringByAppendingFormat:UiText(
-      @"\n\n提醒状态：%@", @"\n\nReminder status: %@"), reminderStatus];
-  if (_reminderCatalogCommitUncertain) {
-    aboutText = [aboutText stringByAppendingString:UiText(
-        @"\n文案库：当前进程使用的内容已验签，但恢复文件的本地持久状态未能确认；下次启动会重新验签并尝试恢复。",
-        @"\nCatalog: The content used in this session has a valid signature, but local durability of its recovery files could not be confirmed. The app will reverify and retry recovery on next launch.")];
-  }
   NSString *douyinPath = [NSBundle.mainBundle pathForResource:@"developer-douyin" ofType:@"png"];
   NSImage *douyinImage = douyinPath ? [[NSImage alloc] initWithContentsOfFile:douyinPath] : nil;
   NSScreen *screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;

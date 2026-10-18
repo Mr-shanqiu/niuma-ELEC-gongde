@@ -40,6 +40,15 @@ struct CatalogInstallResult {
   std::string detail;
 };
 
+inline bool IsCatalogPackagePath(const std::filesystem::path& path) {
+  auto extension = path.extension().native();
+  for (auto& ch : extension) {
+    if (ch >= 'A' && ch <= 'Z')
+      ch = static_cast<std::filesystem::path::value_type>(ch + ('a' - 'A'));
+  }
+  return extension == std::filesystem::path(".nmgtext").native();
+}
+
 // Stores one complete signed catalog. The envelope is retained verbatim so
 // startup recovery can repeat signature and schema verification. No package
 // path or filename comes from the untrusted payload.
@@ -54,7 +63,7 @@ class CatalogUpdateStore {
   CatalogInstallResult InstallFile(const std::filesystem::path& source,
                                    const CatalogSignatureVerifier& verify) {
     CatalogInstallResult result;
-    if (source.extension() != ".nmgtext") {
+    if (!IsCatalogPackagePath(source)) {
       result.detail = "select an .nmgtext catalog file";
       return result;
     }

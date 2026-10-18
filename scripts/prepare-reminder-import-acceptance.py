@@ -23,7 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ref", default="HEAD")
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--revision", choices=("R1", "R2"), default="R1")
+    parser.add_argument("--revision", choices=("R1", "R2", "R3"), default="R1")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     output = args.output.resolve()
@@ -95,34 +95,7 @@ def main():
     if found != ids or len(kept) != 41:
         raise ValueError("small JSON/header IDs disagree")
     header_path.write_text(prefix + "\n".join(kept) + header[end:], encoding="utf-8")
-    # Read-only status in the acceptance snapshot makes the imported active
-    # library visible. The importer, verifier, activity and input code stay intact.
-    replace_once(source / "src/macos/app.mm", "  if (_reminderCatalogCommitUncertain) {", '''  const auto acceptanceView = _reminderCatalog
-      ? _reminderCatalog->view() : niuma::reminder::kBuiltinCatalogView;
-  unsigned long acceptanceChinese = 0, acceptanceEnglish = 0;
-  for (std::size_t index = 0; index < acceptanceView.item_count; ++index) {
-    if (std::strcmp(acceptanceView.items[index].language, "zh-CN") == 0) ++acceptanceChinese;
-    if (std::strcmp(acceptanceView.items[index].language, "en") == 0) ++acceptanceEnglish;
-  }
-  aboutText = [aboutText stringByAppendingFormat:UiText(
-      @"\\n【仅验收候选】当前文案库：%@ · v%u · 中文 %lu / 英文 %lu",
-      @"\\n[Acceptance only] Active messages: %@ · v%u · Chinese %lu / English %lu"),
-      _reminderCatalog ? UiText(@"已导入", @"Imported") : UiText(@"内置", @"Built in"),
-      acceptanceView.content_version, acceptanceChinese, acceptanceEnglish];
-  if (_reminderCatalogCommitUncertain) {''')
-    replace_once(source / "src/windows/app.cpp", "  if (gState.reminderCatalogCommitUncertain) {", '''  const auto acceptanceView = gState.reminderCatalog
-      ? gState.reminderCatalog->view() : niuma::reminder::kBuiltinCatalogView;
-  unsigned acceptanceChinese = 0, acceptanceEnglish = 0;
-  for (std::size_t index = 0; index < acceptanceView.item_count; ++index) {
-    if (std::strcmp(acceptanceView.items[index].language, "zh-CN") == 0) ++acceptanceChinese;
-    if (std::strcmp(acceptanceView.items[index].language, "en") == 0) ++acceptanceEnglish;
-  }
-  text += UiText(L"\\n【仅验收候选】当前文案库：", L"\\n[Acceptance only] Active messages: ");
-  text += gState.reminderCatalog ? UiText(L"已导入", L"Imported") : UiText(L"内置", L"Built in");
-  text += L" · v" + std::to_wstring(acceptanceView.content_version) +
-      UiText(L" · 中文 ", L" · Chinese ") + std::to_wstring(acceptanceChinese) +
-      UiText(L" / 英文 ", L" / English ") + std::to_wstring(acceptanceEnglish);
-  if (gState.reminderCatalogCommitUncertain) {''')
+    # Keep About identical to production; catalog diagnostics do not belong in the UI.
     # The Windows production harness requires a timed preview. Permit manual
     # isolated UI only in this snapshot, keeping the same private/empty-root gate.
     replace_once(source / "src/windows/app.cpp", "  if (!isolated || !preview || rootLength == 0 ||",
@@ -140,15 +113,15 @@ def main():
     replace_once(source / "src/windows/app.cpp",
                  "    ConfigureLaunchAtLogin();\n    RestartGlobalListeners();",
                  "    if (!gListenerAcceptance) ConfigureLaunchAtLogin();\n    RestartGlobalListeners();")
-    expected_modified = {"src/reminder_catalog_data.h", "src/macos/app.mm", "src/windows/app.cpp"}
-    if args.revision == "R2":
+    expected_modified = {"src/reminder_catalog_data.h", "src/windows/app.cpp"}
+    if args.revision in ("R2", "R3"):
         replace_once(source / "src/windows/app.cpp",
                      '  return UiText(L"牛马电子功德", L"NiuMa Merit");',
-                     '  return UiText(L"牛马电子功德【综合验收·R2】", L"NiuMa Merit [Unified Acceptance R2]");')
+                     f'  return UiText(L"牛马电子功德【综合验收·{args.revision}】", L"NiuMa Merit [Unified Acceptance {args.revision}]");')
         for name, label in (
-                ("en", "NiuMa Merit [Unified Acceptance R2]"),
-                ("zh-Hans", "牛马电子功德【综合验收·R2】"),
-                ("zh-Hant", "牛馬電子功德【綜合驗收·R2】")):
+                ("en", f"NiuMa Merit [Unified Acceptance {args.revision}]"),
+                ("zh-Hans", f"牛马电子功德【综合验收·{args.revision}】"),
+                ("zh-Hant", f"牛馬電子功德【綜合驗收·{args.revision}】")):
             relative = f"src/macos/{name}.lproj/InfoPlist.strings"
             path = source / relative
             text = path.read_text(encoding="utf-8")
@@ -166,7 +139,7 @@ def main():
             old = f"<key>{key}</key><string>NiuMa Merit</string>"
             if text.count(old) != 1:
                 raise ValueError("unexpected bundle label")
-            text = text.replace(old, f"<key>{key}</key><string>NiuMa Merit [Unified Acceptance R2]</string>")
+            text = text.replace(old, f"<key>{key}</key><string>NiuMa Merit [Unified Acceptance {args.revision}]</string>")
         path.write_text(text, encoding="utf-8")
         expected_modified.add(relative)
     modified = {name: hashlib.sha256((source / name).read_bytes()).hexdigest()
@@ -179,7 +152,7 @@ def main():
                 "full_counts": dict(counts), "content_version": full["content_version"],
                 "ids": sorted(ids), "original_source_sha256": original,
                 "acceptance_overlay_sha256": modified,
-                "changed_behavior": ["40 built-in messages", "read-only active-library counts in About",
+                "changed_behavior": ["40 built-in messages",
                                      "Windows manual isolated UI without the preview timer",
                                      "Windows --listener-acceptance keeps real listeners/profile without rewriting login startup"],
                 "production_assets_modified": False, "production_sources_modified": False,

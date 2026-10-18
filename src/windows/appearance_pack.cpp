@@ -1258,8 +1258,8 @@ bool IsAppearanceBatchPath(const std::wstring& path) {
   return extension == L".nmgpacks";
 }
 
-bool RegisterAppearancePackAssociation(const std::wstring& executable,
-                                       std::wstring* error) {
+bool RegisterPackFileAssociations(const std::wstring& executable,
+                                  std::wstring* error) {
   const wchar_t* extensionKey = L"Software\\Classes\\.nmgpack";
   const wchar_t* classKey = L"Software\\Classes\\NiuMaMerit.AppearancePack";
   const wchar_t* commandKey =
@@ -1285,9 +1285,12 @@ bool RegisterAppearancePackAssociation(const std::wstring& executable,
       !writeDefault(commandKey, command) ||
       !writeDefault(batchExtensionKey, L"NiuMaMerit.AppearanceBatch") ||
       !writeDefault(batchClassKey, L"NiuMa Merit Appearance Batch") ||
-      !writeDefault(batchCommandKey, command)) {
+      !writeDefault(batchCommandKey, command) ||
+      !writeDefault(L"Software\\Classes\\.nmgtext", L"NiuMaMerit.MessageCatalog") ||
+      !writeDefault(L"Software\\Classes\\NiuMaMerit.MessageCatalog", L"NiuMa Merit Message Catalog") ||
+      !writeDefault(L"Software\\Classes\\NiuMaMerit.MessageCatalog\\shell\\open\\command", command)) {
     if (key != nullptr) RegCloseKey(key);
-    SetError(error, L"无法关联形象包文件类型。请在客户端使用导入入口，或重新安装官方客户端。");
+    SetError(error, L"无法关联扩展包文件类型，请重新安装官方客户端。");
     return false;
   }
   SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);

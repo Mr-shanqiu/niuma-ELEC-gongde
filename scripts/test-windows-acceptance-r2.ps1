@@ -1,7 +1,8 @@
 ﻿param(
   [Parameter(Mandatory = $true)][string]$InstallerPath,
   [Parameter(Mandatory = $true)][string]$ClientPath,
-  [Parameter(Mandatory = $true)][string]$EvidenceDirectory
+  [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
+  [string]$CandidateLabel = '牛马电子功德【综合验收·R2】'
 )
 
 # All installation, registry and input-listener checks are confined to a disposable runner.
@@ -154,7 +155,7 @@ foreach ($case in @(
     [R2Window]::PostMessage($main[0].Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
     if (-not $restart.WaitForExit(10000)) { throw 'Restarted client did not exit.' }
     foreach ($desktop in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('CommonDesktopDirectory'))) {
-      if (Test-Path (Join-Path $desktop '牛马电子功德【综合验收·R2】.lnk')) { throw 'Desktop shortcut created.' }
+      if (Test-Path (Join-Path $desktop ($CandidateLabel + '.lnk'))) { throw 'Desktop shortcut created.' }
     }
     $cases += @{case=$case.name; selected=$case.selected; installed=$true; autoLaunched=$true; noFirstUseModal=$true; restartPreservedChoice=$true}
   } finally {

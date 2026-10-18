@@ -242,6 +242,10 @@ static void TestRealSignedCatalogStore(const std::string& payload,
   auto loaded = store.Load(verify);
   assert(loaded && loaded->content_version == 2 && loaded->items.size() == 2);
   assert(store.InstallFile(source, verify).status == CatalogInstallStatus::AlreadyInstalled);
+  // Finder and Explorer treat filename extensions without regard to case.
+  const auto openedFile = directory / "downloaded messages.NMGTEXT";
+  std::filesystem::copy_file(source, openedFile);
+  assert(store.InstallFile(openedFile, verify).status == CatalogInstallStatus::AlreadyInstalled);
   auto changed_payload = payload;
   const auto text = changed_payload.find("A useful work joke.");
   assert(text != std::string::npos);

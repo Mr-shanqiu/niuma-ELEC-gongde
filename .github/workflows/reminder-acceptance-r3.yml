@@ -1,0 +1,75 @@
+name: Build Unified Acceptance R3
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/prepare-reminder-import-acceptance.py'
+      - 'scripts/test-windows-acceptance-r2.ps1'
+      - 'scripts/test-windows-catalog-file-open.ps1'
+      - 'installer/windows/niuma-merit-unified-acceptance-r3.iss'
+      - '.github/workflows/reminder-acceptance-r3.yml'
+      - 'assets/reminders/official-multilingual-v1.nmgtext'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-r3:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare and compile the current R3 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = '.local-work/candidates/unified-r3'
+          python scripts/prepare-reminder-import-acceptance.py --revision R3 --output $root
+          if ($LASTEXITCODE -ne 0) { throw 'R3 source preparation failed' }
+          cmake -S "$root/source" -B "$root/build" -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'R3 configuration failed' }
+          cmake --build "$root/build" --config Release --target niuma-merit --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'R3 client compilation failed' }
+      - name: Package the R3 client
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD '.local-work/candidates/unified-r3'
+          $output = "$root/output"
+          New-Item -ItemType Directory -Path $output | Out-Null
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'Installer compiler setup failed' }
+          }
+          $client = "$root/build/Release/niuma-merit.exe"
+          & $iscc "/DClientExecutable=$client" "/DAcceptanceOutputDir=$output" 'installer/windows/niuma-merit-unified-acceptance-r3.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'R3 installer compilation failed' }
+          Copy-Item $client $output
+          Copy-Item "$root/SOURCE_BINDING.json" $output
+          Copy-Item "$root/fixtures/small-builtin.json" $output
+          Copy-Item 'assets/reminders/official-multilingual-v1.nmgtext' $output
+          Get-ChildItem $output -File | ForEach-Object {
+            @{filename=$_.Name; bytes=$_.Length; sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 "$output/BUILD_RECEIPT.json"
+      - name: Check installation choices and startup persistence
+        shell: powershell
+        run: |
+          $output = Join-Path $PWD '.local-work/candidates/unified-r3/output'
+          $installer = @(Get-ChildItem $output -Filter '*安装包.exe')
+          if ($installer.Count -ne 1) { throw 'Expected one R3 installer' }
+          & ./scripts/test-windows-acceptance-r2.ps1 -InstallerPath $installer[0].FullName -ClientPath "$output/niuma-merit.exe" -EvidenceDirectory "$output/journey" -CandidateLabel '牛马电子功德【综合验收·R3】'
+      - name: Open signed message files through Explorer file association
+        shell: powershell
+        run: |
+          $output = Join-Path $PWD '.local-work/candidates/unified-r3/output'
+          & ./scripts/test-windows-catalog-file-open.ps1 -ClientPath "$output/niuma-merit.exe" -CatalogPath "$output/official-multilingual-v1.nmgtext" -EvidenceDirectory "$output/file-open"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-unified-acceptance-r3
+          path: .local-work/candidates/unified-r3/output/*
+          if-no-files-found: error
+          retention-days: 7
