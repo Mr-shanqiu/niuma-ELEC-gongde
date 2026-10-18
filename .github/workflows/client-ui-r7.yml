@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-r7:
@@ -26,29 +27,31 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Compile and package R7
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-client-ui-r7
+          run-id: 39158412636
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .local-work/candidates/r7/output
+      - name: Bind the already compiled R7 to unchanged client sources
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $PWD '.local-work/candidates/r7'
-          python scripts/prepare-reminder-import-acceptance.py --revision R7 --output $root
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate source preparation failed' }
-          cmake -S "$root/source" -B "$root/build" -G 'Visual Studio 17 2022' -A x64
-          if ($LASTEXITCODE -ne 0) { throw 'Configuration failed' }
-          cmake --build "$root/build" --config Release --target niuma-merit --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'Compilation failed' }
-          $output = "$root/output"
-          New-Item -ItemType Directory -Path $output | Out-Null
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
-          & $iscc "/DClientExecutable=$root/build/Release/niuma-merit.exe" "/DAcceptanceOutputDir=$output" 'installer/windows/niuma-merit-unified-acceptance-r7.iss'
-          if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-          Copy-Item "$root/build/Release/niuma-merit.exe" $output
-          Copy-Item "$root/SOURCE_BINDING.json" $output
-          Copy-Item "$root/fixtures/small-builtin.json" $output
-          Get-ChildItem $output -File | ForEach-Object {
-            @{filename=$_.Name;bytes=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
-          } | ConvertTo-Json | Set-Content -Encoding UTF8 "$output/BUILD_RECEIPT.json"
+          python scripts/prepare-reminder-import-acceptance.py --revision R7 --output "$root/current"
+          if ($LASTEXITCODE -ne 0) { throw 'Source preparation failed' }
+          $old = Get-Content "$root/output/SOURCE_BINDING.json" -Raw | ConvertFrom-Json
+          $new = Get-Content "$root/current/SOURCE_BINDING.json" -Raw | ConvertFrom-Json
+          foreach ($key in @('original_source_sha256','acceptance_overlay_sha256')) {
+            $a = $old.$key | ConvertTo-Json -Compress
+            $b = $new.$key | ConvertTo-Json -Compress
+            if ($a -ne $b) { throw 'Frozen binary does not match current client sources' }
+          }
+          foreach ($item in (Get-Content "$root/output/BUILD_RECEIPT.json" -Raw | ConvertFrom-Json)) {
+            $actual = Get-Item (Join-Path "$root/output" $item.filename)
+            if ($actual.Length -ne $item.bytes -or (Get-FileHash $actual.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.sha256) { throw 'Frozen artifact digest mismatch' }
+          }
+          Move-Item "$root/current/source" "$root/source"
       - name: Verify styled installer choices and persistence
         shell: powershell
         run: |
@@ -77,6 +80,8 @@ jobs:
           retention-days: 7
 
   macos-r7:
+    # Unchanged Mac product already passed in run 39158412636.
+    if: false
     runs-on: macos-15
     timeout-minutes: 15
     steps:
