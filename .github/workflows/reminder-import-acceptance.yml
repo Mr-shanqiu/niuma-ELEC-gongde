@@ -1,0 +1,52 @@
+name: Reminder Small Builtin Import Acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/prepare-reminder-import-acceptance.py'
+      - '.github/workflows/reminder-import-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-small-builtin:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare acceptance-only source snapshot
+        shell: powershell
+        run: |
+          python scripts/prepare-reminder-import-acceptance.py --output .local-work/candidates/small-builtin-import-ci
+          if ($LASTEXITCODE -ne 0) { throw 'Small builtin fixture preparation failed' }
+      - name: Build isolated Windows acceptance candidate
+        shell: powershell
+        run: |
+          cmake -S .local-work/candidates/small-builtin-import-ci/source -B .local-work/candidates/small-builtin-import-ci/build -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Small builtin configuration failed' }
+          cmake --build .local-work/candidates/small-builtin-import-ci/build --config Release --target niuma-merit --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Small builtin client compilation failed' }
+      - name: Record candidate executable digest
+        shell: powershell
+        run: |
+          $root = '.local-work/candidates/small-builtin-import-ci'
+          @{
+            kind = 'small-builtin-import-acceptance-only'
+            executableSha256 = (Get-FileHash "$root/build/Release/niuma-merit.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+            builtinChinese = 20
+            builtinEnglish = 20
+            launched = $false
+            installed = $false
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 "$root/WINDOWS_RECEIPT.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-small-builtin-import-acceptance-only
+          path: |
+            .local-work/candidates/small-builtin-import-ci/build/Release/niuma-merit.exe
+            .local-work/candidates/small-builtin-import-ci/SOURCE_BINDING.json
+            .local-work/candidates/small-builtin-import-ci/WINDOWS_RECEIPT.json
+            .local-work/candidates/small-builtin-import-ci/fixtures/small-builtin.json
+          if-no-files-found: error
+          retention-days: 7
