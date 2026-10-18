@@ -57,11 +57,12 @@ foreach ($language in @('default', 'chinesesimp')) {
       $captions = @($controls | ForEach-Object { $_.Current.Name } | Where-Object { $_ })
       $pages += @{ language = $language; page = $index; captions = $captions }
       Save-Screen "$language-$index.png"
+      $pages | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'WIZARD_PAGES.json')
       if (($captions -join "`n") -match '桌面快捷|desktop shortcut|Select Additional Tasks|选择附加任务') {
         throw 'Desktop shortcut or obsolete task page is still visible.'
       }
       $buttons = @($controls | Where-Object {
-        $_.Current.ControlType -eq [Windows.Automation.ControlType]::Button -and $_.Current.IsEnabled
+        $_.Current.NativeWindowHandle -ne 0 -and $_.Current.IsEnabled
       })
       $install = @($buttons | Where-Object { ($_.Current.Name -replace '&','') -match '^(Install|安装)(\([A-Z]\))?$' })
       if ($install.Count -eq 1) { $ready = $true; break }
