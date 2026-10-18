@@ -40,11 +40,12 @@ function Wait-Window([string]$Class) {
  do { $h=[NiuMaGallery]::Find($process.Id,$Class); if($h -ne [IntPtr]::Zero){return $h};Start-Sleep -Milliseconds 80 } while([DateTime]::UtcNow -lt $end)
  throw ('Missing gallery window: '+$Class)
 }
-function Capture-Window([IntPtr]$Window,[string]$Name) {
- [NiuMaGallery]::SetForegroundWindow($Window)|Out-Null
+function Capture-Window([IntPtr]$Window,[string]$Name,[bool]$IsMenu=$false) {
+ # A popup menu is owned by its app's active window; activating the menu itself dismisses it.
+ if(-not $IsMenu){[NiuMaGallery]::SetForegroundWindow($Window)|Out-Null}
  Start-Sleep -Milliseconds 180
  $rect=New-Object NiuMaGallery+Rect
- if(-not [NiuMaGallery]::GetWindowRect($Window,[ref]$rect)){throw 'Window bounds unavailable'}
+ if(-not [NiuMaGallery]::GetWindowRect($Window,[ref]$rect)){throw ('Window bounds unavailable: '+$Name)}
  $bitmap=New-Object Drawing.Bitmap(($rect.Right-$rect.Left),($rect.Bottom-$rect.Top))
  $graphics=[Drawing.Graphics]::FromImage($bitmap)
  try { $graphics.CopyFromScreen($rect.Left,$rect.Top,0,0,$bitmap.Size);$bitmap.Save((Join-Path $OutputDirectory $Name),[Drawing.Imaging.ImageFormat]::Png) }
@@ -60,7 +61,7 @@ try {
  foreach($case in $cases) {
   [NiuMaGallery]::PostMessage($main,0x8046,[IntPtr]$case.action,[IntPtr]::Zero)|Out-Null
   $window=Wait-Window $case.class
-  Capture-Window $window $case.name
+  Capture-Window $window $case.name ($case.close -eq -1)
   if($case.close -eq -1){[NiuMaGallery]::PostMessage($main,0x8046,[IntPtr]6,[IntPtr]::Zero)|Out-Null}
   elseif($case.close -gt 0){$button=[NiuMaGallery]::GetDlgItem($window,$case.close);if($button -eq [IntPtr]::Zero){throw 'Close control missing'};[NiuMaGallery]::SendMessage($button,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null}
   else{[NiuMaGallery]::PostMessage($window,0x10,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null}

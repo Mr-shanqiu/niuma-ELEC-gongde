@@ -63,7 +63,7 @@ static void CaptureView(NSWindow *window, NSString *name) {
 }
 static void DismissModalAfterCapture(NSString *name, NSModalResponse response) {
   NSTimer *timer = [NSTimer timerWithTimeInterval:.3 repeats:NO block:^(NSTimer *unused) {
-    (void)unused; CaptureView(NSApp.modalWindow, name); [NSApp abortModalWithCode:response];
+    (void)unused; CaptureView(NSApp.modalWindow, name); [NSApp stopModalWithCode:response];
   }];
   [NSRunLoop.mainRunLoop addTimer:timer forMode:NSModalPanelRunLoopMode];
 }

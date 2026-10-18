@@ -74,7 +74,9 @@ inline void PaintButton(HWND window, HDC dc) {
   const LRESULT state = SendMessageW(window, BM_GETSTATE, 0, 0);
   const bool pressed = (state & BST_PUSHED) != 0;
   const bool hover = GetPropW(window, L"NiuMaUiHover") != nullptr;
-  wchar_t label[512]{}; GetWindowTextW(window, label, 512);
+  // Read only this subclassed button's own caption for native painting.
+  wchar_t label[512]{};
+  SendMessageW(window, WM_GETTEXT, std::size(label), reinterpret_cast<LPARAM>(label));
   COLORREF ink = enabled ? kInk : RGB(153, 153, 160);
   if (check) {
     RECT box{rect.left + Dip(2, dpi), (rect.bottom - Dip(18, dpi)) / 2,
