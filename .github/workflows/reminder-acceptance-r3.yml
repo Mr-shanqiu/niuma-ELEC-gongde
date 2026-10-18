@@ -58,9 +58,9 @@ jobs:
         shell: powershell
         run: |
           $output = Join-Path $PWD '.local-work/candidates/unified-r3/output'
-          $installer = @(Get-ChildItem $output -Filter '*安装包.exe')
+          $installer = @(Get-ChildItem $output -Filter '*.exe' | Where-Object { $_.Name -ne 'niuma-merit.exe' })
           if ($installer.Count -ne 1) { throw 'Expected one R3 installer' }
-          & ./scripts/test-windows-acceptance-r2.ps1 -InstallerPath $installer[0].FullName -ClientPath "$output/niuma-merit.exe" -EvidenceDirectory "$output/journey" -CandidateLabel '牛马电子功德【综合验收·R3】'
+          & ./scripts/test-windows-acceptance-r2.ps1 -InstallerPath $installer[0].FullName -ClientPath "$output/niuma-merit.exe" -EvidenceDirectory "$output/journey" -CandidateRevision R3
       - name: Open signed message files through Explorer file association
         shell: powershell
         run: |

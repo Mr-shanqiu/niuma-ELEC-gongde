@@ -2,10 +2,11 @@
   [Parameter(Mandatory = $true)][string]$InstallerPath,
   [Parameter(Mandatory = $true)][string]$ClientPath,
   [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
-  [string]$CandidateLabel = '牛马电子功德【综合验收·R2】'
+  [ValidateSet('R2', 'R3')][string]$CandidateRevision = 'R2'
 )
 
 # All installation, registry and input-listener checks are confined to a disposable runner.
+$CandidateLabel = '牛马电子功德【综合验收·' + $CandidateRevision + '】'
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'An ephemeral GitHub runner is required.' }
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
