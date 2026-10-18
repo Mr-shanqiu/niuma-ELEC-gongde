@@ -4,6 +4,7 @@ static NSColor *NMUiCanvas(void) { return [NSColor colorWithCalibratedWhite:.965
 static NSColor *NMUiInk(void) { return [NSColor colorWithCalibratedRed:.11 green:.11 blue:.13 alpha:1]; }
 static NSColor *NMUiMuted(void) { return [NSColor colorWithCalibratedRed:.43 green:.43 blue:.47 alpha:1]; }
 static NSColor *NMUiBlue(void) { return [NSColor colorWithCalibratedRed:0 green:.44 blue:.96 alpha:1]; }
+static NSColor *NMUiMeritGold(void) { return [NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1]; }
 
 @interface NMUiCardButton : NSButton
 @property(nonatomic) BOOL cardHovered;
@@ -77,6 +78,24 @@ static void NMUiWindow(NSWindow *window) {
 @end
 @implementation NMUiAlert
 - (NSModalResponse)runModal { [self layout]; NMUiWindow(self.window); return [super runModal]; }
+@end
+
+@interface NMUiCenteredAccessoryAlert : NMUiAlert
+@end
+@implementation NMUiCenteredAccessoryAlert
+- (void)layout {
+  [super layout];
+  NSView *view = self.accessoryView;
+  NSView *content = self.window.contentView;
+  // NSAlert wraps accessories in a container beside its icon column.
+  // Center that container, so the native wrapper does not retain a left bias.
+  while (view.superview && view.superview != content) view = view.superview;
+  if (view.superview == content) {
+    NSRect frame = view.frame;
+    frame.origin.x = (NSWidth(content.bounds) - NSWidth(frame)) / 2.0;
+    view.frame = frame;
+  }
+}
 @end
 
 @interface NMUiBubbleView : NSView

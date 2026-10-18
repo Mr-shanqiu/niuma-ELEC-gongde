@@ -230,6 +230,17 @@ static NSString *UiText(NSString *chinese, NSString *english) {
   return IsChineseUI() ? chinese : english;
 }
 
+static NMUiAlert *NMPermissionIntroAlert(NSString *applicationName) {
+  NMUiAlert *alert = [[NMUiAlert alloc] init];
+  alert.messageText = UiText(@"还差一步：开启输入监控", @"One more step: allow Input Monitoring");
+  alert.informativeText = [NSString stringWithFormat:UiText(
+      @"1. 点击下方按钮，打开系统的“输入监控”设置。\n\n2. 为“%@”打开开关。列表中没有时，点“＋”，从“应用程序”中选择它。\n\n3. 按系统提示退出，再重新打开牛马。\n\n只统计操作次数，不读取输入内容。",
+      @"1. Click below to open Input Monitoring in System Settings.\n\n2. Enable “%@”. If it is missing, click + and select it in Applications.\n\n3. Quit when macOS asks, then reopen NiuMa.\n\nOnly operation counts are used; typed content is never read."), applicationName];
+  [alert addButtonWithTitle:UiText(@"去开启输入监控", @"Open Input Monitoring")];
+  [alert addButtonWithTitle:UiText(@"稍后", @"Later")];
+  return alert;
+}
+
 static NSString *OffworkDurationText(long long seconds) {
   return [NSString stringWithUTF8String:niuma::OffworkDuration(seconds).c_str()];
 }
@@ -705,12 +716,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                     rect:NSMakeRect(0, kCounterY, kWindowWidth, 40)
                     font:[NSFont monospacedDigitSystemFontOfSize:totalFont
                                                          weight:NSFontWeightRegular]
-                   color:[NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1]];
+                   color:NMUiMeritGold()];
   }
 
   [ctx restoreGraphicsState];
   if (!self.previewOnly && controller.offworkEnabled) {
-    NSColor *color = [NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1];
+    NSColor *color = NMUiMeritGold();
     [self drawCenteredText:controller.offworkDisplayLabel ?: UiText(@"距下班", @"Until off work")
                      rect:NSMakeRect(0, 55, kWindowWidth, 28)
                      font:[NSFont systemFontOfSize:24 weight:NSFontWeightMedium]
@@ -807,8 +818,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSRectFill(self.bounds);
 
   NSColor *ink = NMUiInk();
-  NSColor *muted = NMUiMuted();
-  NSColor *accent = NMUiBlue();
+  NSColor *accent = NMUiMeritGold();
   [self refreshNavigation];
   NSString *monthTitle = IsChineseUI()
       ? [NSString stringWithFormat:@"%ld 年 %ld 月", (long)self.year, (long)self.month]
@@ -835,7 +845,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   for (NSInteger column = 0; column < 7; ++column) {
     [self drawText:weekdays[column]
               rect:NSMakeRect(left + column * cellWidth, 94, cellWidth, 20)
-              size:11 color:muted weight:NSFontWeightMedium];
+              size:11 color:ink weight:NSFontWeightMedium];
   }
 
   NSDateComponents *firstParts = [[NSDateComponents alloc] init];
@@ -865,10 +875,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     CGFloat meritSize = meritText.length > 10 ? 10 : (meritText.length > 7 ? 12 : 15);
     [self drawText:meritText
               rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 5, NSWidth(cell) - 4, 22)
-              size:meritSize color:ink weight:NSFontWeightSemibold];
+              size:meritSize color:accent weight:NSFontWeightSemibold];
     [self drawText:dateText
               rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 27, NSWidth(cell) - 4, 16)
-              size:10 color:muted weight:NSFontWeightMedium];
+              size:10 color:ink weight:NSFontWeightMedium];
     NSDictionary *overtime = [self.controller offworkRecordForDay:key];
     if (overtime) {
       NSString *text = [NSString stringWithFormat:@"%@ %@", UiText(@"加班", @"OT"),
@@ -1706,19 +1716,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)showPermissionIntroIfNeeded {
   if (gIsolatedAcceptance || [self hasLiveEventTap]) return;
-  NMUiAlert *alert = [[NMUiAlert alloc] init];
-  alert.messageText = UiText(@"还差一步：开启输入监控", @"One more step: allow Input Monitoring");
-  alert.informativeText = [NSString stringWithFormat:UiText(
-      @"在系统设置中，为“%@”开启输入监控，再按系统提示退出并重新打开。\n\n列表中没有时，点“＋”添加这个应用。可以先用下方按钮在“应用程序”中定位它。只统计操作次数，不读取输入内容。",
-      @"Enable Input Monitoring for “%@” in System Settings, then quit and reopen when macOS asks.\n\nIf it is missing, use + to add this app. The button below can reveal its location in Applications. Only operation counts are used; typed content is never read."),
-      NSBundle.mainBundle.bundleURL.lastPathComponent.stringByDeletingPathExtension];
-  [alert addButtonWithTitle:UiText(@"去开启输入监控", @"Open Input Monitoring")];
-  [alert addButtonWithTitle:UiText(@"在应用程序中显示", @"Show in Applications")];
-  [alert addButtonWithTitle:UiText(@"稍后", @"Later")];
+  NMUiAlert *alert = NMPermissionIntroAlert(
+      NSBundle.mainBundle.bundleURL.lastPathComponent.stringByDeletingPathExtension);
   const NSModalResponse response = [alert runModal];
   if (response == NSAlertFirstButtonReturn) [self requestListenPermission];
-  else if (response == NSAlertSecondButtonReturn)
-    [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[NSBundle.mainBundle.bundleURL]];
 }
 
 - (void)showFirstUseGuide:(id)sender {
@@ -2628,15 +2629,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (self.appearancePickerAlert) {
     self.pendingAppearanceId = self.selectedAppearanceId;
     self.appearancePickerAlert.accessoryView = [self appearanceGrid];
+    [self.appearancePickerAlert layout];
     [self.appearancePickerAlert.window makeKeyAndOrderFront:nil];
     return;
   }
   self.pendingAppearanceId = self.selectedAppearanceId;
   while (YES) {
-    NSAlert *alert = [[NMUiAlert alloc] init];
+    NSAlert *alert = [[NMUiCenteredAccessoryAlert alloc] init];
     alert.messageText = UiText(@"更换形象", @"Change Appearance");
-    alert.informativeText = UiText(@"当前 = 正在显示；本次新增 = 新加入。选择后点确认才会切换。",
-                                   @"Current = displayed now; New = newly added. Confirm your selection to switch.");
+    alert.informativeText = @"";
     alert.accessoryView = [self appearanceGrid];
     [alert addButtonWithTitle:UiText(@"确认", @"Confirm")];
     [alert addButtonWithTitle:UiText(@"取消", @"Cancel")];

@@ -53,7 +53,7 @@ static NSColor *Ink(void) { return [NSColor colorWithCalibratedWhite:.11 alpha:1
   icon.image = [[NSImage alloc] initWithContentsOfURL:[NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"appicon.icns"]];
   icon.imageScaling = NSImageScaleProportionallyUpOrDown;
   [self.window.contentView addSubview:icon];
-  [self label:Text(@"安装牛马电子功德", @"Install NiuMa Merit") frame:NSMakeRect(28, 222, 504, 34)
+  [self label:Text(@"正在安装牛马电子功德", @"Installing NiuMa Merit") frame:NSMakeRect(28, 222, 504, 34)
       size:25 weight:NSFontWeightSemibold];
   [self label:Text(@"装好后自动打开，再按提示开启输入监控。", @"Opens after installation, then guides you through Input Monitoring.")
       frame:NSMakeRect(38, 174, 484, 40) size:14 weight:NSFontWeightRegular];
@@ -63,25 +63,33 @@ static NSColor *Ink(void) { return [NSColor colorWithCalibratedWhite:.11 alpha:1
   self.status.textColor = [NSColor colorWithCalibratedWhite:.43 alpha:1];
   self.progress = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(180, 99, 200, 5)];
   self.progress.style = NSProgressIndicatorStyleBar; self.progress.indeterminate = YES;
-  self.progress.hidden = YES; [self.window.contentView addSubview:self.progress];
+  self.progress.hidden = NO; [self.window.contentView addSubview:self.progress];
+  [self.progress startAnimation:nil];
   self.installButton = [NSButton buttonWithTitle:Text(@"安装并打开", @"Install and Open")
       target:self action:@selector(install:)];
   self.installButton.frame = NSMakeRect(182, 51, 196, 36); self.installButton.keyEquivalent = @"\r";
   self.installButton.bezelStyle = NSBezelStyleRounded;
   self.installButton.font = [NSFont systemFontOfSize:15 weight:NSFontWeightMedium];
+  self.installButton.hidden = YES; // Only shown for an explicit retry after failure.
   [self.window.contentView addSubview:self.installButton];
   const unsigned long long size = [NSBundle.mainBundle.infoDictionary[@"NiuMaInstalledBytes"] unsignedLongLongValue];
   NSString *sizeText = [NSByteCountFormatter stringFromByteCount:size countStyle:NSByteCountFormatterCountStyleFile];
   [self label:[NSString stringWithFormat:Text(@"安装后约 %@ · 本地运行，无需联网", @"About %@ installed · Local operation, no internet required"), sizeText]
       frame:NSMakeRect(28, 15, 504, 22) size:12 weight:NSFontWeightRegular];
   [self.window center]; [self.window makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES];
+  // Opening the clearly named installer is the user's install action.
+  [self performSelector:@selector(beginAutomaticInstallation) withObject:nil afterDelay:0];
+}
+- (void)beginAutomaticInstallation { [self install:nil]; }
+- (NSArray<NSRunningApplication *> *)runningCompanions {
+  return [NSRunningApplication runningApplicationsWithBundleIdentifier:@"cn.niuma.merit"];
 }
 - (BOOL)windowShouldClose:(NSWindow *)sender {
   (void)sender; if (self.busy) return NO; [NSApp terminate:nil]; return YES;
 }
 - (void)showError:(NSString *)message {
   self.busy = NO; self.progress.hidden = YES; [self.progress stopAnimation:nil];
-  self.installButton.enabled = YES;
+  self.installButton.hidden = NO; self.installButton.enabled = YES;
   self.installButton.title = self.installed ? Text(@"打开应用", @"Open App") : Text(@"重新安装", @"Try Again");
   self.status.stringValue = message;
   NSAlert *alert = [[NSAlert alloc] init]; alert.alertStyle = NSAlertStyleWarning;
@@ -104,23 +112,23 @@ static NSColor *Ink(void) { return [NSColor colorWithCalibratedWhite:.11 alpha:1
 - (void)install:(id)sender {
   (void)sender; if (self.busy) return;
   if (self.installed) { [self openInstalled]; return; }
-  NSArray<NSRunningApplication *> *running = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"cn.niuma.merit"];
+  NSArray<NSRunningApplication *> *running = [self runningCompanions];
   if (running.count) {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = Text(@"先退出正在运行的牛马", @"Quit the running companion first");
     alert.informativeText = Text(@"退出后继续安装，你的功德、形象和设置都会保留。", @"Installation will continue after it quits. Your merit, appearances and settings are preserved.");
     [alert addButtonWithTitle:Text(@"退出并安装", @"Quit and Install")];
     [alert addButtonWithTitle:Text(@"取消", @"Cancel")];
-    if ([alert runModal] != NSAlertFirstButtonReturn) return;
+    if ([alert runModal] != NSAlertFirstButtonReturn) { [NSApp terminate:nil]; return; }
     for (NSRunningApplication *app in running) [app terminate];
   }
   self.busy = YES; self.installButton.enabled = NO; self.progress.hidden = NO;
   [self.progress startAnimation:nil]; self.status.stringValue = Text(@"正在安装，请稍候…", @"Installing…");
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
     @autoreleasepool {
-      for (int retry = 0; retry < 30 && [NSRunningApplication runningApplicationsWithBundleIdentifier:@"cn.niuma.merit"].count; ++retry)
+      for (int retry = 0; retry < 30 && [self runningCompanions].count; ++retry)
         [NSThread sleepForTimeInterval:.1];
-      if ([NSRunningApplication runningApplicationsWithBundleIdentifier:@"cn.niuma.merit"].count) {
+      if ([self runningCompanions].count) {
         dispatch_async(dispatch_get_main_queue(), ^{ [self showError:Text(@"应用尚未退出，请从右键菜单退出后重试。", @"The app is still running. Quit it from its menu, then try again.")]; }); return;
       }
       NSError *error = nil;

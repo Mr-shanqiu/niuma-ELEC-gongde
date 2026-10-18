@@ -2529,8 +2529,7 @@ void DrawMeritCalendar(HDC dc) {
   Gdiplus::SolidBrush white(Gdiplus::Color(255, 255, 255, 255));
   graphics.FillPath(&white, &card);
   const Gdiplus::Color ink(255, 29, 29, 31);
-  const Gdiplus::Color muted(255, 110, 110, 118);
-  const Gdiplus::Color accent(255, 0, 112, 245);
+  const Gdiplus::Color accent(255, 240, 139, 35);
 
   wchar_t monthTitle[32] = {};
   if (IsChineseUi()) swprintf_s(monthTitle, L"%d 年 %d 月", gCalendar.year, gCalendar.month);
@@ -2561,7 +2560,7 @@ void DrawMeritCalendar(HDC dc) {
   const float left = 14, top = 112, cellWidth = 76, cellHeight = 72;
   for (int column = 0; column < 7; ++column) {
     DrawCalendarText(graphics, IsChineseUi() ? zhWeekdays[column] : enWeekdays[column],
-        Gdiplus::RectF(left + column * cellWidth, 94, cellWidth, 20), 11, muted, true);
+        Gdiplus::RectF(left + column * cellWidth, 94, cellWidth, 20), 11, ink, true);
   }
   SYSTEMTIME today = {};
   GetLocalTime(&today);
@@ -2586,10 +2585,10 @@ void DrawMeritCalendar(HDC dc) {
         (meritText.size() > 7 ? 12.0f : 15.0f);
     DrawCalendarText(graphics, meritText,
         Gdiplus::RectF(cell.X + 2, cell.Y + 5, cell.Width - 4, 22),
-        meritSize, ink, true);
+        meritSize, accent, true);
     DrawCalendarText(graphics, dateText,
         Gdiplus::RectF(cell.X + 2, cell.Y + 27, cell.Width - 4, 16),
-        10, muted, false);
+        10, ink, false);
     const auto& overtime = OffworkDay(key);
     if (overtime.present) {
       DrawCalendarText(graphics, UiText(L"今日加班", L"Today's OT"),
