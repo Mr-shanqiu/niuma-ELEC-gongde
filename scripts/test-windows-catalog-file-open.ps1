@@ -30,6 +30,7 @@ public class CatalogOpenNative {
   }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowW(string c, string t);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int n);
+  [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
 }
 '@
@@ -74,8 +75,12 @@ function Finish-Dialog($Process, [string]$Name, [bool]$Success) {
     $bitmap.Save((Join-Path $EvidenceDirectory ($Name + '.png')), [Drawing.Imaging.ImageFormat]::Png)
   } finally { $graphics.Dispose(); $bitmap.Dispose() }
   $script:records += @{case=$Name; dialog=$dialog.Current.Name; text=$text; pid=$Process.Id}
-  [CatalogOpenNative]::PostMessage([IntPtr]$dialog.Current.NativeWindowHandle, 0x0111, [IntPtr]1, [IntPtr]::Zero) | Out-Null
-  Start-Sleep -Milliseconds 500
+  $button = [CatalogOpenNative]::GetDlgItem([IntPtr]$dialog.Current.NativeWindowHandle, 1)
+  if ($button -eq [IntPtr]::Zero) { throw 'Import result OK button is missing.' }
+  [CatalogOpenNative]::PostMessage($button, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+  $deadline = [DateTime]::UtcNow.AddSeconds(5)
+  while ([CatalogOpenNative]::Dialog($Process.Id) -ne [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
+  if ([CatalogOpenNative]::Dialog($Process.Id) -ne [IntPtr]::Zero) { throw 'Import result dialog did not close.' }
   if (-not (Test-Path $catalog) -or (Get-FileHash $catalog -Algorithm SHA256).Hash -ne $digest) { throw 'Installed catalog differs after file-open result.' }
 }
 function Stop-Client($Process) {
@@ -95,7 +100,18 @@ try {
   # ShellExecute exercises the same association as opening the downloaded file.
   Start-Process -FilePath $CatalogPath
   Finish-Dialog $running 'warm-import' $true
-  if ((@(Clients)).Count -ne 1 -or (@(Clients))[0].Id -ne $running.Id) { throw 'File open created a second persistent client.' }
+  # The short-lived launcher waits for WM_COPYDATA (bounded at five seconds).
+  $deadline = [DateTime]::UtcNow.AddSeconds(7)
+  do {
+    $remaining = @(Clients)
+    if ($remaining.Count -eq 1 -and $remaining[0].Id -eq $running.Id) { break }
+    Start-Sleep -Milliseconds 100
+  } while ([DateTime]::UtcNow -lt $deadline)
+  if ($remaining.Count -ne 1 -or $remaining[0].Id -ne $running.Id) {
+    @{expectedPid=$running.Id; remaining=@($remaining | ForEach-Object { @{pid=$_.Id;path=$_.Path} })} |
+      ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'INSTANCE_FAILURE.json')
+    throw 'File open created a second persistent client.'
+  }
   Stop-Client $running
   Start-Process -FilePath $CatalogPath
   $running = Wait-Client
