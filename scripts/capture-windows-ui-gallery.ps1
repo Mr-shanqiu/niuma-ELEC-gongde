@@ -18,6 +18,12 @@ public static class NiuMaGallery {
  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
  [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h,int id);
+ [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
+ [DllImport("user32.dll")] public static extern bool GetMenuItemRect(IntPtr window,IntPtr menu,uint index,out Rect rect);
+ [DllImport("user32.dll")] public static extern int GetWindowRgn(IntPtr window,IntPtr region);
+ [DllImport("gdi32.dll")] public static extern IntPtr CreateRectRgn(int l,int t,int r,int b);
+ [DllImport("gdi32.dll")] public static extern bool PtInRegion(IntPtr region,int x,int y);
+ [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
  public static IntPtr Find(int pid,string cls) {
   IntPtr found=IntPtr.Zero;
   EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);var b=new System.Text.StringBuilder(128);GetClassName(h,b,128);
@@ -62,6 +68,24 @@ try {
   [NiuMaGallery]::PostMessage($main,0x8046,[IntPtr]$case.action,[IntPtr]::Zero)|Out-Null
   $window=Wait-Window $case.class
   Capture-Window $window $case.name ($case.close -eq -1)
+  if($case.action -in @(1,4,5)) {
+   $region=[NiuMaGallery]::CreateRectRgn(0,0,0,0)
+   try {
+    if([NiuMaGallery]::GetWindowRgn($window,$region) -eq 0 -or [NiuMaGallery]::PtInRegion($region,0,0) -or -not [NiuMaGallery]::PtInRegion($region,30,30)){throw ('Rounded shell missing: '+$case.name)}
+   } finally {[NiuMaGallery]::DeleteObject($region)|Out-Null}
+  }
+  if($case.close -eq -1) {
+   $menu=[NiuMaGallery]::SendMessage($window,0x1E1,[IntPtr]::Zero,[IntPtr]::Zero)
+   if([NiuMaGallery]::GetMenuItemCount($menu) -ne 6){throw 'Expected six equal command rows'}
+   $heights=@()
+   for($i=0;$i -lt 6;$i++) {
+    $row=New-Object NiuMaGallery+Rect
+    if(-not [NiuMaGallery]::GetMenuItemRect($main,$menu,$i,[ref]$row)){throw 'Menu row bounds unavailable'}
+    $heights+=($row.Bottom-$row.Top)
+   }
+   if(@($heights|Select-Object -Unique).Count -ne 1){throw 'Menu command heights differ'}
+   @{rows=6;heights=$heights;roundedShell=$true}|ConvertTo-Json|Set-Content -Encoding UTF8 (Join-Path $OutputDirectory 'MENU_GEOMETRY.json')
+  }
   if($case.close -eq -1){[NiuMaGallery]::PostMessage($main,0x8046,[IntPtr]6,[IntPtr]::Zero)|Out-Null}
   elseif($case.close -gt 0){$button=[NiuMaGallery]::GetDlgItem($window,$case.close);if($button -eq [IntPtr]::Zero){throw 'Close control missing'};[NiuMaGallery]::SendMessage($button,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null}
   else{[NiuMaGallery]::PostMessage($window,0x10,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null}

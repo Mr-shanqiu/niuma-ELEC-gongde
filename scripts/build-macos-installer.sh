@@ -15,7 +15,7 @@ ditto "$CLIENT_APP" "$APP_PATH/Contents/Resources/Payload/牛马电子功德.app
 cp "$ROOT_DIR/assets/appicon.icns" "$APP_PATH/Contents/Resources/appicon.icns"
 for ARCH in arm64 x86_64; do
   xcrun clang++ -std=c++17 -O2 -fobjc-arc -mmacosx-version-min=10.15 -arch "$ARCH" \
-    "$ROOT_DIR/installer/macos/install.mm" -framework AppKit -framework Security \
+    "$ROOT_DIR/installer/macos/install.mm" -framework AppKit -framework Security -framework CoreServices \
     -o "$OUTPUT_DIR/build/installer-$ARCH"
 done
 lipo -create "$OUTPUT_DIR/build/installer-arm64" "$OUTPUT_DIR/build/installer-x86_64" \
@@ -25,14 +25,17 @@ from pathlib import Path
 import sys, plistlib
 app, client = map(Path, sys.argv[1:])
 size = sum(p.stat().st_size for p in client.rglob('*') if p.is_file())
+client_info = plistlib.loads((client / 'Contents/Info.plist').read_bytes())
+label = client_info.get('NiuMaInstallName', '')
+revision = label.rsplit('-', 1)[-1].removesuffix('.app') if label else ''
 info = {
     'CFBundleIdentifier': 'cn.niuma.merit.installer',
     'CFBundleName': '安装牛马电子功德',
-    'CFBundleDisplayName': '安装牛马电子功德 · R6',
+    'CFBundleDisplayName': '安装牛马电子功德' + (' · ' + revision if revision else ''),
     'CFBundleExecutable': 'niuma-installer',
     'CFBundlePackageType': 'APPL',
     'CFBundleShortVersionString': '0.9.4',
-    'CFBundleVersion': '094.6',
+    'CFBundleVersion': client_info['CFBundleVersion'],
     'CFBundleIconFile': 'appicon',
     'LSMinimumSystemVersion': '10.15',
     'NSHighResolutionCapable': True,

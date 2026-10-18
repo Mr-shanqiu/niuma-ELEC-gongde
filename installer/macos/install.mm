@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <Security/Security.h>
+#import <CoreServices/CoreServices.h>
 #include <unistd.h>
 
 static BOOL Chinese(void) {
@@ -33,12 +34,17 @@ static NSColor *Ink(void) { return [NSColor colorWithCalibratedWhite:.11 alpha:1
   NSURL *applications = [NSURL fileURLWithPath:@"/Applications" isDirectory:YES];
   if (![files isWritableFileAtPath:applications.path])
     applications = [NSURL fileURLWithPath:[NSHomeDirectory() stringByAppendingPathComponent:@"Applications"] isDirectory:YES];
-  self.target = [applications URLByAppendingPathComponent:@"牛马电子功德.app" isDirectory:YES];
   self.payload = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"Payload/牛马电子功德.app" isDirectory:YES];
+  NSString *name = [NSBundle bundleWithURL:self.payload].infoDictionary[@"NiuMaInstallName"];
+  // Only a simple .app filename from the signed payload may override the target.
+  if (![name isKindOfClass:NSString.class] || ![name.pathExtension isEqualToString:@"app"] ||
+      ![name.lastPathComponent isEqualToString:name] || [name hasPrefix:@"."])
+    name = @"牛马电子功德.app";
+  self.target = [applications URLByAppendingPathComponent:name isDirectory:YES];
   self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 560, 390)
       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
       backing:NSBackingStoreBuffered defer:NO];
-  self.window.title = Text(@"安装牛马电子功德 · R6", @"Install NiuMa Merit · R6");
+  self.window.title = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: Text(@"安装牛马电子功德", @"Install NiuMa Merit");
   self.window.delegate = self; self.window.releasedWhenClosed = NO;
   self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
   self.window.titlebarAppearsTransparent = YES;
@@ -154,6 +160,12 @@ static NSColor *Ink(void) { return [NSColor colorWithCalibratedWhite:.11 alpha:1
 }
 - (void)openInstalled {
   self.busy = YES; self.installButton.enabled = NO;
+  // Register the final installed URL before the client requests system permission.
+  // Launch by this exact URL even when older same-ID copies are still present.
+  if (LSRegisterURL((__bridge CFURLRef)self.target, true) != noErr) {
+    [self showError:Text(@"应用已安装，但系统登记未完成。请点击“打开应用”重试。", @"The app is installed, but macOS registration did not finish. Click Open App to retry.")];
+    return;
+  }
   NSWorkspaceOpenConfiguration *configuration = [NSWorkspaceOpenConfiguration configuration];
   configuration.activates = YES;
   [NSWorkspace.sharedWorkspace openApplicationAtURL:self.target configuration:configuration

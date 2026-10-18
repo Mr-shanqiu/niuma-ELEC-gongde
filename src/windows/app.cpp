@@ -2035,7 +2035,7 @@ bool IsAboutScrollKey(WPARAM key) {
 
 void DrawAboutContent(HWND window, HDC dc, const RECT& client,
                       const AboutDialogState& state) {
-  FillRect(dc, &client, niuma::ui::CanvasBrush());
+  FillRect(dc, &client, niuma::ui::WhiteBrush());
   HGDIOBJ oldFont = SelectObject(dc, state.font);
   SetBkMode(dc, TRANSPARENT);
   SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
@@ -2136,7 +2136,7 @@ LRESULT CALLBACK AboutContentProcedure(HWND window, UINT message,
     case WM_DRAWITEM: {
       const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
       if (!draw || draw->CtlID != kAboutHelpLink) break;
-      FillRect(draw->hDC, &draw->rcItem, niuma::ui::CanvasBrush());
+      FillRect(draw->hDC, &draw->rcItem, niuma::ui::WhiteBrush());
       HGDIOBJ oldFont = SelectObject(draw->hDC, state->font);
       const COLORREF color = GetSysColor(COLOR_HOTLIGHT);
       SetBkMode(draw->hDC, TRANSPARENT);
@@ -2276,11 +2276,12 @@ void LayoutAboutDialog(HWND window, AboutDialogState& state) {
   GetClientRect(window, &client);
   const int width = static_cast<int>(client.right);
   const int height = static_cast<int>(client.bottom);
-  const int buttonHeight = std::min(MulDiv(28, gState.dpi, 96), height);
+  const int buttonHeight = std::min(MulDiv(36, gState.dpi, 96), height);
+  const int header = niuma::ui::CardHeader(gState.dpi);
   const int padding = std::min(state.padding,
       std::min(std::max(0, (height - buttonHeight) / 3), width / 4));
-  const int viewportHeight = std::max(0, height - buttonHeight - padding * 3);
-  MoveWindow(state.viewport, padding, padding, std::max(1, width - padding * 2),
+  const int viewportHeight = std::max(0, height - header - buttonHeight - padding * 3);
+  MoveWindow(state.viewport, padding, header + padding, std::max(1, width - padding * 2),
              viewportHeight, TRUE);
   ShowWindow(state.viewport, viewportHeight > 0 ? SW_SHOW : SW_HIDE);
   const int buttonWidth = std::min(MulDiv(92, gState.dpi, 96),
@@ -2319,7 +2320,7 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
       GetClientRect(window, &client);
       const int borderHeight = outer.bottom - outer.top - client.bottom;
       const int borderWidth = outer.right - outer.left - client.right;
-      state->padding = std::max(1, MulDiv(16, gState.dpi, 96));
+      state->padding = std::max(1, MulDiv(22, gState.dpi, 96));
       state->imageHeight = std::max(1, MulDiv(260, gState.dpi, 96));
       state->imageWidth = state->imageHeight;
       if (state->douyin.image && state->douyin.image->GetHeight() != 0 &&
@@ -2329,6 +2330,7 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
             / state->douyin.image->GetHeight())));
       }
       niuma::ui::Apply(window);
+      niuma::ui::Card(window, UiText(L"关于牛马电子功德", L"About NiuMa Merit"), UiText(L"关闭", L"Close"));
       const HWND textControl = GetDlgItem(window, 3001);
       state->font = reinterpret_cast<HFONT>(
           SendMessageW(textControl, WM_GETFONT, 0, 0));
@@ -2368,7 +2370,7 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
                    SWP_NOZORDER | SWP_NOACTIVATE);
       LayoutAboutDialog(window, *state);
       const int height = std::min(maxHeight,
-          borderHeight + state->contentHeight + MulDiv(28, gState.dpi, 96)
+          niuma::ui::CardHeader(gState.dpi) + state->contentHeight + MulDiv(36, gState.dpi, 96)
           + state->padding * 3 + GetSystemMetrics(SM_CYHSCROLL));
       SetWindowPos(window, nullptr,
                    work.left + (work.right - work.left - width) / 2,
@@ -2481,6 +2483,12 @@ void DrawMeritCalendar(HDC dc) {
   const float scale = static_cast<float>(gState.dpi) / 96.0f;
   graphics.ScaleTransform(scale, scale);
   graphics.Clear(Gdiplus::Color(255, 245, 245, 247));
+  graphics.TranslateTransform(0, 52);
+  graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+  Gdiplus::GraphicsPath card;
+  niuma::ui::RoundPath(card, Gdiplus::RectF(10, 94, 540, 444), 16);
+  Gdiplus::SolidBrush white(Gdiplus::Color(255, 255, 255, 255));
+  graphics.FillPath(&white, &card);
   const Gdiplus::Color ink(255, 29, 29, 31);
   const Gdiplus::Color muted(255, 110, 110, 118);
   const Gdiplus::Color accent(255, 0, 112, 245);
@@ -2589,7 +2597,7 @@ LRESULT CALLBACK CalendarWindowProcedure(HWND window, UINT message, WPARAM wPara
     case WM_LBUTTONUP: {
       const int x = MulDiv(GET_X_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
       const int y = MulDiv(GET_Y_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
-      if (y >= 12 && y <= 60 && (x <= 82 || x >= 478)) {
+      if (y >= 64 && y <= 112 && (x <= 82 || x >= 478)) {
         gCalendar.month += x <= 82 ? -1 : 1;
         if (gCalendar.month == 0) { gCalendar.month = 12; --gCalendar.year; }
         if (gCalendar.month == 13) { gCalendar.month = 1; ++gCalendar.year; }
@@ -2608,7 +2616,7 @@ void ShowMeritCalendar(HWND owner) {
     SYSTEMTIME now = {};
     GetLocalTime(&now);
     gCalendar.year = now.wYear; gCalendar.month = now.wMonth;
-    RECT desired = {0, 0, ScaleDip(560, gState.dpi), ScaleDip(552, gState.dpi)};
+    RECT desired = {0, 0, ScaleDip(560, gState.dpi), ScaleDip(604, gState.dpi)};
     AdjustWindowRectEx(&desired, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_TOOLWINDOW);
     gCalendar.window = CreateWindowExW(
         WS_EX_TOOLWINDOW, kCalendarClass, UiText(L"功德日历", L"Merit Calendar"),
@@ -2618,6 +2626,7 @@ void ShowMeritCalendar(HWND owner) {
   }
   if (gCalendar.window != nullptr) {
     niuma::ui::Apply(gCalendar.window);
+    niuma::ui::Card(gCalendar.window, UiText(L"功德日历", L"Merit Calendar"), UiText(L"关闭", L"Close"));
     ShowWindow(gCalendar.window, SW_SHOW);
     SetForegroundWindow(gCalendar.window);
     InvalidateRect(gCalendar.window, nullptr, FALSE);
@@ -3346,28 +3355,25 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     return;
   }
   std::vector<niuma::ui::MenuItem> items;
-  items.reserve(8);
+  items.reserve(6);
   const auto append = [&](UINT_PTR id, const wchar_t* text, const wchar_t* icon,
-                           bool checked = false, bool separator = false) {
-    items.push_back({text, icon, checked, separator});
-    AppendMenuW(menu, MF_OWNERDRAW | (separator ? MF_SEPARATOR : 0) |
+                           bool checked = false, bool dividerBefore = false) {
+    items.push_back({text, icon, checked, dividerBefore});
+    AppendMenuW(menu, MF_OWNERDRAW |
         (checked ? MF_CHECKED : 0), id, reinterpret_cast<const wchar_t*>(&items.back()));
   };
   append(kMenuAppearance, UiText(L"更换形象", L"Change Appearance"), L"\xE77B");
   append(kMenuCalendar, UiText(L"功德日历…", L"Merit Calendar…"), L"\xE787");
   append(kMenuOffwork, UiText(L"下班倒计时…", L"Off-work Countdown…"), L"\xE823", gOffwork.enabled);
-  append(0, L"", L"", false, true);
-  append(kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"), L"\xE7F4", IsLaunchAtLoginEnabled());
-  append(0, L"", L"", false, true);
-  append(kMenuAbout, UiText(L"关于牛马电子功德", L"About NiuMa Merit"), L"\xE946");
+  append(kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"), L"\xE7F4", IsLaunchAtLoginEnabled(), true);
+  append(kMenuAbout, UiText(L"关于牛马电子功德", L"About NiuMa Merit"), L"\xE946", false, true);
   append(kMenuQuit, UiText(L"退出", L"Exit"), L"\xE8AC");
   MENUINFO style{}; style.cbSize = sizeof(style); style.fMask = MIM_BACKGROUND | MIM_STYLE;
   style.hbrBack = niuma::ui::WhiteBrush(); style.dwStyle = MNS_NOCHECK;
   SetMenuInfo(menu, &style);
 
-  const int command = TrackPopupMenu(
-      menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
-      screenPoint.x, screenPoint.y, 0, window, nullptr);
+  const int command = niuma::ui::TrackMenu(
+      menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, screenPoint, window);
   DestroyMenu(menu);
 
   if (command == static_cast<int>(kMenuAbout)) {

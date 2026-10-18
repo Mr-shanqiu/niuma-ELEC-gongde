@@ -93,6 +93,9 @@ inline void PaintButton(HWND window, HDC dc) {
       SelectObject(dc, old); DeleteObject(pen);
     }
     rect.left += Dip(30, dpi);
+  } else if (GetDlgCtrlID(window) == 4190) {
+    if (hover || pressed) Rounded(dc, rect, RGB(227, 232, 240), Dip(10, dpi));
+    wcscpy_s(label, L"\x00D7");
   } else if (GetDlgCtrlID(window) == 4101) {
     FillRect(dc, &rect, WhiteBrush());
     ink = kMuted;
@@ -177,21 +180,97 @@ inline void Apply(HWND window) {
   }, reinterpret_cast<LPARAM>(font));
 }
 
-struct MenuItem { const wchar_t* text; const wchar_t* icon; bool checked; bool separator; };
+// The region supplies rounded corners on Windows 10 and server desktops too,
+// where DWM's Windows 11 corner preference is unavailable.
+inline void ClipRoundedWindow(HWND window, int radius) {
+  RECT bounds{}; GetWindowRect(window, &bounds);
+  HRGN region = CreateRoundRectRgn(0, 0, bounds.right - bounds.left + 1,
+      bounds.bottom - bounds.top + 1, radius * 2, radius * 2);
+  if (region && !SetWindowRgn(window, region, TRUE)) DeleteObject(region);
+}
+inline int CardHeader(UINT dpi) { return Dip(52, dpi); }
+inline void LayoutCard(HWND window) {
+  RECT client{}; GetClientRect(window, &client); const UINT dpi = Dpi(window);
+  MoveWindow(GetDlgItem(window, 4191), Dip(22, dpi), Dip(16, dpi),
+      std::max(1L, client.right - Dip(82, dpi)), Dip(24, dpi), TRUE);
+  MoveWindow(GetDlgItem(window, 4190), client.right - Dip(46, dpi), Dip(12, dpi),
+      Dip(32, dpi), Dip(32, dpi), TRUE);
+  ClipRoundedWindow(window, Dip(18, dpi));
+}
+inline LRESULT CALLBACK CardProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                                     UINT_PTR, DWORD_PTR) {
+  if (message == WM_SIZE) LayoutCard(window);
+  if (message == WM_COMMAND && LOWORD(wParam) == 4190) {
+    SendMessageW(window, WM_CLOSE, 0, 0); return 0;
+  }
+  if (message == WM_NCHITTEST) {
+    POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)}; ScreenToClient(window, &point);
+    RECT client{}; GetClientRect(window, &client);
+    if (point.y >= 0 && point.y < CardHeader(Dpi(window)) &&
+        point.x >= 0 && point.x < client.right - Dip(52, Dpi(window))) return HTCAPTION;
+  }
+  if (message == WM_KEYDOWN && wParam == VK_ESCAPE) {
+    SendMessageW(window, WM_CLOSE, 0, 0); return 0;
+  }
+  if (message == WM_NCDESTROY) {
+    if (HFONT font = reinterpret_cast<HFONT>(RemovePropW(window, L"NiuMaCardFont"))) DeleteObject(font);
+    RemoveWindowSubclass(window, CardProcedure, 62);
+  }
+  return DefSubclassProc(window, message, wParam, lParam);
+}
+inline void Card(HWND window, const wchar_t* title, const wchar_t* closeLabel) {
+  if (GetDlgItem(window, 4190)) return;
+  const LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
+  SetWindowLongPtrW(window, GWL_STYLE, (style & ~(WS_CAPTION | WS_BORDER | WS_DLGFRAME)) | WS_POPUP | WS_CLIPCHILDREN);
+  SetWindowLongPtrW(window, GWL_EXSTYLE,
+      GetWindowLongPtrW(window, GWL_EXSTYLE) & ~(WS_EX_DLGMODALFRAME | WS_EX_CLIENTEDGE | WS_EX_WINDOWEDGE));
+  SetWindowSubclass(window, CardProcedure, 62, 0);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+  CreateWindowExW(0, L"STATIC", title, WS_CHILD | WS_VISIBLE | SS_LEFT,
+      0, 0, 1, 1, window, reinterpret_cast<HMENU>(4191), GetModuleHandleW(nullptr), nullptr);
+  CreateWindowExW(0, L"BUTTON", closeLabel, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+      0, 0, 1, 1, window, reinterpret_cast<HMENU>(4190), GetModuleHandleW(nullptr), nullptr);
+  Apply(window);
+  HFONT font = Font(Dpi(window), 16, FW_SEMIBOLD); SetPropW(window, L"NiuMaCardFont", font);
+  SendMessageW(GetDlgItem(window, 4191), WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+  LayoutCard(window);
+}
+// A thread-local menu lifecycle hook only styles this thread's native popup.
+// It never observes keyboard/mouse input or another process's windows.
+inline LRESULT CALLBACK MenuChromeHook(int code, WPARAM wParam, LPARAM lParam) {
+  static thread_local bool applying = false;
+  if (code >= 0 && !applying) {
+    const auto* event = reinterpret_cast<const CWPSTRUCT*>(lParam);
+    if (event->message == WM_WINDOWPOSCHANGED || event->message == WM_SHOWWINDOW) {
+      wchar_t name[32]{}; GetClassNameW(event->hwnd, name, 32);
+      if (wcscmp(name, L"#32768") == 0) {
+        applying = true; WindowChrome(event->hwnd);
+        ClipRoundedWindow(event->hwnd, Dip(14, Dpi(event->hwnd))); applying = false;
+      }
+    }
+  }
+  return CallNextHookEx(nullptr, code, wParam, lParam);
+}
+inline int TrackMenu(HMENU menu, UINT flags, POINT point, HWND owner) {
+  HHOOK hook = SetWindowsHookExW(WH_CALLWNDPROC, MenuChromeHook, nullptr, GetCurrentThreadId());
+  const int result = TrackPopupMenu(menu, flags, point.x, point.y, 0, owner, nullptr);
+  if (hook) UnhookWindowsHookEx(hook);
+  return result;
+}
+struct MenuItem { const wchar_t* text; const wchar_t* icon; bool checked; bool dividerBefore; };
 inline bool MeasureMenu(MEASUREITEMSTRUCT* item, UINT dpi) {
   if (!item || item->CtlType != ODT_MENU || !item->itemData) return false;
-  const auto* data = reinterpret_cast<const MenuItem*>(item->itemData);
-  item->itemWidth = Dip(240, dpi); item->itemHeight = Dip(data->separator ? 12 : 36, dpi); return true;
+  item->itemWidth = Dip(248, dpi); item->itemHeight = Dip(40, dpi); return true;
 }
 inline bool DrawMenu(DRAWITEMSTRUCT* item, UINT dpi) {
   if (!item || item->CtlType != ODT_MENU || !item->itemData) return false;
   const auto& data = *reinterpret_cast<const MenuItem*>(item->itemData);
   RECT r = item->rcItem; FillRect(item->hDC, &r, WhiteBrush());
-  if (data.separator) {
+  if (data.dividerBefore) {
     HPEN pen = CreatePen(PS_SOLID, 1, RGB(230, 230, 235)); HGDIOBJ old = SelectObject(item->hDC, pen);
-    MoveToEx(item->hDC, r.left + Dip(14, dpi), (r.top + r.bottom) / 2, nullptr);
-    LineTo(item->hDC, r.right - Dip(14, dpi), (r.top + r.bottom) / 2);
-    SelectObject(item->hDC, old); DeleteObject(pen); return true;
+    MoveToEx(item->hDC, r.left + Dip(14, dpi), r.top, nullptr);
+    LineTo(item->hDC, r.right - Dip(14, dpi), r.top);
+    SelectObject(item->hDC, old); DeleteObject(pen);
   }
   RECT background = r; InflateRect(&background, -Dip(5, dpi), -Dip(2, dpi));
   if (item->itemState & ODS_SELECTED) Rounded(item->hDC, background, RGB(235, 240, 248), Dip(7, dpi));

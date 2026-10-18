@@ -1674,12 +1674,17 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (gIsolatedAcceptance || [self hasLiveEventTap]) return;
   NMUiAlert *alert = [[NMUiAlert alloc] init];
   alert.messageText = UiText(@"还差一步：开启输入监控", @"One more step: allow Input Monitoring");
-  alert.informativeText = UiText(
-      @"在系统设置中，为当前牛马电子功德开启“输入监控”，再按系统提示退出并重新打开。\n\n只统计操作次数，不读取你输入的内容。开关已开启仍不计数时，请移除旧条目，再添加“应用程序”里的当前应用。",
-      @"In System Settings, enable Input Monitoring for this copy of NiuMa Merit, then quit and reopen when macOS asks.\n\nOnly operation counts are used; typed content is never read. If an old enabled entry still does not work, remove it and add the current app from Applications.");
+  alert.informativeText = [NSString stringWithFormat:UiText(
+      @"在系统设置中，为“%@”开启输入监控，再按系统提示退出并重新打开。\n\n列表中没有时，点“＋”添加这个应用。可以先用下方按钮在“应用程序”中定位它。只统计操作次数，不读取输入内容。",
+      @"Enable Input Monitoring for “%@” in System Settings, then quit and reopen when macOS asks.\n\nIf it is missing, use + to add this app. The button below can reveal its location in Applications. Only operation counts are used; typed content is never read."),
+      NSBundle.mainBundle.bundleURL.lastPathComponent.stringByDeletingPathExtension];
   [alert addButtonWithTitle:UiText(@"去开启输入监控", @"Open Input Monitoring")];
+  [alert addButtonWithTitle:UiText(@"在应用程序中显示", @"Show in Applications")];
   [alert addButtonWithTitle:UiText(@"稍后", @"Later")];
-  if ([alert runModal] == NSAlertFirstButtonReturn) [self requestListenPermission];
+  const NSModalResponse response = [alert runModal];
+  if (response == NSAlertFirstButtonReturn) [self requestListenPermission];
+  else if (response == NSAlertSecondButtonReturn)
+    [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[NSBundle.mainBundle.bundleURL]];
 }
 
 - (void)showFirstUseGuide:(id)sender {
