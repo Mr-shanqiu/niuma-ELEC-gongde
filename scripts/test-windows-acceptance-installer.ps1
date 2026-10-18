@@ -39,11 +39,14 @@ foreach ($language in @('default', 'chinesesimp')) {
     $window = $null
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
-      $condition = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ClassNameProperty, 'TSetupForm')
+      $condition = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ClassNameProperty, 'TWizardForm')
       $window = [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
       if ($null -eq $window) { Start-Sleep -Milliseconds 200 }
     } while ($null -eq $window -and [DateTime]::UtcNow -lt $deadline)
-    if ($null -eq $window) { throw 'The installer did not show its main wizard.' }
+    if ($null -eq $window) {
+      Save-Screen "$language-window-not-found.png"
+      throw 'The installer did not show its main wizard.'
+    }
     if ($window.Current.Name -notmatch 'R1') { throw 'Unexpected installer window.' }
     [SetupCheckWindow]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle) | Out-Null
     $ready = $false
