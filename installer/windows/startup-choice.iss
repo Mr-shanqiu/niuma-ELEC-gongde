@@ -1,7 +1,10 @@
-; Shared by the production installer and the explicitly labelled R2 candidate.
+; Shared by production and labelled acceptance installers.
 #ifndef StartupArguments
   #define StartupArguments ""
 #endif
+
+[Setup]
+DisableReadyPage=yes
 
 [CustomMessages]
 english.StartAtLogin=Start automatically when I sign in
@@ -64,4 +67,11 @@ end;
 function StartAtLoginPreference(Param: String): String;
 begin
   if StartAtLoginSelected then Result := '1' else Result := '0';
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  { The destination/startup page is the final choice before installation. }
+  if CurPageID = wpSelectDir then
+    WizardForm.NextButton.Caption := SetupMessage(msgButtonInstall);
 end;

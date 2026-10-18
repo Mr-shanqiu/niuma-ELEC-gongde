@@ -2,7 +2,8 @@
   [Parameter(Mandatory = $true)][string]$InstallerPath,
   [Parameter(Mandatory = $true)][string]$ClientPath,
   [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
-  [ValidateSet('R2', 'R3')][string]$CandidateRevision = 'R2'
+  [ValidateSet('R2', 'R3')][string]$CandidateRevision = 'R2',
+  [switch]$RequireSinglePage
 )
 
 # All installation, registry and input-listener checks are confined to a disposable runner.
@@ -111,8 +112,10 @@ foreach ($case in @(
       $install = @($buttons | Where-Object { ($_.Current.Name -replace '&','') -match '^(Install|安装)(\([A-Z]\))?$' })
       if ($install.Count -eq 1) {
         if (-not $checked) { throw 'Installation reached without the startup choice.' }
+        if ($RequireSinglePage -and ($index -ne 0 -or $checkbox.Count -ne 1)) { throw 'Install must be available directly on the first destination/startup page.' }
         Click-Control $install[0]; $installed=$true; break
       }
+      if ($RequireSinglePage) { throw 'The first page should have Install instead of Next; no separate confirmation is allowed.' }
       $next = @($buttons | Where-Object { ($_.Current.Name -replace '&','') -match '^(Next|下一步)' })
       if ($next.Count -ne 1) { throw 'Next button missing.' }
       Click-Control $next[0]
@@ -177,5 +180,5 @@ try {
 } finally {
   if (-not $probe.HasExited) { & taskkill /PID $probe.Id /T /F | Out-Null }
 }
-@{status='passed'; cases=$cases; upgradePreservedOptOut=$true; userDevicesTouched=$false; scope='Disposable Windows runner; real device input/import/security prompts remain pending.'} |
+@{status='passed'; cases=$cases; upgradePreservedOptOut=$true; singlePreInstallPage=[bool]$RequireSinglePage; userDevicesTouched=$false; scope='Disposable Windows runner; real device input/import/security prompts remain pending.'} |
   ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $EvidenceDirectory 'JOURNEY_RECEIPT.json')
