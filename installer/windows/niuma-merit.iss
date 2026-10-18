@@ -21,7 +21,6 @@ DisableProgramGroupPage=yes
 DisableDirPage=no
 DisableFinishedPage=yes
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\..\dist
 OutputBaseFilename=niuma-merit-windows-{#MyAppVersion}-setup
 Compression=lzma2/ultra64
