@@ -18,6 +18,7 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={localappdata}\Programs\NiumaMerit
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+DisableDirPage=no
 DisableFinishedPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog

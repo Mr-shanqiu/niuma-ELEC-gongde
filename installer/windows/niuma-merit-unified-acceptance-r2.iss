@@ -13,6 +13,7 @@ AppPublisher=NiuMa Merit
 DefaultDirName={localappdata}\Programs\NiuMaMeritUnifiedAcceptance-20261018-R2
 DefaultGroupName=牛马电子功德【综合验收·R2】
 DisableProgramGroupPage=yes
+DisableDirPage=no
 DisableFinishedPage=yes
 PrivilegesRequired=lowest
 OutputDir={#AcceptanceOutputDir}
