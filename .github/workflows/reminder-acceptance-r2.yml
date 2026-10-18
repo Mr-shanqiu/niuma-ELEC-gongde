@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-r2:
@@ -21,19 +22,24 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare the single small-builtin acceptance application
+      - name: Download the verified R2 client without changing its identity
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 39128760504
+          name: windows-unified-acceptance-r2
+          path: .local-work/candidates/unified-r2/frozen
+      - name: Verify and reuse the exact R2 client
         shell: powershell
         run: |
-          python scripts/prepare-reminder-import-acceptance.py --revision R2 --output .local-work/candidates/unified-r2
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate preparation failed' }
-      - name: Compile the acceptance client
-        shell: powershell
-        run: |
+          $ErrorActionPreference = 'Stop'
           $root = '.local-work/candidates/unified-r2'
-          cmake -S "$root/source" -B "$root/build" -G 'Visual Studio 17 2022' -A x64
-          if ($LASTEXITCODE -ne 0) { throw 'Configuration failed' }
-          cmake --build "$root/build" --config Release --target niuma-merit --parallel 2
-          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          $client = "$root/frozen/niuma-merit.exe"
+          if ((Get-FileHash $client -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'c14bb1480e2dbda06aeca3d974fa297361b11e276316c750b8335dec4042b04a') { throw 'Frozen R2 client mismatch' }
+          New-Item -ItemType Directory -Force -Path "$root/build/Release", "$root/fixtures" | Out-Null
+          Copy-Item $client "$root/build/Release/niuma-merit.exe"
+          Copy-Item "$root/frozen/SOURCE_BINDING.json" "$root/SOURCE_BINDING.json"
+          Copy-Item "$root/frozen/small-builtin.json" "$root/fixtures/small-builtin.json"
       - name: Package R2 and the production template with their shared startup choice
         shell: powershell
         run: |
@@ -58,6 +64,8 @@ jobs:
           if ($installer.Count -ne 1) { throw 'Expected one R2 installer' }
           @{
             sourceCommit = (git rev-parse HEAD).Trim()
+            clientSourceCommit = '68663cbba3eb03be78fabd43b2cb72a9c58a5859'
+            clientRecompiled = $false
             clientSha256 = (Get-FileHash $client -Algorithm SHA256).Hash.ToLowerInvariant()
             installerSha256 = (Get-FileHash $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             builtinChinese = 20

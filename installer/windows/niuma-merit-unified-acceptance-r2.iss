@@ -17,7 +17,7 @@ DisableDirPage=no
 DisableFinishedPage=yes
 PrivilegesRequired=lowest
 OutputDir={#AcceptanceOutputDir}
-OutputBaseFilename=牛马电子功德-Windows-0.9.4-综合验收-20261018-R2-安装包
+OutputBaseFilename=牛马电子功德-Windows-0.9.4-综合验收-20261018-R2-语言修订-安装包
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -28,10 +28,16 @@ VersionInfoVersion=0.9.4.0
 VersionInfoDescription=牛马电子功德综合验收R2安装程序
 ShowLanguageDialog=no
 LanguageDetectionMethod=uilanguage
+UsePreviousLanguage=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
+Name: "chinesetraditional"; MessagesFile: "languages\ChineseSimplified.isl"
+
+[LangOptions]
+chinesetraditional.LanguageID=$0404
+chinesetraditional.LanguageName=中文
 
 [Files]
 Source: "{#ClientExecutable}"; DestDir: "{app}"; DestName: "niuma-merit.exe"; Flags: ignoreversion

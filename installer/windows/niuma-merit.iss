@@ -38,10 +38,16 @@ VersionInfoProductVersion={#MyAppVersion}
 
 ShowLanguageDialog=no
 LanguageDetectionMethod=uilanguage
+UsePreviousLanguage=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
+Name: "chinesetraditional"; MessagesFile: "languages\ChineseSimplified.isl"
+
+[LangOptions]
+chinesetraditional.LanguageID=$0404
+chinesetraditional.LanguageName=中文
 
 [CustomMessages]
 chinesesimp.LaunchApp=启动%1

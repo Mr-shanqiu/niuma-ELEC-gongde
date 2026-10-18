@@ -66,8 +66,9 @@ $pages = @()
 $cases = @()
 
 foreach ($case in @(
-    @{name='default-enabled'; language='default'; selected=$true},
-    @{name='chinese-opt-out'; language='chinesesimp'; selected=$false}
+    @{name='default-enabled'; language='default'; initial=$true; selected=$true},
+    @{name='chinese-opt-out'; language='chinesesimp'; initial=$true; selected=$false},
+    @{name='traditional-chinese'; language='chinesetraditional'; initial=$false; selected=$false}
 )) {
   $destination = Join-Path $env:RUNNER_TEMP ('NiuMaMerit-R2-' + $case.name)
   $arguments = @('/NORESTART', '/SP-', ('/DIR="' + $destination + '"'))
@@ -93,8 +94,9 @@ foreach ($case in @(
       if ($checkbox.Count -eq 1) {
         if ($checked) { throw 'Startup choice shown on more than one page.' }
         $state = [R2Window]::SendMessage([IntPtr]$checkbox[0].Current.NativeWindowHandle, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero).ToInt32()
-        if ($state -ne 1) { throw 'Fresh install and prior enabled choice should default checked.' }
-        if (-not $case.selected) { Click-Control $checkbox[0] }
+        if (($state -eq 1) -ne $case.initial) { throw 'Installer ignored the default or previous choice.' }
+        if (($state -eq 1) -ne $case.selected) { Click-Control $checkbox[0] }
+        if ($case.language -eq 'chinesetraditional' -and $checkbox[0].Current.Name -ne '登录后自动启动') { throw 'Traditional Chinese language fell back to English.' }
         $checked = $true
         $state = [R2Window]::SendMessage([IntPtr]$checkbox[0].Current.NativeWindowHandle, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero).ToInt32()
         if (($state -eq 1) -ne $case.selected) { throw 'Startup checkbox failed to change.' }

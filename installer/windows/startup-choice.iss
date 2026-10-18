@@ -6,8 +6,10 @@
 [CustomMessages]
 english.StartAtLogin=Start automatically when I sign in
 chinesesimp.StartAtLogin=登录后自动启动
+chinesetraditional.StartAtLogin=登录后自动启动
 english.LocalOnly=Runs locally. No internet connection required.
 chinesesimp.LocalOnly=本地运行，无需联网。
+chinesetraditional.LocalOnly=本地运行，无需联网。
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "NiuMaMerit"; ValueData: """{app}\niuma-merit.exe""{#StartupArguments} --autostart"; Flags: uninsdeletevalue; Check: StartAtLoginSelected
