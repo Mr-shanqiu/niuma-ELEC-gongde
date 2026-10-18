@@ -71,7 +71,8 @@ jobs:
         shell: powershell
         run: |
           $output = Join-Path $PWD '.local-work/candidates/unified-r2/output'
-          $installer = @(Get-ChildItem $output -Filter '*.exe')
+          $installer = @(Get-ChildItem $output -Filter '*.exe' | Where-Object { $_.Name -ne 'niuma-merit.exe' })
+          if ($installer.Count -ne 1) { throw 'Expected exactly one installer for the journey check' }
           & ./scripts/test-windows-acceptance-r2.ps1 -InstallerPath $installer[0].FullName -ClientPath "$output/niuma-merit.exe" -EvidenceDirectory "$output/journey-evidence"
       - uses: actions/upload-artifact@v4
         if: always()
