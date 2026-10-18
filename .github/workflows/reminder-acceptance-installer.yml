@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'installer/windows/niuma-merit-unified-acceptance.iss'
+      - 'installer/windows/niuma-merit.iss'
+      - 'scripts/test-windows-acceptance-installer.ps1'
       - '.github/workflows/reminder-acceptance-installer.yml'
   workflow_dispatch:
 
@@ -56,7 +58,14 @@ jobs:
             installed = $false
             launched = $false
           } | ConvertTo-Json | Set-Content -Encoding UTF8 "$output/INSTALLER_RECEIPT.json"
+      - name: Check visible pre-install wizard and installed shortcuts on the disposable runner
+        shell: powershell
+        run: |
+          $root = Join-Path $PWD '.local-work/candidates/frozen-r1-installer'
+          $installer = @(Get-ChildItem -LiteralPath "$root/output" -File -Filter '*.exe')
+          & ./scripts/test-windows-acceptance-installer.ps1 -InstallerPath $installer[0].FullName -EvidenceDirectory "$root/output/setup-evidence"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: windows-unified-acceptance-r1-setup
           path: .local-work/candidates/frozen-r1-installer/output/*

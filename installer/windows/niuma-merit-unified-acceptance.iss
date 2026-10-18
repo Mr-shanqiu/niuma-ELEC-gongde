@@ -15,7 +15,7 @@ DefaultGroupName=牛马电子功德【综合验收·R1】
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir={#AcceptanceOutputDir}
-OutputBaseFilename=牛马电子功德-Windows-0.9.4-综合验收-20261018-R1-安装包
+OutputBaseFilename=牛马电子功德-Windows-0.9.4-综合验收-20261018-R1-安装流程修订2-安装包
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -28,18 +28,14 @@ ShowLanguageDialog=no
 LanguageDetectionMethod=uilanguage
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
-
-[Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: checkedonce
+Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [Files]
 Source: "{#ClientExecutable}"; DestDir: "{app}"; DestName: "niuma-merit.exe"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\牛马电子功德【综合验收·R1】"; Filename: "{app}\niuma-merit.exe"; Parameters: "--listener-acceptance --diagnostics"
-Name: "{autodesktop}\牛马电子功德【综合验收·R1】"; Filename: "{app}\niuma-merit.exe"; Parameters: "--listener-acceptance --diagnostics"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\niuma-merit.exe"; Parameters: "--listener-acceptance --diagnostics"; Description: "{cm:LaunchProgram,牛马电子功德【综合验收·R1】}"; Flags: nowait postinstall skipifsilent

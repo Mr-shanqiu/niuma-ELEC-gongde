@@ -34,27 +34,22 @@ VersionInfoDescription={#MyAppName} Windows 安装程序
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 
+ShowLanguageDialog=no
+LanguageDetectionMethod=uilanguage
+
 [Languages]
-Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [CustomMessages]
-chinesesimp.ShortcutGroup=快捷方式：
-chinesesimp.DesktopShortcut=创建桌面快捷方式
 chinesesimp.LaunchApp=启动%1
-english.ShortcutGroup=Shortcuts:
-english.DesktopShortcut=Create a desktop shortcut
 english.LaunchApp=Launch %1
-
-[Tasks]
-Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; GroupDescription: "{cm:ShortcutGroup}"; Flags: checkedonce
 
 [Files]
 Source: "..\..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "NiuMaMerit"; Flags: uninsdeletevalue
