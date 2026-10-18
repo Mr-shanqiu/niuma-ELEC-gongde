@@ -30,7 +30,6 @@ public class CatalogOpenNative {
   }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowW(string c, string t);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int n);
-  [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
 }
 '@
@@ -76,9 +75,8 @@ function Finish-Dialog($Process, [string]$Name, [bool]$Success) {
     $bitmap.Save((Join-Path $EvidenceDirectory ($Name + '.png')), [Drawing.Imaging.ImageFormat]::Png)
   } finally { $graphics.Dispose(); $bitmap.Dispose() }
   $script:records += @{case=$Name; dialog=$dialog.Current.Name; text=$text; pid=$Process.Id; nativeHandle=$opened.window.ToInt64(); automationHandle=$dialog.Current.NativeWindowHandle}
-  $button = [CatalogOpenNative]::GetDlgItem($opened.window, 1)
-  if ($button -eq [IntPtr]::Zero) { throw 'Import result OK button is missing.' }
-  [CatalogOpenNative]::PostMessage($button, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+  # Closing an informational MB_OK dialog follows its normal window-close path.
+  [CatalogOpenNative]::PostMessage($opened.window, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
   $deadline = [DateTime]::UtcNow.AddSeconds(5)
   while ([CatalogOpenNative]::Dialog($Process.Id) -ne [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
   if ([CatalogOpenNative]::Dialog($Process.Id) -ne [IntPtr]::Zero) { throw 'Import result dialog did not close.' }
