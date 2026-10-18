@@ -23,7 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ref", default="HEAD")
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--revision", choices=("R1", "R2", "R3"), default="R1")
+    parser.add_argument("--revision", choices=("R1", "R2", "R3", "R4"), default="R1")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     output = args.output.resolve()
@@ -114,7 +114,7 @@ def main():
                  "    ConfigureLaunchAtLogin();\n    RestartGlobalListeners();",
                  "    if (!gListenerAcceptance) ConfigureLaunchAtLogin();\n    RestartGlobalListeners();")
     expected_modified = {"src/reminder_catalog_data.h", "src/windows/app.cpp"}
-    if args.revision in ("R2", "R3"):
+    if args.revision in ("R2", "R3", "R4"):
         replace_once(source / "src/windows/app.cpp",
                      '  return UiText(L"牛马电子功德", L"NiuMa Merit");',
                      f'  return UiText(L"牛马电子功德【综合验收·{args.revision}】", L"NiuMa Merit [Unified Acceptance {args.revision}]");')

@@ -2624,19 +2624,19 @@ RECT PickerCardRect(int index, UINT dpi) {
   return {left, top, left + ScaleDip(156, dpi), top + ScaleDip(130, dpi)};
 }
 
-void PaintAppearancePicker(HWND window) {
-  PAINTSTRUCT paint = {};
-  HDC dc = BeginPaint(window, &paint);
-  RECT client = {};
-  GetClientRect(window, &client);
+void DrawAppearancePicker(HDC dc, HDC updateDc, const RECT& client) {
   FillRect(dc, &client, reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
   Gdiplus::Graphics graphics(dc);
   graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
   graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
   const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+  // Cards never paint into the native button area, including partial rows.
+  graphics.SetClip(Gdiplus::Rect(0, 0, client.right,
+      std::min(client.bottom, static_cast<LONG>(ScaleDip(442, dpi)))));
   for (int index = 0; index < PickerItemCount(); ++index) {
     const RECT card = PickerCardRect(index, dpi);
-    if (card.bottom <= 0 || card.top >= ScaleDip(442, dpi)) continue;
+    if (card.bottom <= 0 || card.top >= ScaleDip(442, dpi) ||
+        !RectVisible(updateDc, &card)) continue;
     const bool selected = index == gPicker.pendingIndex;
     Gdiplus::SolidBrush background(selected
         ? Gdiplus::Color(255, 255, 244, 226)
@@ -2707,12 +2707,44 @@ void PaintAppearancePicker(HWND window) {
             static_cast<float>(card.right - card.left),
             static_cast<float>(ScaleDip(25, dpi))), &format, &text);
   }
+  graphics.Flush(Gdiplus::FlushIntentionSync);
+}
+
+void PaintAppearancePicker(HWND window) {
+  PAINTSTRUCT paint = {};
+  HDC dc = BeginPaint(window, &paint);
+  RECT client = {};
+  GetClientRect(window, &client);
+  const int width = client.right - client.left;
+  const int height = client.bottom - client.top;
+  if (dc == nullptr || width <= 0 || height <= 0 || IsRectEmpty(&paint.rcPaint)) {
+    EndPaint(window, &paint);
+    return;
+  }
+  HDC bufferDc = CreateCompatibleDC(dc);
+  HBITMAP bitmap = bufferDc ? CreateCompatibleBitmap(dc, width, height) : nullptr;
+  HGDIOBJ previousBitmap = bitmap ? SelectObject(bufferDc, bitmap) : nullptr;
+  const bool buffered = previousBitmap != nullptr && previousBitmap != HGDI_ERROR;
+  if (buffered) {
+    // Match the calendar's buffered rendering: never expose a cleared frame.
+    DrawAppearancePicker(bufferDc, dc, client);
+    BitBlt(dc, paint.rcPaint.left, paint.rcPaint.top,
+        paint.rcPaint.right - paint.rcPaint.left, paint.rcPaint.bottom - paint.rcPaint.top,
+        bufferDc, paint.rcPaint.left, paint.rcPaint.top, SRCCOPY);
+    SelectObject(bufferDc, previousBitmap);
+  } else {
+    DrawAppearancePicker(dc, dc, client);
+  }
+  if (bitmap) DeleteObject(bitmap);
+  if (bufferDc) DeleteDC(bufferDc);
   EndPaint(window, &paint);
 }
 
 LRESULT CALLBACK PickerWindowProcedure(
     HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
+    case WM_ERASEBKGND:
+      return 1;
     case WM_CREATE: {
       const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
       CreateWindowW(L"BUTTON", UiText(L"去官网查看更多形象", L"See More Appearances Online"),
@@ -2741,11 +2773,19 @@ LRESULT CALLBACK PickerWindowProcedure(
     case WM_LBUTTONUP: {
       const POINT point = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
       const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+      if (point.y < 0 || point.y >= ScaleDip(442, dpi)) return 0;
       for (int index = 0; index < PickerItemCount(); ++index) {
         const RECT card = PickerCardRect(index, dpi);
         if (PtInRect(&card, point)) {
+          if (gPicker.pendingIndex == index) return 0;
+          RECT previous = PickerCardRect(gPicker.pendingIndex, dpi);
+          RECT selected = card;
+          const int margin = ScaleDip(2, dpi);
+          InflateRect(&previous, margin, margin);
+          InflateRect(&selected, margin, margin);
           gPicker.pendingIndex = index;
-          InvalidateRect(window, nullptr, FALSE);
+          InvalidateRect(window, &previous, FALSE);
+          InvalidateRect(window, &selected, FALSE);
           break;
         }
       }
@@ -2753,10 +2793,15 @@ LRESULT CALLBACK PickerWindowProcedure(
     }
     case WM_MOUSEWHEEL: {
       const int maximumRow = std::max(0, (PickerItemCount() + 1) / 2 - 3);
-      gPicker.scrollRow = std::clamp(
+      const int nextRow = std::clamp(
           gPicker.scrollRow + (GET_WHEEL_DELTA_WPARAM(wParam) < 0 ? 1 : -1),
           0, maximumRow);
-      InvalidateRect(window, nullptr, FALSE);
+      if (nextRow != gPicker.scrollRow) {
+        gPicker.scrollRow = nextRow;
+        const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
+        const RECT grid = {0, 0, ScaleDip(360, dpi), ScaleDip(442, dpi)};
+        InvalidateRect(window, &grid, FALSE);
+      }
       return 0;
     }
     case WM_COMMAND:
@@ -2847,7 +2892,7 @@ void ShowAppearancePicker(HWND owner) {
       proposedY, static_cast<int>(monitorInfo.rcWork.top),
       static_cast<int>(monitorInfo.rcWork.bottom) - height);
   gPicker.window = CreateWindowExW(
-      WS_EX_TOOLWINDOW, kPickerClass, UiText(L"更换形象", L"Change Appearance"), WS_CAPTION | WS_SYSMENU,
+      WS_EX_TOOLWINDOW, kPickerClass, UiText(L"更换形象", L"Change Appearance"), WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN,
       pickerX, pickerY,
       width, height, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
   if (gPicker.window == nullptr) return;
