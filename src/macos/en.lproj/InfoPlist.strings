@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "NiuMa Merit";
+"CFBundleName" = "NiuMa Merit";
+"NSInputMonitoringUsageDescription" = "Counts keyboard presses, mouse button presses, and scroll gestures without reading specific content, positions, or window information.";

@@ -1,0 +1,4 @@
+#pragma once
+
+// Generated from the project's VERSION file by CMake.
+#define NIUMA_APP_VERSION_W L"@PROJECT_VERSION@"

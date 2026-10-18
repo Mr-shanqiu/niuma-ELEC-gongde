@@ -1,0 +1,73 @@
+name: Package Frozen Unified Acceptance R1 Installer
+
+on:
+  pull_request:
+    paths:
+      - 'installer/windows/niuma-merit-unified-acceptance.iss'
+      - 'installer/windows/niuma-merit.iss'
+      - 'scripts/test-windows-acceptance-installer.ps1'
+      - '.github/workflows/reminder-acceptance-installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package-frozen-r1:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the existing frozen R1 client without recompiling
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 39112526533
+          name: windows-unified-reminder-acceptance-r1
+          path: .local-work/candidates/frozen-r1-installer/payload
+      - name: Verify and package the exact R1 executable
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD '.local-work/candidates/frozen-r1-installer'
+          $matches = @(Get-ChildItem -LiteralPath "$root/payload" -Recurse -File -Filter 'niuma-merit.exe')
+          if ($matches.Count -ne 1) { throw 'Expected exactly one frozen R1 executable' }
+          $client = $matches[0].FullName
+          $expected = '26604b166e58cb40c145b46326c54bb50ebfafafbc2b9b762294110de4762c2b'
+          if ((Get-FileHash -LiteralPath $client -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Frozen R1 digest mismatch' }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'CI installer tool setup failed' }
+          }
+          if (-not (Test-Path -LiteralPath $iscc)) { throw 'CI installer compiler unavailable' }
+          $output = Join-Path $root 'output'
+          New-Item -ItemType Directory -Path $output | Out-Null
+          & $iscc "/DClientExecutable=$client" "/DAcceptanceOutputDir=$output" 'installer/windows/niuma-merit-unified-acceptance.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Acceptance installer compilation failed' }
+          if ((Get-FileHash -LiteralPath $client -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Packaging changed the frozen client' }
+          $installers = @(Get-ChildItem -LiteralPath $output -File -Filter '*.exe')
+          if ($installers.Count -ne 1) { throw 'Expected one acceptance installer' }
+          @{
+            kind = 'installer-for-frozen-unified-acceptance-r1'
+            clientSha256 = $expected
+            clientRecompiled = $false
+            installerFilename = $installers[0].Name
+            installerSha256 = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            installed = $false
+            launched = $false
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 "$output/INSTALLER_RECEIPT.json"
+      - name: Check visible pre-install wizard and installed shortcuts on the disposable runner
+        shell: powershell
+        run: |
+          $root = Join-Path $PWD '.local-work/candidates/frozen-r1-installer'
+          $installer = @(Get-ChildItem -LiteralPath "$root/output" -File -Filter '*.exe')
+          & ./scripts/test-windows-acceptance-installer.ps1 -InstallerPath $installer[0].FullName -EvidenceDirectory "$root/output/setup-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-unified-acceptance-r1-setup
+          path: .local-work/candidates/frozen-r1-installer/output/*
+          if-no-files-found: error
+          retention-days: 7

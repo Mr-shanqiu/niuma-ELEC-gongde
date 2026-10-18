@@ -1,0 +1,9 @@
+build/
+build-*/
+dist/
+preview/
+.vs/
+.DS_Store
+node_modules/
+website/admin/
+.local-work/

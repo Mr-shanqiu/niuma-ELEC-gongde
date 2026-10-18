@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="牛马电子功德官方安装图解：Windows EXE 与 Mac DMG、系统安全提示、开机启动，以及扩展形象免费领取后的整批导入说明。">
+  <title>Windows / Mac 安装与形象包导入图解｜牛马电子功德</title>
+  <link rel="canonical" href="https://gongde.zqscreen.cn/install.html">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="guide-page">
+  <header class="guide-nav">
+    <a class="guide-brand" href="./index.html">牛马电子功德</a>
+    <a class="text-link" href="./download.html">返回下载</a>
+  </header>
+
+  <main class="guide-shell">
+    <section class="guide-hero">
+      <p class="eyebrow">第一次安装也没关系</p>
+      <h1>跟着图片，<br>一步一步来。</h1>
+      <p>请选择你的电脑系统。每一步都只保留需要点击的位置，不需要理解复杂的技术名词。</p>
+    </section>
+
+    <aside class="official-warning">
+      <strong>请只从官网下载</strong>
+      <span>其他来源的安装包可能被修改或植入恶意程序。官网地址：gongde.zqscreen.cn</span>
+    </aside>
+
+    <div class="os-switch" role="tablist" aria-label="选择电脑系统">
+      <button class="os-tab is-active" type="button" data-guide="mac" role="tab" aria-selected="true">Mac</button>
+      <button class="os-tab" type="button" data-guide="windows" role="tab" aria-selected="false">Windows 10 / 11</button>
+    </div>
+
+    <section class="os-guide" id="guide-mac" data-panel="mac">
+      <div class="guide-heading">
+        <div>
+          <p class="eyebrow">macOS 安装</p>
+          <h2>第一次会多一步系统确认</h2>
+        </div>
+        <p>本轮 0.9 Mac 实际新构建使用 Apple Development 签名，不是 Developer ID 分发签名，且未完成 Apple 公证。第一次打开仍可能被 Gatekeeper 阻止或提示，不能据此宣传免安全提示或已获 Apple 分发认可。只有确认官方来源、文件未被修改，并愿意运行当前版本时，才按下面步骤进行单应用确认。</p>
+      </div>
+
+      <div class="step-grid">
+        <article class="step-card">
+          <div class="step-number">01</div>
+          <svg viewBox="0 0 360 210" aria-label="打开下载的 DMG 文件">
+            <rect x="18" y="18" width="324" height="174" rx="18" fill="#fffaf1" stroke="#d9cdbc"/>
+            <rect x="38" y="43" width="284" height="28" rx="8" fill="#eadfce"/>
+            <circle cx="58" cy="57" r="5" fill="#d6532d"/><circle cx="75" cy="57" r="5" fill="#e6a72f"/>
+            <rect x="70" y="95" width="220" height="56" rx="12" fill="#f7f0e4" stroke="#cabba8"/>
+            <circle cx="102" cy="123" r="17" fill="#d6532d"/>
+            <text x="132" y="119" font-size="15" fill="#29231c">niuma-merit-macos.dmg</text>
+            <text x="132" y="140" font-size="12" fill="#746858">双击打开</text>
+          </svg>
+          <div class="step-copy"><h3>打开下载文件</h3><p>在“下载”文件夹里，双击名称以 <b>.dmg</b> 结尾的文件。</p></div>
+        </article>
+
+        <article class="step-card">
+          <div class="step-number">02</div>
+          <svg viewBox="0 0 360 210" aria-label="把应用拖入应用程序">
+            <rect x="18" y="18" width="324" height="174" rx="18" fill="#fffaf1" stroke="#d9cdbc"/>
+            <rect x="55" y="72" width="76" height="76" rx="19" fill="#eadfce"/>
+            <ellipse cx="93" cy="113" rx="27" ry="22" fill="#8c3f1f"/>
+            <path d="M141 110h69" stroke="#d6532d" stroke-width="6" stroke-linecap="round"/>
+            <path d="M197 98l16 12-16 12" fill="none" stroke="#d6532d" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M239 82h62v65h-62z" fill="#e6a72f"/>
+            <path d="M239 82l12-15h38l12 15" fill="#f0bd55"/>
+            <text x="229" y="168" font-size="12" fill="#746858">应用程序</text>
+          </svg>
+          <div class="step-copy"><h3>拖入“应用程序”</h3><p>把左侧的木鱼图标拖到右侧“应用程序”文件夹。</p></div>
+        </article>
+
+        <article class="step-card">
+          <div class="step-number">03</div>
+          <svg viewBox="0 0 360 210" aria-label="在隐私与安全中仍要打开">
+            <rect x="18" y="18" width="324" height="174" rx="18" fill="#fffaf1" stroke="#d9cdbc"/>
+            <rect x="42" y="42" width="276" height="124" rx="12" fill="#f7f0e4"/>
+            <text x="59" y="70" font-size="15" font-weight="700" fill="#29231c">隐私与安全性</text>
+            <line x1="59" y1="83" x2="300" y2="83" stroke="#d9cdbc"/>
+            <text x="59" y="108" font-size="12" fill="#746858">“牛马电子功德”已被阻止使用</text>
+            <rect x="204" y="122" width="96" height="28" rx="14" fill="#d6532d"/>
+            <text x="222" y="141" font-size="12" fill="#fff">仍要打开</text>
+          </svg>
+          <div class="step-copy"><h3>确认后，仅允许本应用打开</h3><p>遇到“Apple 无法验证”提示时，先点“完成”，不要点“移到废纸篓”。确认文件来源后，进入“系统设置 → 隐私与安全性”，找到本应用并点“仍要打开”，再按系统提示确认。</p><p>这与下一步的“输入监控”授权不同，也不需要关闭全局安全检查。如果系统提示应用“将损坏你的电脑”或“已损坏”，请停止安装，不要绕过提示。可查看 <a href="https://support.apple.com/zh-cn/102445" target="_blank" rel="noopener noreferrer">Apple 官方说明</a>。</p></div>
+        </article>
+
+        <article class="step-card">
+          <div class="step-number">04</div>
+          <svg viewBox="0 0 360 210" aria-label="开启输入监控">
+            <rect x="18" y="18" width="324" height="174" rx="18" fill="#fffaf1" stroke="#d9cdbc"/>
+            <rect x="42" y="42" width="276" height="124" rx="12" fill="#f7f0e4"/>
+            <text x="59" y="70" font-size="15" font-weight="700" fill="#29231c">输入监控</text>
+            <rect x="59" y="94" width="38" height="38" rx="10" fill="#eadfce"/>
+            <ellipse cx="78" cy="113" rx="14" ry="11" fill="#8c3f1f"/>
+            <text x="112" y="118" font-size="13" fill="#29231c">牛马电子功德</text>
+            <rect x="260" y="99" width="40" height="24" rx="12" fill="#415b49"/>
+            <circle cx="288" cy="111" r="9" fill="#fff"/>
+          </svg>
+          <div class="step-copy"><h3>开启“输入监控”</h3><p>打开开关后，应用只统计按键和点击次数，不读取你输入的文字。</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="os-guide" id="guide-windows" data-panel="windows" hidden>
+      <div class="guide-heading">
+        <div>
+          <p class="eyebrow">Windows 10 / 11 安装</p>
+          <h2>以后只提供 EXE 安装包</h2>
+        </div>
+        <p>直接双击安装，不再需要解压 ZIP。安装程序会帮你创建快捷方式。</p>
+      </div>
+
+      <div class="step-grid">
+        <article class="step-card">
+          <div class="step-number">01</div>
+          <svg viewBox="0 0 360 210" aria-label="双击 EXE 安装包">
+            <rect x="18" y="18" width="324" height="174" rx="18" fill="#fffaf1" stroke="#d9cdbc"/>
+            <rect x="50" y="45" width="260" height="120" rx="10" fill="#f7f0e4"/>
+            <rect x="72" y="77" width="42" height="42" rx="8" fill="#d6532d"/>
+            <path d="M81 88h10v10H81zm12 0h10v10H93zm-12 12h10v10H81zm12 0h10v10H93z" fill="#fff"/>
+            <text x="130" y="94" font-size="14" fill="#29231c">niuma-merit-setup.exe</text>
+            <text x="130" y="117" font-size="12" fill="#746858">双击开始安装</text>
+          </svg>
+          <div class="step-copy"><h3>打开 EXE</h3><p>在“下载”文件夹里双击官网提供的 <b>.exe</b> 安装包。</p></div>
+        </article>
+
+        <article class="step-card">
+          <div class="step-number">02</div>
+          <svg viewBox="0 0 360 210" aria-label="Windows 安全提示中选择仍要运行">
+            <rect x="18" y="18" width="324" height="174" rx="18" fill="#fffaf1" stroke="#d9cdbc"/>
+            <rect x="50" y="39" width="260" height="132" rx="10" fill="#f7f0e4"/>
+            <text x="69" y="70" font-size="15" font-weight="700" fill="#29231c">Windows 已保护你的电脑</text>
+            <text x="69" y="96" font-size="12" fill="#746858">点击“更多信息”查看运行按钮</text>
+            <text x="69" y="121" font-size="12" fill="#2369b5">更多信息</text>
+            <rect x="196" y="133" width="94" height="26" rx="5" fill="#d6532d"/>
+            <text x="218" y="151" font-size="12" fill="#fff">仍要运行</text>
+          </svg>
+          <div class="step-copy"><h3>如果出现安全提醒</h3><p>确认文件来自官网后，点击“更多信息”，再点“仍要运行”。</p></div>
+        </article>
+
+        <article class="step-card">
+          <div class="step-number">03</div>
+          <svg viewBox="0 0 360 210" aria-label="安装时开启开机启动">
+            <rect x="18" y="18" width="324" height="174" rx="18" fill="#fffaf1" stroke="#d9cdbc"/>
+            <rect x="54" y="38" width="252" height="136" rx="10" fill="#f7f0e4"/>
+            <text x="73" y="67" font-size="15" font-weight="700" fill="#29231c">安装牛马电子功德</text>
+            <rect x="73" y="91" width="18" height="18" rx="3" fill="#415b49"/>
+            <path d="M77 99l4 4 7-8" fill="none" stroke="#fff" stroke-width="2"/>
+            <text x="101" y="105" font-size="12" fill="#29231c">开机后自动启动</text>
+            <rect x="215" y="133" width="72" height="26" rx="13" fill="#d6532d"/>
+            <text x="239" y="151" font-size="12" fill="#fff">安装</text>
+          </svg>
+          <div class="step-copy"><h3>保持默认选项</h3><p>“开机后自动启动”默认勾选。以后也可以在应用设置里关闭。</p></div>
+        </article>
+
+        <article class="step-card">
+          <div class="step-number">04</div>
+          <svg viewBox="0 0 360 210" aria-label="从桌面打开应用">
+            <rect x="18" y="18" width="324" height="174" rx="18" fill="#fffaf1" stroke="#d9cdbc"/>
+            <rect x="48" y="39" width="264" height="132" rx="10" fill="#f7f0e4"/>
+            <rect x="77" y="68" width="55" height="55" rx="13" fill="#eadfce"/>
+            <ellipse cx="104" cy="97" rx="20" ry="16" fill="#8c3f1f"/>
+            <text x="153" y="91" font-size="15" font-weight="700" fill="#29231c">牛马电子功德</text>
+            <text x="153" y="116" font-size="12" fill="#746858">双击桌面快捷方式</text>
+          </svg>
+          <div class="step-copy"><h3>安装完成</h3><p>从桌面快捷方式打开。需要卸载时，可在 Windows“已安装的应用”中操作。</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="batch-import-note" id="appearance-import"><p class="eyebrow">免费领取的形象包</p><h2>下载一次，整批导入。</h2><p>基础木鱼随客户端直接免费下载，无需领取码。扩展形象在统一形象库凭群码或作者推广码免费领取，每批 1 至当前权限上限且最多 10 个，文件最多 16 MiB。</p><p>一个形象下载 .nmgpack，多个形象下载一个 .nmgpacks。先从客户端下载页取得 0.9 永久包兼容客户端或发布元数据规定的更新版本，再双击文件；无需解压。不要把旧 0.8.4 安装包当作支持永久交付。客户端核验签名并一次导入后，从“更换形象”选择。</p><p>安装产物实际发布后，下载页通过 v2 API 展示对应公开地址、版本、大小和 SHA-256；不预填尚未发布的 GitHub 文件 URL。<a href="download.html">查看正式客户端下载元数据</a>。</p><p><strong>下载后可长期保存，随时导入，永久离线使用。</strong>服务器仅保留首次成功签发后的 7 天重下载入口，换码和服务器入口到期不影响本地文件。没有首次导入倒计时，重装后仍可再次离线导入。</p></section><section class="batch-import-note" id="community-import"><h2>共创作品，也在同一个形象库。</h2><p>作品免费分发授权及审核通过后才开放领取。新作品首次发布增加作者推广权限，更新同一作品不增加贡献。投稿在外部完成制作，仅上传无 license 的源包；不要直接导入待审源包。</p><p>创作者使用手机号验证码登录，无需昵称。可选本人抖音号只在网页填写，不要求放入源包；审核通过后随本作品公开。</p><p><a href="index.html#characters">统一形象库</a> · <a href="creator.html">创作者中心</a> · <a href="creator-guide.html">制作指南</a> · <a href="checkout.html?history=1">恢复合法历史订单与原权益</a></p></section>
+
+    <section class="autostart-note">
+      <div>
+        <p class="eyebrow">关于开机启动</p>
+        <h2>默认开启，但永远由你决定。</h2>
+      </div>
+      <p>开机启动只是让桌面小伙伴自动出现，不会联网，也不会上传任何输入内容。Mac 和 Windows 都可以随时在应用设置中关闭。</p>
+    </section>
+
+    <details class="advanced-help">
+      <summary>给熟悉电脑的用户：查看安装包校验值</summary>
+      <p>普通用户不需要操作这一项。若你希望核对文件完整性，可查看官方 <a href="https://download.gongde.zqscreen.cn/SHA256SUMS.txt">SHA-256 清单</a>。</p>
+    </details>
+    <p style="max-width:1180px;margin:32px auto;padding:0 24px;"><a href="faq.html">免费领取、历史订单与下载常见问题</a> · <a href="index.html#characters">返回官网选择形象</a></p>
+  </main>
+
+  <script>
+    const tabs = [...document.querySelectorAll('.os-tab')];
+    const panels = [...document.querySelectorAll('.os-guide')];
+    function showGuide(name) {
+      tabs.forEach((tab) => {
+        const active = tab.dataset.guide === name;
+        tab.classList.toggle('is-active', active);
+        tab.setAttribute('aria-selected', String(active));
+      });
+      panels.forEach((panel) => { panel.hidden = panel.dataset.panel !== name; });
+    }
+    tabs.forEach((tab) => tab.addEventListener('click', () => showGuide(tab.dataset.guide)));
+    if (/Windows/i.test(navigator.userAgent)) showGuide('windows');
+  </script>
+</body>
+</html>
