@@ -12,6 +12,27 @@ $ini=Join-Path $data 'data.ini'
 $run=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
 $classes=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Classes')
 $types=@{'.nmgpack'='NiuMaMerit.AppearancePack';'.nmgpacks'='NiuMaMerit.AppearanceBatch';'.nmgtext'='NiuMaMerit.MessageCatalog'}
+# Reproduce an older installer's unconditional startup uninstall-log entry.
+$iscc="${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+$legacySource=Join-Path $Output 'legacy-startup.iss'
+$client=(Resolve-Path 'final-output/niuma-merit.exe').Path
+@"
+[Setup]
+AppId={{D1B9D81E-13A1-45E2-9B8F-33C9C7A06F27}
+AppName=NiuMa legacy startup fixture
+AppVersion=0.9.3
+DefaultDirName={localappdata}\Programs\NiumaMerit
+PrivilegesRequired=lowest
+OutputDir=$Output
+OutputBaseFilename=legacy-startup
+Uninstallable=yes
+[Files]
+Source: "$client"; DestDir: "{app}"; Flags: ignoreversion
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "NiuMaMerit"; ValueData: """{app}\niuma-merit.exe"" --autostart"; Flags: uninsdeletevalue
+"@ | Set-Content -Encoding UTF8 $legacySource
+& $iscc $legacySource
+if($LASTEXITCODE -ne 0){throw 'Legacy uninstall-log fixture did not compile'}
 $results=@()
 function Check($condition,$reason){if(-not $condition){throw $reason}}
 for($scenario=1;$scenario -le 3;$scenario++){
@@ -20,6 +41,10 @@ for($scenario=1;$scenario -le 3;$scenario++){
   $sentinel=Join-Path $data 'history-preserved.txt'
   Set-Content $sentinel 'Do not remove user records or packs'
   $dir=Join-Path $Output "installed-$scenario"
+  if($scenario -eq 3){
+    $p=Start-Process (Join-Path $Output 'legacy-startup.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=`"$dir`"") -PassThru -Wait
+    Check ($p.ExitCode -eq 0) 'Legacy install failed'
+  }
   $p=Start-Process $Installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=`"$dir`"","/LOG=`"$Output\install-$scenario.log`"") -PassThru -Wait
   Check ($p.ExitCode -eq 0) 'Install failed'
   $exe=Join-Path $dir 'niuma-merit.exe'
@@ -60,7 +85,7 @@ for($scenario=1;$scenario -le 3;$scenario++){
     else{Check ($null -eq $value) 'Owned extension survived'}
     if($key){$key.Close()}
   }
-  $results+=@{scenario=$scenario;status='passed';data_preserved=$true;client_launched=$false}
+  $results+=@{scenario=$scenario;status='passed';data_preserved=$true;client_launched=$false;legacy_upgrade=($scenario -eq 3)}
   $run.DeleteValue('NiuMaMerit',$false)
   foreach($ext in $types.Keys){$classes.DeleteSubKeyTree($ext,$false);$classes.DeleteSubKeyTree($types[$ext],$false)}
 }

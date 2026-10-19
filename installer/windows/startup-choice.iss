@@ -29,6 +29,7 @@ Filename: "{localappdata}\NiuMaMerit\data.ini"; Section: "state"; Key: "autostar
 var
   StartAtLoginCheckbox: TNewCheckBox;
   LocalOnlyLabel: TNewStaticText;
+  RetainedRunCommand: String;
 
 procedure InitializeWizard;
 var
@@ -122,7 +123,20 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Command: String;
 begin
+  { Older installations may have appended an unconditional Run deletion to
+    the uninstall log. Preserve a retained copy across that legacy action. }
+  if CurUninstallStep = usPostUninstall then begin
+    if (RetainedRunCommand <> '') and
+        not RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'NiuMaMerit') then
+      RegWriteStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
+          'NiuMaMerit', RetainedRunCommand);
+    exit;
+  end;
   if CurUninstallStep <> usUninstall then exit;
+  RetainedRunCommand := '';
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
+      'NiuMaMerit', Command) and not CommandBelongsToApp(Command) then
+    RetainedRunCommand := Command;
   if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
       'NiuMaMerit', Command) and CommandBelongsToApp(Command) then
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'NiuMaMerit');

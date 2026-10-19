@@ -6,6 +6,8 @@
 #undef wWinMain
 #include <cassert>
 #include <iostream>
+#undef assert
+#define assert(condition) do { if (!(condition)) { std::cerr << "FAILED line " << __LINE__ << ": " << #condition << "; Win32=" << GetLastError() << std::endl; std::exit(1); } } while (false)
 
 static LRESULT CALLBACK Reject(HWND w, UINT m, WPARAM a, LPARAM b) {
   if (m == WM_COPYDATA) return FALSE;
@@ -53,15 +55,17 @@ int wmain(int argc, wchar_t** argv) {
   EnsureDay(L"2027-01-01"); gState.todayTotal = 2; gState.total = 113;
   SaveState(); gState.currentDay.clear(); gState.todayTotal = 0;
   assert(ReadDailyTotal(L"2026-12-31") == 9 && ReadDailyTotal(L"2027-01-01") == 2);
-  // A directory instead of an INI deterministically fails even on an admin runner.
-  const auto blocked = std::filesystem::path(path);
-  std::filesystem::remove(blocked); std::filesystem::create_directory(blocked);
+  // A missing parent deterministically fails without relying on INI caching
+  // or filesystem permission differences on an administrator runner.
+  const auto validRoot = gAcceptanceRoot;
+  gAcceptanceRoot += L"\\missing-parent";
   gState.dirty = true; EnsureDay(L"2027-01-02"); gState.todayTotal = 7;
   SaveState(); assert(gState.dirty && !gState.pendingDailyTotals.empty());
   EnsureDay(L"2027-01-03"); gState.todayTotal = 4;
-  std::filesystem::remove(blocked); SaveState(); assert(!gState.dirty);
+  gAcceptanceRoot = validRoot; SaveState(); assert(!gState.dirty);
   gState.currentDay.clear(); gState.todayTotal = 0;
   assert(ReadDailyTotal(L"2027-01-02") == 7 && ReadDailyTotal(L"2027-01-03") == 4);
+  std::cout << "PASS count rollover and failed-write retry" << std::endl;
 
   WNDCLASSW cls{}; cls.hInstance = GetModuleHandleW(nullptr);
   cls.lpfnWndProc = WindowProcedure; cls.lpszClassName = L"NiuMaPresignReceiver";
