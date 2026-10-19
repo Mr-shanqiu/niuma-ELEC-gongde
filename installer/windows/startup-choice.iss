@@ -5,6 +5,7 @@
 
 [Setup]
 DisableReadyPage=yes
+ChangesAssociations=yes
 
 [CustomMessages]
 english.StartAtLogin=Start automatically when I sign in

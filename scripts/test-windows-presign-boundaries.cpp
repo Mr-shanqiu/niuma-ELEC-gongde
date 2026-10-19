@@ -22,6 +22,13 @@ static void TestImport(HWND window, const std::wstring& path) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+  SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+  std::cerr << "Boundary test entered; argc=" << argc << std::endl;
+  std::set_terminate([] {
+    try { if (auto e = std::current_exception()) std::rethrow_exception(e); }
+    catch (const std::exception& e) { std::cerr << "UNCAUGHT: " << e.what() << std::endl; }
+    std::abort();
+  });
   if (argc == 3 && std::wstring(argv[1]) == L"--register") {
     std::wstring error;
     assert(niuma::RegisterPackFileAssociations(argv[2], &error));
@@ -36,6 +43,7 @@ int wmain(int argc, wchar_t** argv) {
   // month/year rollover, restart, and failed save followed by another day.
   gState.currentDay = L"2026-10-31";
   gState.total = 100; gState.todayTotal = 40; gState.dirty = true;
+  std::cerr << "Stage rollover" << std::endl;
   assert(EnsureDay(L"2026-11-01"));
   assert(ReadDailyTotal(L"2026-10-31") == 40 && gState.todayTotal == 0);
   ++gState.total; ++gState.todayTotal;
@@ -44,6 +52,7 @@ int wmain(int argc, wchar_t** argv) {
   assert(gState.pendingDailyTotals.at(L"2026-10-31") == 40);
   assert(EnsureDay(L"2026-11-02"));
   ++gState.total; ++gState.todayTotal;
+  std::cerr << "Stage save" << std::endl;
   SaveState();
   assert(!gState.dirty && gState.pendingDailyTotals.empty());
   gState.currentDay.clear(); gState.todayTotal = 0;
@@ -67,6 +76,7 @@ int wmain(int argc, wchar_t** argv) {
   assert(ReadDailyTotal(L"2027-01-02") == 7 && ReadDailyTotal(L"2027-01-03") == 4);
   std::cout << "PASS count rollover and failed-write retry" << std::endl;
 
+  std::cerr << "Stage receiver" << std::endl;
   WNDCLASSW cls{}; cls.hInstance = GetModuleHandleW(nullptr);
   cls.lpfnWndProc = WindowProcedure; cls.lpszClassName = L"NiuMaPresignReceiver";
   assert(RegisterClassW(&cls));
