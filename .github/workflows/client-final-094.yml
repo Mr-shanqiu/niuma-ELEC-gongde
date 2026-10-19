@@ -17,13 +17,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Retrieve unchanged verified production client
-        uses: actions/download-artifact@v4
+      - uses: actions/setup-node@v4
         with:
-          name: windows-final-0.9.4
-          run-id: 39174355737
-          github-token: ${{ github.token }}
-          path: verified-client
+          node-version: '22'
       - name: Check production identity and full catalog
         shell: python
         run: |
@@ -35,31 +31,18 @@ jobs:
           assert Counter(item['language'] for item in catalog['items']) == {'zh-CN': 800, 'en': 800}
           assert Path('src/reminder_catalog_data.h').read_text(encoding='utf-8').split('kCatalogItems[] = {', 1)[1].split('\n};', 1)[0].count('  {"') == 1600
           assert 'Unified Acceptance' not in Path('src/windows/app.cpp').read_text(encoding='utf-8')
-      - name: Verify reusable source and importer evidence
-        shell: python
+      - name: Build production client and required importer evidence
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -ExpectedVersion '0.9.4'
+      - name: Verify reminder policy and state persistence
+        shell: pwsh
         run: |
-          from pathlib import Path
-          import hashlib, json, os, shutil
-          original = Path('verified-client/final-output')
-          binding = json.loads((original / 'SOURCE_BINDING.json').read_text(encoding='utf-8-sig'))
-          for name, expected in binding['normalized_source_sha256'].items():
-              if name.startswith('installer/'):
-                  continue
-              data = Path(name).read_bytes()
-              if Path(name).suffix in ['.cpp', '.h', '.txt', '.rc', '.manifest', '.iss', '.mm', '.in', '.strings'] or name == 'VERSION':
-                  data = data.replace(b'\r\n', b'\n')
-              assert hashlib.sha256(data).hexdigest() == expected, name
-          evidence = json.loads((original / 'perpetual-runtime.json').read_text(encoding='utf-8-sig'))
-          client = original / 'niuma-merit.exe'
-          assert evidence['status'] == 'PASS'
-          assert hashlib.sha256(client.read_bytes()).hexdigest() == evidence['clientSha256']
-          Path('dist').mkdir()
-          shutil.copy2(client, 'dist/niuma-merit.exe')
-          with open(os.environ['GITHUB_ENV'], 'a') as env:
-              env.write('WINDOWS_PERPETUAL_STATUS=PASS\n')
-              env.write('WINDOWS_RELEASE_EVIDENCE=' + str(original.resolve()) + '\n')
+          cmake --build build-windows --config Release --target niuma-reminder-activity-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Reminder tests did not compile' }
+          ctest --test-dir build-windows -C Release --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw 'Reminder policy or persistence failed' }
       - name: Package final installer and bind version and bytes
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:WINDOWS_PERPETUAL_STATUS -ne 'PASS') { throw 'Production importer evidence did not pass' }
@@ -78,6 +61,10 @@ jobs:
           Get-ChildItem final-output -Filter '*.exe' | ForEach-Object {
             @{filename=$_.Name;bytes=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();source=$env:GITHUB_SHA}
           } | ConvertTo-Json | Set-Content -Encoding UTF8 final-output/BUILD_RECEIPT.json
+      - name: Verify the final client bubble remains visible for 15 seconds
+        shell: pwsh
+        run: |
+          & ./scripts/test-windows-reminder-ui-preview.ps1 -ExecutablePath final-output/niuma-merit.exe -ScreenshotPath final-output/reminder-auto.png -DismissMode Auto
       - name: Record exact client source inputs
         shell: python
         run: |

@@ -1628,8 +1628,8 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
   }
   gState.reminderStorageFault = false;
   gReminderWindow = popup;
-  gReminderDismissAt = GetTickCount64() + 8000;
-  SetTimer(popup, kReminderDismissTimer, 8000, nullptr);
+  gReminderDismissAt = GetTickCount64() + niuma::reminder::kReminderDisplayMilliseconds;
+  SetTimer(popup, kReminderDismissTimer, niuma::reminder::kReminderDisplayMilliseconds, nullptr);
   ShowWindow(popup, SW_SHOWNOACTIVATE);
   InvalidateRect(popup, nullptr, TRUE);
   stage("shown");
@@ -3936,7 +3936,8 @@ int WINAPI wWinMain(
             gState.reminderStorageFault);
         std::fclose(report);
       }
-      SetTimer(window, kAcceptanceExitTimer, 12000, nullptr);
+      SetTimer(window, kAcceptanceExitTimer,
+          niuma::reminder::kReminderDisplayMilliseconds + 4000, nullptr);
     }
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
       if (gCountingCheck.window && IsDialogMessageW(gCountingCheck.window, &message)) continue;

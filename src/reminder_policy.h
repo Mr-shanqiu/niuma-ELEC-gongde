@@ -11,6 +11,8 @@
 
 namespace niuma::reminder {
 
+inline constexpr unsigned kReminderDisplayMilliseconds = 15'000;
+
 enum class Locale : std::uint8_t { Chinese, English };
 enum class Overtime : std::uint8_t { Unknown, No, Yes };
 

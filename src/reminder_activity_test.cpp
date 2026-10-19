@@ -1218,10 +1218,18 @@ int main() {
   assert(stored_recent.count("nm.en.0004") == 1 && stored_warm);
   assert(restarted_store.TryReserve("nm.en.0005", "2026-10-18", false,
       start_utc + 180 * 60) == StoreResult::Success);
-  assert(restarted_store.TryReserve("nm.en.0006", "2026-10-18", false,
-      start_utc + 225 * 60) == StoreResult::LimitReached);
   assert(restarted_store.TryReserve("nm.en.0004", "2026-10-18", false,
       start_utc + 200 * 60) == StoreResult::LimitReached);
+  assert(restarted_store.TryReserve("nm.en.0006", "2026-10-18", false,
+      start_utc + 225 * 60) == StoreResult::Success);
+  ReminderStore afterSixDisplays(store_root);
+  assert(afterSixDisplays.ReadSelectionHistory("2026-10-18", start_utc + 225 * 60,
+      &stored_recent, &stored_warm));
+  assert(stored_recent.size() == 6 && stored_warm);
+  assert(afterSixDisplays.TryReserve("nm.en.0007", "2026-10-18", false,
+      start_utc + 270 * 60 - 1) == StoreResult::LimitReached);
+  assert(afterSixDisplays.TryReserve("nm.en.0007", "2026-10-18", false,
+      start_utc + 270 * 60) == StoreResult::Success);
   assert(restarted_store.TryReserve("nm.en.0004", "2026-10-26", false,
       start_utc + 8 * 24 * 60 * 60) == StoreResult::Success);
   {
@@ -1257,29 +1265,33 @@ int main() {
       dedupStart + kIdCooldownSeconds) == StoreResult::Success);
   std::filesystem::remove_all(dedup_boundary_root);
 
-  const auto bilingual_quota_root = std::filesystem::temp_directory_path() /
-      ("niuma-reminder-bilingual-quota-" + std::to_string(
+  // A busy day can exceed five reminders; reopening must preserve both the
+  // enlarged daily count and the shared seven-day Chinese/English ID history.
+  const auto bilingual_day_root = std::filesystem::temp_directory_path() /
+      ("niuma-reminder-bilingual-day-" + std::to_string(
           std::chrono::steady_clock::now().time_since_epoch().count()));
-  ReminderStore bilingualQuotaStore(bilingual_quota_root);
+  ReminderStore bilingualDayStore(bilingual_day_root);
   const std::int64_t bilingualStart = 1'800'200'000;
-  assert(bilingualQuotaStore.SetSegmentConsumed(true, bilingualStart) == StoreResult::Success);
-  for (unsigned slot = 0; slot < 5; ++slot) {
+  assert(bilingualDayStore.SetSegmentConsumed(true, bilingualStart) == StoreResult::Success);
+  for (unsigned slot = 0; slot < 32; ++slot) {
     const std::string id = slot % 2 == 0
-        ? "nm.zh.quota." + std::to_string(slot)
-        : "nm.en.quota." + std::to_string(slot);
-    assert(bilingualQuotaStore.TryReserve(id.c_str(), "2026-10-18", false,
+        ? "nm.zh.day." + std::to_string(slot)
+        : "nm.en.day." + std::to_string(slot);
+    ReminderStore reopened(bilingual_day_root);
+    assert(reopened.TryReserve(id.c_str(), "2026-10-18", false,
         bilingualStart + slot * 45 * 60) == StoreResult::Success);
   }
-  assert(bilingualQuotaStore.TryReserve("nm.en.quota.overflow", "2026-10-18", false,
-      bilingualStart + 5 * 45 * 60) == StoreResult::LimitReached);
   std::unordered_set<std::string> bilingualHistory;
   bool bilingualWarmUsed = false;
-  assert(bilingualQuotaStore.ReadSelectionHistory("2026-10-18",
-      bilingualStart + 5 * 45 * 60, &bilingualHistory, &bilingualWarmUsed));
-  assert(bilingualHistory.size() == 5);
-  assert(bilingualHistory.count("nm.zh.quota.0") == 1);
-  assert(bilingualHistory.count("nm.en.quota.1") == 1);
-  std::filesystem::remove_all(bilingual_quota_root);
+  ReminderStore afterBusyDay(bilingual_day_root);
+  assert(afterBusyDay.ReadSelectionHistory("2026-10-18",
+      bilingualStart + 31 * 45 * 60, &bilingualHistory, &bilingualWarmUsed));
+  assert(bilingualHistory.size() == 32 && !bilingualWarmUsed);
+  assert(bilingualHistory.count("nm.zh.day.0") == 1);
+  assert(bilingualHistory.count("nm.en.day.1") == 1);
+  assert(afterBusyDay.TryReserve("nm.zh.day.0", "2026-10-18", false,
+      bilingualStart + 32 * 45 * 60) == StoreResult::LimitReached);
+  std::filesystem::remove_all(bilingual_day_root);
 
   const auto bilingual_warm_root = std::filesystem::temp_directory_path() /
       ("niuma-reminder-bilingual-warm-" + std::to_string(
@@ -1341,8 +1353,10 @@ int main() {
   const std::int64_t forwardRecovery = forwardJump + 300;
   assert(clockStore.SetClockGuard(false, forwardRecovery, "2027-01-16") == StoreResult::Success);
   assert(clockStore.TryReserve("nm.en.0105", "2027-01-16", false,
-      forwardRecovery + 45 * 60) == StoreResult::LimitReached);
+      forwardRecovery + 45 * 60) == StoreResult::Success);
   assert(clockStore.TryReserve("nm.en.0105", "2027-01-17", false,
+      forwardRecovery + 24 * 60 * 60) == StoreResult::LimitReached);
+  assert(clockStore.TryReserve("nm.en.0106", "2027-01-17", false,
       forwardRecovery + 24 * 60 * 60) == StoreResult::Success);
   std::filesystem::remove_all(clock_store_root);
 
@@ -1437,7 +1451,7 @@ int main() {
   std::filesystem::remove_all(boundary_root);
 
 #if !defined(_WIN32)
-  // The daily cap and cooldown must remain atomic across independent processes,
+  // Cooldown must remain atomic after more than five shows across independent processes,
   // not merely across ReminderStore objects in one process.
   const auto concurrent_root = std::filesystem::temp_directory_path() /
       ("niuma-reminder-concurrent-" + std::to_string(
@@ -1445,7 +1459,7 @@ int main() {
   ReminderStore concurrent_setup(concurrent_root);
   const std::int64_t concurrent_start = start_utc + 10 * 24 * 60 * 60;
   assert(concurrent_setup.SetSegmentConsumed(true, concurrent_start) == StoreResult::Success);
-  for (unsigned slot = 0; slot < 4; ++slot) {
+  for (unsigned slot = 0; slot < 6; ++slot) {
     assert(concurrent_setup.TryReserve(("nm.seed." + std::to_string(slot)).c_str(),
         "2026-10-28", false, concurrent_start + slot * 45 * 60) == StoreResult::Success);
   }
@@ -1458,7 +1472,7 @@ int main() {
       ReminderStore contender(concurrent_root);
       const auto result = contender.TryReserve(
           ("nm.race." + std::to_string(index)).c_str(), "2026-10-28", false,
-          concurrent_start + 4 * 45 * 60);
+          concurrent_start + 6 * 45 * 60);
       _exit(result == StoreResult::Success ? 0 :
             result == StoreResult::LimitReached ? 1 : 2);
     }
@@ -1474,8 +1488,8 @@ int main() {
   assert(winners == 1);
   std::unordered_set<std::string> concurrent_history;
   assert(concurrent_setup.ReadSelectionHistory("2026-10-28",
-      concurrent_start + 4 * 45 * 60, &concurrent_history, &stored_warm));
-  assert(concurrent_history.size() == 5);
+      concurrent_start + 6 * 45 * 60, &concurrent_history, &stored_warm));
+  assert(concurrent_history.size() == 7);
   std::filesystem::remove_all(concurrent_root);
 #endif
 #if defined(_WIN32)
@@ -1486,21 +1500,21 @@ int main() {
   const std::int64_t windows_concurrent_start = start_utc + 10 * 24 * 60 * 60;
   assert(windows_concurrent_setup.SetSegmentConsumed(true,
       windows_concurrent_start) == StoreResult::Success);
-  for (unsigned slot = 0; slot < 4; ++slot) {
+  for (unsigned slot = 0; slot < 6; ++slot) {
     assert(windows_concurrent_setup.TryReserve(
         ("nm.seed.win." + std::to_string(slot)).c_str(), "2026-10-28", false,
         windows_concurrent_start + slot * 45 * 60) == StoreResult::Success);
   }
   constexpr unsigned kWindowsCompetitors = 6;
   const bool windowsRacePassed = RunWindowsReservationRace(
-      windows_concurrent_root, windows_concurrent_start + 4 * 45 * 60,
+      windows_concurrent_root, windows_concurrent_start + 6 * 45 * 60,
       kWindowsCompetitors);
   assert(windowsRacePassed);
   std::unordered_set<std::string> windows_concurrent_history;
   assert(windows_concurrent_setup.ReadSelectionHistory("2026-10-28",
-      windows_concurrent_start + 4 * 45 * 60,
+      windows_concurrent_start + 6 * 45 * 60,
       &windows_concurrent_history, &stored_warm));
-  assert(windows_concurrent_history.size() == 5);
+  assert(windows_concurrent_history.size() == 7);
   std::filesystem::remove_all(windows_concurrent_root);
 #endif
 

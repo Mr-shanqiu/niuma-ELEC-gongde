@@ -1529,7 +1529,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [self presentReminderForTrigger:niuma::reminder::ActivitySampler::Trigger::HighIntensity];
     // Keep the preview process bounded on CI; this path is available only when
     // the explicit isolated-acceptance flags and an empty private temp root pass.
-    [NSApp performSelector:@selector(terminate:) withObject:nil afterDelay:12.0];
+    [NSApp performSelector:@selector(terminate:) withObject:nil
+        afterDelay:niuma::reminder::kReminderDisplayMilliseconds / 1000.0 + 4.0];
   }
   self.readyForOpenedFiles = YES;
   NSArray<NSString *> *pending = [self.pendingOpenFiles copy];
@@ -1930,7 +1931,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [content addSubview:close];
   self.reminderPanel = panel;
   [self positionReminderPanel:panel];
-  self.reminderDismissTimer = [NSTimer scheduledTimerWithTimeInterval:8.0
+  self.reminderDismissTimer = [NSTimer scheduledTimerWithTimeInterval:
+      niuma::reminder::kReminderDisplayMilliseconds / 1000.0
       target:self selector:@selector(dismissReminder:) userInfo:nil repeats:NO];
   if (!self.reminderDismissTimer) {
     [panel orderOut:nil];
@@ -1951,7 +1953,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     return;
   }
   _reminderStorageFault = false;
-  self.reminderDismissTimer.fireDate = [NSDate dateWithTimeIntervalSinceNow:8.0];
+  self.reminderDismissTimer.fireDate = [NSDate dateWithTimeIntervalSinceNow:
+      niuma::reminder::kReminderDisplayMilliseconds / 1000.0];
   [panel orderFrontRegardless];
 }
 

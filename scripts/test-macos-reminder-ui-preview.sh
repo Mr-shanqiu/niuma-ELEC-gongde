@@ -40,7 +40,7 @@ screencapture -x "$screenshot_path"
 dimensions=$(sips -g pixelWidth -g pixelHeight "$screenshot_path")
 grep -Eq 'pixelWidth: [1-9][0-9]*' <<<"$dimensions"
 grep -Eq 'pixelHeight: [1-9][0-9]*' <<<"$dimensions"
-sleep 6
+sleep 13
 kill -0 "$preview_pid" 2>/dev/null || { echo "The app exited before auto-dismissal could be checked." >&2; exit 1; }
 screencapture -x "${screenshot_path%.png}-dismissed.png"
 wait "$observer_pid"

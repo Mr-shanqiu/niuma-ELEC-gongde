@@ -33,7 +33,7 @@ struct HistoryEntry {
 
 struct PersistentState {
   std::string daily_date;
-  unsigned daily_count = 0;
+  unsigned daily_count = 0;  // Local display count, retained for state compatibility; no daily quota.
   std::string warm_date;
   bool warm_used = false;
   std::int64_t last_show_utc = 0;
@@ -180,7 +180,6 @@ class ReminderStore {
         state.warm_used = false;
       }
       if (state.quiet_until_utc > now_utc) return StoreResult::ClockGuard;
-      if (state.daily_count >= 5) return StoreResult::LimitReached;
       if (warm && state.warm_used) return StoreResult::LimitReached;
       if (state.last_show_utc > 0) {
         if (now_utc + 120 < state.last_show_utc) return StoreResult::ClockGuard;
@@ -325,8 +324,8 @@ class ReminderStore {
         if (split == std::string::npos || got_daily) return false;
         parsed.daily_date = line.substr(6, split - 6);
         if (!ParseInteger(line.substr(split + 1), &parsed.daily_count)) return false;
-        got_daily = (parsed.daily_date.empty() ? parsed.daily_count == 0 :
-            ValidDate(parsed.daily_date.c_str())) && parsed.daily_count <= 5;
+        got_daily = parsed.daily_date.empty() ? parsed.daily_count == 0 :
+            ValidDate(parsed.daily_date.c_str());
         if (!got_daily) return false;
       } else if (line.rfind("warm\t", 0) == 0) {
         const auto split = line.find('\t', 5);

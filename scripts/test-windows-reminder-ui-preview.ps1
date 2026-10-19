@@ -120,7 +120,7 @@ try {
     if ($closeButton -eq [IntPtr]::Zero) { throw 'The reminder close button is missing.' }
     [NiuMaReminderPreviewWindows]::SendMessage($closeButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
   }
-  $dismissDeadline = [DateTime]::UtcNow.AddSeconds($(if ($DismissMode -eq 'Auto') { 10 } else { 2 }))
+  $dismissDeadline = [DateTime]::UtcNow.AddSeconds($(if ($DismissMode -eq 'Auto') { 18 } else { 2 }))
   while ([NiuMaReminderPreviewWindows]::IsWindowVisible($bubble) -and [DateTime]::UtcNow -lt $dismissDeadline) {
     Start-Sleep -Milliseconds 100
     $process.Refresh()
@@ -129,7 +129,7 @@ try {
   if ([NiuMaReminderPreviewWindows]::IsWindowVisible($bubble)) { throw "Reminder did not dismiss in $DismissMode mode." }
   $process.Refresh()
   if ($process.HasExited) { throw 'The preview app must remain alive after the bubble closes.' }
-  if ($DismissMode -eq 'Auto' -and $previewClock.Elapsed.TotalSeconds -lt 7) { throw 'The reminder auto-dismissed too early.' }
+  if ($DismissMode -eq 'Auto' -and $previewClock.Elapsed.TotalSeconds -lt 14) { throw 'The reminder auto-dismissed before the 15-second display interval.' }
   Save-PreviewScreenshot ([IO.Path]::ChangeExtension($ScreenshotPath, '.dismissed.png'))
 
   if (-not $process.WaitForExit(20000)) { throw 'The preview app did not exit on its bounded acceptance timer.' }
