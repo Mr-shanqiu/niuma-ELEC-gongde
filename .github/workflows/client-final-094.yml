@@ -61,6 +61,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native woodfish renderer did not compile' }
           & ./build-windows/Release/niuma-woodfish-render-test.exe $PWD (Join-Path $PWD 'final-output/woodfish')
           if ($LASTEXITCODE -ne 0) { throw 'Woodfish poses or feedback separation failed' }
+      - name: Verify count rollover, import handoff and ownership-aware uninstall
+        shell: pwsh
+        run: |
+          cmake --build build-windows --config Release --target niuma-presign-boundary-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Native boundary test did not compile' }
+          & ./build-windows/Release/niuma-presign-boundary-test.exe (Join-Path $env:RUNNER_TEMP 'niuma-presign-state')
+          if ($LASTEXITCODE -ne 0) { throw 'Count persistence or import handoff failed' }
+          & ./scripts/test-windows-presign-uninstall.ps1 -Installer 'final-output/牛马电子功德-Windows-0.9.4.exe' -Helper './build-windows/Release/niuma-presign-boundary-test.exe' -Output 'final-output/uninstall'
       - name: Record exact client source inputs
         shell: python
         run: |

@@ -18,7 +18,7 @@ chinesesimp.InstallerSize=安装包：%1 MB
 chinesetraditional.InstallerSize=安装包：%1 MB
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "NiuMaMerit"; ValueData: """{app}\niuma-merit.exe""{#StartupArguments} --autostart"; Flags: uninsdeletevalue; Check: StartAtLoginSelected
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "NiuMaMerit"; ValueData: """{app}\niuma-merit.exe""{#StartupArguments} --autostart"; Check: StartAtLoginSelected
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "NiuMaMerit"; Flags: deletevalue; Check: StartAtLoginNotSelected
 
 [INI]
@@ -78,4 +78,55 @@ begin
   { The destination/startup page is the final choice before installation. }
   if CurPageID = wpSelectDir then
     WizardForm.NextButton.Caption := SetupMessage(msgButtonInstall);
+end;
+
+
+function CommandBelongsToApp(Command: String): Boolean;
+var
+  Executable: String;
+  EndQuote: Integer;
+begin
+  Command := Trim(Command);
+  Result := False;
+  if Command = '' then exit;
+  if Command[1] = '"' then begin
+    Delete(Command, 1, 1);
+    EndQuote := Pos('"', Command);
+    if EndQuote = 0 then exit;
+    Executable := Copy(Command, 1, EndQuote - 1);
+  end else begin
+    { The client always writes a quoted path. Also accept an exact bare path. }
+    Executable := Command;
+  end;
+  Result := CompareText(Executable, ExpandConstant('{app}\niuma-merit.exe')) = 0;
+end;
+
+procedure RemoveOwnedAssociation(Extension, ProgID: String);
+var
+  Command, RegisteredID: String;
+  Key: String;
+begin
+  Key := 'Software\Classes\' + ProgID;
+  if RegQueryStringValue(HKCU, Key + '\shell\open\command', '', Command) and
+      CommandBelongsToApp(Command) then begin
+    if RegQueryStringValue(HKCU, 'Software\Classes\' + Extension, '', RegisteredID) and
+        (CompareText(RegisteredID, ProgID) = 0) then begin
+      RegDeleteValue(HKCU, 'Software\Classes\' + Extension, '');
+      RegDeleteKeyIfEmpty(HKCU, 'Software\Classes\' + Extension);
+    end;
+    RegDeleteKeyIncludingSubkeys(HKCU, Key);
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Command: String;
+begin
+  if CurUninstallStep <> usUninstall then exit;
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
+      'NiuMaMerit', Command) and CommandBelongsToApp(Command) then
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'NiuMaMerit');
+  RemoveOwnedAssociation('.nmgpack', 'NiuMaMerit.AppearancePack');
+  RemoveOwnedAssociation('.nmgpacks', 'NiuMaMerit.AppearanceBatch');
+  RemoveOwnedAssociation('.nmgtext', 'NiuMaMerit.MessageCatalog');
 end;

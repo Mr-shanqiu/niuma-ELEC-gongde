@@ -7,6 +7,18 @@ add_executable(niuma-reminder-activity-test src/reminder_activity_test.cpp)
 target_compile_features(niuma-reminder-activity-test PRIVATE cxx_std_17)
 if(MSVC)
   target_compile_options(niuma-reminder-activity-test PRIVATE /W4 /permissive- /utf-8)
+  add_executable(niuma-presign-boundary-test
+    scripts/test-windows-presign-boundaries.cpp
+    src/windows/appearance_pack.cpp
+    third_party/miniz/miniz.c)
+  target_include_directories(niuma-presign-boundary-test PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(niuma-presign-boundary-test PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-presign-boundary-test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-presign-boundary-test PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  if(MSVC)
+    set_property(TARGET niuma-presign-boundary-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(niuma-presign-boundary-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+  endif()
 elseif(APPLE)
   target_compile_options(niuma-reminder-activity-test PRIVATE -Wall -Wextra)
 endif()

@@ -60,6 +60,7 @@ constexpr wchar_t kRunKey[] =
 constexpr wchar_t kRunValue[] = L"NiuMaMerit";
 constexpr UINT kCountMessage = WM_APP + 1;
 constexpr UINT kScrollMessage = WM_APP + 2;
+constexpr UINT kImportQueuedMessage = WM_APP + 32;
 constexpr ULONG_PTR kPackFileCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
 constexpr UINT_PTR kDayTimer = 2;
@@ -156,7 +157,9 @@ struct AppState {
   std::uint64_t total = 0;
   std::uint64_t todayTotal = 0;
   std::wstring currentDay;
+  std::map<std::wstring, std::uint64_t> pendingDailyTotals;
   ULONGLONG lastInputTime = 0;
+  ULONGLONG lastSaveAttempt = 0;
   ULONGLONG lastScrollEventTime = 0;
   double intervalEma = static_cast<double>(kDefaultStrikeMs);
   bool striking = false;
@@ -180,6 +183,9 @@ struct AppState {
 };
 
 AppState gState;
+std::vector<std::wstring> gPendingImports;
+bool gImportReady = false;
+bool gImportActive = false;
 HWND gReminderWindow = nullptr;
 std::wstring gReminderText;
 ULONGLONG gReminderDismissAt = 0;
@@ -452,6 +458,9 @@ std::wstring DateKey(const SYSTEMTIME& date) {
 }
 
 std::uint64_t ReadDailyTotal(const std::wstring& key) {
+  if (key == gState.currentDay) return gState.todayTotal;
+  const auto pending = gState.pendingDailyTotals.find(key);
+  if (pending != gState.pendingDailyTotals.end()) return pending->second;
   const std::wstring path = DataPath();
   if (path.empty()) return 0;
   wchar_t value[64] = {};
@@ -462,14 +471,20 @@ std::uint64_t ReadDailyTotal(const std::wstring& key) {
   return end == value ? 0 : static_cast<std::uint64_t>(result);
 }
 
+bool EnsureDay(const std::wstring& today) {
+  if (today == gState.currentDay) return false;
+  if (!gState.currentDay.empty())
+    gState.pendingDailyTotals[gState.currentDay] = gState.todayTotal;
+  const auto todayTotal = ReadDailyTotal(today);
+  gState.currentDay = today;
+  gState.todayTotal = todayTotal;
+  return true;
+}
+
 bool EnsureCurrentDay() {
   SYSTEMTIME now = {};
   GetLocalTime(&now);
-  const std::wstring today = DateKey(now);
-  if (today == gState.currentDay) return false;
-  gState.currentDay = today;
-  gState.todayTotal = ReadDailyTotal(today);
-  return true;
+  return EnsureDay(DateKey(now));
 }
 
 int DaysInMonth(int year, int month) {
@@ -895,37 +910,40 @@ void UnregisterOffworkSessionNotifications(HWND window) {
   gOffwork.sessionLibrary = nullptr;
 }
 
+// Keep every unflushed date until all count writes succeed. A failed write
+// must not discard an old day's value when the local date changes again.
+bool SaveCountState(const std::wstring& path) {
+  if (path.empty()) return false;
+  if (!gState.currentDay.empty())
+    gState.pendingDailyTotals[gState.currentDay] = gState.todayTotal;
+  bool saved = WritePrivateProfileStringW(L"state", L"total",
+      std::to_wstring(gState.total).c_str(), path.c_str()) != FALSE;
+  for (const auto& day : gState.pendingDailyTotals) {
+    const bool daySaved = WritePrivateProfileStringW(L"daily", day.first.c_str(),
+        std::to_wstring(day.second).c_str(), path.c_str()) != FALSE;
+    saved = daySaved && saved;
+  }
+  if (saved) gState.pendingDailyTotals.clear();
+  return saved;
+}
+
 void SaveState() {
   const std::wstring path = DataPath();
-  if (path.empty() || gState.window == nullptr) {
-    return;
-  }
-
+  bool saved = SaveCountState(path);
+  if (path.empty()) return;
+  auto write = [&](const wchar_t* key, const std::wstring& value) {
+    const bool written = WritePrivateProfileStringW(
+        L"state", key, value.c_str(), path.c_str()) != FALSE;
+    saved = written && saved;
+  };
   RECT rect = {};
-  GetWindowRect(gState.window, &rect);
-  wchar_t total[64] = {};
-  wchar_t x[32] = {};
-  wchar_t y[32] = {};
-  swprintf_s(total, L"%llu", static_cast<unsigned long long>(gState.total));
-  swprintf_s(x, L"%ld", rect.left);
-  swprintf_s(y, L"%ld", rect.top);
-  WritePrivateProfileStringW(L"state", L"total", total, path.c_str());
-  if (!gState.currentDay.empty()) {
-    WritePrivateProfileStringW(
-        L"daily", gState.currentDay.c_str(),
-        std::to_wstring(gState.todayTotal).c_str(), path.c_str());
+  if (gState.window && GetWindowRect(gState.window, &rect)) {
+    write(L"x", std::to_wstring(rect.left));
+    write(L"y", std::to_wstring(rect.top));
   }
-  WritePrivateProfileStringW(L"state", L"x", x, path.c_str());
-  WritePrivateProfileStringW(L"state", L"y", y, path.c_str());
-  WritePrivateProfileStringW(
-      L"state", L"selected_scene",
-      std::to_wstring(static_cast<int>(gState.selectedScene)).c_str(),
-      path.c_str());
-  const std::wstring selectedPack(
-      gState.selectedPackId.begin(), gState.selectedPackId.end());
-  WritePrivateProfileStringW(
-      L"state", L"selected_pack_id", selectedPack.c_str(), path.c_str());
-  gState.dirty = false;
+  write(L"selected_scene", std::to_wstring(static_cast<int>(gState.selectedScene)));
+  write(L"selected_pack_id", std::wstring(gState.selectedPackId.begin(), gState.selectedPackId.end()));
+  gState.dirty = !saved;
 }
 
 bool LoadPngResource(int resourceId, PngResource& output) {
@@ -2514,6 +2532,8 @@ void ReloadCalendarRange() {
       }
     }
   }
+  for (const auto& entry : gState.pendingDailyTotals)
+    if (entry.second > 0) gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
   // Include an unflushed in-memory overtime snapshot without writing any data.
   for (const auto& entry : gOffwork.days)
     if (entry.second.present) gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
@@ -3167,6 +3187,16 @@ void ImportPackageFile(HWND owner, const std::wstring& filename) {
     ImportAppearancePack(owner, filename, true);
 }
 
+void DrainPendingImport(HWND window, void (*importFile)(HWND, const std::wstring&)) {
+  if (!gImportReady || gImportActive || gPendingImports.empty()) return;
+  const std::wstring path = gPendingImports.front();
+  gPendingImports.erase(gPendingImports.begin());
+  gImportActive = true;
+  importFile(window, path);
+  gImportActive = false;
+  if (!gPendingImports.empty()) PostMessageW(window, kImportQueuedMessage, 0, 0);
+}
+
 bool PrepareClientStartup(HWND owner, const std::wstring& pendingImportFile) {
   if (!IsMainWindowAlive(owner)) return false;
   if (!pendingImportFile.empty()) ImportPackageFile(owner, pendingImportFile);
@@ -3492,9 +3522,15 @@ LRESULT CALLBACK WindowProcedure(
       if (!niuma::IsAppearancePackPath(sourcePath) &&
           !niuma::IsAppearanceBatchPath(sourcePath) &&
           !niuma::reminder::IsCatalogPackagePath(std::filesystem::path(sourcePath))) return FALSE;
-      ImportPackageFile(window, sourcePath);
+      if (gPendingImports.size() >= 64) return FALSE;
+      gPendingImports.push_back(sourcePath);
+      if (gImportReady) PostMessageW(window, kImportQueuedMessage, 0, 0);
       return TRUE;
     }
+
+    case kImportQueuedMessage:
+      DrainPendingImport(window, ImportPackageFile);
+      return 0;
 
     case WM_TIMER: {
       if (wParam == kAcceptanceExitTimer && gReminderPreviewAcceptance) {
@@ -3551,7 +3587,8 @@ LRESULT CALLBACK WindowProcedure(
         RenderLayeredWindow(now);
       }
       if (gState.dirty && gState.lastInputTime != 0 &&
-          now - gState.lastInputTime >= 500) {
+          now - gState.lastInputTime >= 500 && now - gState.lastSaveAttempt >= 1000) {
+        gState.lastSaveAttempt = now;
         SaveState();
       }
       if (!gState.striking && !gState.dirty) {
@@ -3700,6 +3737,18 @@ LRESULT CALLBACK WindowProcedure(
   return DefWindowProcW(window, message, wParam, lParam);
 }
 
+bool TransferImport(HWND receiver, const std::wstring& file, UINT timeout = 5000) {
+  if (!receiver || file.empty()) return false;
+  COPYDATASTRUCT copy = {};
+  copy.dwData = kPackFileCopyData;
+  copy.cbData = static_cast<DWORD>((file.size() + 1) * sizeof(wchar_t));
+  copy.lpData = const_cast<wchar_t*>(file.c_str());
+  DWORD_PTR accepted = FALSE;
+  return SendMessageTimeoutW(receiver, WM_COPYDATA, 0,
+      reinterpret_cast<LPARAM>(&copy), SMTO_ABORTIFHUNG | SMTO_BLOCK,
+      timeout, &accepted) != 0 && accepted == TRUE;
+}
+
 }  // namespace
 
 int WINAPI wWinMain(
@@ -3721,15 +3770,14 @@ int WINAPI wWinMain(
         existingWindow = FindWindowW(kWindowClass, nullptr);
         if (existingWindow == nullptr) Sleep(50);
       }
-      if (existingWindow != nullptr) {
-        COPYDATASTRUCT copy = {};
-        copy.dwData = kPackFileCopyData;
-        copy.cbData = static_cast<DWORD>(
-            (pendingImportFile.size() + 1) * sizeof(wchar_t));
-        copy.lpData = const_cast<wchar_t*>(pendingImportFile.c_str());
-        SendMessageTimeoutW(existingWindow, WM_COPYDATA, 0,
-                            reinterpret_cast<LPARAM>(&copy),
-                            SMTO_ABORTIFHUNG, 5000, nullptr);
+      if (!TransferImport(existingWindow, pendingImportFile)) {
+        niuma::ui::Message(nullptr, UiText(
+            L"文件尚未导入。请先关闭牛马的启动提示，等待桌面形象出现，再重新双击此文件。若刚才的导入窗口已打开，请先完成它。",
+            L"The file has not been imported. Dismiss NiuMa's startup notices and wait for the desktop character, then double-click the file again. If an import dialog has already opened, complete it first."),
+            WindowTitle(), MB_OK | MB_ICONWARNING);
+        CloseHandle(gState.mutex);
+        gState.mutex = nullptr;
+        return 2;
       }
     }
     CloseHandle(gState.mutex);
@@ -3929,6 +3977,8 @@ int WINAPI wWinMain(
       !PrepareClientStartup(window, pendingImportFile) && IsMainWindowAlive(window)) {
     DestroyWindow(window);
   }
+  gImportReady = IsMainWindowAlive(window);
+  if (gImportReady && !gPendingImports.empty()) PostMessageW(window, kImportQueuedMessage, 0, 0);
   // A listener failure leaves click-only/partial counting and a reachable retry
   // entry, instead of terminating the client and losing its recovery path.
 

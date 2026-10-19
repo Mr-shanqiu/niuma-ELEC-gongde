@@ -245,12 +245,21 @@ static NSString *OffworkDurationText(long long seconds) {
   return [NSString stringWithUTF8String:niuma::OffworkDuration(seconds).c_str()];
 }
 
+// Persisted record keys and the calendar grid share the local Gregorian date
+// axis, regardless of the user's preferred display calendar.
+static NSCalendar *RecordCalendar() {
+  NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+  calendar.timeZone = NSTimeZone.localTimeZone;
+  return calendar;
+}
+
 static NSString *DateKeyForDate(NSDate *date) {
   static NSDateFormatter *formatter;
   static dispatch_once_t once;
   dispatch_once(&once, ^{
     formatter = [[NSDateFormatter alloc] init];
     formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.calendar = RecordCalendar();
     formatter.dateFormat = @"yyyy-MM-dd";
   });
   formatter.timeZone = NSTimeZone.localTimeZone;
@@ -755,7 +764,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (BOOL)isFlipped { return YES; }
 
 - (void)showCurrentMonth {
-  NSDateComponents *parts = [NSCalendar.currentCalendar
+  NSDateComponents *parts = [RecordCalendar()
       components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
   self.year = parts.year;
   self.month = parts.month;
@@ -765,7 +774,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)reloadMonthRange {
-  NSDateComponents *now = [NSCalendar.currentCalendar
+  NSDateComponents *now = [RecordCalendar()
       components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
   _monthRange = niuma::CalendarMonthRange((int)now.year, (int)now.month);
   for (NSString *key in self.controller.dailyTotals) {
@@ -779,7 +788,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)refreshNavigation {
-  NSDateComponents *now = [NSCalendar.currentCalendar
+  NSDateComponents *now = [RecordCalendar()
       components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
   if (_monthRange.last != niuma::CalendarMonthRange::Month((int)now.year, (int)now.month))
     [self reloadMonthRange];
@@ -850,11 +859,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
   NSDateComponents *firstParts = [[NSDateComponents alloc] init];
   firstParts.year = self.year; firstParts.month = self.month; firstParts.day = 1;
-  NSDate *firstDate = [NSCalendar.currentCalendar dateFromComponents:firstParts];
-  NSInteger firstWeekday = [NSCalendar.currentCalendar component:NSCalendarUnitWeekday
+  NSDate *firstDate = [RecordCalendar() dateFromComponents:firstParts];
+  NSInteger firstWeekday = [RecordCalendar() component:NSCalendarUnitWeekday
                                                          fromDate:firstDate];
   NSInteger offset = (firstWeekday + 5) % 7;
-  NSRange days = [NSCalendar.currentCalendar rangeOfUnit:NSCalendarUnitDay
+  NSRange days = [RecordCalendar() rangeOfUnit:NSCalendarUnitDay
                                                   inUnit:NSCalendarUnitMonth
                                                  forDate:firstDate];
   NSString *todayKey = DateKeyForDate(NSDate.date);
@@ -898,10 +907,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (column > 6 || row > 5) return;
   NSDateComponents *parts = [[NSDateComponents alloc] init];
   parts.year = self.year; parts.month = self.month; parts.day = 1;
-  NSDate *firstDate = [NSCalendar.currentCalendar dateFromComponents:parts];
-  NSInteger weekday = [NSCalendar.currentCalendar component:NSCalendarUnitWeekday fromDate:firstDate];
+  NSDate *firstDate = [RecordCalendar() dateFromComponents:parts];
+  NSInteger weekday = [RecordCalendar() component:NSCalendarUnitWeekday fromDate:firstDate];
   NSInteger day = row * 7 + column - (weekday + 5) % 7 + 1;
-  NSRange days = [NSCalendar.currentCalendar rangeOfUnit:NSCalendarUnitDay
+  NSRange days = [RecordCalendar() rangeOfUnit:NSCalendarUnitDay
       inUnit:NSCalendarUnitMonth forDate:firstDate];
   if (day < 1 || day > (NSInteger)days.length) return;
   [self.controller showCalendarDay:[NSString stringWithFormat:@"%04ld-%02ld-%02ld",
