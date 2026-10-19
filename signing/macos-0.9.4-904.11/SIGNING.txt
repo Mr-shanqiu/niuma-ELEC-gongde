@@ -1,0 +1,15 @@
+macOS 0.9.4（904.11）送签原包
+
+用途：供协助签名的开发者下载。当前为 ad-hoc 签名，尚未完成 Developer ID 分发签名与 Apple 公证，不是已签名正式发行版。
+
+附件：牛马电子功德-macOS-0.9.4.dmg
+大小：5,576,534 字节
+SHA-256：2f2f8e7722a41822b1ed17d68035fa87906a802f6e9d7bcb4f564f9c6f9688ac
+架构：Intel x86_64 + Apple Silicon arm64
+Mac 原包来源提交：02cdb50d64d50acd8d326b8acbcfcd442e1dd120
+
+这是当前一键安装版本。DMG 内含“安装牛马电子功德.app”，其 Resources/Payload 中包含实际“牛马电子功德.app”。请由内到外处理实际客户端与安装器的 Developer ID Application 签名，保留现有 bundle identifier、版本、资源和功能，重新封装 DMG，并完成 Apple 公证与 staple。
+
+请返还最终可分发 DMG、最终 SHA-256、签名者/Team ID、Apple 公证结果及验证结果。签名所需证书、私钥、Apple 账号凭据均留在签名者本机，不上传到仓库。
+
+本目录仅用于送签交付，不替换官网/COS下载，不代表已签名正式发布。
