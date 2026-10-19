@@ -49,6 +49,12 @@ if(WIN32)
   )
   target_include_directories(niuma-merit PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
   set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc" PROPERTIES GENERATED TRUE)
+  # The real window procedure uses comctl32 v6 ordinal imports. Match the
+  # production activation context instead of loading the legacy system DLL.
+  if(TARGET niuma-presign-boundary-test)
+    target_sources(niuma-presign-boundary-test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")
+    target_link_options(niuma-presign-boundary-test PRIVATE /MANIFEST:NO)
+  endif()
   target_compile_features(niuma-merit PRIVATE cxx_std_17)
   target_compile_definitions(niuma-merit PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
   target_link_libraries(niuma-merit PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
