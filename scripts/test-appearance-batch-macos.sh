@@ -1,15 +1,25 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-TEMP=$(mktemp -d "${TMPDIR:-/tmp}/niuma-batch-test.XXXXXX")
+WORK="$ROOT/.local-work/acceptance/perpetual-license"
+mkdir -p "$WORK"
+TEMP=$(mktemp -d "$WORK/legacy-batch.XXXXXX")
 trap 'rm -rf "$TEMP"' EXIT INT TERM
-python3 "$ROOT/scripts/appearance-pack.py" build \
-  "$ROOT/assets/appearance-packs/woodfish-sample" "$TEMP/woodfish-sample.nmgpack"
-python3 "$ROOT/scripts/appearance-pack.py" build \
-  "$ROOT/assets/appearance-packs/lucky-cat" "$TEMP/lucky-cat.nmgpack"
-(cd "$TEMP" && zip -q two-packs.nmgpacks woodfish-sample.nmgpack lucky-cat.nmgpack)
-xcrun clang++ -std=c++17 -O2 -fobjc-arc -mmacosx-version-min=10.15 \
-  "$ROOT/scripts/test-appearance-batch.mm" "$ROOT/src/macos/appearance_pack.mm" \
-  -framework AppKit -framework ApplicationServices -framework Security \
-  -o "$TEMP/test-appearance-batch"
-"$TEMP/test-appearance-batch" "$TEMP/two-packs.nmgpacks" "$TEMP/installed"
+cd "$ROOT"
+
+# Reuse the bounded signature-protocol fixtures, not unsigned platform sources.
+# Positive batches carry valid independent P-256 signatures in an isolated test
+# trust copy. The unchanged production importer separately checks the frozen real
+# historical file and rejects the ephemeral signer. No product anchor is changed.
+SERVICE="$ROOT/services/gongde-payments"
+mkdir -p "$TEMP/build"
+printf '{"type":"module"}\n' > "$TEMP/build/package.json"
+ln -s "$SERVICE/node_modules" "$TEMP/build/node_modules"
+"$SERVICE/node_modules/.bin/tsc" --target ES2022 --module ESNext \
+  --moduleResolution bundler --strict --esModuleInterop --skipLibCheck \
+  --types node --typeRoots "$SERVICE/node_modules/@types" \
+  --rootDir "$SERVICE/src" --outDir "$TEMP/build" \
+  "$SERVICE/src/delivery/pack-signer.ts"
+GONGDE_TEST_BUILD_ROOT="$TEMP/build" GONGDE_NATIVE_LICENSE_TEST=1 \
+  node --test --test-name-pattern 'macOS native importer and Python tool agree' \
+  "$SERVICE/tests/pack-signer-perpetual.test.mjs"

@@ -48,7 +48,9 @@ export const OFFICIAL_ASSET_IDS = Object.freeze([
   "zqscreen.baodan-charm",
   "zqscreen.woodpecker-peck",
   "zqscreen.zhuan-yun-bead",
-  "zqscreen.treasure-basin"
+  "zqscreen.treasure-basin",
+  "official.wealth-button",
+  "official.offwork-button"
 ]);
 export const OFFICIAL_ASSET_NAMES_ZH: Readonly<Record<string, string>> = Object.freeze({
   "official.lucky-cat": "招财猫",
@@ -69,6 +71,19 @@ export const OFFICIAL_ASSET_NAMES_ZH: Readonly<Record<string, string>> = Object.
   "zqscreen.baodan-charm": "爆单符",
   "zqscreen.woodpecker-peck": "啄木鸟啄击",
   "zqscreen.zhuan-yun-bead": "转运珠",
-  "zqscreen.treasure-basin": "聚宝盆"
+  "zqscreen.treasure-basin": "聚宝盆",
+  "official.wealth-button": "暴富按钮",
+  "official.offwork-button": "下班按钮"
 });
-export const MAX_ASSETS_PER_DELIVERY = 5;
+export const MAX_ASSETS_PER_DELIVERY = 10;
+export const MAX_LEGACY_ASSETS_PER_DELIVERY = 5;
+export const OFFICIAL_APPEARANCE_BATCH = Object.freeze({
+  id: "official-appearance-batch", version: 2,
+  nameZh: "官方形象包批次", nameEn: "Official Appearance Batch",
+  descriptionZh: "每个形象1元，每批最多10个，无打包优惠。付款仅用于本次下载，再次下载须重新付款或使用有效群码；保存的文件可长期离线使用。",
+  currency: "CNY" as const
+});
+export function appearanceBatchPriceFen(count: number): number {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_ASSETS_PER_DELIVERY) throw new Error("asset_selection_limit_exceeded");
+  return count * 100;
+}

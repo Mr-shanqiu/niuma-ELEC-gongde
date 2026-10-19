@@ -13,9 +13,16 @@
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>appicon</string>
   <key>CFBundleShortVersionString</key><string>@PROJECT_VERSION@</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleVersion</key><string>904.11</string>
   <key>CFBundleDocumentTypes</key>
   <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key><array><string>nmgtext</string></array>
+      <key>CFBundleTypeName</key><string>NiuMa Merit Message Catalog</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSItemContentTypes</key><array><string>cn.niuma.message-catalog</string></array>
+    </dict>
     <dict>
       <key>CFBundleTypeExtensions</key><array><string>nmgpack</string></array>
       <key>CFBundleTypeName</key><string>NiuMa Merit Appearance Pack</string>
@@ -33,6 +40,16 @@
   </array>
   <key>UTExportedTypeDeclarations</key>
   <array>
+    <dict>
+      <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+      <key>UTTypeDescription</key><string>NiuMa Merit Message Catalog</string>
+      <key>UTTypeIdentifier</key><string>cn.niuma.message-catalog</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>nmgtext</string></array>
+        <key>public.mime-type</key><string>application/x-niuma-message-catalog</string>
+      </dict>
+    </dict>
     <dict>
       <key>UTTypeConformsTo</key><array><string>public.zip-archive</string></array>
       <key>UTTypeDescription</key><string>NiuMa Merit Appearance Pack</string>

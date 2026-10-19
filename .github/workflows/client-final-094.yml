@@ -1,0 +1,97 @@
+name: Final 0.9.4 Windows installer
+
+on:
+  push:
+    branches: ['codex/client-094-final-20261019']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-final:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check production identity and full catalog
+        shell: python
+        run: |
+          from pathlib import Path
+          from collections import Counter
+          import json
+          assert Path('VERSION').read_text().strip() == '0.9.4'
+          catalog = json.loads(Path('assets/reminders/official-multilingual-v1.json').read_text(encoding='utf-8'))
+          assert Counter(item['language'] for item in catalog['items']) == {'zh-CN': 800, 'en': 800}
+          assert Path('src/reminder_catalog_data.h').read_text(encoding='utf-8').split('kCatalogItems[] = {', 1)[1].split('\n};', 1)[0].count('  {"') == 1600
+          assert 'Unified Acceptance' not in Path('src/windows/app.cpp').read_text(encoding='utf-8')
+      - name: Verify count and import boundaries before packaging
+        shell: pwsh
+        run: |
+          cmake -S . -B build-windows -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Native test configuration failed' }
+          cmake --build build-windows --config Release --target niuma-presign-boundary-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Native boundary test did not compile' }
+          & ./build-windows/Release/niuma-presign-boundary-test.exe (Join-Path $env:RUNNER_TEMP 'niuma-presign-state')
+          if ($LASTEXITCODE -ne 0) { throw ('Count persistence or import handoff failed: native exit {0} (0x{1:X8})' -f $LASTEXITCODE, ($LASTEXITCODE -band 0xffffffffL)) }
+      - name: Build production client and required importer evidence
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -ExpectedVersion '0.9.4'
+      - name: Package final installer and bind version and bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:WINDOWS_PERPETUAL_STATUS -ne 'PASS') { throw 'Production importer evidence did not pass' }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          & $iscc '/DMyAppVersion=0.9.4' 'installer/windows/niuma-merit.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
+          New-Item -ItemType Directory -Path final-output | Out-Null
+          Copy-Item dist/niuma-merit-windows-0.9.4-setup.exe 'final-output/牛马电子功德-Windows-0.9.4.exe'
+          Copy-Item dist/niuma-merit.exe final-output/niuma-merit.exe
+          & ./scripts/verify-windows-artifact.ps1 -ExecutablePath 'final-output/牛马电子功德-Windows-0.9.4.exe' -ExpectedVersion '0.9.4' -ArtifactKind installer -ReceiptPath final-output/installer-artifact.json
+          if ($LASTEXITCODE -ne 0) { throw 'Installer metadata check failed' }
+          foreach ($name in @('client-artifact.json', 'perpetual-client-artifact.json', 'perpetual-runtime.json')) {
+            Copy-Item (Join-Path $env:WINDOWS_RELEASE_EVIDENCE $name) final-output
+          }
+          Get-ChildItem final-output -Filter '*.exe' | ForEach-Object {
+            @{filename=$_.Name;bytes=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();source=$env:GITHUB_SHA}
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 final-output/BUILD_RECEIPT.json
+      - name: Render default woodfish poses and verify clear feedback band
+        shell: pwsh
+        run: |
+          cmake --build build-windows --config Release --target niuma-woodfish-render-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Native woodfish renderer did not compile' }
+          & ./build-windows/Release/niuma-woodfish-render-test.exe $PWD (Join-Path $PWD 'final-output/woodfish')
+          if ($LASTEXITCODE -ne 0) { throw 'Woodfish poses or feedback separation failed' }
+      - name: Verify count rollover, import handoff and ownership-aware uninstall
+        shell: pwsh
+        run: |
+          & ./scripts/test-windows-presign-uninstall.ps1 -Installer 'final-output/牛马电子功德-Windows-0.9.4.exe' -Helper './build-windows/Release/niuma-presign-boundary-test.exe' -Output 'final-output/uninstall'
+      - name: Record exact client source inputs
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib, json, os
+          names = ['CMakeLists.txt', 'VERSION']
+          for folder in ['src', 'third_party/miniz', 'installer/windows']:
+              names += [p.as_posix() for p in Path(folder).rglob('*') if p.is_file()]
+          names += ['assets/' + name for name in ['woodfish.png', 'mallet.png', 'developer-douyin.png', 'appicon.ico']]
+          files = {name: hashlib.sha256(Path(name).read_bytes().replace(b'\r\n', b'\n') if Path(name).suffix in ['.cpp', '.h', '.txt', '.rc', '.manifest', '.iss', '.mm', '.in', '.strings'] or name == 'VERSION' else Path(name).read_bytes()).hexdigest() for name in sorted(names)}
+          Path('final-output/SOURCE_BINDING.json').write_text(json.dumps({'commit': os.environ['GITHUB_SHA'], 'builtin_counts': {'zh-CN':800,'en':800}, 'normalized_source_sha256':files}, indent=2))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-final-0.9.4
+          path: |
+            final-output/*
+            build-windows/Release/niuma-presign-boundary-test.exe
+            build-windows/release-evidence-*/*.json
+          if-no-files-found: error
+          retention-days: 14

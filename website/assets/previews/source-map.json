@@ -642,7 +642,7 @@
     },
     "woodfish": {
       "id": "builtin.woodfish",
-      "manifestSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
+      "manifestSha256": "e0884aea891bee448a693cebc8b944da66aa8da5a9c06f8bd71a4ba896b0d068",
       "files": {
         "body.png": {
           "source": "assets/woodfish.png",
@@ -657,8 +657,8 @@
           "projection": "exact-copy"
         },
         "manifest.json": {
-          "sourceSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
-          "projectedSha256": "efaf7bf6dfe77fce3c1deda8d73396e5ef23dc3abd111c089f05075f9cab537b",
+          "sourceSha256": "e0884aea891bee448a693cebc8b944da66aa8da5a9c06f8bd71a4ba896b0d068",
+          "projectedSha256": "e0884aea891bee448a693cebc8b944da66aa8da5a9c06f8bd71a4ba896b0d068",
           "projection": "native-code-extraction"
         }
       }

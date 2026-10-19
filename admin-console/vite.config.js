@@ -4,7 +4,7 @@ export default defineConfig({
     base: "/admin/",
     plugins: [react()],
     build: {
-        outDir: "../website/admin",
+        outDir: "dist",
         emptyOutDir: true,
         sourcemap: false
     }

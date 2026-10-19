@@ -1,0 +1,63 @@
+name: Offwork Client Compile Only
+run-name: Offwork compile-only ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - codex/offwork-countdown-20261016
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offwork-client-compile-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-compile:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact source candidate
+        uses: actions/checkout@v4
+
+      - name: Configure Windows x64
+        shell: pwsh
+        run: |
+          cmake -S . -B build-offwork -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
+
+      - name: Compile the client only
+        shell: pwsh
+        run: |
+          cmake --build build-offwork --config Release --target niuma-merit --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Client compilation failed" }
+
+      - name: Bind the unpublished candidate to its source
+        shell: pwsh
+        run: |
+          $exe = Get-Item "build-offwork/Release/niuma-merit.exe"
+          $record = [ordered]@{
+            sourceCommit = $env:GITHUB_SHA
+            sourceVersion = (Get-Content VERSION -Raw).Trim()
+            platform = 'windows-x64'
+            bytes = $exe.Length
+            sha256 = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            candidateOnly = $true
+            clientExecuted = $false
+            productTestsRun = $false
+            installerBuilt = $false
+            published = $false
+          }
+          $record | ConvertTo-Json | Set-Content "build-offwork/build-info.json" -Encoding utf8
+
+      - name: Retain the development executable and source binding
+        uses: actions/upload-artifact@v4
+        with:
+          name: offwork-windows-dev-${{ github.sha }}
+          path: |
+            build-offwork/Release/niuma-merit.exe
+            build-offwork/build-info.json
+          if-no-files-found: error
+          retention-days: 14

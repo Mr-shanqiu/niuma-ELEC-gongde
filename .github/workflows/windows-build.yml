@@ -5,6 +5,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      require_signed_fixtures:
+        description: Require signed importer evidence for a formal 0.9.x installer
+        type: boolean
+        default: true
+      run_legacy_expiry:
+        description: Run unrelated legacy expiry diagnostics (nonblocking)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,13 +29,38 @@ jobs:
 
       - name: Read version
         shell: bash
-        run: echo "VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          [[ "$version" =~ ^0\.9\.[0-9]+$ ]] || { echo "Expected formal version in the 0.9.x series"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Set up fixture archive dependency
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up public-only signature verification dependency
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run reminder core tests in Release configuration
+        shell: powershell
+        run: |
+          cmake -S . -B build-reminder-tests -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Reminder test configuration failed" }
+          cmake --build build-reminder-tests --config Release --target niuma-reminder-activity-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Reminder test build failed" }
+          ctest --test-dir build-reminder-tests -C Release --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw "Reminder core tests failed" }
 
       - name: Build Release package
         shell: powershell
-        run: ./scripts/build-windows.ps1
+        run: ./scripts/build-windows.ps1 -ExpectedVersion $env:VERSION
 
       - name: Verify controlled source expiry regression
+        if: github.event_name == 'workflow_dispatch' && inputs.run_legacy_expiry
+        continue-on-error: true
         shell: pwsh
         run: |
           & ./scripts/test-windows-owner-expiry.ps1 `
@@ -40,7 +74,16 @@ jobs:
         shell: bash
         run: ./scripts/audit-offline.sh
 
+      - name: Require formal release importer evidence
+        if: github.event_name != 'workflow_dispatch' || inputs.require_signed_fixtures
+        shell: powershell
+        run: |
+          if ($env:WINDOWS_PERPETUAL_STATUS -ne 'PASS') {
+            throw "Client compiled, but formal 0.9.x release is blocked: supply frozen signed perpetual/expired fixtures covering both production public keys. No private signing key belongs in this workflow."
+          }
+
       - name: Build Windows installer
+        if: env.WINDOWS_PERPETUAL_STATUS == 'PASS'
         shell: powershell
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -64,11 +107,21 @@ jobs:
           & ./scripts/verify-windows-artifact.ps1 @artifactArguments
 
       - name: Upload Windows installer
+        if: env.WINDOWS_PERPETUAL_STATUS == 'PASS'
         uses: actions/upload-artifact@v4
         with:
           name: niuma-merit-windows-${{ env.VERSION }}-setup
           path: dist/niuma-merit-windows-${{ env.VERSION }}-setup.exe
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Retain client-only build (not formal release evidence)
+        if: always() && env.WINDOWS_PERPETUAL_STATUS != 'PASS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-client-only-${{ env.VERSION }}-${{ github.run_id }}
+          path: dist/niuma-merit-windows-${{ env.VERSION }}-Release.zip
+          if-no-files-found: ignore
           retention-days: 14
 
       - name: Retain Windows artifact version and byte bindings
@@ -82,15 +135,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Retain free-community native runtime evidence
+      - name: Retain perpetual production importer runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: free-community-windows-runtime-${{ github.run_id }}
+          name: perpetual-windows-runtime-${{ github.run_id }}
           path: |
-            build-windows/pack-fixtures/community-runtime-*/fixture-receipt.json
-            build-windows/pack-fixtures/community-runtime-*/runtime-results.json
-            build-windows/pack-fixtures/community-runtime-*/*.stdout.log
-            build-windows/pack-fixtures/community-runtime-*/*.stderr.log
+            build-windows/pack-fixtures/perpetual-runtime-*/fixture-receipt.json
+            build-windows/pack-fixtures/perpetual-runtime-*/runtime-results.json
+            build-windows/pack-fixtures/perpetual-runtime-*/*.stdout.log
+            build-windows/pack-fixtures/perpetual-runtime-*/*.stderr.log
           if-no-files-found: ignore
           retention-days: 14

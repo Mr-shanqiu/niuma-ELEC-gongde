@@ -80,6 +80,15 @@ LocalAppData/NiuMaMerit/Appearances/<id>.nmgpack; InstallBatch() uses that catal
 installer/windows/niuma-merit.iss: per-user Inno install; skipifsilent prevents
 the postinstall auto-launch. /NOICONS avoids shared shortcuts.
 
+CandidateBindingPath plus ExpectedSourceManifestSha256 permits a new native
+build only after all frozen dependencies and this exact helper match the source
+manifest. Without both, the historical client pin remains. No existing workflow
+is redirected. Privacy Escape/close/owner-close are separate fail-closed probes;
+MB_OK has no Cancel button and ignored/confirming Escape/close is not a pass.
+Switching uses observed native menu captions, source-derived DPI-bound picker
+points and an observed Confirm control; captures and restart/zero-exit checks
+are retained. Physical input and visual artwork identity are not asserted.
+
 This evidence is NOT anonymous website download, original production delivery,
 public publication, F1/F2 acceptance, or goal completion.
 #>
@@ -89,7 +98,9 @@ param(
   [Parameter(Mandatory = $true)][string]$ExpectedInstallerSha256,
   [Parameter(Mandatory = $true)][string]$ExpectedClientSha256,
   [Parameter(Mandatory = $true)][string]$SdkManifestPath,
-  [Parameter(Mandatory = $true)][string]$OutputDirectory
+  [Parameter(Mandatory = $true)][string]$OutputDirectory,
+  [string]$CandidateBindingPath = '',
+  [string]$ExpectedSourceManifestSha256 = ''
 )
 
 Set-StrictMode -Version Latest
@@ -135,7 +146,7 @@ $uninstallerBinding = $null
 $failure = $null
 $phase = 'preflight'
 $report = [ordered]@{
-  schema = 'gongde-windows-installed-original-sdk-gui.v2'
+  schema = 'gongde-windows-installed-original-sdk-gui.v3'
   classification = 'ISOLATED_FROZEN_INSTALLER_AND_NORMAL_GUI_ONLY'
   runId = $runId
   startedAt = [DateTime]::UtcNow.ToString('o')
@@ -149,6 +160,11 @@ $report = [ordered]@{
   guiAcceptancePassed = $false
   installer = $null
   installedClient = $null
+  candidateSourceBinding = $null
+  historicalRun37288741395 = 'FAIL 0xC0000005; root cause unproven; not superseded'
+  privacyLifecycleChecksPassed = $false
+  switchingChecksPassed = $false
+  lifecycleCases = [Collections.Generic.List[object]]::new()
   sdkManifest = $null
   inputs = @()
   desktop = $null
@@ -169,6 +185,9 @@ $report = [ordered]@{
     securityPolicyChanged = $false
     signatureTrustBypassed = $false
     syntheticRuntimeHarnessUsed = $false
+    physicalMouseKeyboardInputAccepted = $false
+    artworkVisualIdentityManuallyAccepted = $false
+    absenceOfInputHooksIndependentlyObserved = $false
   }
 }
 
@@ -229,6 +248,61 @@ function Get-RequiredField($Object, [string]$Name) {
   Assert-Condition ($Object -is [pscustomobject] -and $null -ne $Object.PSObject.Properties[$Name]) `
     "Manifest is missing field: $Name"
   return $Object.PSObject.Properties[$Name].Value
+}
+
+function Assert-CandidateBinding {
+  if (-not $CandidateBindingPath) {
+    Assert-Condition (-not $ExpectedSourceManifestSha256) 'Source hash requires CandidateBindingPath.'
+    return
+  }
+  Assert-Condition ($ExpectedSourceManifestSha256 -cmatch '\A[a-f0-9]{64}\z') `
+    'A candidate requires the separately frozen source manifest SHA256.'
+  $binding = Open-BoundFile $CandidateBindingPath
+  Assert-Condition ($binding.bytes -le 1MB) 'Candidate binding exceeds 1 MiB.'
+  $candidate = $utf8.GetString((Read-BoundBytes $binding)) | ConvertFrom-Json
+  Assert-Condition ((Get-RequiredField $candidate 'schema') -ceq 'gongde-windows-native-candidate.v1' -and
+    (Get-RequiredField $candidate 'nativeBuildCompleted') -eq $true -and
+    $null -eq (Get-RequiredField $candidate 'gitSourceRef')) 'Candidate must bind a native byte-frozen build, not a Git sourceRef.'
+  Assert-Condition ((Get-RequiredField $candidate 'sourceManifestSha256') -ceq $ExpectedSourceManifestSha256 -and
+    (Get-RequiredField $candidate 'clientSha256') -ceq $ExpectedClientSha256.ToLowerInvariant() -and
+    (Get-RequiredField $candidate 'installerSha256') -ceq $ExpectedInstallerSha256.ToLowerInvariant()) `
+    'Candidate source/client/installer hashes do not match the supplied frozen identity.'
+  $sourceFile = Open-BoundFile (Get-SafePath (Get-RequiredField $candidate 'sourceManifestPath') `
+    ([IO.Path]::GetDirectoryName($binding.path))) $ExpectedSourceManifestSha256
+  Assert-Condition ($sourceFile.bytes -le 1MB) 'Source binding exceeds 1 MiB.'
+  $source = $utf8.GetString((Read-BoundBytes $sourceFile)) | ConvertFrom-Json
+  Assert-Condition ((Get-RequiredField $source 'schema') -ceq 'gongde-windows-source-freeze.v1' -and
+    (Get-RequiredField $source 'version') -ceq '0.8.4') 'Unsupported frozen source identity.'
+  $root = [IO.Path]::GetDirectoryName($sourceFile.path)
+  $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  $files = @(Get-RequiredField $source 'files')
+  Assert-Condition ($files.Count -ge 16 -and $files.Count -le 64) 'Unexpected dependency count.'
+  foreach ($file in $files) {
+    $relative = Get-RequiredField $file 'path'
+    Assert-Condition ($relative -is [string] -and $relative -cmatch '\A[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\z' -and
+      @($relative.Split('/') | Where-Object { $_ -in @('.', '..') }).Count -eq 0 -and $names.Add($relative)) `
+      'Unsafe or duplicate source binding path.'
+    $sha = Get-RequiredField $file 'sha256'
+    Assert-Condition ($sha -is [string] -and $sha -cmatch '\A[a-f0-9]{64}\z') 'Invalid source SHA256.'
+    Open-BoundFile (Get-SafePath $relative $root) $sha `
+      (Get-Integer (Get-RequiredField $file 'bytes') 'source bytes' 1 83886080) | Out-Null
+  }
+  $app = @($files | Where-Object { $_.path -ceq 'src/windows/app.cpp' })
+  $test = @($files | Where-Object { $_.path -ceq 'scripts/test-windows-startup-lifecycle.py' })
+  $entry = @($files | Where-Object { $_.path -ceq 'scripts/test-windows-installed-community-gui.ps1' })
+  Assert-Condition ($app.Count -eq 1 -and $test.Count -eq 1 -and $entry.Count -eq 1 -and
+    $app[0].sha256 -ceq 'af205298159cf73c16447f6c5cb4a21a229455724496b13396aa7b70d25012e3' -and
+    $test[0].sha256 -ceq 'a7cf61b19fe65da669356affad8cfaa8663d3b48c7177e8397308df81b0bfe43') `
+    'Candidate differs from the locally passed lifecycle source/test.'
+  Open-BoundFile $PSCommandPath $entry[0].sha256 $entry[0].bytes | Out-Null
+  $script:frozenClientSha = $ExpectedClientSha256.ToLowerInvariant()
+  $report.candidateSourceBinding = [ordered]@{
+    candidateBindingPath = $binding.path; candidateBindingSha256 = $binding.sha256
+    sourceManifestPath = $sourceFile.path; sourceManifestSha256 = $sourceFile.sha256
+    appSha256 = $app[0].sha256; lifecycleTestSha256 = $test[0].sha256
+    allFrozenDependenciesMatched = $true; gitSourceRef = $null
+    scope = 'Byte-bound source and same-run native build record, not independent build attestation'
+  }
 }
 
 function Get-Integer($Value, [string]$Field, [long]$Min, [long]$Max) {
@@ -786,6 +860,195 @@ function Confirm-OwnedDialog($Case, $App, $Main, $Dialog, [string]$Stage) {
   }
 }
 
+function Invoke-PrivacyExitCase([string]$Mode, $InputCase) {
+  Assert-NoForeignClient
+  $case = [ordered]@{
+    name = $Mode; result = 'FAIL'; guiPhase = 'await-first-privacy'; appProcess = $null
+    trigger = $Mode; failure = $null; privacyBefore = $null; privacyAfter = $null
+    selectedPackAfter = $null; catalogBefore = Get-CatalogSnapshot; catalogAfter = @()
+    observations = [Collections.Generic.List[object]]::new()
+    controlEvents = [Collections.Generic.List[object]]::new()
+    scope = 'Normal binary, owned close/key messages; not physical input or independent hook observation'
+  }
+  $report.lifecycleCases.Add($case)
+  $case.privacyBefore = [NmgGuiObserver]::PrivacyShown((Join-Path $dataRoot 'data.ini'))
+  Assert-Condition ($case.catalogBefore.Count -eq 0 -and $case.privacyBefore -ne '1') `
+    'Negative first-run cases require no prior import or accepted privacy flag.'
+  Write-Receipt
+  $app = $null
+  try {
+    $app = Start-OwnedProcess $clientPath ('"' + $InputCase.binding.path + '"') ('app-' + $Mode)
+    $case.appProcess = $app.evidence
+    $script:clientStarted = $true
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $main = @(); $dialogs = @()
+    while ($timer.ElapsedMilliseconds -lt 10000) {
+      Assert-Condition (-not $app.handle.HasExited) 'App exited before the first Privacy prompt.'
+      $windows = @([NmgGuiObserver]::Windows($app.evidence.pid))
+      $main = @($windows | Where-Object { $_.ClassName -eq 'NiuMaMeritWindow' })
+      $dialogs = @($windows | Where-Object { $_.ClassName -eq '#32770' })
+      if ($main.Count -eq 1 -and $dialogs.Count -eq 1) { break }
+      Start-Sleep -Milliseconds 100
+    }
+    Assert-Condition ($main.Count -eq 1 -and $dialogs.Count -eq 1 -and
+      $dialogs[0].Owner -eq $main[0].Handle -and
+      $dialogs[0].Title -cin @('Privacy', [regex]::Unescape('\u9690\u79c1\u8bf4\u660e'))) `
+      'No single owned first-run Privacy prompt observed.'
+    Capture-Observation $case $main[0] $dialogs[0] 'before-exit'
+    $event = [ordered]@{ stage = $Mode
+      controls = [NmgGuiObserver]::InspectOkDialog($dialogs[0].Handle, $app.evidence.pid, $main[0].Handle)
+      dispatch = $null; target = $null; requestedAt = [DateTime]::UtcNow.ToString('o')
+      policy = 'Never synthesize IDOK/IDCANCEL results or write app preferences' }
+    $case.controlEvents.Add($event)
+    $case.guiPhase = 'request-unconfirmed-exit'
+    $app.evidence['lastGuiPhase'] = $case.guiPhase
+    Write-Receipt
+    if ($Mode -ceq 'privacy-owner-close') {
+      $event.target = $main[0].Handle
+      $event.dispatch = [NmgGuiObserver]::PostMessage($main[0].Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+    } elseif ($Mode -ceq 'privacy-dialog-close') {
+      $event.target = $dialogs[0].Handle
+      $event.dispatch = [NmgGuiObserver]::PostMessage($dialogs[0].Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+    } else {
+      $event.target = $dialogs[0].Handle
+      $event.dispatch = [NmgGuiObserver]::PostMessage($dialogs[0].Handle, 0x0100, [IntPtr]27, [IntPtr]::Zero)
+      Assert-Condition ([NmgGuiObserver]::PostMessage($dialogs[0].Handle, 0x0101, [IntPtr]27, [IntPtr]::Zero)) `
+        'Could not post owned Privacy Escape key-up.'
+    }
+    Assert-Condition $event.dispatch 'Owned unconfirmed-exit dispatch failed.'
+    Write-Receipt
+    # MB_OK has no Cancel button. Ignored/confirming Escape or close is a
+    # retained failure, never repaired by fallback confirmation or INI edits.
+    Wait-OwnedProcess $app 10000
+    $case.privacyAfter = [NmgGuiObserver]::PrivacyShown((Join-Path $dataRoot 'data.ini'))
+    $case.selectedPackAfter = [NmgGuiObserver]::SelectedPack((Join-Path $dataRoot 'data.ini'))
+    $case.catalogAfter = Get-CatalogSnapshot
+    Assert-Condition (-not $app.evidence.forcedTermination -and $case.privacyAfter -ne '1' -and
+      -not $case.selectedPackAfter -and $case.catalogAfter.Count -eq 0) `
+      'Unconfirmed startup wrote privacy_shown, selected/imported a pack, or failed normal exit.'
+    $case.result = 'PASS'; $case.guiPhase = 'unconfirmed-exit-zero-no-import'
+    Write-Receipt
+  } catch {
+    $case.failure = $_.Exception.Message
+    if ($null -ne $app) {
+      Record-Exit $app
+      $case.privacyAfter = [NmgGuiObserver]::PrivacyShown((Join-Path $dataRoot 'data.ini'))
+      $case.selectedPackAfter = [NmgGuiObserver]::SelectedPack((Join-Path $dataRoot 'data.ini'))
+      $case.catalogAfter = Get-CatalogSnapshot
+    }
+    Write-Receipt
+    throw
+  }
+}
+
+function Wait-OwnedGuiWindow($App, [string]$ClassName, [IntPtr]$Owner = [IntPtr]::Zero) {
+  $timer = [Diagnostics.Stopwatch]::StartNew()
+  while ($timer.ElapsedMilliseconds -lt 5000) {
+    [NmgGuiObserver]::CheckDesktop()
+    Assert-Condition (-not $App.handle.HasExited) "App exited while awaiting $ClassName."
+    $windows = @([NmgGuiObserver]::Windows($App.evidence.pid))
+    Assert-Condition (@($windows | Where-Object { $_.ClassName -eq '#32770' }).Count -eq 0) `
+      'Unexpected native dialog during switching/restart.'
+    $matches = @($windows | Where-Object { $_.ClassName -ceq $ClassName })
+    Assert-Condition ($matches.Count -le 1) "Ambiguous owned $ClassName windows."
+    if ($matches.Count -eq 1 -and [NmgGuiObserver]::Observable($matches[0].Handle)) {
+      if ($Owner -ne [IntPtr]::Zero) { Assert-Condition ($matches[0].Owner -eq $Owner) 'GUI owner identity changed.' }
+      return $matches[0]
+    }
+    Start-Sleep -Milliseconds 100
+  }
+  throw "No observable owned $ClassName within five seconds."
+}
+
+function Open-OwnedMenuItem($Case, $App, $Main, [string]$Caption, [string]$Stage) {
+  $Case.guiPhase = $Stage + ':open-context-menu'
+  $App.evidence['lastGuiPhase'] = $Case.guiPhase
+  Assert-Condition ([NmgGuiObserver]::Observable($Main.Handle) -and
+    [NmgGuiObserver]::PostMessage($Main.Handle, 0x007B, $Main.Handle, [IntPtr](-1))) `
+    'Could not request ordinary owned context menu.'
+  $menu = Wait-OwnedGuiWindow $App '#32768'
+  Capture-Observation $Case $Main $menu ($Stage + '-menu')
+  $target = [NmgGuiObserver]::InspectMenuItem($menu.Handle, $App.evidence.pid, $Caption)
+  $event = [ordered]@{ stage = $Stage; nativeMenuItem = $target; dispatch = $null
+    policy = 'Observed native caption/rectangle; owned mouse messages, no private WM_COMMAND' }
+  $Case.controlEvents.Add($event)
+  Write-Receipt
+  $event.dispatch = [NmgGuiObserver]::ClickNativePoint($target)
+  Assert-Condition $event.dispatch 'Owned native menu click failed.'
+  Write-Receipt
+}
+
+function Invoke-AppearanceSwitchChecks($Case, $App, $Main, $InputCase) {
+  $installedIds = @($inputs.ToArray() | ForEach-Object { $_.packs } |
+    Where-Object { [IO.File]::Exists((Join-Path $catalogDir ($_.id + '.nmgpack'))) } |
+    ForEach-Object { $_.id } | Sort-Object -Unique)
+  Assert-Condition ($installedIds.Count -ge 1 -and $installedIds.Count -le 2) 'Unexpected picker catalog cardinality.'
+  $targets = [Collections.Generic.List[object]]::new()
+  $targets.Add([pscustomobject]@{ id = ''; index = 0; label = 'builtin' })
+  foreach ($pack in $InputCase.packs) {
+    $index = [array]::IndexOf([string[]]$installedIds, [string]$pack.id)
+    Assert-Condition ($index -ge 0) 'Imported original absent from picker catalog.'
+    $targets.Add([pscustomobject]@{ id = $pack.id; index = $index + 1; label = 'pack-' + ($index + 1) })
+  }
+  foreach ($target in $targets) {
+    $stage = 'switch-' + $target.label
+    Open-OwnedMenuItem $Case $App $Main 'Change Appearance' $stage
+    $picker = Wait-OwnedGuiWindow $App 'NiuMaMeritAppearancePicker' $Main.Handle
+    Capture-Observation $Case $Main $picker ($stage + '-picker')
+    $card = [NmgGuiObserver]::InspectPickerCard($picker.Handle, $App.evidence.pid, $Main.Handle, $target.index)
+    $switch = [ordered]@{ expectedPackId = $target.id; card = $card; actualPackId = $null
+      cardDispatch = $null; confirmControl = $null; confirmDispatch = $null; selected = $false
+      geometrySource = 'Frozen app.cpp PickerCardRect; DPI-bound owned client point, not card-text recognition' }
+    $Case.switches.Add($switch)
+    Write-Receipt
+    $switch.cardDispatch = [NmgGuiObserver]::ClickNativePoint($card)
+    Assert-Condition $switch.cardDispatch 'Owned picker card click failed.'
+    Start-Sleep -Milliseconds 150
+    Capture-Observation $Case $Main $picker ($stage + '-pending')
+    $switch.confirmControl = [NmgGuiObserver]::InspectPickerConfirm($picker.Handle, $App.evidence.pid, $Main.Handle)
+    Write-Receipt
+    $switch.confirmDispatch = [NmgGuiObserver]::ClickPickerConfirm($switch.confirmControl, $picker.Handle, $App.evidence.pid, $Main.Handle)
+    Assert-Condition $switch.confirmDispatch.Completed 'Picker Confirm BM_CLICK did not complete.'
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    while ($timer.ElapsedMilliseconds -lt 3000) {
+      Assert-Condition (-not $App.handle.HasExited) 'App exited during selection.'
+      $switch.actualPackId = [NmgGuiObserver]::SelectedPack((Join-Path $dataRoot 'data.ini'))
+      if (-not [NmgGuiObserver]::DialogExistsForProcess($picker.Handle, $App.evidence.pid) -and
+          $switch.actualPackId -ceq $target.id) { $switch.selected = $true; break }
+      Start-Sleep -Milliseconds 100
+    }
+    Assert-Condition $switch.selected 'Native picker did not persist requested appearance.'
+    Start-Sleep -Milliseconds 1000
+    $Main = Wait-OwnedGuiWindow $App 'NiuMaMeritWindow'
+    Capture-Observation $Case $Main $null ($stage + '-rendered')
+  }
+  $Case.switchingObserved = $true
+}
+
+function Invoke-RestartSelectionCheck($Case) {
+  $expected = $Case.switches[$Case.switches.Count - 1].expectedPackId
+  Assert-NoForeignClient
+  $restart = Start-OwnedProcess $clientPath '' ('app-' + $Case.name + '-restart')
+  $Case.restartProcess = $restart.evidence
+  $Case.guiPhase = 'restart-without-import-argument'
+  $restart.evidence['lastGuiPhase'] = $Case.guiPhase
+  Write-Receipt
+  $main = Wait-OwnedGuiWindow $restart 'NiuMaMeritWindow'
+  Start-Sleep -Milliseconds 1000
+  $main = Wait-OwnedGuiWindow $restart 'NiuMaMeritWindow'
+  $Case.restartSelectedPackId = [NmgGuiObserver]::SelectedPack((Join-Path $dataRoot 'data.ini'))
+  Assert-Condition ($Case.restartSelectedPackId -ceq $expected -and
+    [NmgGuiObserver]::PrivacyShown((Join-Path $dataRoot 'data.ini')) -ceq '1') `
+    'Restart did not preserve GUI selection/privacy flag.'
+  Capture-Observation $Case $main $null 'restart-rendered'
+  Assert-Condition ([NmgGuiObserver]::PostMessage($main.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) `
+    'Could not request owned restart closure.'
+  Wait-OwnedProcess $restart 10000
+  Assert-Condition (-not $restart.evidence.forcedTermination) 'Forced restart termination is not acceptance.'
+  $Case.restartSelectionObserved = $true
+  Write-Receipt
+}
+
 function Invoke-GuiCase($InputCase) {
   Assert-NoForeignClient
   $case = [ordered]@{
@@ -794,6 +1057,9 @@ function Invoke-GuiCase($InputCase) {
     actualGuiObserved = $false; normalGuiImportObserved = $false
     successDialogObserved = $false; dialogImportedCount = $null
     actualImportedCount = 0; countEvidence = $null; selectedPackId = $null
+    privacyConfirmationObserved = $false; privacyShownAfter = $null
+    switchingObserved = $false; switches = [Collections.Generic.List[object]]::new()
+    restartProcess = $null; restartSelectedPackId = $null; restartSelectionObserved = $false
     catalogBefore = Get-CatalogSnapshot; catalogAfter = @()
     observations = [Collections.Generic.List[object]]::new()
     controlEvents = [Collections.Generic.List[object]]::new()
@@ -834,6 +1100,7 @@ function Invoke-GuiCase($InputCase) {
         Capture-Observation $case $main[0] $dialog 'privacy'
         $privacySeen = $true
         Confirm-OwnedDialog $case $app $main[0] $dialog 'privacy-confirmation'
+        $case.privacyConfirmationObserved = $true
         $case.guiPhase = 'await-import-success-dialog'
         $app.evidence['lastGuiPhase'] = $case.guiPhase
         continue
@@ -890,13 +1157,24 @@ function Invoke-GuiCase($InputCase) {
       Start-Sleep -Milliseconds 100
     } while ($settle.ElapsedMilliseconds -lt 1000)
     Assert-Condition ($main.Count -eq 1) 'Normal app GUI disappeared after import.'
+    $case.privacyShownAfter = [NmgGuiObserver]::PrivacyShown((Join-Path $dataRoot 'data.ini'))
+    Assert-Condition ($case.privacyShownAfter -ceq '1') 'Confirmed startup did not persist privacy_shown.'
+    if ($InputCase.name -ceq 'amber') {
+      Assert-Condition $case.privacyConfirmationObserved 'Fresh startup must actually confirm Privacy.'
+    }
     Capture-Observation $case $main[0] $null 'normal-app'
+    Invoke-AppearanceSwitchChecks $case $app $main[0] $InputCase
     $case.guiPhase = 'request-normal-app-close'
     $app.evidence['lastGuiPhase'] = $case.guiPhase
-    Assert-Condition ([NmgGuiObserver]::PostMessage($main[0].Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) `
-      'Could not request normal closure of the owned app window.'
+    if ($InputCase.name -ceq 'pair') {
+      Open-OwnedMenuItem $case $app $main[0] 'Exit' 'normal-menu-exit'
+    } else {
+      Assert-Condition ([NmgGuiObserver]::PostMessage($main[0].Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) `
+        'Could not request normal closure of the owned app window.'
+    }
     Wait-OwnedProcess $app 10000
     Assert-Condition (-not $app.evidence.forcedTermination) 'Forced termination is not successful GUI acceptance.'
+    Invoke-RestartSelectionCheck $case
     $case.actualGuiObserved = $true
     $case.normalGuiImportObserved = $true
     $case.result = 'PASS'
@@ -992,6 +1270,8 @@ public static class NmgExclusiveOutputDirectory {
   $outputDirectoryOwned = $true
   $report['outputDirectory'] = $outputRoot
   Assert-Condition ($ExpectedInstallerSha256 -match '^[a-fA-F0-9]{64}$') 'ExpectedInstallerSha256 must be SHA256 hex.'
+  Assert-Condition ($ExpectedClientSha256 -match '^[a-fA-F0-9]{64}$') 'ExpectedClientSha256 must be SHA256 hex.'
+  Assert-CandidateBinding
   Assert-Condition ($ExpectedClientSha256 -match '^[a-fA-F0-9]{64}$' -and
     $ExpectedClientSha256.ToLowerInvariant() -ceq $frozenClientSha) 'ExpectedClientSha256 must match the frozen 0.8.4 client digest.'
 
@@ -1266,6 +1546,19 @@ public sealed class NmgButtonDispatch {
   public IntPtr ForegroundAfter { get; set; }
   public bool ForegroundRequestSucceeded { get; set; }
 }
+public sealed class NmgNativePoint {
+  public IntPtr Window { get; set; }
+  public IntPtr Owner { get; set; }
+  public int ProcessId { get; set; }
+  public string ClassName { get; set; }
+  public string Caption { get; set; }
+  public int Index { get; set; }
+  public uint Dpi { get; set; }
+  public int ClientX { get; set; }
+  public int ClientY { get; set; }
+  public int ScreenX { get; set; }
+  public int ScreenY { get; set; }
+}
 public static class NmgGuiObserver {
   private delegate bool EnumProc(IntPtr window, IntPtr parameter);
   [StructLayout(LayoutKind.Sequential)] private struct Rect { public int L,T,R,B; }
@@ -1300,6 +1593,17 @@ public static class NmgGuiObserver {
   [DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetExitCodeProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process, out uint exitCode);
   [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint bytes, out uint needed);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] private static extern uint GetPrivateProfileString(string section, string key, string fallback, StringBuilder value, uint size, string path);
+  [StructLayout(LayoutKind.Sequential)] private struct MenuBarInfo {
+    public uint Size; public Rect Bar; public IntPtr Menu,MenuWindow; public uint FocusFlags;
+  }
+  [DllImport("user32.dll")] private static extern bool GetMenuBarInfo(IntPtr window,int objectId,int item,ref MenuBarInfo info);
+  [DllImport("user32.dll")] private static extern int GetMenuItemCount(IntPtr menu);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetMenuString(IntPtr menu,uint item,StringBuilder text,int size,uint flags);
+  [DllImport("user32.dll")] private static extern bool GetMenuItemRect(IntPtr window,IntPtr menu,uint item,out Rect rect);
+  [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr window,ref Point point);
+  [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr window,ref Point point);
+  [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr window,out Rect rect);
+  [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
   private static string Class(IntPtr window) {
     var text=new StringBuilder(256); GetClassName(window,text,text.Capacity); return text.ToString();
   }
@@ -1373,6 +1677,12 @@ public static class NmgGuiObserver {
     return item!=null && item.Exists && item.ControlId==1 && item.Parent==dialog && item.Root==dialog &&
       item.ProcessId==(uint)processId && String.Equals(item.ClassName,"Button",StringComparison.OrdinalIgnoreCase);
   }
+  private static bool IsOwnedVisibleOkCaption(NmgControlInspection item,IntPtr dialog,int processId) {
+    return item!=null && item.Exists && item.Visible && item.Enabled && item.TextError==null &&
+      item.Parent==dialog && item.Root==dialog && item.ProcessId==(uint)processId &&
+      String.Equals(item.ClassName,"Button",StringComparison.OrdinalIgnoreCase) &&
+      String.Equals((item.Text??String.Empty).Replace("&",String.Empty).Trim(),"OK",StringComparison.OrdinalIgnoreCase);
+  }
   public static NmgDialogInspection InspectOkDialog(IntPtr dialog,int processId,IntPtr expectedOwner) {
     var title=new StringBuilder(1024); GetWindowText(dialog,title,title.Capacity);
     var snapshot=new NmgDialogInspection {Dialog=dialog,Owner=GetWindow(dialog,4),ExpectedOwner=expectedOwner,
@@ -1406,7 +1716,22 @@ public static class NmgGuiObserver {
         snapshot.Button=item; snapshot.Resolution="EnumChildWindows/GetDlgCtrlID(IDOK)";
       }
     }
-    if(snapshot.Button==null) snapshot.InspectionError="Neither direct lookup nor owned standard-control enumeration resolved IDOK; inspect recorded controls.";
+    if(snapshot.Button==null) {
+      // The observed single-button Privacy message box uses control ID 2
+      // while its actual caption is OK. Resolve that observed control, not
+      // an assumed ID, and retain the original ID in the receipt.
+      NmgControlInspection captionButton=null;
+      foreach(var item in controls) if(IsOwnedVisibleOkCaption(item,dialog,processId)) {
+        if(captionButton!=null) {
+          snapshot.InspectionError="Ambiguous owned visible OK-caption controls."; return snapshot;
+        }
+        captionButton=item;
+      }
+      if(captionButton!=null) {
+        snapshot.Button=captionButton; snapshot.Resolution="Owned unique visible OK-caption button";
+      }
+    }
+    if(snapshot.Button==null) snapshot.InspectionError="Neither standard IDOK nor a unique owned visible OK-caption control was observed; inspect recorded controls.";
     return snapshot;
   }
   private static bool ButtonObservable(NmgControlInspection button,IntPtr dialog) {
@@ -1430,10 +1755,14 @@ public static class NmgGuiObserver {
        WindowProcessId(snapshot.ExpectedOwner)!=(uint)snapshot.ExpectedProcessId ||
        Class(snapshot.ExpectedOwner)!="NiuMaMeritWindow")
       throw new InvalidOperationException("Target dialog/owner identity changed before IDOK dispatch.");
-    if(snapshot.Button==null) throw new InvalidOperationException("No verified standard IDOK control; see recorded enumeration.");
+    if(snapshot.Button==null) throw new InvalidOperationException("No verified owned OK control; see recorded enumeration.");
     var button=ReadControl(snapshot.Button.Handle);
-    if(!IsStandardIdOk(button,dialog,snapshot.ExpectedProcessId))
-      throw new InvalidOperationException("IDOK control ID/class/parent/process identity changed before dispatch.");
+    bool standardResolution=IsStandardIdOk(button,dialog,snapshot.ExpectedProcessId);
+    bool captionResolution=String.Equals(snapshot.Resolution,"Owned unique visible OK-caption button",StringComparison.Ordinal) &&
+      IsOwnedVisibleOkCaption(button,dialog,snapshot.ExpectedProcessId);
+    if((!standardResolution && !captionResolution) || button.ControlId!=snapshot.Button.ControlId ||
+       !String.Equals(button.Text,snapshot.Button.Text,StringComparison.Ordinal))
+      throw new InvalidOperationException("Observed OK control ID/caption/class/parent/process identity changed before dispatch.");
     if(!IsWindowVisible(dialog) || !IsWindowEnabled(dialog) || !button.Visible || !button.Enabled)
       throw new InvalidOperationException("Verified IDOK control or target dialog is hidden/disabled; not a missing-button assertion.");
     if(!Observable(dialog) || !ButtonObservable(button,dialog))
@@ -1458,6 +1787,94 @@ public static class NmgGuiObserver {
   }
   public static string SelectedPack(string path) {
     var value=new StringBuilder(128); GetPrivateProfileString("state","selected_pack_id","",value,128,path); return value.ToString();
+  }
+  public static string PrivacyShown(string path) {
+    var value=new StringBuilder(16); GetPrivateProfileString("state","privacy_shown","0",value,16,path); return value.ToString();
+  }
+  private static void RequireOwnedVisible(IntPtr window,int processId,string className) {
+    CheckDesktop();
+    if(!IsWindow(window)||WindowProcessId(window)!=(uint)processId||Class(window)!=className||
+       !IsWindowVisible(window)||!IsWindowEnabled(window)||!Observable(window))
+      throw new InvalidOperationException("Native UI target is not the owned observable "+className+".");
+  }
+  public static NmgNativePoint InspectMenuItem(IntPtr window,int processId,string caption) {
+    RequireOwnedVisible(window,processId,"#32768");
+    var info=new MenuBarInfo {Size=(uint)Marshal.SizeOf(typeof(MenuBarInfo))};
+    if(!GetMenuBarInfo(window,-4,0,ref info)||info.Menu==IntPtr.Zero)
+      throw new InvalidOperationException("Native popup menu handle unobservable; no private command fallback.");
+    int count=GetMenuItemCount(info.Menu), found=-1;
+    if(count<1||count>16) throw new InvalidOperationException("Unexpected native menu item count.");
+    for(int i=0;i<count;i++) {
+      var text=new StringBuilder(256); GetMenuString(info.Menu,(uint)i,text,text.Capacity,0x400);
+      string actual=text.ToString().Replace("&",String.Empty).Trim();
+      string chinese=caption=="Exit"?"\u9000\u51fa":"\u66f4\u6362\u5f62\u8c61";
+      if(actual==caption||actual==chinese) {
+        if(found>=0) throw new InvalidOperationException("Ambiguous native menu caption.");
+        found=i;
+      }
+    }
+    Rect rect;
+    if(found<0||!GetMenuItemRect(IntPtr.Zero,info.Menu,(uint)found,out rect)||rect.R<=rect.L||rect.B<=rect.T)
+      throw new InvalidOperationException("Native menu item/rectangle not observed.");
+    var screen=new Point {X=rect.L+(rect.R-rect.L)/2,Y=rect.T+(rect.B-rect.T)/2};
+    var client=screen;
+    if(!ScreenToClient(window,ref client)||GetAncestor(WindowFromPoint(screen),2)!=window)
+      throw new InvalidOperationException("Native menu item occluded.");
+    return new NmgNativePoint {Window=window,ProcessId=processId,ClassName="#32768",Caption=caption,Index=found,
+      ClientX=client.X,ClientY=client.Y,ScreenX=screen.X,ScreenY=screen.Y};
+  }
+  public static NmgNativePoint InspectPickerCard(IntPtr window,int processId,IntPtr owner,int index) {
+    RequireOwnedVisible(window,processId,"NiuMaMeritAppearancePicker");
+    if(!IsWindow(owner)||WindowProcessId(owner)!=(uint)processId||Class(owner)!="NiuMaMeritWindow"||
+       GetWindow(window,4)!=owner||index<0||index>2)
+      throw new InvalidOperationException("Picker identity/index outside the bounded check.");
+    uint dpi=GetDpiForWindow(owner);
+    if(dpi<96||dpi>480) throw new InvalidOperationException("Owner DPI unavailable/outside bound.");
+    // Frozen app.cpp PickerCardRect, <=2 installed packs and scrollRow==0.
+    int x=(int)Math.Round((16+(index%2)*172+78)*dpi/96.0,MidpointRounding.AwayFromZero);
+    int y=(int)Math.Round((14+(index/2)*142+65)*dpi/96.0,MidpointRounding.AwayFromZero);
+    Rect rect;
+    var screen=new Point {X=x,Y=y};
+    if(!GetClientRect(window,out rect)||x<0||y<0||x>=rect.R||y>=rect.B||!ClientToScreen(window,ref screen)||
+       WindowFromPoint(screen)!=window)
+      throw new InvalidOperationException("Owned source-derived picker point outside/occluded.");
+    return new NmgNativePoint {Window=window,Owner=owner,ProcessId=processId,ClassName="NiuMaMeritAppearancePicker",
+      Caption="source-derived-card",Index=index,Dpi=dpi,ClientX=x,ClientY=y,ScreenX=screen.X,ScreenY=screen.Y};
+  }
+  public static bool ClickNativePoint(NmgNativePoint point) {
+    if(point==null) throw new InvalidOperationException("Missing native pointer target.");
+    NmgNativePoint now;
+    if(point.ClassName=="#32768") now=InspectMenuItem(point.Window,point.ProcessId,point.Caption);
+    else if(point.ClassName=="NiuMaMeritAppearancePicker") now=InspectPickerCard(point.Window,point.ProcessId,point.Owner,point.Index);
+    else throw new InvalidOperationException("Unapproved native pointer class.");
+    if(now.ClientX!=point.ClientX||now.ClientY!=point.ClientY||now.ScreenX!=point.ScreenX||now.ScreenY!=point.ScreenY||
+       now.Index!=point.Index||now.Dpi!=point.Dpi||now.ClientX<0||now.ClientY<0||now.ClientX>32767||now.ClientY>32767)
+      throw new InvalidOperationException("Native pointer target moved/changed before dispatch.");
+    IntPtr position=new IntPtr((now.ClientY<<16)|(now.ClientX&0xffff));
+    // Owned mouse messages, not global SendInput or private WM_COMMAND.
+    return PostMessage(now.Window,0x0200,IntPtr.Zero,position)&&
+      PostMessage(now.Window,0x0201,new IntPtr(1),position)&&PostMessage(now.Window,0x0202,IntPtr.Zero,position);
+  }
+  public static NmgControlInspection InspectPickerConfirm(IntPtr picker,int processId,IntPtr owner) {
+    RequireOwnedVisible(picker,processId,"NiuMaMeritAppearancePicker");
+    if(GetWindow(picker,4)!=owner||!IsWindow(owner)||WindowProcessId(owner)!=(uint)processId||
+       Class(owner)!="NiuMaMeritWindow") throw new InvalidOperationException("Picker owner changed.");
+    var button=ReadControl(GetDlgItem(picker,1));
+    if(!IsStandardIdOk(button,picker,processId)||!button.Visible||!button.Enabled||button.TextError!=null||
+       (button.Text!="Confirm"&&button.Text!="\u786e\u8ba4")||!ButtonObservable(button,picker))
+      throw new InvalidOperationException("Owned picker Confirm control not observed.");
+    return button;
+  }
+  public static NmgButtonDispatch ClickPickerConfirm(NmgControlInspection expected,IntPtr picker,int processId,IntPtr owner) {
+    var button=InspectPickerConfirm(picker,processId,owner);
+    if(expected==null||button.Handle!=expected.Handle||button.Text!=expected.Text)
+      throw new InvalidOperationException("Picker Confirm identity changed.");
+    var dispatch=new NmgButtonDispatch {Button=button.Handle,TimeoutMs=1500,ForegroundBefore=GetForegroundWindow()};
+    dispatch.ForegroundRequestSucceeded=SetForegroundWindow(picker); dispatch.ForegroundAfter=GetForegroundWindow();
+    IntPtr result;
+    var completed=SendButtonMessageTimeout(button.Handle,0x00F5,IntPtr.Zero,IntPtr.Zero,2,1500,out result);
+    dispatch.Completed=completed!=IntPtr.Zero; dispatch.Win32Error=completed==IntPtr.Zero?Marshal.GetLastWin32Error():0;
+    dispatch.MessageResult=result.ToInt64(); return dispatch;
   }
   public static void Capture(string path) {
     CheckDesktop();
@@ -1541,6 +1958,27 @@ public static class NmgGuiObserver {
     $inputCase = @($inputs.ToArray() | Where-Object { $_.name -ceq $name })[0]
     Invoke-GuiCase $inputCase
   }
+  # Only this initially absent runner profile was owned. Never reset a user's
+  # existing state or alter privacy_shown to manufacture another first run.
+  Assert-OwnedProcessesExited
+  Cleanup-AppArtifacts
+  $phase = 'first-run-privacy-exit'
+  foreach ($mode in @('privacy-owner-close', 'privacy-dialog-close', 'privacy-escape')) {
+    try { Invoke-PrivacyExitCase $mode $amberInput }
+    catch {
+      if (-not $failure) {
+        $failure = $_.Exception.Message
+        $report.failure = [ordered]@{ phase = $phase; message = $failure; observedAt = [DateTime]::UtcNow.ToString('o') }
+      }
+      Stop-OwnedProcesses
+    }
+    # A failed native probe remains FAIL. Another probe is safe only after
+    # exact owned process exit and conservative cleanup of this run's data.
+    Assert-OwnedProcessesExited
+    Cleanup-AppArtifacts
+  }
+  $report.privacyLifecycleChecksPassed = ($report.lifecycleCases.Count -eq 3 -and
+    @($report.lifecycleCases.ToArray() | Where-Object { $_.result -ne 'PASS' }).Count -eq 0)
 } catch {
   $failure = $_.Exception.Message
   $report.failure = [ordered]@{ phase = $phase; message = $failure; observedAt = [DateTime]::UtcNow.ToString('o') }
@@ -1599,7 +2037,12 @@ public static class NmgGuiObserver {
     $owned.handle.Dispose()
   }
   if (-not $failure -and $cleanupErrors.Count -eq 0 -and $report.cleanup.complete -and
-      $report.cases.Count -eq 3 -and @($report.cases.ToArray() | Where-Object { $_.result -ne 'PASS' }).Count -eq 0) {
+      $report.lifecycleCases.Count -eq 3 -and $report.privacyLifecycleChecksPassed -and
+      @($report.lifecycleCases.ToArray() | Where-Object { $_.result -ne 'PASS' }).Count -eq 0 -and
+      $report.cases.Count -eq 3 -and @($report.cases.ToArray() | Where-Object {
+        $_.result -ne 'PASS' -or -not $_.switchingObserved -or -not $_.restartSelectionObserved
+      }).Count -eq 0) {
+    $report.switchingChecksPassed = $true
     $report.guiAcceptancePassed = $true
     $report.result = 'PASS'
   }
@@ -1631,4 +2074,4 @@ if ($report.result -ne 'PASS') {
   [Console]::Error.WriteLine('Frozen installed normal-GUI acceptance failed: ' + $reason)
   throw ('Frozen installed normal-GUI acceptance failed: ' + $reason)
 }
-Write-Output 'WINDOWS_INSTALLED_ORIGINAL_SDK_GUI=PASS counts=1,1,2 scope=isolated-runner-only'
+Write-Output 'WINDOWS_INSTALLED_ORIGINAL_SDK_GUI=PASS counts=1,1,2 privacy-exit=3 switch-and-restart=3 scope=isolated-runner-native-ui-messages-only'

@@ -1,6 +1,16 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <mach/mach_time.h>
 #import "appearance_pack.mm"
+#include "../offwork_clock.h"
+#include "../calendar_month_range.h"
+#include "../reminder_activity.h"
+#include "../reminder_geometry.h"
+#include "../reminder_policy.h"
+#include "../reminder_status.h"
+#include "../reminder_store.h"
+#include "../reminder_catalog_store.h"
+#include "../reminder_catalog_trust.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,13 +18,60 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <unordered_set>
+#import "ui_theme.h"
 
 // Explicit acceptance launches never consult the user's product preferences.
 // The pack root must be an empty, private directory supplied by the runner;
 // invalid or incomplete isolation settings fail before NSApplication starts.
 static BOOL gIsolatedAcceptance = NO;
+static BOOL gReminderPreviewAcceptance = NO;
+static NSString *gAcceptanceRootPath;
+static int gSingleInstanceLockFd = -1;
+
+static std::uint64_t ReminderContinuousTimeMs(void) {
+  static const mach_timebase_info_data_t timebase = [] {
+    mach_timebase_info_data_t value{};
+    mach_timebase_info(&value);
+    return value;
+  }();
+  if (timebase.denom == 0) return 0;
+  const long double nanoseconds = static_cast<long double>(mach_continuous_time()) *
+      timebase.numer / timebase.denom;
+  return static_cast<std::uint64_t>(nanoseconds / 1'000'000.0L);
+}
+
+static BOOL AcquireSingleInstanceLock(void) {
+  NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
+  if (bundleIdentifier.length > 0) {
+    for (NSRunningApplication *application in
+         [NSRunningApplication runningApplicationsWithBundleIdentifier:bundleIdentifier]) {
+      if (application.processIdentifier != getpid()) return NO;
+    }
+  }
+
+  char path[128];
+  const int length = snprintf(path, sizeof(path), "/tmp/niuma-merit-client-%u.lock",
+                              (unsigned)geteuid());
+  if (length <= 0 || (size_t)length >= sizeof(path)) return NO;
+
+  const int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+  if (fd < 0) return NO;
+  struct stat attributes;
+  if (fstat(fd, &attributes) != 0 || !S_ISREG(attributes.st_mode) ||
+      attributes.st_uid != geteuid() || attributes.st_nlink != 1 ||
+      (attributes.st_mode & 0777) != 0600 || flock(fd, LOCK_EX | LOCK_NB) != 0) {
+    close(fd);
+    return NO;
+  }
+  gSingleInstanceLockFd = fd;
+  return YES;
+}
 
 @protocol NMMeritPreferences <NSObject>
 - (id)objectForKey:(NSString *)key;
@@ -60,11 +117,13 @@ static NMEphemeralMeritPreferences *gAcceptancePreferences;
 
 static BOOL InitializeAcceptanceContext(int argc, const char *argv[]) {
   BOOL requested = NO;
+  BOOL reminderPreview = NO;
   for (int index = 1; index < argc; ++index) {
     if (strcmp(argv[index], "--isolated-acceptance") == 0) requested = YES;
+    if (strcmp(argv[index], "--reminder-ui-preview") == 0) reminderPreview = YES;
   }
   const char *rootValue = getenv("NIUMA_ACCEPTANCE_ROOT");
-  if (!requested && !rootValue) return YES;
+  if (!requested && !rootValue && !reminderPreview) return YES;
   if (!requested || !rootValue || !rootValue[0]) return NO;
   NSString *root = [NSString stringWithUTF8String:rootValue];
   if (!root.isAbsolutePath ||
@@ -83,6 +142,8 @@ static BOOL InitializeAcceptanceContext(int argc, const char *argv[]) {
   if (!entries || error || entries.count != 0) return NO;
   gAcceptancePreferences = [[NMEphemeralMeritPreferences alloc] init];
   gIsolatedAcceptance = YES;
+  gReminderPreviewAcceptance = reminderPreview;
+  gAcceptanceRootPath = [root copy];
   return YES;
 }
 
@@ -141,6 +202,16 @@ static NSString *const kTotal = @"total";
 static NSString *const kDailyTotals = @"dailyTotals";
 static NSString *const kSelectedScene = @"selectedScene";
 static NSString *const kSelectedAppearance = @"selectedAppearanceId";
+// Keep countdown preferences and snapshots independent of merit persistence.
+static NSString *const kOffworkEnabled = @"offwork.enabled";
+static NSString *const kOffworkHour = @"offwork.hour";
+static NSString *const kOffworkMinute = @"offwork.minute";
+static NSString *const kOffworkDailySnapshots = @"offwork.dailySnapshots";
+static constexpr CGFloat kOffworkRegionHeight = 96.0;
+static constexpr CGFloat kCalendarLeft = 14.0;
+static constexpr CGFloat kCalendarTop = 112.0;
+static constexpr CGFloat kCalendarCellWidth = 76.0;
+static constexpr CGFloat kCalendarCellHeight = 64.0;
 static constexpr CGFloat kArtworkTop = 170.0;
 static constexpr CGFloat kFeedbackY = 174.0;
 static constexpr CGFloat kCounterY = 210.0;
@@ -159,12 +230,36 @@ static NSString *UiText(NSString *chinese, NSString *english) {
   return IsChineseUI() ? chinese : english;
 }
 
+static NMUiAlert *NMPermissionIntroAlert(NSString *applicationName) {
+  NMUiAlert *alert = [[NMUiAlert alloc] init];
+  alert.messageText = UiText(@"还差一步：开启输入监控", @"One more step: allow Input Monitoring");
+  alert.informativeText = [NSString stringWithFormat:UiText(
+      @"1. 点击下方按钮，打开系统的“输入监控”设置。\n\n2. 为“%@”打开开关。列表中没有时，点“＋”，从“应用程序”中选择它。\n\n3. 按系统提示退出，再重新打开牛马。\n\n只统计操作次数，不读取输入内容。",
+      @"1. Click below to open Input Monitoring in System Settings.\n\n2. Enable “%@”. If it is missing, click + and select it in Applications.\n\n3. Quit when macOS asks, then reopen NiuMa.\n\nOnly operation counts are used; typed content is never read."), applicationName];
+  [alert addButtonWithTitle:UiText(@"去开启输入监控", @"Open Input Monitoring")];
+  [alert addButtonWithTitle:UiText(@"稍后", @"Later")];
+  return alert;
+}
+
+static NSString *OffworkDurationText(long long seconds) {
+  return [NSString stringWithUTF8String:niuma::OffworkDuration(seconds).c_str()];
+}
+
+// Persisted record keys and the calendar grid share the local Gregorian date
+// axis, regardless of the user's preferred display calendar.
+static NSCalendar *RecordCalendar() {
+  NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+  calendar.timeZone = NSTimeZone.localTimeZone;
+  return calendar;
+}
+
 static NSString *DateKeyForDate(NSDate *date) {
   static NSDateFormatter *formatter;
   static dispatch_once_t once;
   dispatch_once(&once, ^{
     formatter = [[NSDateFormatter alloc] init];
     formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.calendar = RecordCalendar();
     formatter.dateFormat = @"yyyy-MM-dd";
   });
   formatter.timeZone = NSTimeZone.localTimeZone;
@@ -225,17 +320,56 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic) BOOL previewOnly;
 @end
 
-@interface MeritController : NSObject <NSApplicationDelegate, NSWindowDelegate>
+@interface MeritController : NSObject <NSApplicationDelegate, NSWindowDelegate> {
+  niuma::OffworkSnapshot _offworkSnapshot;
+  niuma::reminder::ActivitySampler _reminderActivity;
+  niuma::reminder::WallClockGuard _reminderClockGuard;
+  bool _reminderStorageFault;
+  std::unique_ptr<niuma::reminder::ReminderStore> _reminderStore;
+  std::unique_ptr<niuma::reminder::CatalogUpdateStore> _catalogStore;
+  std::shared_ptr<niuma::reminder::ValidatedCatalog> _reminderCatalog;
+  bool _reminderCatalogCommitUncertain;
+}
+@property(nonatomic) BOOL readyForOpenedFiles;
+@property(nonatomic, strong) NSMutableArray<NSString *> *pendingOpenFiles;
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) MeritView *view;
 @property(nonatomic, strong) NSTimer *animationTimer;
 @property(nonatomic, strong) NSTimer *permissionPollTimer;
 @property(nonatomic, strong) NSTimer *saveTimer;
 @property(nonatomic, strong) NSTimer *dayTimer;
+@property(nonatomic, strong) NSTimer *reminderTimer;
+@property(nonatomic, strong) NSPanel *reminderPanel;
+@property(nonatomic, strong) NSTimer *reminderDismissTimer;
 @property(nonatomic, strong) NSWindow *calendarWindow;
 @property(nonatomic, strong) MeritCalendarView *calendarView;
+@property(nonatomic, strong) NSTimer *offworkTimer;
+@property(nonatomic, strong) NSWindow *offworkSettingsWindow;
+@property(nonatomic, strong) NSButton *offworkEnableControl;
+@property(nonatomic, strong) NSPopUpButton *offworkHourControl;
+@property(nonatomic, strong) NSPopUpButton *offworkMinuteControl;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *offworkDailySnapshots;
+@property(nonatomic) BOOL offworkEnabled;
+@property(nonatomic) NSInteger offworkHour;
+@property(nonatomic) NSInteger offworkMinute;
+@property(nonatomic) BOOL offworkDirty;
+@property(nonatomic) BOOL offworkHasSnapshot;
+@property(nonatomic) BOOL offworkSuspended;
+@property(nonatomic) BOOL offworkLayoutExpanded;
+@property(nonatomic) BOOL offworkIsOvertime;
+@property(nonatomic, copy) NSString *offworkDayKey;
+@property(nonatomic, copy) NSString *offworkDisplayLabel;
+@property(nonatomic, copy) NSString *offworkDisplayDuration;
+@property(nonatomic) NSTimeInterval offworkLastSampleUptime;
+@property(nonatomic) NSTimeInterval offworkLastFlushUptime;
 @property(nonatomic) CFMachPortRef eventTap;
 @property(nonatomic) CFRunLoopSourceRef eventSource;
+@property(nonatomic) BOOL eventTapOperationInProgress;
+@property(nonatomic) BOOL eventTapRecoveryStopped;
+@property(nonatomic) BOOL eventTapDisabledPending;
+@property(nonatomic) BOOL eventTapStopping;
+@property(nonatomic) NSUInteger eventTapRecoveryAttempts;
+@property(nonatomic) NSTimeInterval eventTapNextAttempt;
 @property(nonatomic) long long total;
 @property(nonatomic) long long todayTotal;
 @property(nonatomic, copy) NSString *currentDayKey;
@@ -287,6 +421,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (BOOL)hasLiveEventTap;
 - (NSString *)countStatusTitle;
 - (void)receiveGlobalEvent:(CGEventType)type;
+- (void)receiveReminderKeyUp;
+- (void)reminderWillPause:(NSNotification *)notification;
+- (void)reminderDidResume:(NSNotification *)notification;
+- (void)reminderObservationInterrupted:(NSNotification *)notification;
+- (void)evaluateReminderActivity:(NSTimer *)timer;
+- (void)presentReminderForTrigger:(niuma::reminder::ActivitySampler::Trigger)trigger;
+- (void)positionReminderPanel:(NSPanel *)panel;
+- (void)reminderScreensDidChange:(NSNotification *)notification;
+- (void)dismissReminder:(id)sender;
 - (void)countPetClickIfNeeded;
 - (void)showCountStatus:(id)sender;
 - (void)refreshCountStatus:(NSTimer *)timer;
@@ -297,15 +440,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)count;
 - (void)countScrollGesture;
 - (void)showContextMenu:(NSEvent *)event;
+- (NSMenu *)contextMenu;
 - (void)startStrikeWithDuration:(NSTimeInterval)duration;
 - (void)animate:(NSTimer *)timer;
 - (void)showPermissionIntroIfNeeded;
 - (void)requestListenPermission;
 - (void)installEventTap;
+- (void)createEventTapOnce;
 - (void)removeEventTap;
-- (void)handleEventTapDisabled;
+- (void)handleEventTapDisabled:(CGEventType)type;
 - (void)showAbout:(id)sender;
 - (void)showAppearancePicker:(id)sender;
+- (BOOL)importOfficialMessagesAtPath:(NSString *)filename;
 - (void)showMeritCalendar:(id)sender;
 - (void)shiftCalendarMonth:(NSButton *)sender;
 - (void)ensureCurrentDay;
@@ -318,6 +464,16 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)reloadAppearancePacks;
 - (NMAppearancePack *)appearancePackWithId:(NSString *)identifier;
 - (void)applyAppearanceId:(NSString *)identifier;
+- (void)loadOffworkState;
+- (void)startOffworkTimer;
+- (void)refreshOffworkAllowRollover:(BOOL)allowRollover;
+- (void)flushOffwork:(BOOL)durable;
+- (void)showOffworkSettings:(id)sender;
+- (void)offworkEnableChanged:(id)sender;
+- (void)saveOffworkSettings:(id)sender;
+- (void)cancelOffworkSettings:(id)sender;
+- (NSDictionary *)offworkRecordForDay:(NSString *)key;
+- (void)showCalendarDay:(NSString *)key;
 @end
 
 @implementation MeritView
@@ -376,17 +532,19 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                     rect:(NSRect)rect
                     font:(NSFont *)font
                    color:(NSColor *)color {
-  NSColor *glow = [color colorWithAlphaComponent:0.45];
+  NSColor *glow = [NSColor colorWithCalibratedWhite:0 alpha:.8];
   NSMutableParagraphStyle *center = [[NSMutableParagraphStyle alloc] init];
   center.alignment = NSTextAlignmentCenter;
   NSShadow *shadow = [[NSShadow alloc] init];
   shadow.shadowColor = glow;
   shadow.shadowOffset = NSMakeSize(0, -1);
-  shadow.shadowBlurRadius = 3;
+  shadow.shadowBlurRadius = 2;
   NSDictionary *attributes = @{
     NSFontAttributeName: font,
     NSForegroundColorAttributeName: color,
     NSParagraphStyleAttributeName: center,
+    NSStrokeColorAttributeName: [NSColor colorWithCalibratedWhite:0 alpha:.7],
+    NSStrokeWidthAttributeName: @(-2.5),
     NSShadowAttributeName: shadow
   };
   [text drawInRect:rect withAttributes:attributes];
@@ -400,6 +558,14 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAffineTransform *canvas = [NSAffineTransform transform];
   [canvas scaleBy:kUiScale];
   [canvas concat];
+
+  // Extend below the existing canvas, leaving every artwork/counter coordinate intact.
+  [ctx saveGraphicsState];
+  if (!self.previewOnly && self.controller.offworkEnabled) {
+    NSAffineTransform *layout = [NSAffineTransform transform];
+    [layout translateXBy:0 yBy:kOffworkRegionHeight];
+    [layout concat];
+  }
 
   MeritController *controller = self.controller;
   NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
@@ -553,26 +719,44 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   // a scene or one of its moving layers, so it is deliberately drawn last.
   if (!self.previewOnly) {
   NSString *totalText = [NSString stringWithFormat:@"%lld", controller.todayTotal];
-  CGFloat totalFont = totalText.length > 18 ? 24 : 30;
-  if (totalText.length > 24) totalFont = 20;
+  CGFloat totalFont = totalText.length > 18 ? 22 : 26;
+  if (totalText.length > 24) totalFont = 18;
   [self drawCenteredText:totalText
                     rect:NSMakeRect(0, kCounterY, kWindowWidth, 40)
                     font:[NSFont monospacedDigitSystemFontOfSize:totalFont
-                                                         weight:NSFontWeightBold]
-                   color:[NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1]];
+                                                         weight:NSFontWeightRegular]
+                   color:NMUiMeritGold()];
   }
 
-[ctx restoreGraphicsState];
+  [ctx restoreGraphicsState];
+  if (!self.previewOnly && controller.offworkEnabled) {
+    NSColor *color = NMUiMeritGold();
+    [self drawCenteredText:controller.offworkDisplayLabel ?: UiText(@"距下班", @"Until off work")
+                     rect:NSMakeRect(0, 55, kWindowWidth, 28)
+                     font:[NSFont systemFontOfSize:24 weight:NSFontWeightMedium]
+                    color:color];
+    [self drawCenteredText:controller.offworkDisplayDuration ?: @"--:--:--"
+                     rect:NSMakeRect(0, 14, kWindowWidth, 35)
+                     font:[NSFont monospacedDigitSystemFontOfSize:24 weight:NSFontWeightRegular]
+                    color:color];
+  }
+  [ctx restoreGraphicsState];
 }
 
 @end
 
-@interface MeritCalendarView : NSView
+@interface MeritCalendarView : NSView {
+  niuma::CalendarMonthRange _monthRange;
+}
+@property(nonatomic, strong) NSButton *previousButton;
+@property(nonatomic, strong) NSButton *nextButton;
 @property(nonatomic, weak) MeritController *controller;
 @property(nonatomic) NSInteger year;
 @property(nonatomic) NSInteger month;
 - (void)showCurrentMonth;
 - (void)shiftMonth:(NSInteger)delta;
+- (void)reloadMonthRange;
+- (void)refreshNavigation;
 @end
 
 @implementation MeritCalendarView
@@ -580,23 +764,48 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (BOOL)isFlipped { return YES; }
 
 - (void)showCurrentMonth {
-  NSDateComponents *parts = [NSCalendar.currentCalendar
+  NSDateComponents *parts = [RecordCalendar()
       components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
   self.year = parts.year;
   self.month = parts.month;
+  [self reloadMonthRange];
+  [self refreshNavigation];
   [self setNeedsDisplay:YES];
 }
 
+- (void)reloadMonthRange {
+  NSDateComponents *now = [RecordCalendar()
+      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
+  _monthRange = niuma::CalendarMonthRange((int)now.year, (int)now.month);
+  for (NSString *key in self.controller.dailyTotals) {
+    if ([self.controller.dailyTotals[key] longLongValue] > 0 && key.UTF8String)
+      _monthRange.IncludeRecordedDay(std::string_view(key.UTF8String));
+  }
+  for (NSString *key in self.controller.offworkDailySnapshots) {
+    if ([self.controller offworkRecordForDay:key] && key.UTF8String)
+      _monthRange.IncludeRecordedDay(std::string_view(key.UTF8String));
+  }
+}
+
+- (void)refreshNavigation {
+  NSDateComponents *now = [RecordCalendar()
+      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
+  if (_monthRange.last != niuma::CalendarMonthRange::Month((int)now.year, (int)now.month))
+    [self reloadMonthRange];
+  const int selected = _monthRange.Clamp(
+      niuma::CalendarMonthRange::Month((int)self.year, (int)self.month));
+  self.year = selected / 12; self.month = selected % 12 + 1;
+  self.previousButton.enabled = _monthRange.CanShift(selected, -1);
+  self.nextButton.enabled = _monthRange.CanShift(selected, 1);
+}
+
 - (void)shiftMonth:(NSInteger)delta {
-  NSDateComponents *parts = [[NSDateComponents alloc] init];
-  parts.year = self.year;
-  parts.month = self.month + delta;
-  parts.day = 1;
-  NSDate *date = [NSCalendar.currentCalendar dateFromComponents:parts];
-  NSDateComponents *normalized = [NSCalendar.currentCalendar
-      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:date];
-  self.year = normalized.year;
-  self.month = normalized.month;
+  [self refreshNavigation];
+  const int current = niuma::CalendarMonthRange::Month((int)self.year, (int)self.month);
+  const int next = _monthRange.Shift(current, delta < 0 ? -1 : delta > 0 ? 1 : 0);
+  if (next == current) return;
+  self.year = next / 12; self.month = next % 12 + 1;
+  [self refreshNavigation];
   [self setNeedsDisplay:YES];
 }
 
@@ -614,12 +823,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)drawRect:(NSRect)dirtyRect {
   (void)dirtyRect;
-  [[NSColor colorWithCalibratedRed:.97 green:.94 blue:.88 alpha:1] setFill];
+  [NMUiCanvas() setFill];
   NSRectFill(self.bounds);
 
-  NSColor *ink = [NSColor colorWithCalibratedRed:.24 green:.18 blue:.12 alpha:1];
-  NSColor *muted = [NSColor colorWithCalibratedRed:.49 green:.42 blue:.34 alpha:1];
-  NSColor *accent = [NSColor colorWithCalibratedRed:.78 green:.39 blue:.12 alpha:1];
+  NSColor *ink = NMUiInk();
+  NSColor *accent = NMUiMeritGold();
+  [self refreshNavigation];
   NSString *monthTitle = IsChineseUI()
       ? [NSString stringWithFormat:@"%ld 年 %ld 月", (long)self.year, (long)self.month]
       : [NSString stringWithFormat:@"%ld / %02ld", (long)self.year, (long)self.month];
@@ -640,20 +849,21 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSArray<NSString *> *weekdays = IsChineseUI()
       ? @[@"一", @"二", @"三", @"四", @"五", @"六", @"日"]
       : @[@"MON", @"TUE", @"WED", @"THU", @"FRI", @"SAT", @"SUN"];
-  const CGFloat left = 14, top = 112, cellWidth = 76, cellHeight = 51;
+  const CGFloat left = kCalendarLeft, top = kCalendarTop;
+  const CGFloat cellWidth = kCalendarCellWidth, cellHeight = kCalendarCellHeight;
   for (NSInteger column = 0; column < 7; ++column) {
     [self drawText:weekdays[column]
               rect:NSMakeRect(left + column * cellWidth, 94, cellWidth, 20)
-              size:11 color:muted weight:NSFontWeightMedium];
+              size:11 color:ink weight:NSFontWeightMedium];
   }
 
   NSDateComponents *firstParts = [[NSDateComponents alloc] init];
   firstParts.year = self.year; firstParts.month = self.month; firstParts.day = 1;
-  NSDate *firstDate = [NSCalendar.currentCalendar dateFromComponents:firstParts];
-  NSInteger firstWeekday = [NSCalendar.currentCalendar component:NSCalendarUnitWeekday
+  NSDate *firstDate = [RecordCalendar() dateFromComponents:firstParts];
+  NSInteger firstWeekday = [RecordCalendar() component:NSCalendarUnitWeekday
                                                          fromDate:firstDate];
   NSInteger offset = (firstWeekday + 5) % 7;
-  NSRange days = [NSCalendar.currentCalendar rangeOfUnit:NSCalendarUnitDay
+  NSRange days = [RecordCalendar() rangeOfUnit:NSCalendarUnitDay
                                                   inUnit:NSCalendarUnitMonth
                                                  forDate:firstDate];
   NSString *todayKey = DateKeyForDate(NSDate.date);
@@ -665,7 +875,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     NSString *key = [NSString stringWithFormat:@"%04ld-%02ld-%02ld",
         (long)self.year, (long)self.month, (long)day];
     if ([key isEqualToString:todayKey]) {
-      [[NSColor colorWithCalibratedRed:.95 green:.77 blue:.49 alpha:.38] setFill];
+      [[NSColor colorWithCalibratedRed:.89 green:.94 blue:1 alpha:1] setFill];
       [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(cell, 2, 3) xRadius:9 yRadius:9] fill];
     }
     unsigned long long value = self.controller.dailyTotals[key].unsignedLongLongValue;
@@ -674,16 +884,364 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     CGFloat meritSize = meritText.length > 10 ? 10 : (meritText.length > 7 ? 12 : 15);
     [self drawText:meritText
               rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 5, NSWidth(cell) - 4, 22)
-              size:meritSize color:ink weight:NSFontWeightSemibold];
+              size:meritSize color:accent weight:NSFontWeightSemibold];
     [self drawText:dateText
               rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 27, NSWidth(cell) - 4, 16)
-              size:10 color:muted weight:NSFontWeightMedium];
+              size:10 color:ink weight:NSFontWeightMedium];
+    NSDictionary *overtime = [self.controller offworkRecordForDay:key];
+    if (overtime) {
+      NSString *text = [NSString stringWithFormat:@"%@ %@", UiText(@"加班", @"OT"),
+          OffworkDurationText([overtime[@"seconds"] longLongValue])];
+      [self drawText:text
+                rect:NSMakeRect(NSMinX(cell) + 1, NSMinY(cell) + 44, NSWidth(cell) - 2, 14)
+                size:9 color:accent weight:NSFontWeightMedium];
+    }
   }
+}
+
+- (void)mouseDown:(NSEvent *)event {
+  NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+  if (point.x < kCalendarLeft || point.y < kCalendarTop) return;
+  NSInteger column = (NSInteger)((point.x - kCalendarLeft) / kCalendarCellWidth);
+  NSInteger row = (NSInteger)((point.y - kCalendarTop) / kCalendarCellHeight);
+  if (column > 6 || row > 5) return;
+  NSDateComponents *parts = [[NSDateComponents alloc] init];
+  parts.year = self.year; parts.month = self.month; parts.day = 1;
+  NSDate *firstDate = [RecordCalendar() dateFromComponents:parts];
+  NSInteger weekday = [RecordCalendar() component:NSCalendarUnitWeekday fromDate:firstDate];
+  NSInteger day = row * 7 + column - (weekday + 5) % 7 + 1;
+  NSRange days = [RecordCalendar() rangeOfUnit:NSCalendarUnitDay
+      inUnit:NSCalendarUnitMonth forDate:firstDate];
+  if (day < 1 || day > (NSInteger)days.length) return;
+  [self.controller showCalendarDay:[NSString stringWithFormat:@"%04ld-%02ld-%02ld",
+      (long)self.year, (long)self.month, (long)day]];
 }
 
 @end
 
 @implementation MeritController
+
+- (void)loadOffworkState {
+  id<NMMeritPreferences> defaults = MeritPreferences();
+  self.offworkEnabled = [defaults boolForKey:kOffworkEnabled];
+  NSInteger hour = [defaults objectForKey:kOffworkHour] ? [defaults integerForKey:kOffworkHour] : 18;
+  NSInteger minute = [defaults objectForKey:kOffworkMinute] ? [defaults integerForKey:kOffworkMinute] : 0;
+  self.offworkHour = hour >= 0 && hour <= 23 ? hour : 18;
+  self.offworkMinute = minute >= 0 && minute <= 59 ? minute : 0;
+  NSDictionary *stored = [defaults dictionaryForKey:kOffworkDailySnapshots];
+  self.offworkDailySnapshots = stored ? [stored mutableCopy] : [NSMutableDictionary dictionary];
+  self.offworkLastFlushUptime = NSProcessInfo.processInfo.systemUptime;
+}
+
+- (NSDictionary *)offworkRecordForDay:(NSString *)key {
+  id record = self.offworkDailySnapshots[key];
+  if (![record isKindOfClass:NSDictionary.class]) return nil;
+  id seconds = record[@"seconds"], target = record[@"targetMinutes"], sampled = record[@"sampledAt"];
+  if (![seconds isKindOfClass:NSNumber.class] || [seconds longLongValue] <= 0 ||
+      ![target isKindOfClass:NSNumber.class] || [target integerValue] < 0 ||
+      [target integerValue] >= 1440 || ![sampled isKindOfClass:NSNumber.class] ||
+      !std::isfinite([sampled doubleValue])) return nil;
+  return record;
+}
+
+- (void)flushOffwork:(BOOL)durable {
+  if (self.offworkDirty) {
+    [MeritPreferences() setObject:[self.offworkDailySnapshots copy] forKey:kOffworkDailySnapshots];
+    self.offworkDirty = NO;
+  }
+  self.offworkLastFlushUptime = NSProcessInfo.processInfo.systemUptime;
+  // Best effort at lifecycle boundaries only; normal per-second updates stay in memory.
+  if (durable && !gIsolatedAcceptance) [NSUserDefaults.standardUserDefaults synchronize];
+}
+
+- (void)updateOffworkWindowLayout {
+  if (!self.window || self.offworkLayoutExpanded == self.offworkEnabled) return;
+  CGFloat delta = kOffworkRegionHeight * kUiScale * (self.offworkEnabled ? 1 : -1);
+  NSRect frame = self.window.frame;
+  frame.origin.y -= delta;
+  frame.size.height += delta;
+  NSScreen *screen = self.window.screen ?: NSScreen.mainScreen;
+  if (screen) {
+    NSRect visible = screen.visibleFrame;
+    frame.origin.x = MAX(NSMinX(visible), MIN(frame.origin.x, NSMaxX(visible) - NSWidth(frame)));
+    frame.origin.y = MAX(NSMinY(visible), MIN(frame.origin.y, NSMaxY(visible) - NSHeight(frame)));
+  }
+  self.offworkLayoutExpanded = self.offworkEnabled;
+  [self.window setFrame:frame display:NO];
+  [self.view setFrameSize:frame.size];
+  [self.view setNeedsDisplay:YES];
+}
+
+- (void)refreshOffworkAllowRollover:(BOOL)allowRollover {
+  if (!self.offworkEnabled || self.offworkSuspended) return;
+  const time_t now = std::time(nullptr);
+  const NSTimeInterval uptime = NSProcessInfo.processInfo.systemUptime;
+  const auto next = niuma::EvaluateOffwork(now, (int)self.offworkHour, (int)self.offworkMinute);
+  if (!next.valid) {
+    self.offworkHasSnapshot = NO;
+    self.offworkIsOvertime = NO;
+    self.offworkDisplayLabel = UiText(@"时间不可用", @"Time unavailable");
+    self.offworkDisplayDuration = @"--:--:--";
+    [self.view setNeedsDisplay:YES];
+    return;
+  }
+  NSString *key = DateKeyForDate([NSDate dateWithTimeIntervalSince1970:next.sampledAt]);
+  BOOL changedDay = self.offworkHasSnapshot && ![key isEqualToString:self.offworkDayKey];
+  if (changedDay) {
+    double wallGap = std::difftime(next.sampledAt, _offworkSnapshot.sampledAt);
+    double uptimeGap = uptime - self.offworkLastSampleUptime;
+    // Only adjacent live samples may finalize yesterday. Sleep, unlock, clock changes,
+    // long run-loop stalls and missed days must never fabricate a historical day.
+    BOOL continuousMidnight = allowRollover && wallGap >= 0 && wallGap <= 5 &&
+        uptimeGap >= 0 && uptimeGap <= 5 && std::abs(wallGap - uptimeGap) <= 2 &&
+        next.sampledAt >= _offworkSnapshot.nextMidnightAt &&
+        std::difftime(next.sampledAt, _offworkSnapshot.nextMidnightAt) <= 5 &&
+        _offworkSnapshot.targetMinutes == self.offworkHour * 60 + self.offworkMinute;
+    if (continuousMidnight) {
+      long long seconds = niuma::OffworkFinalDaySeconds(_offworkSnapshot);
+      if (seconds > 0) {
+        self.offworkDailySnapshots[self.offworkDayKey] = @{
+          @"seconds": @(seconds), @"targetMinutes": @(_offworkSnapshot.targetMinutes),
+          @"sampledAt": @(_offworkSnapshot.nextMidnightAt - 1),
+          @"targetAt": @(_offworkSnapshot.targetAt)
+        };
+        self.offworkDirty = YES;
+      }
+    }
+  }
+  _offworkSnapshot = next;
+  self.offworkHasSnapshot = YES;
+  self.offworkDayKey = key;
+  self.offworkLastSampleUptime = uptime;
+  self.offworkIsOvertime = next.overtime;
+  self.offworkDisplayLabel = next.overtime ? UiText(@"已加班", @"Overtime")
+                                          : UiText(@"距下班", @"Until off work");
+  self.offworkDisplayDuration = OffworkDurationText(next.overtime ? next.overtimeSeconds : next.remainingSeconds);
+  if (next.overtime && next.overtimeSeconds > 0) {
+    self.offworkDailySnapshots[key] = @{
+      @"seconds": @(next.overtimeSeconds), @"targetMinutes": @(next.targetMinutes),
+      @"sampledAt": @(next.sampledAt), @"targetAt": @(next.targetAt)
+    };
+    self.offworkDirty = YES;
+  } else if (self.offworkDailySnapshots[key]) {
+    // Rewinding the clock or moving today's target forward removes only today's result.
+    [self.offworkDailySnapshots removeObjectForKey:key];
+    self.offworkDirty = YES;
+  }
+  self.view.accessibilityLabel = [NSString stringWithFormat:@"%@ %lld, %@ %@",
+      UiText(@"今日功德", @"Today's merit"), self.todayTotal,
+      self.offworkDisplayLabel, self.offworkDisplayDuration];
+  [self.view setNeedsDisplay:YES];
+  if (self.calendarWindow.isVisible) [self.calendarView setNeedsDisplay:YES];
+  if (changedDay) [self flushOffwork:YES];
+  else if (uptime - self.offworkLastFlushUptime >= 60) [self flushOffwork:NO];
+}
+
+- (void)offworkTick:(NSTimer *)timer {
+  (void)timer;
+  [self refreshOffworkAllowRollover:YES];
+}
+
+- (void)startOffworkTimer {
+  [self.offworkTimer invalidate];
+  self.offworkTimer = nil;
+  [self updateOffworkWindowLayout];
+  if (!self.offworkEnabled) {
+    self.offworkHasSnapshot = NO;
+    self.view.accessibilityLabel = nil;
+    return;
+  }
+  [self refreshOffworkAllowRollover:NO];
+  NSDate *firstTick = [NSDate dateWithTimeIntervalSince1970:std::floor(NSDate.date.timeIntervalSince1970) + 1];
+  self.offworkTimer = [[NSTimer alloc] initWithFireDate:firstTick interval:1
+      target:self selector:@selector(offworkTick:) userInfo:nil repeats:YES];
+  self.offworkTimer.tolerance = .05;
+  [NSRunLoop.mainRunLoop addTimer:self.offworkTimer forMode:NSRunLoopCommonModes];
+  [NSRunLoop.mainRunLoop addTimer:self.offworkTimer forMode:NSModalPanelRunLoopMode];
+}
+
+- (void)offworkWillSleep:(NSNotification *)notification {
+  (void)notification;
+  _reminderActivity.BeginSuspend(ReminderContinuousTimeMs());
+  [self refreshOffworkAllowRollover:YES];
+  [self flushOffwork:YES];
+  self.offworkSuspended = YES;
+}
+
+- (void)offworkClockChanged:(NSNotification *)notification {
+  (void)notification;
+  [NSTimeZone resetSystemTimeZone];
+  tzset();
+  self.offworkSuspended = NO;
+  [self ensureCurrentDay];
+  [self refreshOffworkAllowRollover:NO];
+  [self flushOffwork:YES];
+}
+
+- (void)reminderWillPause:(NSNotification *)notification {
+  (void)notification;
+  _reminderActivity.BeginSuspend(ReminderContinuousTimeMs());
+}
+
+- (void)reminderDidResume:(NSNotification *)notification {
+  (void)notification;
+  const std::uint64_t nowMs = ReminderContinuousTimeMs();
+  const bool paired = _reminderActivity.suspended();
+  const std::uint64_t startMs = _reminderActivity.suspend_started_ms();
+  const bool trusted = paired && nowMs >= startMs;
+  const std::uint64_t duration = trusted ? nowMs - startMs : 0;
+  const bool wasConsumed = _reminderActivity.segment_consumed();
+  _reminderActivity.ResumeFromSuspend(nowMs, paired, trusted, duration);
+  if (wasConsumed && !_reminderActivity.segment_consumed()) {
+    const auto result = _reminderStore
+        ? _reminderStore->SetSegmentConsumed(false,
+            static_cast<std::int64_t>(NSDate.date.timeIntervalSince1970))
+        : niuma::reminder::StoreResult::IoError;
+    if (result != niuma::reminder::StoreResult::Success) {
+      _reminderStorageFault = true;
+      _reminderActivity.RestoreSegmentConsumed(true);
+    } else {
+      _reminderStorageFault = false;
+    }
+  }
+}
+
+- (void)reminderObservationInterrupted:(NSNotification *)notification {
+  if ([notification.name isEqualToString:NSSystemClockDidChangeNotification]) {
+    const auto nowUtc = static_cast<std::int64_t>(NSDate.date.timeIntervalSince1970);
+    const auto nowMs = ReminderContinuousTimeMs();
+    const auto transition = _reminderClockGuard.NotifyClockChange(nowUtc, nowMs);
+    if (transition == niuma::reminder::WallClockGuard::Transition::Guarded && _reminderStore) {
+      NSString *dateText = DateKeyForDate(NSDate.date);
+      if (_reminderStore->SetClockGuard(true, nowUtc, dateText.UTF8String) !=
+          niuma::reminder::StoreResult::Success) _reminderStorageFault = true;
+    }
+  }
+  if (_reminderActivity.suspended()) return;
+  const bool wasConsumed = _reminderActivity.segment_consumed();
+  _reminderActivity.ResumeFromSuspend(ReminderContinuousTimeMs(), false, false, 0);
+  if (wasConsumed) _reminderActivity.RestoreSegmentConsumed(true);
+}
+
+- (void)offworkWillPowerOff:(NSNotification *)notification {
+  (void)notification;
+  [self refreshOffworkAllowRollover:YES];
+  [self flushOffwork:YES];
+}
+
+- (void)showOffworkSettings:(id)sender {
+  (void)sender;
+  if (!self.offworkSettingsWindow) {
+    self.offworkSettingsWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 440, 290)
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+        backing:NSBackingStoreBuffered defer:NO];
+    self.offworkSettingsWindow.title = UiText(@"下班倒计时", @"Off-work Countdown");
+    self.offworkSettingsWindow.releasedWhenClosed = NO;
+    self.offworkSettingsWindow.delegate = self;
+    if (gIsolatedAcceptance) self.offworkSettingsWindow.restorable = NO;
+    NSView *content = self.offworkSettingsWindow.contentView;
+    self.offworkEnableControl = [NSButton checkboxWithTitle:UiText(@"启用下班倒计时", @"Enable off-work countdown")
+        target:self action:@selector(offworkEnableChanged:)];
+    self.offworkEnableControl.frame = NSMakeRect(24, 240, 392, 26);
+    [content addSubview:self.offworkEnableControl];
+    NSTextField *label = [NSTextField labelWithString:UiText(@"下班时间（24小时制）", @"Off-work time (24-hour)")];
+    label.frame = NSMakeRect(24, 196, 214, 24);
+    [content addSubview:label];
+    self.offworkHourControl = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(244, 192, 70, 28) pullsDown:NO];
+    self.offworkMinuteControl = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(336, 192, 70, 28) pullsDown:NO];
+    for (NSInteger hour = 0; hour < 24; ++hour)
+      [self.offworkHourControl addItemWithTitle:[NSString stringWithFormat:@"%02ld", (long)hour]];
+    for (NSInteger minute = 0; minute < 60; ++minute)
+      [self.offworkMinuteControl addItemWithTitle:[NSString stringWithFormat:@"%02ld", (long)minute]];
+    self.offworkHourControl.accessibilityLabel = UiText(@"下班小时", @"Off-work hour");
+    self.offworkMinuteControl.accessibilityLabel = UiText(@"下班分钟", @"Off-work minute");
+    [content addSubview:self.offworkHourControl];
+    [content addSubview:self.offworkMinuteControl];
+    NSTextField *colon = [NSTextField labelWithString:@":"];
+    colon.frame = NSMakeRect(319, 197, 12, 22);
+    [content addSubview:colon];
+    NSTextField *explanation = [NSTextField wrappingLabelWithString:UiText(
+        @"每天按本地下班时间重新计算，超过即为加班。开启时自动保存当天加班快照，关闭保留历史。仅本地运行，不需要输入监控权限，不判断实际劳动或离岗时间。",
+        @"Recalculates daily using local time. Time past your target is overtime. While enabled, daily snapshots are saved; disabling keeps history. Local only, no Input Monitoring needed. This is not work or attendance detection.")];
+    explanation.frame = NSMakeRect(24, 66, 392, 108);
+    explanation.font = [NSFont systemFontOfSize:13];
+    [content addSubview:explanation];
+    NSButton *cancel = [NSButton buttonWithTitle:UiText(@"取消", @"Cancel")
+        target:self action:@selector(cancelOffworkSettings:)];
+    cancel.frame = NSMakeRect(232, 20, 88, 30);
+    cancel.keyEquivalent = @"\033";
+    [content addSubview:cancel];
+    NSButton *save = [NSButton buttonWithTitle:UiText(@"保存", @"Save")
+        target:self action:@selector(saveOffworkSettings:)];
+    save.frame = NSMakeRect(328, 20, 88, 30);
+    save.keyEquivalent = @"\r";
+    [content addSubview:save];
+    NMUiWindow(self.offworkSettingsWindow);
+    [self.offworkSettingsWindow center];
+  }
+  if (!self.offworkSettingsWindow.isVisible) {
+    self.offworkEnableControl.state = self.offworkEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+    [self.offworkHourControl selectItemAtIndex:self.offworkHour];
+    [self.offworkMinuteControl selectItemAtIndex:self.offworkMinute];
+    [self offworkEnableChanged:nil];
+  }
+  [NSApp activateIgnoringOtherApps:YES];
+  [self.offworkSettingsWindow makeKeyAndOrderFront:nil];
+}
+
+- (void)offworkEnableChanged:(id)sender {
+  (void)sender;
+  BOOL enabled = self.offworkEnableControl.state == NSControlStateValueOn;
+  self.offworkHourControl.enabled = enabled;
+  self.offworkMinuteControl.enabled = enabled;
+}
+
+- (void)cancelOffworkSettings:(id)sender {
+  (void)sender;
+  [self.offworkSettingsWindow close];
+}
+
+- (void)saveOffworkSettings:(id)sender {
+  (void)sender;
+  [self refreshOffworkAllowRollover:YES];
+  [self flushOffwork:YES];
+  self.offworkEnabled = self.offworkEnableControl.state == NSControlStateValueOn;
+  self.offworkHour = self.offworkHourControl.indexOfSelectedItem;
+  self.offworkMinute = self.offworkMinuteControl.indexOfSelectedItem;
+  id<NMMeritPreferences> defaults = MeritPreferences();
+  [defaults setBool:self.offworkEnabled forKey:kOffworkEnabled];
+  [defaults setInteger:self.offworkHour forKey:kOffworkHour];
+  [defaults setInteger:self.offworkMinute forKey:kOffworkMinute];
+  [self startOffworkTimer];
+  [self flushOffwork:YES];
+  [self.calendarView setNeedsDisplay:YES];
+  [self.offworkSettingsWindow close];
+}
+
+- (void)showCalendarDay:(NSString *)key {
+  [self refreshOffworkAllowRollover:YES];
+  NSAlert *alert = [[NMUiAlert alloc] init];
+  alert.messageText = key;
+  NSString *merit = [NSString stringWithFormat:@"%@ %llu", UiText(@"功德", @"Merit"),
+      self.dailyTotals[key].unsignedLongLongValue];
+  NSDictionary *record = [self offworkRecordForDay:key];
+  if (record) {
+    NSInteger minutes = [record[@"targetMinutes"] integerValue];
+    NSString *updated = [NSDateFormatter localizedStringFromDate:
+        [NSDate dateWithTimeIntervalSince1970:[record[@"sampledAt"] doubleValue]]
+        dateStyle:NSDateFormatterMediumStyle timeStyle:NSDateFormatterMediumStyle];
+    alert.informativeText = [NSString stringWithFormat:UiText(
+        @"%@\n加班快照：%@\n当日预定下班：%02ld:%02ld\n最后更新：%@\n\n本地时间快照，不代表实际劳动或离岗时刻。历史日期不随当前设置回算。",
+        @"%@\nOvertime snapshot: %@\nOff-work target: %02ld:%02ld\nLast updated: %@\n\nA local time snapshot, not actual work or departure time. Historical dates are not recalculated with current settings."),
+        merit, OffworkDurationText([record[@"seconds"] longLongValue]),
+        (long)(minutes / 60), (long)(minutes % 60), updated];
+  } else {
+    alert.informativeText = [NSString stringWithFormat:@"%@\n\n%@", merit,
+        UiText(@"没有加班快照，不代表当天准时下班。", @"No overtime snapshot. This does not mean an on-time departure.")];
+  }
+  [alert addButtonWithTitle:UiText(@"关闭", @"Close")];
+  [alert runModal];
+}
 
 - (void)loadState {
   id<NMMeritPreferences> defaults = MeritPreferences();
@@ -787,7 +1345,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [defaults setBool:YES forKey:kLaunchAtLoginConfigured];
     [defaults setBool:enabled forKey:kLaunchAtLoginEnabled];
   } else if (showError) {
-    NSAlert *alert = [[NSAlert alloc] init];
+    NSAlert *alert = [[NMUiAlert alloc] init];
     alert.messageText = UiText(@"无法修改登录启动项", @"Unable to change login startup");
     alert.informativeText = error.localizedDescription ?:
         UiText(@"请稍后重试。", @"Please try again later.");
@@ -799,6 +1357,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)configureLaunchAtLogin {
   if (gIsolatedAcceptance) return;
+  // A diagnostic candidate must not rewrite the installed login item's path.
+  if ([NSProcessInfo.processInfo.arguments containsObject:@"--listener-acceptance"]) return;
   id<NMMeritPreferences> defaults = MeritPreferences();
   if ([defaults objectForKey:kLaunchAtLoginConfigured] == nil) {
     [self setLaunchAtLoginEnabled:YES showError:NO];
@@ -829,6 +1389,31 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
   [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
   [self loadState];
+  [self loadOffworkState];
+  if (!gIsolatedAcceptance || gReminderPreviewAcceptance) {
+    NSString *support = gReminderPreviewAcceptance ? gAcceptanceRootPath :
+        NSSearchPathForDirectoriesInDomains(
+            NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    if (support.length > 0) {
+      NSString *reminderPath = [[support stringByAppendingPathComponent:@"NiuMaMerit"]
+          stringByAppendingPathComponent:@"Reminders"];
+      _reminderStore = std::make_unique<niuma::reminder::ReminderStore>(
+          std::filesystem::path(reminderPath.fileSystemRepresentation));
+      _catalogStore = std::make_unique<niuma::reminder::CatalogUpdateStore>(
+          std::filesystem::path(reminderPath.fileSystemRepresentation) / "Catalog");
+      _reminderCatalog = _catalogStore->Load(
+          niuma::reminder::OfficialCatalogSignatureVerifier(), nullptr,
+          &_reminderCatalogCommitUncertain);
+      _reminderActivity.RestoreSegmentConsumed(_reminderStore->SegmentConsumed());
+    }
+  }
+  const std::int64_t reminderStartupUtc =
+      static_cast<std::int64_t>(NSDate.date.timeIntervalSince1970);
+  const std::uint64_t reminderStartupMonotonic = ReminderContinuousTimeMs();
+  const char *reminderStartupDate = DateKeyForDate(NSDate.date).UTF8String;
+  _reminderClockGuard.Start(reminderStartupUtc, reminderStartupMonotonic,
+      _reminderStore && _reminderStore->ClockGuard(reminderStartupUtc,
+          reminderStartupDate ? reminderStartupDate : ""));
   [self configureLaunchAtLogin];
 
   self.view = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, kWindowScaleWidth, kWindowScaleHeight)];
@@ -863,6 +1448,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
   if (restoredFrame) {
     NSRect frame = self.window.frame;
+    // Saved expanded frames use a lower origin; normalize without launch-to-launch drift.
+    frame.origin.y += MAX(0.0, NSHeight(frame) - kWindowScaleHeight);
     frame.size = NSMakeSize(kWindowScaleWidth, kWindowScaleHeight);
     [self.window setFrame:frame display:NO];
   }
@@ -879,9 +1466,39 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [self.window setFrameOrigin:NSMakePoint(NSMaxX(screen.visibleFrame) - 280 * kUiScale,
                                            NSMaxY(screen.visibleFrame) - 270 * kUiScale)];
   }
+  NSNotificationCenter *workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
+  [workspaceCenter addObserver:self selector:@selector(offworkWillSleep:) name:NSWorkspaceWillSleepNotification object:nil];
+  [workspaceCenter addObserver:self selector:@selector(offworkClockChanged:) name:NSWorkspaceDidWakeNotification object:nil];
+  [workspaceCenter addObserver:self selector:@selector(reminderDidResume:) name:NSWorkspaceDidWakeNotification object:nil];
+  [workspaceCenter addObserver:self selector:@selector(offworkClockChanged:) name:NSWorkspaceSessionDidBecomeActiveNotification object:nil];
+  [workspaceCenter addObserver:self selector:@selector(offworkWillPowerOff:) name:NSWorkspaceWillPowerOffNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self
+      selector:@selector(reminderScreensDidChange:)
+      name:NSApplicationDidChangeScreenParametersNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self
+      selector:@selector(reminderScreensDidChange:)
+      name:NSWindowDidMoveNotification object:self.window];
+  [NSNotificationCenter.defaultCenter addObserver:self
+      selector:@selector(reminderScreensDidChange:)
+      name:NSWindowDidResizeNotification object:self.window];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(offworkClockChanged:)
+      name:NSSystemClockDidChangeNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reminderObservationInterrupted:)
+      name:NSSystemClockDidChangeNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(offworkClockChanged:)
+      name:NSSystemTimeZoneDidChangeNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reminderObservationInterrupted:)
+      name:NSSystemTimeZoneDidChangeNotification object:nil];
+  [NSDistributedNotificationCenter.defaultCenter addObserver:self selector:@selector(reminderWillPause:)
+      name:@"com.apple.screenIsLocked" object:nil suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+  [NSDistributedNotificationCenter.defaultCenter addObserver:self selector:@selector(offworkClockChanged:)
+      name:@"com.apple.screenIsUnlocked" object:nil suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+  [NSDistributedNotificationCenter.defaultCenter addObserver:self selector:@selector(reminderDidResume:)
+      name:@"com.apple.screenIsUnlocked" object:nil suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+  [self startOffworkTimer];
   [self.window orderFrontRegardless];
   if (previousAppearanceMissing || self.appearanceLoadError) {
-    NSAlert *notice = [[NSAlert alloc] init];
+    NSAlert *notice = [[NMUiAlert alloc] init];
     notice.alertStyle = NSAlertStyleWarning;
     notice.messageText = UiText(@"部分本地形象未能加载", @"Some Local Packs Are Unavailable");
     notice.informativeText = self.appearanceLoadError.localizedDescription ?: UiText(
@@ -904,6 +1521,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                                   repeats:YES];
   [NSRunLoop.mainRunLoop addTimer:self.dayTimer forMode:NSRunLoopCommonModes];
   [NSRunLoop.mainRunLoop addTimer:self.dayTimer forMode:NSModalPanelRunLoopMode];
+  self.reminderTimer = [NSTimer scheduledTimerWithTimeInterval:1
+      target:self selector:@selector(evaluateReminderActivity:) userInfo:nil repeats:YES];
+  [NSRunLoop.mainRunLoop addTimer:self.reminderTimer forMode:NSRunLoopCommonModes];
+  [NSRunLoop.mainRunLoop addTimer:self.reminderTimer forMode:NSModalPanelRunLoopMode];
   if (!gIsolatedAcceptance) {
     // Monitor tap health even on a silent autostart or after a failed installation.
     self.permissionPollTimer = [NSTimer timerWithTimeInterval:kPermissionPollInterval * 2
@@ -911,11 +1532,46 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSRunLoopCommonModes];
     [NSRunLoop.mainRunLoop addTimer:self.permissionPollTimer forMode:NSModalPanelRunLoopMode];
     [self installEventTap];
-    if (!self.launchedAutomatically) [self showPermissionIntroIfNeeded];
+    [self performSelector:@selector(showPermissionIntroIfNeeded) withObject:nil afterDelay:.7];
   }
+  if (gReminderPreviewAcceptance) {
+    [self presentReminderForTrigger:niuma::reminder::ActivitySampler::Trigger::HighIntensity];
+    // Keep the preview process bounded on CI; this path is available only when
+    // the explicit isolated-acceptance flags and an empty private temp root pass.
+    [NSApp performSelector:@selector(terminate:) withObject:nil
+        afterDelay:niuma::reminder::kReminderDisplayMilliseconds / 1000.0 + 4.0];
+  }
+  self.readyForOpenedFiles = YES;
+  NSArray<NSString *> *pending = [self.pendingOpenFiles copy];
+  self.pendingOpenFiles = nil;
+  if (pending.count) [self application:NSApp openFiles:pending];
 }
 
 - (void)application:(NSApplication *)application openFiles:(NSArray<NSString *> *)filenames {
+  // Finder can deliver a document before launch has initialized the stores.
+  if (!self.readyForOpenedFiles) {
+    if (!self.pendingOpenFiles) self.pendingOpenFiles = [NSMutableArray array];
+    [self.pendingOpenFiles addObjectsFromArray:filenames];
+    return;
+  }
+  BOOL handledCatalog = NO, catalogsSucceeded = YES;
+  NSMutableArray<NSString *> *archives = [NSMutableArray array];
+  for (NSString *filename in filenames) {
+    NSString *extension = filename.pathExtension.lowercaseString;
+    if ([extension isEqualToString:@"nmgtext"]) {
+      handledCatalog = YES;
+      if (![self importOfficialMessagesAtPath:filename]) catalogsSucceeded = NO;
+      continue;
+    }
+    if ([extension isEqualToString:@"nmgpack"] ||
+        [extension isEqualToString:@"nmgpacks"]) [archives addObject:filename];
+  }
+  if (archives.count == 0) {
+    [application replyToOpenOrPrint:handledCatalog && catalogsSucceeded
+        ? NSApplicationDelegateReplySuccess : NSApplicationDelegateReplyFailure];
+    return;
+  }
+  filenames = archives;
   NSMutableSet<NSString *> *previousIds = [NSMutableSet set];
   for (NMAppearancePack *pack in self.installedAppearancePacks)
     [previousIds addObject:pack.identifier];
@@ -985,9 +1641,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.pendingAppearanceId = self.selectedAppearanceId;
     self.appearancePickerAlert.accessoryView = [self appearanceGrid];
   }
-  [application replyToOpenOrPrint:failures.count
+  [application replyToOpenOrPrint:failures.count || !catalogsSucceeded
       ? NSApplicationDelegateReplyFailure : NSApplicationDelegateReplySuccess];
-  NSAlert *alert = [[NSAlert alloc] init];
+  NSAlert *alert = [[NMUiAlert alloc] init];
   alert.alertStyle = failures.count ? NSAlertStyleWarning : NSAlertStyleInformational;
   alert.messageText = singleEnabled
       ? UiText(@"导入完成，已启用此形象", @"Imported and Enabled")
@@ -1029,17 +1685,27 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
   (void)notification;
   [self ensureCurrentDay];
+  [self refreshOffworkAllowRollover:NO];
   [self checkPermission:nil];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
   (void)notification;
+  self.eventTapStopping = YES;
+  [self stopPermissionPoll];
+  [self removeEventTap];
+  [self refreshOffworkAllowRollover:YES];
+  [self flushOffwork:YES];
+  [self.offworkTimer invalidate];
+  self.offworkTimer = nil;
   [self saveState];
   [self.dayTimer invalidate];
+  [self.reminderTimer invalidate];
+  self.reminderTimer = nil;
   [self.countStatusTimer invalidate];
   [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
-  [self removeEventTap];
-  [self stopPermissionPoll];
+  [NSNotificationCenter.defaultCenter removeObserver:self];
+  [NSDistributedNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)startStrikeWithDuration:(NSTimeInterval)duration {
@@ -1059,14 +1725,16 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)showPermissionIntroIfNeeded {
-  if (gIsolatedAcceptance || [MeritPreferences() boolForKey:@"basicGuideShown"]) return;
-  [self showFirstUseGuide:nil];
-  [MeritPreferences() setBool:YES forKey:@"basicGuideShown"];
+  if (gIsolatedAcceptance || [self hasLiveEventTap]) return;
+  NMUiAlert *alert = NMPermissionIntroAlert(
+      NSBundle.mainBundle.bundleURL.lastPathComponent.stringByDeletingPathExtension);
+  const NSModalResponse response = [alert runModal];
+  if (response == NSAlertFirstButtonReturn) [self requestListenPermission];
 }
 
 - (void)showFirstUseGuide:(id)sender {
   (void)sender;
-  NSAlert *alert = [[NSAlert alloc] init];
+  NSAlert *alert = [[NMUiAlert alloc] init];
   alert.messageText = UiText(@"先记住三件事", @"Three Things to Get Started");
   alert.informativeText = UiText(
       @"1. 按住小伙伴拖动，放到喜欢的位置。\n"
@@ -1100,6 +1768,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)receiveGlobalEvent:(CGEventType)type {
+  const std::uint64_t reminderNowMs = ReminderContinuousTimeMs();
+  if (type == kCGEventKeyDown)
+    _reminderActivity.Observe(niuma::reminder::ActivitySampler::Event::KeyDown, reminderNowMs);
+  else if (type == kCGEventScrollWheel)
+    _reminderActivity.Observe(niuma::reminder::ActivitySampler::Event::ScrollPulse, reminderNowMs);
+  else
+    _reminderActivity.Observe(niuma::reminder::ActivitySampler::Event::Click, reminderNowMs);
   self.receivedEvents++;
   if (type == kCGEventKeyDown) self.receivedKeys++;
   else if (type == kCGEventScrollWheel) self.receivedScrolls++;
@@ -1118,6 +1793,211 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   else [self count];
   self.selfCheckCountingEvent = NO;
   if (self.total > before) self.globalCountConfirmed = YES;
+}
+
+- (void)receiveReminderKeyUp {
+  const std::uint64_t nowMs = ReminderContinuousTimeMs();
+  _reminderActivity.Observe(niuma::reminder::ActivitySampler::Event::KeyUp, nowMs);
+}
+
+- (void)evaluateReminderActivity:(NSTimer *)timer {
+  (void)timer;
+  const std::uint64_t nowMs = ReminderContinuousTimeMs();
+  const std::int64_t nowUtc = static_cast<std::int64_t>(NSDate.date.timeIntervalSince1970);
+  const auto clockTransition = _reminderClockGuard.Observe(nowUtc, nowMs);
+  if (clockTransition == niuma::reminder::WallClockGuard::Transition::Guarded) {
+    if (_reminderStore) {
+      NSString *dateText = DateKeyForDate(NSDate.date);
+      if (_reminderStore->SetClockGuard(true, nowUtc, dateText.UTF8String) !=
+          niuma::reminder::StoreResult::Success) _reminderStorageFault = true;
+    }
+    _reminderActivity.ResetForListenerRestart();
+  } else if (clockTransition == niuma::reminder::WallClockGuard::Transition::Recovered) {
+    const auto result = _reminderStore
+        ? _reminderStore->SetClockGuard(false, nowUtc,
+            DateKeyForDate(NSDate.date).UTF8String)
+        : niuma::reminder::StoreResult::Success;
+    if (result != niuma::reminder::StoreResult::Success) {
+      _reminderStorageFault = true;
+      _reminderClockGuard.RestoreGuard();
+    } else {
+      _reminderStorageFault = false;
+    }
+  }
+  const BOOL listenerHealthy = [self hasLiveEventTap] && !_reminderClockGuard.guarded();
+  const bool wasConsumed = _reminderActivity.segment_consumed();
+  const auto trigger = _reminderActivity.Evaluate(nowMs, listenerHealthy);
+  const bool isConsumed = _reminderActivity.segment_consumed();
+  if (wasConsumed && !isConsumed) {
+    const auto result = _reminderStore
+        ? _reminderStore->SetSegmentConsumed(false, nowUtc)
+        : niuma::reminder::StoreResult::IoError;
+    if (result != niuma::reminder::StoreResult::Success) {
+      _reminderStorageFault = true;
+      _reminderActivity.RestoreSegmentConsumed(true);
+    } else {
+      _reminderStorageFault = false;
+    }
+  }
+  if (trigger != niuma::reminder::ActivitySampler::Trigger::None)
+    [self presentReminderForTrigger:trigger];
+}
+
+- (void)presentReminderForTrigger:(niuma::reminder::ActivitySampler::Trigger)trigger {
+  if (!_reminderStore || self.reminderPanel ||
+      (gIsolatedAcceptance && !gReminderPreviewAcceptance)) return;
+  const std::int64_t nowUtc = static_cast<std::int64_t>(NSDate.date.timeIntervalSince1970);
+  if (_reminderStore->SetSegmentConsumed(true, nowUtc) !=
+      niuma::reminder::StoreResult::Success) {
+    _reminderStorageFault = true;
+    return;
+  }
+
+  NSDate *now = NSDate.date;
+  NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+  calendar.timeZone = NSTimeZone.localTimeZone;
+  NSDateComponents *components = [calendar components:(NSCalendarUnitYear | NSCalendarUnitMonth |
+      NSCalendarUnitDay | NSCalendarUnitHour | NSCalendarUnitMinute) fromDate:now];
+  niuma::reminder::SelectionContext context;
+  context.locale = IsChineseUI() ? niuma::reminder::Locale::Chinese : niuma::reminder::Locale::English;
+  NSString *country = NSLocale.currentLocale.countryCode.uppercaseString ?: @"";
+  static NSSet<NSString *> *supportedRegions;
+  static dispatch_once_t regionOnce;
+  dispatch_once(&regionOnce, ^{ supportedRegions = [NSSet setWithArray:@[@"US", @"GB", @"CA", @"AU", @"NZ", @"IE"]]; });
+  context.region = [supportedRegions containsObject:country] ? country.UTF8String : "*";
+  context.trigger = trigger == niuma::reminder::ActivitySampler::Trigger::HighIntensity ? 2U : 1U;
+  context.overtime = self.offworkEnabled && !self.offworkSuspended && self.offworkHasSnapshot
+      ? (self.offworkIsOvertime ? niuma::reminder::Overtime::Yes : niuma::reminder::Overtime::No)
+      : niuma::reminder::Overtime::Unknown;
+  context.year = static_cast<int>(components.year);
+  context.month = static_cast<int>(components.month);
+  context.day = static_cast<int>(components.day);
+  context.minute_of_day = static_cast<int>(components.hour * 60 + components.minute);
+  NSString *dateText = DateKeyForDate(now);
+  const char *dateUtf8 = dateText.UTF8String;
+  const std::string localDate = dateUtf8 ? dateUtf8 : "";
+  std::unordered_set<std::string> recentIds;
+  bool warmUsedToday = false;
+  if (!_reminderStore->ReadSelectionHistory(localDate.c_str(), nowUtc, &recentIds, &warmUsedToday)) {
+    if (!_reminderClockGuard.guarded() &&
+        !_reminderStore->ClockGuard(nowUtc, localDate.c_str()))
+      _reminderStorageFault = true;
+    return;
+  }
+  const niuma::reminder::CatalogView catalogView = _reminderCatalog
+      ? _reminderCatalog->view() : niuma::reminder::kBuiltinCatalogView;
+  const auto candidates = niuma::reminder::EligibleItems(context,
+      [&recentIds](const char *id) { return recentIds.find(id) != recentIds.end(); },
+      catalogView);
+  const niuma::reminder::CatalogItem *item = niuma::reminder::SelectItem(candidates,
+      warmUsedToday, [](std::size_t upper) {
+        return static_cast<std::size_t>(arc4random_uniform(static_cast<uint32_t>(upper)));
+      });
+  if (item == nullptr) return;
+
+  NSString *message = [NSString stringWithUTF8String:item->text];
+  if (message.length == 0) return;
+  NSScreen *screen = self.window.screen ?: NSScreen.mainScreen;
+  if (!screen) return;
+  const CGFloat width = 260;
+  NSFont *font = [NSFont systemFontOfSize:15 weight:NSFontWeightMedium];
+  NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+  paragraph.minimumLineHeight = 22; paragraph.maximumLineHeight = 22;
+  NSDictionary *attributes = @{NSFontAttributeName: font,
+      NSForegroundColorAttributeName:NMUiInk(), NSParagraphStyleAttributeName:paragraph};
+  NSRect textBounds = [message boundingRectWithSize:NSMakeSize(width - 60, CGFLOAT_MAX)
+      options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+      attributes:attributes];
+  const CGFloat height = std::max(64.0, std::ceil(NSHeight(textBounds)) + 40.0);
+  NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, width, height)
+      styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+      backing:NSBackingStoreBuffered defer:NO];
+  if (!panel) return;
+  panel.releasedWhenClosed = NO;
+  panel.level = NSFloatingWindowLevel;
+  panel.hidesOnDeactivate = NO;
+  panel.becomesKeyOnlyIfNeeded = YES;
+  panel.hasShadow = YES;
+  panel.backgroundColor = NSColor.clearColor;
+  panel.opaque = NO;
+  panel.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+  panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorTransient;
+  NMUiBubbleView *content = [[NMUiBubbleView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+  panel.contentView = content;
+  NSTextField *label = [NSTextField wrappingLabelWithString:message];
+  label.attributedStringValue = [[NSAttributedString alloc] initWithString:message attributes:attributes];
+  label.frame = NSMakeRect(20, 20, width - 60, height - 40);
+  label.font = font;
+  label.maximumNumberOfLines = 0;
+  label.lineBreakMode = NSLineBreakByWordWrapping;
+  [content addSubview:label];
+  NSButton *close = [NSButton buttonWithTitle:@"×" target:self action:@selector(dismissReminder:)];
+  close.frame = NSMakeRect(width - 36, height - 36, 24, 24);
+  close.bordered = NO;
+  close.font = [NSFont systemFontOfSize:16 weight:NSFontWeightRegular];
+  if (@available(macOS 10.14, *)) close.contentTintColor = NMUiMuted();
+  close.accessibilityLabel = UiText(@"关闭提醒", @"Close reminder");
+  [content addSubview:close];
+  self.reminderPanel = panel;
+  [self positionReminderPanel:panel];
+  self.reminderDismissTimer = [NSTimer scheduledTimerWithTimeInterval:
+      niuma::reminder::kReminderDisplayMilliseconds / 1000.0
+      target:self selector:@selector(dismissReminder:) userInfo:nil repeats:NO];
+  if (!self.reminderDismissTimer) {
+    [panel orderOut:nil];
+    self.reminderPanel = nil;
+    return;
+  }
+  [NSRunLoop.mainRunLoop addTimer:self.reminderDismissTimer forMode:NSRunLoopCommonModes];
+  const auto reserved = _reminderStore->TryReserve(item->id, localDate.c_str(),
+      std::strcmp(item->tone, "warm") == 0, nowUtc);
+  if (reserved != niuma::reminder::StoreResult::Success) {
+    if (reserved == niuma::reminder::StoreResult::IoError ||
+        reserved == niuma::reminder::StoreResult::InvalidState)
+      _reminderStorageFault = true;
+    [self.reminderDismissTimer invalidate];
+    self.reminderDismissTimer = nil;
+    [panel orderOut:nil];
+    self.reminderPanel = nil;
+    return;
+  }
+  _reminderStorageFault = false;
+  self.reminderDismissTimer.fireDate = [NSDate dateWithTimeIntervalSinceNow:
+      niuma::reminder::kReminderDisplayMilliseconds / 1000.0];
+  [panel orderFrontRegardless];
+}
+
+- (void)positionReminderPanel:(NSPanel *)panel {
+  if (!panel || !self.window) return;
+  NSScreen *screen = self.window.screen ?: NSScreen.mainScreen;
+  if (!screen) return;
+  const CGFloat width = NSWidth(panel.frame);
+  const CGFloat height = NSHeight(panel.frame);
+  NSRect visible = screen.visibleFrame;
+  NSRect mainFrame = self.window.frame;
+  const auto placement = niuma::reminder::PlaceBubble(
+      {NSMinX(mainFrame), NSMinY(mainFrame), NSWidth(mainFrame), NSHeight(mainFrame)},
+      {NSMinX(visible), NSMinY(visible), NSWidth(visible), NSHeight(visible)},
+      width, height, 10, niuma::reminder::VerticalAxis::Up);
+  [panel setFrameOrigin:NSMakePoint(placement.x, placement.y)];
+  if ([panel.contentView isKindOfClass:NMUiBubbleView.class]) {
+    NMUiBubbleView *bubble = (NMUiBubbleView *)panel.contentView;
+    bubble.companionPoint = NSMakePoint(NSMidX(mainFrame) - placement.x, NSMidY(mainFrame) - placement.y);
+    bubble.needsDisplay = YES;
+  }
+}
+
+- (void)reminderScreensDidChange:(NSNotification *)notification {
+  (void)notification;
+  [self positionReminderPanel:self.reminderPanel];
+}
+
+- (void)dismissReminder:(id)sender {
+  (void)sender;
+  [self.reminderDismissTimer invalidate];
+  self.reminderDismissTimer = nil;
+  [self.reminderPanel orderOut:nil];
+  self.reminderPanel = nil;
 }
 
 - (void)showCountStatus:(id)sender {
@@ -1155,6 +2035,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     close.frame = NSMakeRect(442, 18, 118, 32);
     close.autoresizingMask = NSViewMinXMargin;
     [content addSubview:close];
+    NMUiWindow(self.countStatusWindow);
     [self.countStatusWindow center];
   }
   [self.countStatusWindow makeKeyAndOrderFront:nil];
@@ -1201,6 +2082,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
+  // Closing the settings window discards its controls, never commits their values.
+  if (notification.object == self.offworkSettingsWindow) return;
   if (notification.object != self.countStatusWindow) return;
   [self.countStatusTimer invalidate];
   self.countStatusTimer = nil;
@@ -1261,7 +2144,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (gIsolatedAcceptance) return;
   BOOL granted = CGRequestListenEventAccess();
   if (granted) {
-    [self checkPermission:nil];
+    [self installEventTap];
     return;
   }
   NSURL *url = [NSURL URLWithString:
@@ -1281,26 +2164,44 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)checkPermission:(NSTimer *)timer {
   (void)timer;
-  if (gIsolatedAcceptance) return;
-  BOOL allowed = CGPreflightListenEventAccess();
-  // Preflight is advisory: creation/enabled state is the actual result.
-  // In particular, do not tear down a working tap on a stale preflight answer.
-  if (self.eventTap && !CFMachPortIsValid(self.eventTap)) [self removeEventTap];
-  if (self.eventTap && !CGEventTapIsEnabled(self.eventTap)) {
-    self.globalCountConfirmed = NO;
-    if (self.selfCheckActive) self.selfCheckInterrupted = YES;
-    CGEventTapEnable(self.eventTap, true);
-  }
-  if (self.eventTap && !CGEventTapIsEnabled(self.eventTap)) [self removeEventTap];
-  [self installEventTap];
-  self.inputMonitoringAuthorized = self.eventTap && CGEventTapIsEnabled(self.eventTap);
-  if (self.diagnostics) {
-    fprintf(stderr, "listen_allowed=%d tap_valid=%d tap_enabled=%d received=%lu keys=%lu clicks=%lu scrolls=%lu total=%lld\n",
-        allowed, self.eventTap && CFMachPortIsValid(self.eventTap),
-        self.eventTap && CGEventTapIsEnabled(self.eventTap),
-        (unsigned long)self.receivedEvents, (unsigned long)self.receivedKeys,
-        (unsigned long)self.receivedClicks, (unsigned long)self.receivedScrolls, self.total);
-    fflush(stderr);
+  if (gIsolatedAcceptance || self.eventTapStopping || self.eventTapOperationInProgress) return;
+  self.eventTapOperationInProgress = YES;
+  @try {
+    if (self.eventTapRecoveryStopped) {
+      [self removeEventTap];
+      return;
+    }
+    if (self.eventTap && !self.eventTapDisabledPending &&
+        CFMachPortIsValid(self.eventTap) && CGEventTapIsEnabled(self.eventTap)) {
+      self.inputMonitoringAuthorized = YES;
+      return;
+    }
+    // A disabled or invalid tap is retired, never synchronously re-armed.
+    [self removeEventTap];
+    if (self.eventTapRecoveryAttempts >= 3) {
+      self.eventTapRecoveryStopped = YES;
+      self.listenerNeedsCheck = YES;
+      return;
+    }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now < self.eventTapNextAttempt) return;
+    if (!CGPreflightListenEventAccess()) {
+      if (self.diagnostics && self.eventTapNextAttempt == 0) {
+        fprintf(stderr, "tap_permission_preflight=denied tap_create_skipped=1\n");
+      }
+      // Waiting for permission does not create taps or consume a recovery attempt.
+      self.eventTapNextAttempt = now + 2.0;
+      return;
+    }
+    ++self.eventTapRecoveryAttempts;
+    self.eventTapNextAttempt = now + (2.0 * (1U << (self.eventTapRecoveryAttempts - 1)));
+    [self createEventTapOnce];
+    if (!self.inputMonitoringAuthorized && self.eventTapRecoveryAttempts >= 3) {
+      self.eventTapRecoveryStopped = YES;
+      self.listenerNeedsCheck = YES;
+    }
+  } @finally {
+    self.eventTapOperationInProgress = NO;
   }
 }
 
@@ -1311,78 +2212,92 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)installEventTap {
-  if (gIsolatedAcceptance) return;
-  if (self.eventTap) {
-    return;
-  }
+  if (gIsolatedAcceptance || self.eventTapStopping ||
+      self.eventTapOperationInProgress || self.eventTap) return;
+  // Only startup or an explicit retry resets this per-session recovery budget.
+  self.eventTapRecoveryAttempts = 0;
+  self.eventTapNextAttempt = 0;
+  self.eventTapRecoveryStopped = NO;
+  self.eventTapDisabledPending = NO;
+  self.listenerNeedsCheck = NO;
+  _reminderActivity.ResetForListenerRestart();
+  [self checkPermission:nil];
+}
+
+- (void)createEventTapOnce {
+  if (gIsolatedAcceptance || self.eventTapStopping ||
+      self.eventTapRecoveryStopped || !self.eventTapOperationInProgress || self.eventTap) return;
   self.globalCountConfirmed = NO;
-  CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventLeftMouseDown) |
+  CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) |
+                     CGEventMaskBit(kCGEventLeftMouseDown) |
                      CGEventMaskBit(kCGEventRightMouseDown) |
                      CGEventMaskBit(kCGEventOtherMouseDown) |
                      CGEventMaskBit(kCGEventScrollWheel);
-  self.eventTap = CGEventTapCreate(kCGHIDEventTap,
-                                   kCGHeadInsertEventTap,
-                                   kCGEventTapOptionListenOnly,
-                                   mask,
-                                   EventTapCallback,
-                                   (__bridge void *)self);
-  if (self.eventTap) {
-    CGEventTapEnable(self.eventTap, true);
-    if (!CGEventTapIsEnabled(self.eventTap)) {
-      CFRelease(self.eventTap);
-      self.eventTap = nullptr;
-    }
-  }
-  if (!self.eventTap) {
-    self.eventTap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+  const CGEventTapLocation locations[] = {kCGHIDEventTap, kCGSessionEventTap};
+  for (CGEventTapLocation location : locations) {
+    if (self.eventTapStopping || self.eventTapRecoveryStopped) break;
+    self.eventTap = CGEventTapCreate(location, kCGHeadInsertEventTap,
         kCGEventTapOptionListenOnly, mask, EventTapCallback, (__bridge void *)self);
+    if (!self.eventTap) continue;
+    self.eventSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, self.eventTap, 0);
+    if (!self.eventSource) {
+      [self removeEventTap];
+      continue;
+    }
+    CFRunLoopAddSource(CFRunLoopGetMain(), self.eventSource, kCFRunLoopCommonModes);
+    CFRunLoopAddSource(CFRunLoopGetMain(), self.eventSource,
+        (__bridge CFStringRef)NSModalPanelRunLoopMode);
+    // New taps are normally enabled. Do not fight a disabled result from the OS.
+    if (self.eventTapStopping || self.eventTapRecoveryStopped || self.eventTapDisabledPending ||
+        !CFMachPortIsValid(self.eventTap) || !CGEventTapIsEnabled(self.eventTap)) {
+      [self removeEventTap];
+      continue;
+    }
+    self.inputMonitoringAuthorized = YES;
+    break;
   }
   if (self.diagnostics) {
-    fprintf(stderr, "tap_create=%s\n", self.eventTap ? "success" : "denied_or_unavailable");
+    fprintf(stderr, "tap_attempt=%lu tap_attached=%d recovery_stopped=%d\n",
+        (unsigned long)self.eventTapRecoveryAttempts, self.inputMonitoringAuthorized,
+        self.eventTapRecoveryStopped);
     fflush(stderr);
   }
-  if (!self.eventTap) {
-    self.inputMonitoringAuthorized = NO;
-    [self.view setNeedsDisplay:YES];
-    return;
-  }
-
-  self.eventSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, self.eventTap, 0);
-  if (!self.eventSource) { [self removeEventTap]; return; }
-  CFRunLoopAddSource(CFRunLoopGetMain(), self.eventSource, kCFRunLoopCommonModes);
-  CFRunLoopAddSource(CFRunLoopGetMain(), self.eventSource, (__bridge CFStringRef)NSModalPanelRunLoopMode);
-  CGEventTapEnable(self.eventTap, true);
-  self.inputMonitoringAuthorized = CGEventTapIsEnabled(self.eventTap);
-  if (!self.inputMonitoringAuthorized) [self removeEventTap];
   [self.view setNeedsDisplay:YES];
 }
 
 - (void)removeEventTap {
   self.globalCountConfirmed = NO;
   if (self.selfCheckActive) self.selfCheckInterrupted = YES;
-  if (!self.eventTap && !self.eventSource) return;
-  if (self.eventTap) {
-    CGEventTapEnable(self.eventTap, false);
-    CFRelease(self.eventTap);
-    self.eventTap = nullptr;
-  }
-  if (self.eventSource) {
-    CFRunLoopRemoveSource(CFRunLoopGetMain(), self.eventSource, kCFRunLoopCommonModes);
-    CFRunLoopRemoveSource(CFRunLoopGetMain(), self.eventSource, (__bridge CFStringRef)NSModalPanelRunLoopMode);
-    CFRelease(self.eventSource);
-    self.eventSource = nullptr;
-  }
+  // Clear ownership before invalidation, which may run invalidation callbacks.
+  CFMachPortRef tap = self.eventTap;
+  CFRunLoopSourceRef source = self.eventSource;
+  self.eventTap = nullptr;
+  self.eventSource = nullptr;
   self.inputMonitoringAuthorized = NO;
+  self.eventTapDisabledPending = NO;
+  // CFRelease alone does not tear down the WindowServer registration.
+  if (tap) CFMachPortInvalidate(tap);
+  if (source) {
+    CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+    CFRunLoopRemoveSource(CFRunLoopGetMain(), source, (__bridge CFStringRef)NSModalPanelRunLoopMode);
+    CFRelease(source);
+  }
+  if (tap) CFRelease(tap);
 }
 
-- (void)handleEventTapDisabled {
-  if (gIsolatedAcceptance) return;
+- (void)handleEventTapDisabled:(CGEventType)type {
+  if (gIsolatedAcceptance || self.eventTapStopping || !self.eventTap) return;
   self.globalCountConfirmed = NO;
+  self.inputMonitoringAuthorized = NO;
   if (self.selfCheckActive) self.selfCheckInterrupted = YES;
-  if (self.eventTap && CFMachPortIsValid(self.eventTap)) {
-    CGEventTapEnable(self.eventTap, true);
+  self.eventTapDisabledPending = YES;
+  self.eventTapNextAttempt = MAX(self.eventTapNextAttempt,
+      NSProcessInfo.processInfo.systemUptime + 2.0);
+  if (type == kCGEventTapDisabledByUserInput) {
+    self.eventTapRecoveryStopped = YES;
+    self.listenerNeedsCheck = YES;
   }
-  self.inputMonitoringAuthorized = self.eventTap && CGEventTapIsEnabled(self.eventTap);
+  // No synchronous WindowServer calls or resource destruction inside the callback.
 }
 
 - (void)count {
@@ -1441,13 +2356,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.animationTimer = nil;
 }
 
-- (void)showContextMenu:(NSEvent *)event {
+- (NSMenu *)contextMenu {
   NSMenu *menu = [[NSMenu alloc] init];
   NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:UiText(@"关于牛马电子功德", @"About NiuMa Merit")
                                                 action:@selector(showAbout:)
                                          keyEquivalent:@""];
   about.target = self;
-  [menu addItem:about];
   NSMenuItem *launchAtLogin = [[NSMenuItem alloc]
       initWithTitle:UiText(@"登录后自动启动", @"Start at Login")
              action:@selector(toggleLaunchAtLogin:)
@@ -1457,25 +2371,107 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   launchAtLogin.state = self.isLaunchAtLoginEnabled
       ? NSControlStateValueOn
       : NSControlStateValueOff;
-  [menu addItem:launchAtLogin];
   NSMenuItem *appearance = [[NSMenuItem alloc] initWithTitle:UiText(@"更换形象", @"Change Appearance")
                                                      action:@selector(showAppearancePicker:)
                                               keyEquivalent:@""];
   appearance.target = self;
-  [menu addItem:appearance];
   NSMenuItem *calendar = [[NSMenuItem alloc]
       initWithTitle:UiText(@"功德日历…", @"Merit Calendar…")
              action:@selector(showMeritCalendar:)
       keyEquivalent:@""];
   calendar.target = self;
-  [menu addItem:calendar];
-  [menu addItem:NSMenuItem.separatorItem];
+  NSMenuItem *offwork = [[NSMenuItem alloc]
+      initWithTitle:UiText(@"下班倒计时…", @"Off-work Countdown…")
+             action:@selector(showOffworkSettings:) keyEquivalent:@""];
+  offwork.target = self;
+  offwork.state = self.offworkEnabled ? NSControlStateValueOn : NSControlStateValueOff;
   NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:UiText(@"退出", @"Quit")
                                                 action:@selector(terminate:)
                                          keyEquivalent:@""];
   quit.target = NSApp;
-  [menu addItem:quit];
-  [NSMenu popUpContextMenu:menu withEvent:event forView:self.view];
+
+  // The compact pet window is only 120 points wide. Keep the native menu
+  // independent from that canvas size and leave room for checkmarks/padding.
+  // Every command is a normal native row; separator rows would add uneven gaps.
+  NSArray<NSMenuItem *> *entries = @[appearance, calendar, offwork, launchAtLogin, about, quit];
+  for (NSMenuItem *item in entries) [menu addItem:item];
+  NSFont *menuFont = [NSFont systemFontOfSize:14];
+  menu.font = menuFont;
+  if (@available(macOS 11.0, *)) {
+    NSArray *symbols = @[@"person.crop.square", @"calendar", @"clock", @"power", @"info.circle", @"rectangle.portrait.and.arrow.right"];
+    for (NSUInteger index = 0; index < entries.count; ++index) {
+      NSImage *image = [NSImage imageWithSystemSymbolName:symbols[index] accessibilityDescription:nil];
+      image.size = NSMakeSize(16, 16); ((NSMenuItem *)entries[index]).image = image;
+    }
+  }
+  CGFloat widestTitle = 0;
+  for (NSMenuItem *item in menu.itemArray) {
+    if (item.isSeparatorItem) continue;
+    widestTitle = MAX(widestTitle, [item.title sizeWithAttributes:@{
+      NSFontAttributeName: menuFont
+    }].width);
+  }
+  menu.minimumWidth = MAX(240.0, widestTitle + 64.0);
+  return menu;
+}
+
+- (void)showContextMenu:(NSEvent *)event {
+  [NSMenu popUpContextMenu:[self contextMenu] withEvent:event forView:self.view];
+}
+
+- (BOOL)importOfficialMessagesAtPath:(NSString *)filename {
+  if (!_catalogStore) {
+    NSAlert *alert = [[NMUiAlert alloc] init];
+    alert.messageText = UiText(@"无法导入文案包", @"Could Not Import Messages");
+    alert.informativeText = UiText(@"本地文案库暂不可用，请退出应用后重试。",
+        @"The local message catalog is unavailable. Quit the app and try again.");
+    [alert addButtonWithTitle:UiText(@"好", @"OK")];
+    [alert runModal];
+    return NO;
+  }
+  auto result = _catalogStore->InstallFile(
+      std::filesystem::path(filename.fileSystemRepresentation),
+      niuma::reminder::OfficialCatalogSignatureVerifier());
+  if (result.status == niuma::reminder::CatalogInstallStatus::Installed ||
+      result.status == niuma::reminder::CatalogInstallStatus::AlreadyInstalled) {
+    _reminderCatalog = result.catalog;
+    std::size_t chinese = 0, english = 0;
+    for (const auto& item : _reminderCatalog->items) {
+      if (std::strcmp(item.language, "zh-CN") == 0) ++chinese;
+      else if (std::strcmp(item.language, "en") == 0) ++english;
+    }
+    NSString *message = [NSString stringWithFormat:
+        UiText(@"文案库版本 %u 已就绪（中文 %lu 条，英文 %lu 条）。提醒历史保持不变。",
+               @"Message catalog version %u is ready (%lu Chinese, %lu English). Reminder history is unchanged."),
+        _reminderCatalog->content_version, static_cast<unsigned long>(chinese),
+        static_cast<unsigned long>(english)];
+    NSAlert *alert = [[NMUiAlert alloc] init];
+    alert.messageText = UiText(@"文案包已导入", @"Messages Imported");
+    alert.informativeText = message;
+    [alert addButtonWithTitle:UiText(@"好", @"OK")];
+    [alert runModal];
+    return YES;
+  }
+  NSString *message = UiText(@"文件未安装，当前文案库和提醒历史保持不变。请确认文件来自官方并且版本较新。",
+                             @"The file was not installed. Your current catalog and reminder history are unchanged. Check that it is an official, newer catalog.");
+  if (result.status == niuma::reminder::CatalogInstallStatus::CommitUncertain)
+    message = UiText(@"文案库文件已完成本地替换，但系统未确认目录写入已持久保存。当前进程仍使用原文案库；重启后会按本地签名验证结果加载。请勿把本次提示视为已完成导入。提醒历史保持不变。",
+                     @"The catalog files were replaced locally, but the system could not confirm durable directory storage. This process keeps using the previous catalog; after restart, the app will load whichever local catalog passes signature verification. Treat the import as unconfirmed. Reminder history is unchanged.");
+  else if (result.status == niuma::reminder::CatalogInstallStatus::UntrustedSignature)
+    message = UiText(@"签名无效或发布密钥不受信任，当前文案库保持不变。",
+                     @"The signature is invalid or its publisher key is not trusted. Your current catalog is unchanged.");
+  else if (result.status == niuma::reminder::CatalogInstallStatus::Downgrade)
+    message = UiText(@"此文案库版本较旧，不能覆盖已安装的新版本。",
+                     @"This catalog is older than the highest installed version and cannot replace it.");
+  else if (result.status == niuma::reminder::CatalogInstallStatus::SameVersionDifferentContent)
+    message = UiText(@"相同版本号对应了不同内容，文件未安装。",
+                     @"This version number is already associated with different content. The file was not installed.");
+  NSAlert *alert = [[NMUiAlert alloc] init];
+  alert.messageText = UiText(@"无法导入文案包", @"Could Not Import Messages");
+  alert.informativeText = message;
+  [alert addButtonWithTitle:UiText(@"好", @"OK")];
+  [alert runModal];
+  return NO;
 }
 
 - (void)toggleLaunchAtLogin:(id)sender {
@@ -1487,7 +2483,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)sender;
   [self ensureCurrentDay];
   if (!self.calendarWindow) {
-    NSRect frame = NSMakeRect(0, 0, 560, 430);
+    NSRect frame = NSMakeRect(0, 0, 560, 516);
     self.calendarView = [[MeritCalendarView alloc] initWithFrame:frame];
     self.calendarView.controller = self;
     [self.calendarView showCurrentMonth];
@@ -1497,6 +2493,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     NSButton *next = [[NSButton alloc] initWithFrame:NSMakeRect(492, 18, 44, 28)];
     next.title = @">"; next.tag = 1; next.target = self;
     next.action = @selector(shiftCalendarMonth:);
+    previous.accessibilityLabel = UiText(@"上个月", @"Previous month");
+    next.accessibilityLabel = UiText(@"下个月", @"Next month");
+    self.calendarView.previousButton = previous;
+    self.calendarView.nextButton = next;
     [self.calendarView addSubview:previous];
     [self.calendarView addSubview:next];
     self.calendarWindow = [[NSWindow alloc] initWithContentRect:frame
@@ -1506,8 +2506,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.calendarWindow.contentView = self.calendarView;
     self.calendarWindow.releasedWhenClosed = NO;
     if (gIsolatedAcceptance) self.calendarWindow.restorable = NO;
+    NMUiWindow(self.calendarWindow);
     [self.calendarWindow center];
   }
+  [self.calendarView reloadMonthRange];
+  [self.calendarView refreshNavigation];
+  [self.calendarView setNeedsDisplay:YES];
   [NSApp activateIgnoringOtherApps:YES];
   [self.calendarWindow makeKeyAndOrderFront:nil];
 }
@@ -1529,7 +2533,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&error];
   self.appearanceLoadError = error;
   if (error && self.window) {
-    NSAlert *alert = [[NSAlert alloc] init];
+    NSAlert *alert = [[NMUiAlert alloc] init];
     alert.alertStyle = NSAlertStyleWarning;
     alert.messageText = UiText(@"本地形象加载失败", @"Unable to Load Local Packs");
     alert.informativeText = error.localizedDescription;
@@ -1589,7 +2593,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       [thumbnail addRepresentation:rep];
     }
     NSInteger row = i / 2;
-    NSButton *button = [[NSButton alloc] initWithFrame:NSMakeRect((i % 2) * 168,
+    NSButton *button = [[NMUiCardButton alloc] initWithFrame:NSMakeRect((i % 2) * 168,
         gridHeight - (row + 1) * 154 - row * 8, 156, 154)];
     NSMutableArray<NSString *> *badges = [NSMutableArray array];
     if ([item[@"id"] isEqualToString:self.selectedAppearanceId])
@@ -1637,15 +2641,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (self.appearancePickerAlert) {
     self.pendingAppearanceId = self.selectedAppearanceId;
     self.appearancePickerAlert.accessoryView = [self appearanceGrid];
+    [self.appearancePickerAlert layout];
     [self.appearancePickerAlert.window makeKeyAndOrderFront:nil];
     return;
   }
   self.pendingAppearanceId = self.selectedAppearanceId;
   while (YES) {
-    NSAlert *alert = [[NSAlert alloc] init];
+    NSAlert *alert = [[NMUiCenteredAccessoryAlert alloc] init];
     alert.messageText = UiText(@"更换形象", @"Change Appearance");
-    alert.informativeText = UiText(@"当前 = 正在显示；本次新增 = 新加入。选择后点确认才会切换。",
-                                   @"Current = displayed now; New = newly added. Confirm your selection to switch.");
+    alert.informativeText = @"";
     alert.accessoryView = [self appearanceGrid];
     [alert addButtonWithTitle:UiText(@"确认", @"Confirm")];
     [alert addButtonWithTitle:UiText(@"取消", @"Cancel")];
@@ -1673,7 +2677,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     }
     NSError *error = nil;
     if (![NMAppearancePackStore removePack:pack error:&error]) {
-      NSAlert *failure = [[NSAlert alloc] init];
+      NSAlert *failure = [[NMUiAlert alloc] init];
       failure.messageText = UiText(@"无法删除形象包", @"Unable to Remove Appearance Pack");
       failure.informativeText = error.localizedDescription ?: @"";
       [failure runModal];
@@ -1689,31 +2693,33 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)showAbout:(id)sender {
   (void)sender;
-  NSAlert *alert = [[NSAlert alloc] init];
+  NSAlert *alert = [[NMUiAlert alloc] init];
   alert.messageText = UiText(@"牛马电子功德", @"NiuMa Merit");
   NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?";
   NSString *aboutText = [NSString stringWithFormat:UiText(
       @"版本 %@\n\n"
        @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
-       @"所有数据仅保存在本机，本软件不包含网络请求、遥测或自动更新。\n\n"
+       @"本软件不包含网络请求、遥测或自动更新。\n\n"
        @"在其他应用中计数，需要允许本应用使用“输入监控”。\n"
+       @"如仍未正常计数，可联系开发者或扫码进粉丝群寻求帮助。\n"
        @"Mac 权限与计数帮助\n\n"
-       @"客户端源代码依 GPLv3 许可证开放。\n\n"
        @"官方网站：\n"
        @"https://gongde.zqscreen.cn/\n\n"
-       @"欢迎关注开发者抖音\n"
-       @"@山丘 / 抖音号：1872941388",
+       @"扫码进粉丝群，免费领取权益包。\n"
+       @"和我一起学习 AI，创建并上架你的专属形象包。\n"
+       @"抖音号：1872941388",
       @"Version %@\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
        @"specific input, mouse positions, or window information.\n"
-       @"All data stays on this computer. The app contains no network requests, telemetry, or automatic updates.\n\n"
+       @"The app contains no network requests, telemetry, or automatic updates.\n\n"
        @"Counting in other apps requires Input Monitoring permission.\n"
+       @"If input is still not being counted, contact the developer or scan the Douyin code to join the fan group for help.\n"
        @"Mac permissions and counting help\n\n"
-       @"Client source code is available under GPLv3.\n\n"
        @"Official website:\n"
        @"https://gongde.zqscreen.cn/\n\n"
-       @"Follow the developer on Douyin\n"
-       @"@Shanqiu / Douyin ID: 1872941388"), version];
+       @"Scan with Douyin to join the fan group and claim free benefit packs.\n"
+       @"Learn AI with me, and create and publish your own appearance packs.\n"
+       @"Douyin ID: 1872941388"), version];
   NSString *douyinPath = [NSBundle.mainBundle pathForResource:@"developer-douyin" ofType:@"png"];
   NSImage *douyinImage = douyinPath ? [[NSImage alloc] initWithContentsOfFile:douyinPath] : nil;
   NSScreen *screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;
@@ -1731,6 +2737,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
         NSLinkAttributeName: @"https://gongde.zqscreen.cn/help-macos.html",
         NSForegroundColorAttributeName: NSColor.linkColor,
         NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)} range:helpRange];
+  }
+  NSRange promoRange = [aboutText rangeOfString:UiText(
+      @"扫码进粉丝群，免费领取权益包。",
+      @"Scan with Douyin to join the fan group and claim free benefit packs.")];
+  if (promoRange.location != NSNotFound) {
+    NSMutableParagraphStyle *promoStyle = [[NSMutableParagraphStyle alloc] init];
+    promoStyle.alignment = NSTextAlignmentCenter;
+    [bodyText addAttribute:NSParagraphStyleAttributeName value:promoStyle
+        range:NSMakeRange(promoRange.location, aboutText.length - promoRange.location)];
   }
   CGFloat textHeight = ceil([bodyText boundingRectWithSize:NSMakeSize(contentWidth, CGFLOAT_MAX)
       options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading].size.height) + 4.0;
@@ -1755,8 +2770,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     code.image = douyinImage;
     code.imageScaling = NSImageScaleProportionallyUpOrDown;
     code.imageAlignment = NSImageAlignCenter;
-    code.toolTip = UiText(@"使用抖音扫一扫，关注开发者山丘", @"Scan with Douyin to find the developer");
-    code.accessibilityLabel = UiText(@"开发者山丘的抖音码，抖音号 1872941388",
+    code.toolTip = UiText(@"使用抖音扫一扫，进粉丝群领取权益包或寻求帮助",
+                         @"Scan with Douyin to join the fan group for benefit packs or help");
+    code.accessibilityLabel = UiText(@"开发者抖音码，抖音号 1872941388",
                                      @"Developer Douyin code, ID 1872941388");
     [content addSubview:code];
   }
@@ -1794,7 +2810,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy proxy,
   if (gIsolatedAcceptance) return event;
   MeritController *controller = (__bridge MeritController *)context;
   if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
-    [controller handleEventTapDisabled];
+    [controller handleEventTapDisabled:type];
+  } else if (type == kCGEventKeyUp) {
+    [controller receiveReminderKeyUp];
   } else if (type == kCGEventScrollWheel || type == kCGEventKeyDown ||
              type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown ||
              type == kCGEventOtherMouseDown) {
@@ -1805,6 +2823,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy proxy,
 
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
+    if (!AcquireSingleInstanceLock()) {
+      fprintf(stderr, "niuma_merit_already_running_or_lock_unavailable\n");
+      return 0;
+    }
     if (!InitializeAcceptanceContext(argc, argv)) {
       fprintf(stderr, "isolated_acceptance_configuration_invalid\n");
       return 2;

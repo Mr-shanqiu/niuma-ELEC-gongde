@@ -1,0 +1,55 @@
+/* English-only overrides; retain the existing bamboo-green paper palette. */
+html:lang(en) { --english-heading: Georgia, "Times New Roman", serif; }
+html:lang(en) body { font-family: "Trebuchet MS", "Helvetica Neue", sans-serif; line-height: 1.65; }
+html:lang(en) :is(h1,h2,h3,.hero-title) { font-family: var(--english-heading); letter-spacing: -.025em; word-break: normal; overflow-wrap: break-word; }
+html:lang(en) h1 { line-height: 1.12; text-wrap: balance; }
+html:lang(en) :is(p,li,label,summary) { word-break: normal; overflow-wrap: anywhere; }
+html:lang(en) :is(button,.button,.back,.flow-actions a,.journey-footer-links a) { white-space: normal; height: auto; min-height: 44px; line-height: 1.35; overflow: visible; text-overflow: clip; max-width: 100%; text-align: center; }
+html:lang(en) :is(.flow-actions,.journey-main-actions,.journey-footer-links,.journey-selection-summary) { flex-wrap: wrap; gap: 12px; }
+html:lang(en) :is(.flow-layout,.step-grid,.hero,.v4-hero) > * { min-width: 0; }
+html:lang(en) :is(.nav,.v4-nav) { flex-wrap: wrap; height: auto; gap: 16px 24px; }
+html:lang(en) :is(.nav,.v4-nav) > nav { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px 20px; min-width: 0; }
+html:lang(en) :is(.nav,.v4-nav) nav a { white-space: normal; line-height: 1.35; }
+html:lang(en) .brand { flex-shrink: 0; white-space: nowrap; }
+html:lang(en) .brand-seal { font-family: Georgia, serif; }
+html:lang(en) .v4-nav { height: auto !important; min-height: 76px; padding-top: 14px !important; padding-bottom: 14px !important; }
+html:lang(en) .hero-v4 h1 { font-family: var(--english-heading); }
+html:lang(en) .guide-shell .guide-hero h1 { white-space: normal; max-width: 26ch; }
+html:lang(en) .journey-dialog h2 { font-family: var(--english-heading); font-size: 25px; }
+html:lang(en) .characters .section-heading { padding-right: 0; }
+html:lang(en) .library-controls { position: static; width: min(540px,100%); margin: 0 0 20px !important; }
+html:lang(en) .library-card:not(.library-card-free) h3:after { content: 'CNY 1'; font-size: 12px; }
+html:lang(en) .library-card h3 { align-items: flex-start; }
+html:lang(en) .library-card h3 a { overflow-wrap: anywhere; }
+html:lang(en) .selection-toolbar-row { flex-wrap: wrap; gap: 12px; }
+html:lang(en) .selection-toolbar #selection-claim { min-width: 145px; }
+html:lang(en) .selection-toolbar #v4-group-claim { min-width: 170px; }
+html:lang(en) .site-language, .site-language { flex: none; min-height: 34px; padding: 5px 12px; border: 1px solid #9cad8f; border-radius: 999px; background: transparent; color: #3c5431; font: inherit; font-size: 12px; cursor: pointer; }
+html:lang(en) .v4-counter-caption { letter-spacing: .02em; }
+html:lang(en) .eyebrow { letter-spacing: .08em; white-space: normal; }
+html:lang(en) :is(input,textarea,select) { font: inherit; max-width: 100%; min-width: 0; }
+html:lang(en) select { white-space: normal; height: auto; min-height: 44px; }
+html:lang(en) :is(.flow-panel,.step-copy,.journey-dialog-inner,.legal-shell) { min-width: 0; }
+html:lang(en) :is(.flow-panel,.step-copy,.legal-shell) p { text-wrap: pretty; }
+html:lang(en) :is(.step-card svg,.step-card svg text) { font-family: "Trebuchet MS", sans-serif; }
+html:lang(en) .step-card svg text { font-size: 10px; letter-spacing: -.15px; }
+html:lang(en) .step-card svg text[font-weight="700"] { font-size: 12px; }
+html:lang(en) .v4-footer { gap: 24px; flex-wrap: wrap; }
+html:lang(en) .v4-footer nav { display: flex; flex-wrap: wrap; gap: 12px 20px; }
+.locale-app-language-note,.locale-image-note { display: none; }
+html:lang(en) .locale-app-language-note { display: block; max-width: 74ch; margin: 24px auto; padding: 16px 20px; border: 1px solid #b8c6b4; border-radius: 12px; background: #edf0e5; color: #354d3d; font-size: .94rem; }
+html:lang(en) .locale-image-note { display: block; max-width: 56ch; margin: 12px 0; font-size: .9rem; line-height: 1.6; }
+@media (min-width: 1000px) {
+  html:lang(en) :is(.hero h1,.v4-hero h1) { font-size: clamp(3.1rem,5.2vw,5.25rem); max-width: 14ch; }
+  html:lang(en) :is(.nav,.v4-nav) > nav { flex: 1 1 620px; }
+  html:lang(en) .step-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 760px) {
+  html:lang(en) .characters .section-heading { padding-right: 0; }
+  html:lang(en) :is(.nav,.v4-nav) { align-items: flex-start; gap: 14px; }
+  html:lang(en) :is(.nav,.v4-nav) > nav { justify-content: flex-start; width: 100%; gap: 12px 16px; }
+  html:lang(en) :is(.hero h1,.v4-hero h1) { font-size: clamp(2.5rem,10vw,4rem); }
+  html:lang(en) :is(.flow-actions,.journey-main-actions) > * { flex: 1 1 180px; }
+  html:lang(en) .step-grid { grid-template-columns: minmax(0,1fr); }
+  html:lang(en) .locale-app-language-note { margin: 16px; }
+}

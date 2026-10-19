@@ -158,6 +158,10 @@ export class AdminObjectStore {
   }
 
   async delete(kind: AdminFileKind, name: string): Promise<void> {
+    // Missing reference/retention records never establish that an installer is
+    // unused. Keep compatibility, release, rollback, and historical artifacts.
+    // Enforce this before any COS request, including for non-HTTP callers.
+    if (kind === "installer") throw new Error("installer_retention_required");
     await new Promise<void>((resolve, reject) => {
       this.#cos.deleteObject({
         Bucket: this.configuration.bucket,
@@ -167,13 +171,13 @@ export class AdminObjectStore {
     });
   }
 
-  async publishInstallerManifest(version: string): Promise<InstallerManifestSummary> {
-    if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error("admin_release_version_invalid");
+  async publishInstallerManifest(version: string, windowsVersion = version): Promise<InstallerManifestSummary> {
+    if (!/^\d+\.\d+\.\d+$/u.test(version) || !/^\d+\.\d+\.\d+$/u.test(windowsVersion)) throw new Error("admin_release_version_invalid");
     const definitions = [
       { name: `niuma-merit-macos-${version}.dmg`, type: "application/x-apple-diskimage",
-        platform: "macOS", architecture: "universal2-arm64-x86_64", notarization: "not-notarized" },
-      { name: `niuma-merit-windows-${version}-setup.exe`, type: "application/vnd.microsoft.portable-executable",
-        platform: "Windows", architecture: "x86_64", notarization: "not-applicable" }
+        platform: "macOS", architecture: "universal2-arm64-x86_64", notarization: "not-notarized", version },
+      { name: `niuma-merit-windows-${windowsVersion}-setup.exe`, type: "application/vnd.microsoft.portable-executable",
+        platform: "Windows", architecture: "x86_64", notarization: "not-applicable", version: windowsVersion }
     ] as const;
     const files = await Promise.all(definitions.map(async (definition) => {
       const object = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
@@ -189,7 +193,6 @@ export class AdminObjectStore {
         ...definition,
         bytes: body.length,
         sha256: createHash("sha256").update(body).digest("hex"),
-        version,
         signature: "unsigned",
         url: this.publicUrl("installer", definition.name)
       };
@@ -234,11 +237,50 @@ export class AdminObjectStore {
     }
   }
 
+  // Number lookup must never interpret a missing/invalid publication object as
+  // "all published". Keep the historic purchase API behavior separate.
+  async publishedAssetIdsStrict(defaultIds: readonly string[]): Promise<string[]> {
+    return (await this.publicationStateStrict(defaultIds)).publishedAssetIds;
+  }
+
+  async publicationStateStrict(defaultIds: readonly string[]): Promise<{ publishedAssetIds: string[]; firstPublishedAt: Record<string, string> }> {
+    const result = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
+      this.#cos.getObject({ Bucket: this.configuration.bucket, Region: this.configuration.region,
+        Key: appearanceCatalogStateKey }, (error, data) => error ? reject(error) : resolve(data));
+    });
+    const raw = Buffer.isBuffer(result.Body) ? result.Body.toString("utf8") : String(result.Body ?? "");
+    const parsed: unknown = JSON.parse(raw);
+    const ids = (parsed as { publishedAssetIds?: unknown } | null)?.publishedAssetIds;
+    if (!Array.isArray(ids) || ids.some(item => typeof item !== "string")) throw new Error("appearance_publication_unavailable");
+    const allowed = new Set(defaultIds);
+    const publishedAssetIds = [...new Set((ids as string[]).filter(item => allowed.has(item)))];
+    const metadata = parsed as { firstPublishedAt?: unknown; updatedAt?: unknown };
+    const stored = metadata.firstPublishedAt;
+    const firstPublishedAt: Record<string, string> = Object.fromEntries(
+      stored && typeof stored === "object" && !Array.isArray(stored)
+        ? Object.entries(stored).filter(([id, date]) => allowed.has(id) && typeof date === "string" && Number.isFinite(Date.parse(date)))
+        : []);
+    // The last legacy publication added only wealth-button. Preserve that real
+    // timestamp; do not mark all existing assets as newly published at rollout.
+    if (stored === undefined && publishedAssetIds.includes("official.wealth-button") &&
+      typeof metadata.updatedAt === "string" && Number.isFinite(Date.parse(metadata.updatedAt))) {
+      firstPublishedAt["official.wealth-button"] = metadata.updatedAt;
+    }
+    return { publishedAssetIds, firstPublishedAt };
+  }
+
   async writePublishedAssetIds(assetIds: readonly string[]): Promise<void> {
+    const previous = await this.publicationStateStrict(assetIds);
+    const now = new Date().toISOString();
+    const firstPublishedAt = { ...previous.firstPublishedAt };
+    for (const id of assetIds) {
+      if (!previous.publishedAssetIds.includes(id) && !Object.prototype.hasOwnProperty.call(firstPublishedAt, id)) firstPublishedAt[id] = now;
+    }
     const body = Buffer.from(JSON.stringify({
       version: 1,
       publishedAssetIds: [...assetIds],
-      updatedAt: new Date().toISOString()
+      firstPublishedAt,
+      updatedAt: now
     }));
     await new Promise<void>((resolve, reject) => {
       this.#cos.putObject({

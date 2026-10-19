@@ -1,14 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  Admin, Create, CreateButton, Datagrid, DateField, DateInput, DeleteButton, FileField, FileInput,
+  Admin, ArrayField, Create, CreateButton, Datagrid, DateField, DateInput, DeleteButton, FileField, FileInput,
   FunctionField, List, NumberField, Resource, required, SelectInput, Show, SimpleForm, SimpleShowLayout,
   TextField, TextInput, TopToolbar, useLogin, useNotify
 } from "react-admin";
 import type { AuthProvider, DataProvider } from "react-admin";
-import { Box, Button, Card, CardContent, Chip, CircularProgress, Stack, TextField as MuiTextField, Typography } from "@mui/material";
+import { Box, Button, Card, CardContent, Chip, CircularProgress, Stack, TextField as MuiTextField, Tooltip, Typography } from "@mui/material";
 import { createTheme } from "@mui/material/styles";
 import "./admin.css";
+import { GroupBenefitsPanel } from "./group-benefits";
+import { FreeClaimsPanel } from "./free-claims";
+import { ReportsPanel } from "./reports";
+import { OfficialSafetyPanel } from "./official-safety";
+import { InstallerRetentionPanel } from "./installer-retention";
+import { ProductStatusPanel } from "./product-status";
 
 const API = "/api/gongde/admin";
 
@@ -47,13 +53,11 @@ const dataProvider: DataProvider = {
     const query = new URLSearchParams({ page: String(params.pagination?.page ?? 1), perPage: String(params.pagination?.perPage ?? 25) });
     const filter = params.filter ?? {};
     if (filter.orderNo) query.set("orderNo", filter.orderNo);
-    if (filter.accessCode) query.set("accessCode", filter.accessCode);
     if (filter.channel) query.set("channel", filter.channel);
     if (filter.state) query.set("state", filter.state);
-    if (filter.from) query.set("from", new Date(`${filter.from}T00:00:00`).toISOString());
+    if (filter.from) query.set("from", new Date(`${filter.from}T00:00:00+08:00`).toISOString());
     if (filter.to) {
-      const exclusive = new Date(`${filter.to}T00:00:00`);
-      exclusive.setDate(exclusive.getDate() + 1);
+      const exclusive = new Date(new Date(`${filter.to}T00:00:00+08:00`).getTime() + 86400000);
       query.set("to", exclusive.toISOString());
     }
     return await request(`/orders?${query}`);
@@ -80,6 +84,7 @@ const dataProvider: DataProvider = {
   },
   delete: async (resource, params) => {
     if (resource !== "appearanceFiles" && resource !== "installerFiles") return unsupported();
+    if (resource === "installerFiles") throw new Error("安装包引用及保留条件尚未解除，禁止直接删除。");
     const kind = resource === "appearanceFiles" ? "appearance" : "installer";
     const name = String(params.previousData?.name ?? "");
     return await request(`/files?kind=${kind}&name=${encodeURIComponent(name)}`, { method: "DELETE" });
@@ -109,7 +114,7 @@ const theme = createTheme({
 const stateChoices = [
   ["PAID", "已支付"], ["FULFILLED", "已交付"]
 ].map(([id, name]) => ({ id, name }));
-const kindNames: Record<string, string> = { "official-pass": "官方形象通行证", "asset-delivery": "形象包交付", support: "赞赏" };
+const kindNames: Record<string, string> = { "official-pass": "旧规则底账", "asset-delivery": "旧规则底账", "appearance-batch": "付费下载批次", support: "旧规则赞赏底账" };
 const stateNames = Object.fromEntries(stateChoices.map(({ id, name }) => [id, name]));
 
 function LoginPage() {
@@ -130,14 +135,14 @@ function LoginPage() {
       <span className="seal">功</span>
       <p>牛马电子功德</p>
       <h1>看清每一笔<br />认真经营。</h1>
-      <small>管理台只提供查看功能，不会修改、删除或退款任何订单。</small>
+      <small>基础木鱼免费；官方扩展形象每个 1 元，每批最多 10 个，无套餐，也可凭当期官方群码免费领取。每次新下载重新付费或验群码，已保存文件可长期离线使用。共创新投稿与推广暂停，交易底账仅供管理员只读运营查看。</small>
     </section>
     <form className="login-panel" onSubmit={submit}>
       <p className="eyebrow">PRIVATE CONSOLE</p>
       <h2>管理员登录</h2>
       <MuiTextField label="管理员账号" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required fullWidth />
       <MuiTextField label="密码" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required fullWidth />
-      <Button type="submit" variant="contained" size="large" disabled={busy}>{busy ? "正在验证" : "进入只读管理台"}</Button>
+      <Button type="submit" variant="contained" size="large" disabled={busy}>{busy ? "正在验证" : "进入管理台"}</Button>
     </form>
   </main>;
 }
@@ -151,14 +156,14 @@ function Dashboard() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   });
   useEffect(() => {
     setData(null);
     setError(false);
-    const from = new Date(`${selectedDate}T00:00:00`);
-    const to = new Date(from); to.setDate(to.getDate() + 1);
+    const from = new Date(`${selectedDate}T00:00:00+08:00`);
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(selectedDate) || !Number.isFinite(from.getTime())) { setError(true); return; }
+    const to = new Date(from.getTime() + 86400000);
     request(`/overview?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`).then(setData).catch(() => setError(true));
   }, [selectedDate]);
   if (error) return <Box p={4}><Typography color="error">经营概览暂时无法读取，请稍后重试。</Typography></Box>;
@@ -167,22 +172,24 @@ function Dashboard() {
   const statusNames: Record<string, string> = { healthy: "正常", disabled: "未启用", error: "异常" };
   const PeriodCard = ({ label, value }: { label: string; value: { orders: number; amountFen: number } }) => <Card><CardContent><span>{label}</span><strong>{value.orders}</strong><Typography variant="caption" color="text.secondary">实收 ¥{(value.amountFen / 100).toFixed(2)}</Typography></CardContent></Card>;
   return <Box className="dashboard-shell">
-    <Box className="dashboard-heading"><div><Typography variant="overline">REPORT</Typography><Typography variant="h4">数据报表</Typography></div><Chip label="只统计有效订单" color="secondary" /></Box>
+    <Box className="dashboard-heading"><div><Typography variant="overline">PRODUCT OPERATIONS</Typography><Typography variant="h4">经营概览</Typography></div><Chip label="付费与群码两条路线" color="secondary" /></Box>
+    <ProductStatusPanel />
+    <Typography variant="body2" color="text.secondary" mb={2}>基础木鱼与客户端直接免费；官方扩展形象每个 1 元，每批最多 10 个不同形象，无套餐，也可凭当期 GD 加 6 位数字的官方群码免费领取。付款仅用于本次下载，新的下载须再次付款或使用有效群码；已保存文件可长期离线使用。共创新投稿、作者推广和审核运营入口已停用。</Typography>
     <Card sx={{ mb: 3, border: "1px solid rgba(214,83,45,.24)" }}>
       <CardContent>
-        <Typography variant="overline" color="primary">累计总计</Typography>
-        <Typography variant="body2" color="text.secondary" mb={2}>从上线至今的全部有效数据，不受下方日期筛选影响。</Typography>
+        <Typography variant="overline" color="primary">原始累计底账</Typography>
+        <Typography variant="body2" color="text.secondary" mb={2}>累计保留全部有效支付记录，可能包含旧规则或验收交易，不受日期筛选影响，也不按新价格重算。新计划运营请按下方北京日期查看；群码领取另列，不与付费订单相加，不推算独立用户、粉丝或安装人数。</Typography>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={4}>
           <Box><Typography color="text.secondary">有效订单</Typography><Typography variant="h3" fontWeight={800}>{data.periods.allTime.orders}</Typography></Box>
           <Box><Typography color="text.secondary">实收金额</Typography><Typography variant="h3" fontWeight={800}>¥{(data.periods.allTime.amountFen / 100).toFixed(2)}</Typography></Box>
-          <Box><Typography color="text.secondary">安装包下载</Typography><Typography variant="h3" fontWeight={800}>{data.downloads.total}</Typography></Box>
+          <Box><Typography color="text.secondary">安装文件请求（非安装人数）</Typography><Typography variant="h3" fontWeight={800}>{typeof data.downloads.total === "number" && Number.isSafeInteger(data.downloads.total) && data.downloads.total >= 0 ? data.downloads.total : "未采集"}</Typography></Box>
         </Stack>
       </CardContent>
     </Card>
-    <Box className="dashboard-heading"><div><Typography variant="overline">DAILY</Typography><Typography variant="h5">按天查看</Typography></div><MuiTextField label="选择日期" type="date" size="small" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Box>
+    <Box className="dashboard-heading"><div><Typography variant="overline">DAILY</Typography><Typography variant="h5">按北京日期查看</Typography></div><MuiTextField label="北京日期" type="date" size="small" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Box>
     <Box className="metric-grid">
       <PeriodCard label={`${selectedDate} 有效订单`} value={data.periods.selectedDay} />
-      <Card><CardContent><span>{selectedDate} 安装包下载</span><strong>{data.downloads.period}</strong></CardContent></Card>
+      <Card><CardContent><span>{selectedDate} 安装文件请求</span><strong>{typeof data.downloads.period === "number" && Number.isSafeInteger(data.downloads.period) && data.downloads.period >= 0 ? data.downloads.period : "未采集"}</strong></CardContent></Card>
     </Box>
     <Card className="service-card"><CardContent><Typography variant="h6">服务状态</Typography><Stack direction="row" useFlexGap flexWrap="wrap" gap={1.2} mt={2}>{Object.entries(data.services).map(([key, value]) => <Chip key={key} variant="outlined" color={value === "healthy" ? "success" : value === "error" ? "error" : "default"} label={`${serviceNames[key]} · ${statusNames[String(value)]}`} />)}</Stack></CardContent></Card>
     <Card className="recent-card"><CardContent><Typography variant="h6">最近有效订单</Typography>{data.recent.length === 0 ? <p className="empty-copy">目前还没有已支付订单。</p> : <div className="recent-list">{data.recent.map((item: any) => <a href={`#/orders/${item.id}/show`} key={item.id}><div><b>{item.orderNo}</b><small>{kindNames[item.purchaseKind] ?? item.purchaseKind}</small></div><div><StatusChip state={item.state} /><strong>¥{(item.amountFen / 100).toFixed(2)}</strong></div></a>)}</div>}</CardContent></Card>
@@ -191,7 +198,6 @@ function Dashboard() {
 
 const orderFilters = [
   <TextInput key="orderNo" source="orderNo" label="订单号" alwaysOn />,
-  <TextInput key="accessCode" source="accessCode" label="权益码" alwaysOn />,
   <SelectInput key="channel" source="channel" label="支付渠道" choices={[{ id: "wechat", name: "微信支付" }, { id: "alipay", name: "支付宝" }]} />,
   <SelectInput key="state" source="state" label="订单状态" choices={stateChoices} />,
   <DateInput key="from" source="from" label="开始日期" />,
@@ -199,12 +205,12 @@ const orderFilters = [
 ];
 
 function OrderList() {
-  return <List title="有效订单" filters={orderFilters} perPage={25} sort={{ field: "createdAt", order: "DESC" }} actions={false}>
+  return <List title="已付款订单（管理员只读）" filters={orderFilters} perPage={25} sort={{ field: "createdAt", order: "DESC" }} actions={false}>
     <Datagrid rowClick="show" bulkActionButtons={false}>
       <TextField source="orderNo" label="订单号" />
       <FunctionField label="类型" render={(record: any) => kindNames[record.purchaseKind] ?? record.purchaseKind} />
       <FunctionField label="状态" render={(record: any) => <StatusChip state={record.state} />} />
-      <FunctionField label="支付渠道" render={(record: any) => record.channel === "wechat" ? "微信" : "支付宝"} />
+      <FunctionField label="支付渠道" render={(record: any) => record.channel === "wechat" ? "微信" : record.channel === "alipay" ? "支付宝" : "原记录未提供"} />
       <FunctionField label="金额" render={(record: any) => `¥${(record.amountFen / 100).toFixed(2)}`} />
       <DateField source="createdAt" label="创建时间" showTime />
     </Datagrid>
@@ -234,27 +240,74 @@ function OfficialAppearancePanel() {
     <CardContent>
       <Typography variant="overline" color="primary">官方形象库</Typography>
       <Typography variant="h6">已发布形象</Typography>
-      <Typography variant="body2" color="text.secondary" mb={2}>这里展示官网当前使用的官方形象；下方可上传和管理独立形象包文件。</Typography>
-      {failed ? <Typography color="error">官方形象暂时无法读取。</Typography> : items.length === 0 ? <CircularProgress size={24} /> : <Stack gap={1}>{items.map((item) => <Box key={item.id} display="flex" alignItems="center" justifyContent="space-between" gap={2} py={0.5} borderBottom="1px solid rgba(41,35,28,.08)"><Box><Typography fontWeight={750}>{item.name}</Typography><Typography variant="caption" color="text.secondary">{item.assetId}</Typography></Box><Stack direction="row" alignItems="center" gap={1}><Chip size="small" color={item.state === "PUBLISHED" ? "success" : item.state === "UNPUBLISHED" ? "default" : "error"} label={item.state === "PUBLISHED" ? "已上架" : item.state === "UNPUBLISHED" ? "已下架" : "资源缺失"} /><Button size="small" variant="outlined" color={item.state === "PUBLISHED" ? "warning" : "primary"} disabled={item.state === "MISSING" || busyId === item.id} onClick={() => togglePublished(item)}>{busyId === item.id ? "处理中" : item.state === "PUBLISHED" ? "下架" : "重新上架"}</Button></Stack></Box>)}</Stack>}
+      <Typography variant="body2" color="text.secondary" mb={2}>保留官方形象上下架与安全停发管理，下方可上传和管理独立形象包文件。基础木鱼免费，扩展官方形象按每个 1 元本次下载或有效官方群码免费领取；不自动把共创作品转为收费商品。</Typography>
+      {failed ? <Typography color="error">官方形象暂时无法读取。</Typography> : items.length === 0 ? <CircularProgress size={24} /> : <Stack gap={1}>{items.map((item) => <Box key={item.id} display="flex" alignItems="center" justifyContent="space-between" gap={2} py={0.5} borderBottom="1px solid rgba(41,35,28,.08)"><Box><Typography fontWeight={750}>{item.name} · {item.appearanceNumber ? `#${item.appearanceNumber}` : "编号未就绪"}</Typography><Typography variant="caption" color="text.secondary">{item.assetId}</Typography></Box><Stack direction="row" alignItems="center" gap={1}><Chip size="small" color={item.state === "PUBLISHED" ? "success" : item.state === "UNPUBLISHED" ? "default" : "error"} label={item.state === "PUBLISHED" ? "已上架" : item.state === "UNPUBLISHED" ? "已下架" : "资源缺失"} /><Button size="small" variant="outlined" color={item.state === "PUBLISHED" ? "warning" : "primary"} disabled={item.state === "MISSING" || busyId === item.id} onClick={() => togglePublished(item)}>{busyId === item.id ? "处理中" : item.state === "PUBLISHED" ? "下架" : "重新上架"}</Button></Stack></Box>)}</Stack>}
+      <OfficialSafetyPanel appearances={items} />
     </CardContent>
   </Card>;
 }
 
+function AppearanceNumberPanel() {
+  const [number, setNumber] = useState("");
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault(); setResult(null); setError(""); setBusy(true);
+    try { setResult((await request(`/appearance-numbers?number=${encodeURIComponent(number.trim())}`)).appearance); }
+    catch (failure) {
+      const code = failure instanceof Error ? failure.message : "";
+      setError(code === "appearance_not_found" ? "没有对应作品。" : code === "appearance_number_invalid" ?
+        "请输入完整的 6 至 9 位形象编号。" : "编号查询暂时不可用，请确认迁移与服务状态。");
+    } finally { setBusy(false); }
+  };
+  return <Card sx={{ m: 2 }}><CardContent>
+    <Typography variant="h6">形象通用编号查询</Typography>
+    <Typography variant="body2" color="text.secondary" mb={2}>查询形象的固定通用编号，不是订单号或群码。当前只运营官方图库；存量作品仍可只读查询，但不开放共创投稿、作者码或社区发布。</Typography>
+    <Stack component="form" onSubmit={submit} direction={{ xs: "column", sm: "row" }} gap={2}>
+      <MuiTextField label="形象通用编号" value={number} onChange={event => setNumber(event.target.value)} required
+        slotProps={{ htmlInput: { inputMode: "numeric", pattern: "[1-9][0-9]{5,8}", maxLength: 9 } }} />
+      <Button type="submit" variant="contained" disabled={busy}>{busy ? "查询中" : "按编号查找"}</Button>
+    </Stack>
+    {error && <Typography color="error" role="status" mt={2}>{error}</Typography>}
+    {result && <Box mt={2}><Typography fontWeight={750}>#{result.appearanceNumber} · {result.titleZh}</Typography>
+      <Typography>{result.sourceKind === "official" ? "官方" : "社区"} · {result.state}</Typography>
+      <Typography variant="caption" display="block">内部 ID：{result.internalId}</Typography>
+      {result.sharePath && <a href={result.sharePath} target="_blank" rel="noreferrer">查看公开作品</a>}
+    </Box>}
+  </CardContent></Card>;
+}
+
 function OrderShow() {
-  return <Show title="订单详情" actions={false}>
+  return <Show title="运营交易详情（只读）" actions={false}>
     <SimpleShowLayout>
       <TextField source="orderNo" label="订单号" />
       <FunctionField label="订单类型" render={(record: any) => kindNames[record.purchaseKind] ?? record.purchaseKind} />
       <FunctionField label="订单状态" render={(record: any) => <StatusChip state={record.state} />} />
       <FunctionField label="支付渠道" render={(record: any) => record.channel === "wechat" ? "微信支付" : "支付宝"} />
       <NumberField source="amountFen" label="金额（分）" />
-      <TextField source="userReference" label="用户匿名标识" emptyText="无" />
       <FunctionField label="形象包" render={(record: any) => record.assetIds?.length ? record.assetIds.join("、") : "无"} />
+      <FunctionField label="订单商品快照" render={(record: any) => Array.isArray(record.marketItems) && record.marketItems.length > 0 ?
+        <Box sx={{ maxWidth: "100%", overflowX: "auto" }}>
+          <Typography variant="body2" color="text.secondary" mb={1}>仅展示原始交易商品与金额快照，不按当前作品或最新版本补齐，不恢复共创分成或旧权益。交易记录不代表后续免费重下资格。</Typography>
+          <ArrayField source="marketItems" record={record} label={false}>
+            <Datagrid bulkActionButtons={false} rowClick={false}>
+              <TextField source="titleZh" label="名称" emptyText="快照缺失" sortable={false} />
+              <FunctionField source="sourceKind" label="来源" sortable={false} render={(item: any) =>
+                item.sourceKind === "official" ? "官方" : item.sourceKind === "community" ? "社区" : "未知来源"} />
+              <TextField source="versionLabel" label="订单版本" emptyText="快照缺失" sortable={false} />
+              <FunctionField source="sourceRevision" label="Revision" sortable={false} render={(item: any) =>
+                typeof item.sourceRevision === "string" && item.sourceRevision.length > 0 ?
+                  <Tooltip title={item.sourceRevision}><span>{item.sourceRevision.slice(0, 12)}{item.sourceRevision.length > 12 ? "..." : ""}</span></Tooltip> : "快照缺失"} />
+              <NumberField source="amountFen" label="商品金额（分）" emptyText="快照缺失" sortable={false} />
+            </Datagrid>
+          </ArrayField>
+        </Box> : "历史无快照"} />
       <TextField source="providerTransactionId" label="支付平台交易号" emptyText="无" />
       <DateField source="createdAt" label="创建时间" showTime />
       <DateField source="paidAt" label="支付时间" showTime emptyText="未支付" />
       <DateField source="fulfilledAt" label="交付时间" showTime emptyText="未交付" />
-      <FunctionField label="权益记录" render={(record: any) => record.entitlements?.length ? record.entitlements.map((item: any) => `${item.scope}${item.assetId ? ` · ${item.assetId}` : ""} · ${item.state}`).join("；") : "无"} />
+      <FunctionField label="原始底账附注" render={(record: any) => record.entitlements?.length ? <details><summary>查看存量记录（不授予新下载权益）</summary>{record.entitlements.map((item: any) => `${item.scope}${item.assetId ? ` · ${item.assetId}` : ""} · ${item.state}`).join("；")}</details> : "无"} />
     </SimpleShowLayout>
   </Show>;
 }
@@ -270,8 +323,11 @@ function ManagedFileActions({ label }: { label: string }) {
 
 function ManagedFileList({ kind }: { kind: "appearance" | "installer" }) {
   const appearance = kind === "appearance";
+  if (!appearance) return <><Box sx={{ m: 2 }}><Button variant="outlined" href="#/installerFiles/create">上传新安装文件</Button><Typography variant="body2" color="text.secondary" mt={1}>上传只保存文件，不自动切换官网当前版本；正式发布仍需确认登记与校验值。日常仅展示当前 Mac / Windows 两份安装包，不读取全部旧文件表。</Typography></Box><InstallerRetentionPanel /></>;
   return <>
     {appearance && <OfficialAppearancePanel />}
+    <details style={{ margin: 16 }}><summary style={{ cursor: "pointer" }}>高级：独立形象文件资料（不等于官网商品发布）</summary>
+    <Typography variant="body2" color="text.secondary" sx={{ mx: 2 }}>以下仅管理独立文件。上传不自动加入首页图库、不改价，也不替代付费或群码交付；官网可选形象以上方已发布库为准。</Typography>
     <List
       title={appearance ? "形象包管理" : "安装包管理"}
       actions={<ManagedFileActions label={appearance ? "上传形象包" : "上传安装包"} />}
@@ -281,12 +337,14 @@ function ManagedFileList({ kind }: { kind: "appearance" | "installer" }) {
       <Datagrid bulkActionButtons={false}>
         <TextField source="name" label="文件名" />
         <FunctionField label="大小" render={(record: any) => fileSize(record.size)} />
-        <FunctionField label="下载量" render={(record: any) => record.downloads ?? 0} />
+        <FunctionField label="文件请求次数（非安装人数）" render={(record: any) => typeof record.downloads === "number" && Number.isSafeInteger(record.downloads) && record.downloads >= 0 ? record.downloads : "未统计"} />
         <DateField source="lastModified" label="更新时间" showTime emptyText="未知" />
         <FunctionField label="公开地址" render={(record: any) => <a className="file-link" href={record.url} target="_blank" rel="noreferrer">打开</a>} />
-        <DeleteButton label="删除" mutationMode="pessimistic" confirmTitle="确认删除这个文件？" confirmContent="删除后官网对应下载会立即失效，此操作无法撤销。" />
+        {appearance ? <DeleteButton label="删除" mutationMode="pessimistic" confirmTitle="确认删除这个文件？" confirmContent="删除后官网对应下载会立即失效，此操作无法撤销。" /> :
+          <FunctionField label="保留状态" render={() => <Chip size="small" label="保留 · 不允许直接删除" />} />}
       </Datagrid>
     </List>
+    </details>
   </>;
 }
 
@@ -313,10 +371,14 @@ function ManagedFileCreate({ kind }: { kind: "appearance" | "installer" }) {
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Admin title="牛马电子功德管理台" theme={theme} dataProvider={dataProvider} authProvider={authProvider} loginPage={LoginPage} requireAuth disableTelemetry>
-      <Resource name="reports" options={{ label: "数据报表" }} list={Dashboard} />
-      <Resource name="orders" options={{ label: "有效订单" }} list={OrderList} show={OrderShow} />
+      <Resource name="reports" options={{ label: "经营概览" }} list={Dashboard} />
+      <Resource name="orders" options={{ label: "付费订单" }} list={OrderList} show={OrderShow} />
+      <Resource name="groupBenefits" options={{ label: "官方群领取码" }} list={GroupBenefitsPanel} />
+      <Resource name="claims" options={{ label: "群码与领取记录" }} list={FreeClaimsPanel} />
+      <Resource name="websiteReports" options={{ label: "官网编号举报" }} list={ReportsPanel} />
+      <Resource name="appearanceNumbers" options={{ label: "形象编号查询" }} list={AppearanceNumberPanel} />
       <Resource name="appearanceFiles" options={{ label: "形象包管理" }} list={() => <ManagedFileList kind="appearance" />} create={() => <ManagedFileCreate kind="appearance" />} />
-      <Resource name="installerFiles" options={{ label: "安装包" }} list={() => <ManagedFileList kind="installer" />} create={() => <ManagedFileCreate kind="installer" />} />
+      <Resource name="installerFiles" options={{ label: "当前安装包" }} list={() => <ManagedFileList kind="installer" />} create={() => <ManagedFileCreate kind="installer" />} />
     </Admin>
   </React.StrictMode>
 );

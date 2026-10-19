@@ -1,0 +1,47 @@
+/* Progressive disclosure over the existing payment and download handlers. */
+.journey-dialog{width:min(500px,calc(100% - 40px));max-height:85vh;padding:0;border:1px solid #dce3d3;border-radius:19px;background:#fffef9;color:#303c30;box-shadow:0 24px 100px #17240f35}
+.journey-dialog::backdrop{background:#28332459;backdrop-filter:blur(3px)}
+.journey-dialog-inner{padding:28px}.journey-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:16px}
+.journey-dialog h2{margin:0;font:500 28px/1.4 'Kaiti SC','STKaiti','KaiTi',serif}
+.journey-dialog-heading>button{border:0;border-radius:50%;width:32px;height:32px;min-height:0;padding:0;font-size:22px;background:#edf2e7;color:#526647}
+.journey-confirm-item{display:flex;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid #dce3d3;font-size:14px}
+.journey-confirm-item strong{font-weight:500;flex:1}.journey-confirm-item>.journey-link{font-size:12px}
+.journey-thumbnail{width:50px;height:50px;flex:none;border-radius:9px;background:#edf2e5;display:grid;place-items:center;font:25px 'Kaiti SC',serif;overflow:hidden}.journey-thumbnail img{max-width:100%;max-height:100%;object-fit:contain}
+.journey-muted{color:#61705b;font-size:13px;line-height:1.8}.journey-confirm-total{font-size:19px;margin:22px 0 12px}.journey-confirm-actions{display:grid;gap:14px;margin-top:22px}
+.journey-confirm-actions .primary{padding:12px 20px;border:1px solid #d95b31;border-radius:10px;background:#d95b31;color:white;font-size:15px;min-height:46px}
+.journey-link,.journey-selection-summary button,.journey-footer-links button{border:0;background:none;padding:0;min-height:0;color:#426238;font-size:13px;text-decoration:underline;text-underline-offset:4px;cursor:pointer}
+.journey-dialog button:disabled{opacity:.45;cursor:not-allowed}
+body[data-journey=checkout] .journey-shell{width:min(520px,calc(100% - 48px));padding-top:34px;min-height:75vh}
+.journey-shell>.journey-eyebrow,.journey-shell>h1{text-align:center}.journey-shell>h1{font-size:34px;margin:8px 0 27px}
+.journey-shell .flow-layout{display:block}.journey-shell .claim-code-panel{padding:28px 32px;border-radius:20px;position:static}
+.journey-shell .journey-selection-summary{display:flex;justify-content:center;align-items:center;gap:12px;font-size:13px;color:#61705b;margin-bottom:22px}
+.journey-shell .v4-route-tabs{display:none}.journey-shell .journey-route-label{display:none}
+.journey-shell .journey-amount{font:44px/1.2 Georgia,serif;color:#303c30!important;text-align:center;margin:4px 0 24px!important}
+.journey-shell #payment-total{font-size:44px}.journey-shell .journey-channel-label{justify-content:center;font-size:13px!important;margin:0 0 22px}
+.journey-shell #payment-channel{min-width:180px;min-height:42px}.journey-shell #payment-checkout{background:transparent;padding:0;text-align:center}
+.journey-shell #payment-checkout img{display:block;width:190px;max-width:100%;height:auto;margin:0 auto 18px;border-radius:10px}
+.journey-shell .journey-main-actions{display:flex;flex-direction:column;gap:12px;margin:18px 0 12px}.journey-shell .journey-main-actions button{width:100%;min-height:46px;font-size:15px}
+.journey-shell #payment-status{font-size:14px;color:#526647;text-align:center;margin:14px 0;line-height:1.8}
+.journey-shell #flow-status{font-size:14px;line-height:1.8;color:#526647;margin:16px 0 0}.journey-shell #flow-status:empty{display:none}
+.journey-shell .flow-status[data-tone=error]{color:#ad4327!important}
+.journey-shell .journey-help,.journey-shell .claim-get-code{border:0;border-top:1px solid #dce3d3;background:none;border-radius:0;padding:16px 0 0;margin-top:20px}
+.journey-shell details summary{font-size:13px;font-weight:500;color:#426238;cursor:pointer}.journey-shell details p{font-size:13px;color:#61705b}
+.journey-shell #claim-code-form input{height:56px;font-size:24px;color:#303c30}.journey-shell #claim-code-form>button,.journey-shell #claim-create{width:100%;font-size:15px;min-height:46px}
+.journey-shell #claim-code-form:has(~ #claim-create:not([hidden]))>button{display:none}
+.journey-footer-links{display:flex;gap:22px;align-items:center;justify-content:center;margin:20px 0;font-size:13px}.journey-footer-links a{color:#61705b}
+.journey-shell .journey-dialog #claim-items{max-height:40vh;overflow:auto}.journey-shell .journey-dialog p{font-size:13px;line-height:1.8}
+.journey-download-hint{margin-top:24px;border:1px solid #b8cba5;background:#eff5e7;border-radius:12px;padding:21px;color:#3f5935}
+.journey-download-hint h2{font:600 18px/1.5 'PingFang SC','Microsoft YaHei',sans-serif!important;margin:0 0 12px!important}
+.journey-download-hint p,.flow-shell .journey-download-hint p{font-size:13px!important;line-height:1.8;color:#4d6241;margin:10px 0}
+.journey-download-hint ol{padding-left:20px;margin:16px 0}.journey-download-hint li{font-size:14px;line-height:1.7;margin:15px 0}
+.journey-download-hint .journey-filename{overflow-wrap:anywhere;color:#526647;font-size:12px!important}
+.journey-download-hint details{border-top:1px solid #ccd9bf;padding-top:14px;margin-top:16px}.journey-download-hint summary{font-size:13px;cursor:pointer;color:#3f5935}
+.journey-finish-actions{margin-top:18px}.journey-finish-actions button{width:100%;background:#426238!important;color:white!important;border:1px solid #426238!important;min-height:44px;font-size:14px!important;border-radius:9px;padding:10px!important}
+.journey-finish-note{font-size:12px!important}.journey-success-mark{font-size:27px;color:#426238;margin-bottom:14px}
+.journey-completed{text-align:center}.journey-completed details{text-align:left;border-top:1px solid #dce3d3;padding-top:16px;margin-top:24px}
+body[data-journey-completed=true] .flow-layout,body[data-journey-completed=true] .journey-footer-links{display:none}
+body[data-journey=delivery] .flow-shell{width:min(620px,calc(100% - 48px))}body[data-journey=delivery] .flow-shell>h1{font-size:34px}
+body[data-journey=delivery] .flow-shell>.eyebrow{display:none}body[data-journey=delivery] .flow-panel{margin-top:20px}
+body[data-journey=delivery] #delivery-download{width:100%;font-size:15px;min-height:46px}
+body[data-journey=delivery] #delivery-meta{overflow-wrap:anywhere}body[data-journey=delivery] .journey-help{margin:22px 0;border-top:1px solid #dce3d3;padding-top:16px}
+@media(max-width:760px){.journey-shell .claim-code-panel{padding:24px}.journey-shell>h1{font-size:29px}.journey-dialog-inner{padding:22px}.journey-confirm-item{gap:9px}}

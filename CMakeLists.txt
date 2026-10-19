@@ -2,6 +2,37 @@ cmake_minimum_required(VERSION 3.16)
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" NIUMA_VERSION LIMIT_COUNT 1)
 project(NiuMaMerit VERSION "${NIUMA_VERSION}" LANGUAGES C CXX)
 
+enable_testing()
+add_executable(niuma-reminder-activity-test src/reminder_activity_test.cpp)
+target_compile_features(niuma-reminder-activity-test PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(niuma-reminder-activity-test PRIVATE /W4 /permissive- /utf-8)
+  add_executable(niuma-presign-boundary-test
+    scripts/test-windows-presign-boundaries.cpp
+    src/windows/appearance_pack.cpp
+    third_party/miniz/miniz.c)
+  target_include_directories(niuma-presign-boundary-test PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(niuma-presign-boundary-test PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-presign-boundary-test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-presign-boundary-test PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  if(MSVC)
+    set_property(TARGET niuma-presign-boundary-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(niuma-presign-boundary-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+  endif()
+elseif(APPLE)
+  target_compile_options(niuma-reminder-activity-test PRIVATE -Wall -Wextra)
+endif()
+if(WIN32)
+  target_link_libraries(niuma-reminder-activity-test PRIVATE bcrypt)
+elseif(APPLE)
+  target_link_libraries(niuma-reminder-activity-test PRIVATE
+    "-framework Security" "-framework CoreFoundation")
+endif()
+add_test(NAME niuma-reminder-activity COMMAND niuma-reminder-activity-test)
+set_tests_properties(niuma-reminder-activity PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 if(WIN32)
   configure_file(src/windows/app.rc "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc" @ONLY)
   configure_file(src/app_version.h.in "${CMAKE_CURRENT_BINARY_DIR}/app_version.h" @ONLY)
@@ -18,9 +49,15 @@ if(WIN32)
   )
   target_include_directories(niuma-merit PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
   set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc" PROPERTIES GENERATED TRUE)
+  # The real window procedure uses comctl32 v6 ordinal imports. Match the
+  # production activation context instead of loading the legacy system DLL.
+  if(TARGET niuma-presign-boundary-test)
+    target_sources(niuma-presign-boundary-test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")
+    target_link_options(niuma-presign-boundary-test PRIVATE /MANIFEST:NO)
+  endif()
   target_compile_features(niuma-merit PRIVATE cxx_std_17)
   target_compile_definitions(niuma-merit PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
-  target_link_libraries(niuma-merit PRIVATE shell32 gdiplus ole32 bcrypt)
+  target_link_libraries(niuma-merit PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
   if(MSVC)
     set_property(TARGET niuma-merit PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_options(niuma-merit PRIVATE /W4 /permissive- /utf-8)
@@ -42,9 +79,24 @@ if(WIN32)
     set_property(TARGET niuma-pack-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_options(niuma-pack-test PRIVATE /W4 /permissive- /utf-8)
   endif()
+
+  add_executable(niuma-woodfish-render-test
+    scripts/test-windows-woodfish-render.cpp
+    src/windows/appearance_pack.cpp
+    third_party/miniz/miniz.c
+  )
+  target_include_directories(niuma-woodfish-render-test PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(niuma-woodfish-render-test PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-woodfish-render-test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-woodfish-render-test PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  if(MSVC)
+    set_property(TARGET niuma-woodfish-render-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(niuma-woodfish-render-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+  endif()
 elseif(APPLE)
   enable_language(OBJCXX)
   set(MACOS_RESOURCES
+    assets/appicon.icns
     assets/woodfish.png
     assets/mallet.png
     assets/developer-douyin.png

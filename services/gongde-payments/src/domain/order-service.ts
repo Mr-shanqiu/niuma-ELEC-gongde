@@ -1,7 +1,10 @@
+import { OFFICIAL_APPEARANCE_BATCH, appearanceBatchPriceFen } from "./catalog.js";
 import { createHash, randomBytes } from "node:crypto";
-import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_DELIVERY, OFFICIAL_CHARACTER_PASS, PROJECT_SUPPORT } from "./catalog.js";
+import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS } from "./catalog.js";
 import type { PaymentStore } from "./store.js";
-import type { CheckoutResult, GongdeAccessAccount, GongdeEntitlement, GongdeOrder, PaymentChannel, PurchaseKind } from "./types.js";
+import type { CheckoutResult, GongdeAccessAccount, GongdeEntitlement, GongdeOrder, MarketOrderItemSnapshot, PaymentChannel, PurchaseKind } from "./types.js";
+
+export type MarketCheckoutItem = Omit<MarketOrderItemSnapshot, "amountFen" | "createdAt">;
 
 type CheckoutInput = {
   channel: PaymentChannel;
@@ -10,6 +13,8 @@ type CheckoutInput = {
   assetId?: string | null;
   assetIds?: string[];
   amountFen?: number;
+  // Resolved by the server from reviewed catalog records, never from HTTP JSON.
+  marketItems?: readonly MarketCheckoutItem[];
 };
 
 type LiveCheckout = Exclude<CheckoutResult["checkout"], { kind: "mock" }>;
@@ -21,14 +26,7 @@ function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const ACCESS_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const ACCESS_CODE_PATTERN = /^GD(?:-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}){5}$/u;
-
-function generateAccessCode(): string {
-  const bytes = randomBytes(20);
-  const value = Array.from(bytes, (byte) => ACCESS_CODE_ALPHABET[byte % ACCESS_CODE_ALPHABET.length]).join("");
-  return `GD-${value.match(/.{4}/gu)!.join("-")}`;
-}
 
 function normalizeAccessCode(value: string): string {
   const normalized = value.trim().toUpperCase().replace(/\s+/gu, "");
@@ -46,7 +44,16 @@ function normalizeAssetIds(input: CheckoutInput): string[] {
   const assetIds = [...new Set(requested)];
   if (assetIds.length < 1) throw new Error("asset_ids_required");
   if (assetIds.length > MAX_ASSETS_PER_DELIVERY) throw new Error("asset_selection_limit_exceeded");
-  if (assetIds.some((assetId) => !OFFICIAL_ASSET_IDS.some((officialAssetId) => officialAssetId === assetId))) {
+  if (input.marketItems) {
+    if (input.purchaseKind !== "appearance-batch" || input.marketItems.length !== assetIds.length ||
+        input.marketItems.some((item, index) => item.assetId !== assetIds[index] || item.unitPriceFen !== 100 ||
+          !/^[a-f0-9]{64}$/u.test(item.sourceRevision) ||
+          item.sourceKind !== "official" || !OFFICIAL_ASSET_IDS.includes(item.assetId) ||
+          item.creatorId !== null || item.workId !== null || item.versionId !== null ||
+          item.revenueRuleVersion !== null)) {
+      throw new Error("market_catalog_snapshot_invalid");
+    }
+  } else if (assetIds.some((assetId) => !OFFICIAL_ASSET_IDS.some((officialAssetId) => officialAssetId === assetId))) {
     throw new Error("asset_id_not_available");
   }
   return assetIds;
@@ -60,39 +67,14 @@ export class GongdeOrderService {
 
   async createPendingOrder(input: CheckoutInput): Promise<{ order: GongdeOrder; buyerToken: string; accessCode: string | null }> {
     const { channel, purchaseKind } = input;
-    let userId: string | null = null;
-    let accessCode: string | null = null;
-    const assetIds = purchaseKind === "support" ? [] : normalizeAssetIds(input);
-    const assetId = assetIds[0] ?? null;
-    if (purchaseKind === "support" && input.accessCode) throw new Error("support_order_must_not_bind_access");
-    if (purchaseKind === "official-pass") {
-      accessCode = generateAccessCode();
-      const account: GongdeAccessAccount = {
-        id: `acc_${randomBytes(12).toString("hex")}`,
-        codeDigest: digest(accessCode),
-        codeHint: accessCode.slice(-4),
-        state: "PENDING",
-        createdAt: this.now(),
-        activatedAt: null
-      };
-      await this.store.insertAccessAccount(account);
-      userId = account.id;
-    } else if (purchaseKind === "asset-delivery") {
-      const account = await this.requireAccessAccount(input.accessCode ?? "");
-      userId = account.id;
-    }
-    if (purchaseKind === "asset-delivery") {
-      if (!await this.store.findActiveEntitlement(userId!, "official-character-pass")) throw new Error("official_pass_required");
-    }
-    const product = purchaseKind === "official-pass"
-      ? OFFICIAL_CHARACTER_PASS
-      : purchaseKind === "asset-delivery"
-        ? OFFICIAL_ASSET_DELIVERY
-        : PROJECT_SUPPORT;
-    const amountFen = purchaseKind === "support" ? input.amountFen : "amountFen" in product ? product.amountFen : undefined;
-    if (!amountFen || (purchaseKind === "support" && !PROJECT_SUPPORT.allowedAmountsFen.includes(amountFen))) {
-      throw new Error("invalid_amount");
-    }
+    if (purchaseKind !== "appearance-batch") throw new Error("invalid_purchase_kind");
+    if (channel !== "wechat" && channel !== "alipay") throw new Error("invalid_channel");
+    if (input.accessCode) throw new Error("access_code_not_supported");
+    const marketItems = input.marketItems ? structuredClone(input.marketItems) : undefined;
+    const assetIds = normalizeAssetIds({ ...input, marketItems });
+    const assetId = assetIds[0];
+    const product = OFFICIAL_APPEARANCE_BATCH;
+    const amountFen = appearanceBatchPriceFen(assetIds.length);
     const createdAt = this.now();
     const expiresAt = new Date(createdAt.getTime() + 15 * 60 * 1000);
     const buyerToken = randomBytes(24).toString("base64url");
@@ -102,7 +84,7 @@ export class GongdeOrderService {
       productVersion: product.version,
       channel,
       purchaseKind,
-      userId,
+      userId: null,
       assetId,
       assetIds,
       amountFen,
@@ -115,8 +97,13 @@ export class GongdeOrderService {
       paidAt: null,
       fulfilledAt: null
     };
-    await this.store.insertOrder(order);
-    return { order, buyerToken, accessCode };
+    const snapshots: MarketOrderItemSnapshot[] = marketItems?.map((item) => ({
+      ...item,
+      amountFen: 100,
+      createdAt
+    })) ?? [];
+    await this.store.insertOrder(order, snapshots);
+    return { order, buyerToken, accessCode: null };
   }
 
   async createMockCheckout(input: CheckoutInput): Promise<CheckoutResult> {
@@ -177,6 +164,9 @@ export class GongdeOrderService {
   }): Promise<{ order: GongdeOrder; entitlements: GongdeEntitlement[] }> {
     return await this.store.runInTransaction(async (store) => {
       const order = await this.requireOrder(input.orderNo, store);
+      if (order.purchaseKind !== "appearance-batch" || order.productVersion !== OFFICIAL_APPEARANCE_BATCH.version) {
+        throw new Error("purchase_flow_retired");
+      }
       if (order.state === "FULFILLED") {
         if (order.providerTransactionId !== input.providerTransactionId) throw new Error("provider_transaction_conflict");
         return { order, entitlements: await store.findEntitlementsByOrder(input.orderNo) };
@@ -193,31 +183,23 @@ export class GongdeOrderService {
       order.paidAt = paidAt;
       order.fulfilledAt = paidAt;
       await store.updateOrder(order);
-      if (order.purchaseKind === "official-pass") {
-        const account = await store.findAccessAccountById(order.userId!);
-        if (!account) throw new Error("access_account_not_found");
-        account.state = "ACTIVE";
-        account.activatedAt = paidAt;
-        await store.updateAccessAccount(account);
-      }
       const entitlements: GongdeEntitlement[] = [];
-      if (order.purchaseKind !== "support") {
+      {
         const deliveries = order.assetIds.map((assetId) => ({ scope: "asset-download" as const, assetId }));
-        const scopes: Array<{ scope: GongdeEntitlement["scope"]; assetId: string | null }> = order.purchaseKind === "official-pass"
-          ? [{ scope: "official-character-pass", assetId: null }, ...deliveries]
-          : deliveries;
-        for (const item of scopes) {
+        for (const item of deliveries) {
           const entitlement: GongdeEntitlement = {
             id: `ent_${randomBytes(12).toString("hex")}`,
             orderNo: input.orderNo,
-            userId: order.userId!,
+            userId: order.userId ?? `order:${order.orderNo}`,
             productId: order.productId,
             scope: item.scope,
             assetId: item.assetId,
             state: "ACTIVE",
             createdAt: paidAt,
             activatedAt: paidAt,
-            expiresAt: item.scope === "asset-download" ? new Date(paidAt.getTime() + 24 * 60 * 60 * 1000) : null,
+            // Current-transaction cleanup only. Signed files use perpetual licenses;
+            // this deadline must never be presented as a local import restriction.
+            expiresAt: new Date(paidAt.getTime() + 24 * 60 * 60 * 1000),
             revokedAt: null
           };
           await store.insertEntitlement(entitlement);
@@ -225,6 +207,18 @@ export class GongdeOrderService {
         }
       }
       return { order, entitlements };
+    });
+  }
+
+  // Only call after the provider has confirmed closure, never on elapsed time alone.
+  async confirmUnpaidClosure(orderNo: string, channel: PaymentChannel): Promise<void> {
+    await this.store.runInTransaction(async (store) => {
+      const order = await this.requireOrder(orderNo, store);
+      if (order.channel !== channel) throw new Error("payment_channel_mismatch");
+      // The row lock also protects a callback that completed while we queried.
+      if (order.state !== "PENDING_PAYMENT" || order.paidAt || order.providerTransactionId) return;
+      order.state = order.expiresAt <= this.now() ? "EXPIRED" : "CANCELED";
+      await store.updateOrder(order);
     });
   }
 

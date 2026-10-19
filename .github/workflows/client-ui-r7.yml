@@ -1,0 +1,121 @@
+name: R7 Native Client UI and Installer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  windows-r7:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-client-ui-r7
+          run-id: 39158412636
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .local-work/candidates/r7/output
+      - name: Bind the already compiled R7 to unchanged client sources
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD '.local-work/candidates/r7'
+          python scripts/prepare-reminder-import-acceptance.py --revision R7 --output "$root/current"
+          if ($LASTEXITCODE -ne 0) { throw 'Source preparation failed' }
+          $old = Get-Content "$root/output/SOURCE_BINDING.json" -Raw | ConvertFrom-Json
+          $new = Get-Content "$root/current/SOURCE_BINDING.json" -Raw | ConvertFrom-Json
+          foreach ($key in @('original_source_sha256','acceptance_overlay_sha256')) {
+            $a = $old.$key | ConvertTo-Json -Compress
+            $b = $new.$key | ConvertTo-Json -Compress
+            if ($a -ne $b) { throw 'Frozen binary does not match current client sources' }
+          }
+          foreach ($item in (Get-Content "$root/output/BUILD_RECEIPT.json" -Raw | ConvertFrom-Json)) {
+            $actual = Get-Item (Join-Path "$root/output" $item.filename)
+            if ($actual.Length -ne $item.bytes -or (Get-FileHash $actual.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.sha256) { throw 'Frozen artifact digest mismatch' }
+          }
+          Move-Item "$root/current/source" "$root/source"
+      - name: Verify styled installer choices and persistence
+        shell: powershell
+        run: |
+          $output = Join-Path $PWD '.local-work/candidates/r7/output'
+          $installer = @(Get-ChildItem $output -Filter '*.exe' | Where-Object { $_.Name -ne 'niuma-merit.exe' })
+          & ./scripts/test-windows-acceptance-r2.ps1 -InstallerPath $installer[0].FullName -ClientPath "$output/niuma-merit.exe" -EvidenceDirectory "$output/journey" -CandidateRevision R7 -RequireSinglePage
+      - name: Capture native pages in a disposable instrumented copy
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD '.local-work/candidates/r7'
+          Copy-Item "$root/source" "$root/gallery-source" -Recurse
+          python scripts/prepare-native-ui-gallery.py "$root/gallery-source"
+          if ($LASTEXITCODE -ne 0) { throw 'Gallery preparation failed' }
+          cmake -S "$root/gallery-source" -B "$root/gallery-build" -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Gallery configuration failed' }
+          cmake --build "$root/gallery-build" --config Release --target niuma-merit --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Gallery compilation failed' }
+          & ./scripts/capture-windows-ui-gallery.ps1 -ExecutablePath "$root/gallery-build/Release/niuma-merit.exe" -OutputDirectory "$root/output/ui"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-client-ui-r7
+          path: .local-work/candidates/r7/output/*
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-r7:
+    # Unchanged Mac product already passed in run 39158412636.
+    if: false
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the R7 client and one-click installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$PWD/.local-work/candidates/r7"
+          python3 scripts/prepare-reminder-import-acceptance.py --revision R7 --output "$root"
+          NIUMA_CODESIGN_IDENTITY=- sh "$root/source/scripts/build-macos.sh" "$root/mac-build"
+          NIUMA_CODESIGN_IDENTITY=- sh "$PWD/scripts/build-macos-installer.sh" "$root/mac-build/牛马电子功德.app" "$root/installer"
+          mkdir -p "$root/output"
+          cp "$root/SOURCE_BINDING.json" "$root/output/"
+      - name: Capture native client pages without a real input listener
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$PWD/.local-work/candidates/r7"
+          cp -R "$root/source" "$root/gallery-source"
+          python3 scripts/prepare-native-ui-gallery.py "$root/gallery-source"
+          NIUMA_CODESIGN_IDENTITY=- sh "$root/gallery-source/scripts/build-macos.sh" "$root/gallery-build"
+          mkdir -p "$root/output/ui"
+          private_root=$(mktemp -d /private/tmp/niuma-merit-acceptance-XXXXXXXX)
+          chmod 700 "$private_root"
+          NIUMA_ACCEPTANCE_ROOT="$private_root" NIUMA_PACK_ROOT="$private_root/AppearancePacks" NIUMA_UI_GALLERY_OUTPUT="$root/output/ui" \
+            "$root/gallery-build/牛马电子功德.app/Contents/MacOS/niuma-merit" --isolated-acceptance --reminder-ui-preview
+          rm -rf "$private_root"
+      - name: Verify one-click copy and user-data preservation in temporary directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$PWD/.local-work/candidates/r7"
+          cp -R "$root/installer/安装牛马电子功德.app" "$root/installer-test.app"
+          xcrun clang++ -std=c++17 -O2 -fobjc-arc -mmacosx-version-min=10.15 scripts/test-macos-installer.mm \
+            -framework AppKit -framework Security -framework CoreServices -o "$root/installer-test.app/Contents/MacOS/niuma-installer"
+          codesign --force --sign - --options runtime --timestamp=none "$root/installer-test.app"
+          for case_name in valid invalid; do
+            test_root=$(mktemp -d /private/tmp/niuma-merit-installer-test-XXXXXXXX)
+            if [ "$case_name" = invalid ]; then export NIUMA_INSTALLER_INVALID_TEST=1; else unset NIUMA_INSTALLER_INVALID_TEST || true; fi
+            NIUMA_INSTALLER_TEST_ROOT="$test_root" NIUMA_UI_GALLERY_OUTPUT="$root/output/ui" \
+              "$root/installer-test.app/Contents/MacOS/niuma-installer"
+            rm -rf "$test_root"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-client-ui-r7
+          path: .local-work/candidates/r7/output/*
+          if-no-files-found: error
+          retention-days: 7

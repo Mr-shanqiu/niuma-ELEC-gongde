@@ -1,0 +1,1041 @@
+/* Static public-page copy. Loaded synchronously before the locale runtime. */
+window.NiuMaEnglishPages = {
+  "Windows / Mac 安装与形象包导入图解｜牛马电子功德": "Windows / Mac installation and character import guide | NiuMa Merit",
+  "功": "N",
+  "牛马电子功德": "NiuMa Merit",
+  "挑选形象": "Browse characters",
+  "下载客户端": "Download app",
+  "领取群码": "Get group code",
+  "安装帮助": "Installation help",
+  "第一次安装也没关系": "Your first install, made simple",
+  "跟着图片，一步一步来。": "Follow along, one step at a time.",
+  "选择你的电脑系统，按图操作即可。": "Choose your operating system and follow the illustrated steps.",
+  "请只从官网下载": "Download only from the official website",
+  "其他来源的安装包可能被修改或植入恶意程序。官网地址：gongde.zqscreen.cn": "Installers from other sources may be modified or contain malware. Official website: gongde.zqscreen.cn",
+  "macOS 安装": "macOS installation",
+  "第一次会多一步系统确认": "One extra system confirmation on first launch",
+  "打开 DMG，把应用拖入“应用程序”，再从“应用程序”启动。首次打开可能有系统安全提示；只有确认官网下载来源并愿意运行时，才按图解为本应用确认。不要关闭系统的全局安全保护。": "Open the DMG, drag the app to Applications, then launch it from there. A security prompt may appear on first launch. Only approve this specific app after confirming the official download source and choosing to run it. Do not disable system-wide security protection.",
+  "01-…Mac安装包.dmg": "01-…Mac installer.dmg",
+  "双击打开": "Double-click to open",
+  "打开 01 开头的安装包": "Open the installer starting with 01",
+  "在“下载”文件夹里，双击": "In Downloads, double-click the file starting with",
+  "01-牛马电子功德-Mac安装包": "01- (Mac installer)",
+  "开头、以": "and ending in",
+  "结尾的文件。基础木鱼已包含在客户端里。": ". The basic woodfish is included in the app.",
+  "应用程序": "Applications",
+  "拖入“应用程序”": "Drag to Applications",
+  "把左侧的木鱼图标拖到右侧“应用程序”文件夹。": "Drag the woodfish icon on the left into the Applications folder on the right.",
+  "隐私与安全性": "Privacy & Security",
+  "“牛马电子功德”已被阻止使用": "NiuMa Merit was blocked",
+  "仍要打开": "Open Anyway",
+  "确认后，仅允许本应用打开": "Approve only this app, after checking its source",
+  "遇到“Apple 无法验证”提示时，先点“完成”，不要点“移到废纸篓”。确认文件来源后，进入“系统设置 → 隐私与安全性”，找到本应用并点“仍要打开”，再按系统提示确认。": "If Apple says it cannot verify the app, click Done, not Move to Trash. After checking the file source, go to System Settings → Privacy & Security, find this app, click Open Anyway, and follow the system prompts.",
+  "这与下一步的“输入监控”授权不同，也不需要关闭全局安全检查。如果系统提示应用“将损坏你的电脑”或“已损坏”，请停止安装，不要绕过提示。可查看": "This is separate from Input Monitoring in the next step, and does not require disabling system-wide checks. If the system says the app will damage your computer or is damaged, stop installation. Do not bypass the warning. See",
+  "Apple 官方说明": "Apple's official guidance",
+  "输入监控": "Input Monitoring",
+  "开启“输入监控”": "Enable Input Monitoring",
+  "打开开关后，应用只统计按键和点击次数，不读取你输入的文字。": "Once enabled, the app counts keystrokes and clicks, not the text you type.",
+  "Windows 10 / 11 安装": "Windows 10 / 11 installation",
+  "下载后，双击 EXE 安装": "Download, then double-click the EXE",
+  "直接双击安装，不再需要解压 ZIP。安装程序会帮你创建快捷方式。": "Double-click to install. There is no ZIP to extract. The installer creates shortcuts for you.",
+  "01-…Windows安装包.exe": "01-…Windows installer.exe",
+  "双击开始安装": "Double-click to install",
+  "01-牛马电子功德-Windows安装包": "01- (Windows installer)",
+  "Windows 已保护你的电脑": "Windows protected your PC",
+  "点击“更多信息”查看运行按钮": "Click More info to see the run option",
+  "更多信息": "More info",
+  "仍要运行": "Run anyway",
+  "如果出现安全提醒": "If a security prompt appears",
+  "仅在确认文件来自官网、提示是“Windows 已保护你的电脑”且愿意运行时，点击“更多信息”，再点“仍要运行”。": "Only if you have verified the official source, the prompt says Windows protected your PC, and you choose to run it: click More info, then Run anyway.",
+  "没有“仍要运行”，或提示恶意软件、智能应用控制／组织策略阻止？请停止安装，保留提示截图并": "No Run anyway button, or a malware, Smart App Control, or organization-policy warning? Stop installation, keep a screenshot of the prompt, and",
+  "联系项目": "contact the project",
+  "。不要关闭杀毒软件、全局安全保护或反复绕过拦截。": ". Do not disable antivirus or system-wide protection, or repeatedly bypass a block.",
+  "安装牛马电子功德": "Install NiuMa Merit",
+  "开机后自动启动": "Launch at startup",
+  "安装": "Install",
+  "保持默认选项": "Keep the default options",
+  "“开机后自动启动”默认勾选。以后也可以在应用设置里关闭。": "Launch at startup is selected by default. You can turn it off later in the app settings.",
+  "双击桌面快捷方式": "Double-click the desktop shortcut",
+  "安装完成": "Installation complete",
+  "从桌面快捷方式打开。需要卸载时，可在 Windows“已安装的应用”中操作。": "Open the app using the desktop shortcut. To uninstall, use Installed apps in Windows.",
+  "02 · 安装后，再导入形象": "02 · Import characters after installation",
+  "多个形象，一个文件，一次导入。": "Multiple characters. One file. One import.",
+  "第一次使用需要两份文件：": "First-time users need two files:",
+  "01 开头的是客户端安装包，02 开头的是形象文件。": "01 is the app installer; 02 is the character file.",
+  "已经安装客户端的用户，可以直接进行这一步。基础木鱼安装即用，不需要额外下载形象文件。": "Already installed? Go straight to this step. The basic woodfish works immediately and needs no extra character file.",
+  "先安装并打开": "First install and open the",
+  "免费客户端": "free app",
+  "下载本批次的形象文件。单个形象的后缀是": "Download this batch's character file. A single character uses",
+  "，多个形象的后缀是": "; multiple characters use",
+  "；多个形象仍只有一份文件，无需解压。": ". Multiple characters still come in one file, with no extraction needed.",
+  "在“下载”文件夹里双击": "In Downloads, double-click the file starting with",
+  "02-牛马形象包": "02- (character pack)",
+  "开头的文件。导入完成后，右键桌面小伙伴，在“更换形象”中选择喜欢的形象。": ". After importing, right-click your desktop companion and choose a character from the change-character menu.",
+  "扩展形象每个 1 元，每批最多 10 个，没有套餐价；也可凭每三天更新的官方群码免费领取。重新发起下载需要重新付款或使用有效群码，不提供历史订单入口。": "Extra characters cost CNY 1 each, up to 10 per batch, with no bundle pricing. An official group code, updated every three days, also lets you claim them free. Starting a new download requires a new payment or a valid group code. There is no order-history portal.",
+  "回首页挑选形象": "Browse characters on the home page",
+  "请保留已下载的文件。它可随时导入并永久离线使用，没有首次导入倒计时。": "Keep your downloaded file. Import it anytime and use it offline indefinitely; there is no first-import deadline.",
+  "安装包与形象文件不能互相替代；不要修改文件后缀。": "The app installer and character file are not interchangeable. Do not change their extensions.",
+  "先确认实际计数，不只看权限开关": "Check actual counting, not just the permission toggle",
+  "只有点击宠物才会增加？": "Only clicks on the companion count?",
+  "请打开与你的电脑对应的详细说明：": "Open the detailed guide for your operating system:",
+  "Mac 权限与计数帮助": "Mac permissions and counting help",
+  "Windows 权限与计数帮助": "Windows permissions and counting help",
+  "。客户端右键菜单的“关于”中也有对应平台的帮助链接。": ". You can also find the platform help link under About in the app's right-click menu.",
+  "这说明点击计数可用，但不证明全局监听已生效。先切换到普通文本编辑器敲几次键，再正常点击桌面，观察数字；不要在密码框或系统安全界面测试。": "This means direct-click counting works, but does not confirm that input in other apps is being received. Type a few keys in an ordinary text editor, click normally on the desktop, and watch the count. Do not test in password fields or system security screens.",
+  "从右键菜单完全退出软件，确认只运行一份正式安装的版本，再正常打开。": "Quit completely using the right-click menu, make sure only one officially installed copy is running, and reopen normally.",
+  "Mac 请检查“输入监控”是否对应“应用程序”中的当前软件。更新、移动位置或签名变化后，旧条目可能失效；必要时通过系统界面移除旧条目，再为当前软件重新授权。": "On Mac, check that Input Monitoring applies to the current app in Applications. An update, move, or signature change can invalidate an old entry. If necessary, remove the old entry through System Settings and authorize the current app again.",
+  "Windows 没有 Mac 的“输入监控”开关。UAC、安全桌面和部分高权限应用受系统限制，不要关闭安全保护或始终管理员运行来扩大监听。": "Windows has no Mac-style Input Monitoring switch. UAC, the secure desktop, and some elevated apps have system-imposed limits. Do not disable protection or always run as administrator to expand monitoring.",
+  "“输入监控”在系统层面允许接收输入事件；本软件只用事件进行计数和动画，不保存具体输入。不要删除计数、日历或形象文件来修复权限。仍不正常时，保留版本和提示，": "Input Monitoring permits input events at system level. This app uses events only for counting and animation, without saving what you type. Do not delete counts, calendar data, or character files to fix permissions. If it still fails, keep the version and prompt details, and",
+  "保留你的小伙伴和积累": "Keep your companion and your progress",
+  "更新应用，不清空数据。": "Update the app, not your data.",
+  "先退出旧版。Mac 在“应用程序”替换同名应用；Windows 使用新版安装程序更新原安装位置。不要同时运行下载目录、DMG 和正式目录中的多个副本。": "Quit the old version first. On Mac, replace the app in Applications; on Windows, update the existing installation using the new installer. Do not run copies from Downloads, a DMG, and the installed location at the same time.",
+  "重开后核对“关于”中的版本、原计数、已安装形象和自启动设置，再在其他普通应用中检查计数。系统可能要求重新确认权限，以实际监听结果为准。": "After reopening, check the version under About, your existing count, installed characters, and startup setting. Then check counting in ordinary apps. The system may ask you to confirm permissions again; actual input counting is what matters.",
+  "软件不自动更新。安装包、源代码、签名状态和真实使用测试是不同信息；有问题时保留原安装文件与提示，回退应用但不删除用户数据。": "The app does not update automatically. Installers, source code, signing status, and real-world testing are distinct information. If something goes wrong, keep the original installer and prompt details. Roll back the app without deleting user data.",
+  "关于开机启动": "About launching at startup",
+  "默认开启，但永远由你决定。": "On by default. Always your choice.",
+  "开机启动只是让桌面小伙伴自动出现，不会联网，也不会上传任何输入内容。Mac 和 Windows 都可以随时在应用设置中关闭。": "Startup simply makes your companion appear automatically. It does not connect to the internet or upload input. You can turn it off in the app settings on both Mac and Windows.",
+  "Mac 签名与系统安全说明": "Mac signing and system security",
+  "当前 0.9 系列 Mac 新构建使用 Apple Development 签名，不是 Developer ID 分发签名，也未完成 Apple 公证。因此首次运行仍可能被系统拦截；单应用确认不代表已获 Apple 分发认可。若系统提示应用“已损坏”或“将损坏你的电脑”，请停止安装并联系项目，不要绕过。": "New Mac builds in the current 0.9 series use Apple Development signing, not Developer ID distribution signing, and are not notarized by Apple. First launch may still be blocked. Approving this app does not mean Apple has approved it for distribution. If the system says the app is damaged or will damage your computer, stop installation and contact the project. Do not bypass the warning.",
+  "给熟悉电脑的用户：查看安装包校验值": "Advanced: check the installer checksum",
+  "普通用户不需要操作这一项。若你希望核对文件完整性，可查看官方": "Most users can skip this. To check file integrity, see the official",
+  "SHA-256 清单": "SHA-256 checksum list",
+  "免费下载客户端": "Download the free app",
+  "返回官网选择形象": "Back to characters",
+  "给忙碌留一点轻松。": "A little ease for a busy day.",
+  "隐私说明": "Privacy",
+  "常见问题": "FAQ",
+  "联系与反馈": "Contact & feedback",
+  "项目说明": "About the project",
+  "陕ICP备2026020359号": "ICP registration 2026020359",
+  "牛马电子功德官方安装图解：先安装免费的 Windows 或 Mac 客户端，再一次导入所选形象。基础木鱼安装即用，扩展形象可付款或凭官方群码获取。": "Official NiuMa Merit installation guide: install the free Windows or Mac app, then import your selected characters in one file. The basic woodfish is included; extra characters are available by payment or official group code.",
+  "主要导航": "Main navigation",
+  "选择电脑系统": "Choose operating system",
+  "打开下载的 DMG 文件": "Open the downloaded DMG",
+  "把应用拖入应用程序": "Drag the app to Applications",
+  "在隐私与安全中仍要打开": "Choose Open Anyway in Privacy & Security",
+  "开启输入监控": "Enable Input Monitoring",
+  "双击 EXE 安装包": "Double-click the EXE installer",
+  "Windows 安全提示中选择仍要运行": "Choose Run anyway in the Windows prompt",
+  "安装时开启开机启动": "Enable launch at startup during installation",
+  "从桌面打开应用": "Open the app from the desktop",
+  "页脚": "Footer navigation",
+  "形象详情与真实预览｜牛马电子功德": "Character details and live preview | NiuMa Merit",
+  "正在读取作品…": "Loading character…",
+  "播放动作": "Play animation",
+  "重试预览": "Retry preview",
+  "作者本人的抖音号：": "Creator's Douyin ID:",
+  "复制作者抖音号": "Copy creator's Douyin ID",
+  "由作者选填并经内容审核公开，不表示身份认证。": "Optional creator-provided information, published after content review. This is not identity verification.",
+  "加入选择": "Add to selection",
+  "下载所选形象": "Download selected characters",
+  "复制形象链接": "Copy character link",
+  "举报作品": "Report character",
+  "原因": "Reason",
+  "侵权": "Copyright infringement",
+  "违法有害": "Illegal or harmful content",
+  "恶意内容": "Malicious content",
+  "其他": "Other",
+  "问题说明": "Describe the issue",
+  "10 至 1000 个 Unicode 码点，按 NFC 正规化计数。": "10–1,000 Unicode code points, counted after NFC normalization.",
+  "证据文字（选填，不抓取链接）": "Evidence text (optional; links are not fetched)",
+  "选填，最多 1000 个字，不接收附件，不自动访问链接。": "Optional, up to 1,000 characters. No attachments; links are not opened automatically.",
+  "联系方式（选填）": "Contact details (optional)",
+  "选填，最多 120 个字，仅供处理举报，不公开。": "Optional, up to 120 characters. Used only to handle this report, not published.",
+  "提交举报": "Submit report",
+  "形象详情与真实预览，官方扩展每个1元，或用三天官方群码免费领取。": "Character details and live preview. Official extras cost CNY 1 each, or claim them free with an official group code updated every three days.",
+  "统一形象库入口｜牛马电子功德": "Character library | NiuMa Merit",
+  "形象库": "Character library",
+  "安装与导入": "Install & import",
+  "公开共创暂时暂停。": "Community creation is on hold.",
+  "当前仅开放首页官方形象库，不恢复旧社区作品链接或作者码。": "Only the official character library on the home page is currently available. Previous community links and creator codes remain disabled.",
+  "进入统一形象库": "Open character library",
+  "· 陕ICP备2026020359号": "· ICP registration 2026020359",
+  "统一形象库入口，公开共创暂停，请在首页选择官方扩展形象。": "Community creation is on hold. Browse official extra characters in the home-page library.",
+  "牛马电子功德官网｜桌面电子木鱼 · Windows / Mac 免费下载": "NiuMa Merit | Desktop woodfish · Free for Windows / Mac",
+  "陪你上班的桌面小伙伴": "A little companion for your working day",
+  "你忙你的，": "You do your thing.",
+  "它陪着。": "It keeps you company.",
+  "打字、点鼠标，它就动一下。": "Type or click. It moves along.",
+  "把忙碌的一天，攒成一点小快乐。": "Turn a busy day into little moments of joy.",
+  "免费下载客户端 ↓": "Download the free app ↓",
+  "选择其他电脑系统 ↗": "Choose another operating system ↗",
+  "基础木鱼永久免费 · 无需登录 · 本地运行": "Basic woodfish, free forever · No login · Runs locally",
+  "先挑一个喜欢的形象 ↓": "Find your favorite character first ↓",
+  "今天也在积攒小快乐": "Collecting little joys today",
+  "功德 +1": "Merit +1",
+  "点一下，试试手感 ↗": "Give it a tap ↗",
+  "给桌面换一点心情": "A fresh mood for your desktop",
+  "换一个小伙伴": "Meet your next companion",
+  "基础木鱼": "Basic woodfish",
+  "永久免费": "Free forever",
+  "。扩展形象每个": ". Extra characters cost",
+  "，也可用": ", or",
+  "粉丝群码免费领取": "claim free with a fan-group code",
+  "搜索名称或形象编号": "Search by name or character ID",
+  "排序": "Sort by",
+  "下载最多": "Most downloaded",
+  "最新发布": "Newest",
+  "近 7 天下载最多": "Most downloaded in the past 7 days",
+  "查找": "Search",
+  "更多筛选": "More filters",
+  "单个标签": "Single tag",
+  "作者编号": "Creator ID",
+  "清除筛选": "Clear filters",
+  "基础木鱼永久免费；扩展形象 ¥1/个，或用官方群码免费领取。": "Basic woodfish: free forever. Extra characters: CNY 1 each, or free with an official group code.",
+  "上一页": "Previous page",
+  "下一页": "Next page",
+  "已选 0 / 10": "Selected 0 / 10",
+  "查看已选（0）": "View selection (0)",
+  "筛选、翻页或切换支付/官方群码不会清除选择。每批最多 10 个不同形象，文件最多 16 MiB。": "Filters, pagination, and switching between payment and group code do not clear your selection. Up to 10 different characters per batch; maximum file size 16 MiB.",
+  "清空选择": "Clear selection",
+  "付费下载": "Paid download",
+  "群码免费领取": "Claim free with group code",
+  "第一次见面？很简单。": "First time here? It's simple.",
+  "装上客户端": "Install the app",
+  "免费木鱼，安装就有。": "Your free woodfish is included.",
+  "挑选喜欢的形象": "Choose your characters",
+  "每个 ¥1，或用群码免费领取。": "CNY 1 each, or free with a group code.",
+  "导入，开始陪伴": "Import and enjoy the company",
+  "下载一个形象包，打开导入就好。": "Download one character pack and open it to import.",
+  "查看安装与导入帮助 ↗": "Installation & import guide ↗",
+  "牛马电子功德官网：Windows / Mac 基础木鱼直接免费，无需账号或码。扩展每个1元，每批最多10个不同形象，每次新下载重新付款；三天官方群码可免费领取，不扣额度。保存文件永久本地使用。": "NiuMa Merit: the Windows / Mac app and basic woodfish are free, with no account or code. Extras cost CNY 1 each, up to 10 different characters per batch. Each new paid download is a new purchase. Official group codes update every three days and allow free claims without using a quota. Keep your files for indefinite offline use.",
+  "牛马电子功德｜离线桌面电子木鱼": "NiuMa Merit | Offline desktop woodfish",
+  "基础木鱼免费，无需登录。挑选扩展形象；支持 Windows 和 Mac。": "Free basic woodfish, no login. Browse extra characters for Windows and Mac.",
+  "木鱼计数动画演示": "Woodfish counting animation demo",
+  "敲一下木鱼，体验客户端原始动作": "Tap the woodfish to try the app's original animation",
+  "客户端木鱼原始动作": "Original woodfish animation from the app",
+  "例如：动物": "For example: animals",
+  "可领取的形象": "Available characters",
+  "已选形象与领取": "Selected characters and claiming",
+  "联系项目｜牛马电子功德": "Contact | NiuMa Merit",
+  "联系我们": "Contact us",
+  "安装、权限、形象包、问题反馈或合作建议，都可以直接联系我们。请简单说明你使用的系统、软件版本和遇到的问题，方便我们准确回复。": "For installation, permissions, character packs, feedback, or collaboration, contact us directly. Include your operating system, app version, and a brief description so we can help.",
+  "邮件咨询": "Email support",
+  "适合发送详细问题、错误截图、合作说明，以及涉及漏洞、账号、手机号、订单或隐私的非公开报告。": "For detailed questions, error screenshots, collaboration proposals, and private reports about vulnerabilities, accounts, phone numbers, orders, or privacy.",
+  "建议写明 macOS 或 Windows、当前版本，以及问题出现前后的操作。": "Please include macOS or Windows, the current version, and what happened before and after the issue.",
+  "微信咨询": "WeChat support",
+  "扫码添加微信，咨询安装、使用与形象合作。": "Scan to add us on WeChat for installation, usage, and character collaboration questions.",
+  "请不要通过邮件、微信或公开问题发送密码、短信验证码、私钥、付款密码或其他敏感凭据。我们不会向你索要这些信息。": "Do not send passwords, SMS verification codes, private keys, payment passwords, or other sensitive credentials through email, WeChat, or public issues. We will never ask for them.",
+  "欢迎关注开发者抖音，一起交流产品的奇思妙想": "Follow the developer on Douyin and share your product ideas",
+  "抖音号：": "Douyin ID:",
+  "使用抖音扫一扫进入开发者主页，加入粉丝群获取当前群码；客户端与基础木鱼不要求进群。": "Scan in Douyin to open the developer's profile, then join the fan group for the current code. Neither the app nor the basic woodfish requires group membership.",
+  "复制抖音号": "Copy Douyin ID",
+  "开发者抖音主页": "Developer's Douyin profile",
+  "公开问题与建议": "Public questions and suggestions",
+  "可以通过项目 GitHub 提交能够公开讨论的普通问题和功能建议。漏洞、账号、手机号、订单、付款或隐私问题请使用上方邮件私下联系，不要发布到公开 Issues。提交公开内容前，请移除截图或日志中的手机号、邮箱和其他个人信息。": "Use GitHub for ordinary questions and feature ideas suitable for public discussion. Email privately for vulnerabilities, accounts, phone numbers, orders, payments, or privacy issues. Do not post them in public Issues. Remove phone numbers, email addresses, and other personal information from screenshots and logs before posting.",
+  "前往 GitHub Issues": "Open GitHub Issues",
+  "下载来源": "Download source",
+  "正式官网为": "The official website is",
+  "。如果安装包来自他人转发，请回到官网核对文件名和 SHA-256。": ". If someone sent you an installer, return to the official website to check its filename and SHA-256 checksum.",
+  "返回首页": "Back to home",
+  "牛马电子功德官方联系方式：安装、系统权限、形象包导入、下载与订单问题，以及合作咨询。请勿在公开渠道发送权益码或完整订单信息。": "Official NiuMa Merit contact information: installation, system permissions, character imports, downloads, orders, and collaboration. Do not share claim codes or full order details publicly.",
+  "牛马电子功德微信咨询二维码": "NiuMa Merit WeChat support QR code",
+  "开发者抖音圆码，抖音号1872941388": "Developer's Douyin scan code; ID 1872941388",
+  "基础木鱼免费，扩展按次下载｜牛马电子功德": "Free basic woodfish, pay-per-download extras | NiuMa Merit",
+  "基础木鱼免费，欢迎关注开发者抖音。": "The basic woodfish is free. Meet the developer on Douyin.",
+  "基础木鱼客户端无需账号或码。扩展每个 1 元，每批最多 10 个不同形象，不套餐、不封顶；每次新下载重新付款，保存文件永久本地使用。官方群码免费领取不扣额度。": "The basic woodfish app needs no account or code. Extras cost CNY 1 each, up to 10 different characters per batch, with no bundles or price cap. Each new paid download is a new purchase. Keep files for indefinite local use. Free group-code claims do not use a quota.",
+  "进入官网": "Open website",
+  "挑选官方扩展形象": "Browse official extra characters",
+  "使用抖音扫一扫进入开发者主页，加入粉丝群获取当前群码。基础木鱼直接免费使用，不要求关注或进群。": "Scan in Douyin to open the developer's profile and join the fan group for the current code. The basic woodfish is free without following or joining.",
+  "基础木鱼免费，扩展按次下载，基础木鱼直接免费，扩展每个1元，官方群码可免费领取。": "Free basic woodfish; extras cost CNY 1 each per new download, or claim free using an official group code.",
+  "公开共创暂停｜牛马电子功德": "Community creation on hold | NiuMa Merit",
+  "创作者中心": "Creator center",
+  "统一形象库": "Official character library",
+  "投稿、作者码、公开社区及创作者预览暂时停用，没有登录、上传、审核或推广码入口。": "Submissions, creator codes, the public community, and creator previews are temporarily disabled. There are no login, upload, review, or referral-code entry points.",
+  "基础木鱼客户端直接免费，无需账号或码。官方扩展每个 1 元，每批最多 10 个不同形象；也可用三天官方群码免费领取，保存文件永久本地使用。": "The basic woodfish app is free with no account or code. Official extras cost CNY 1 each, up to 10 different characters per batch, or claim free with an official group code updated every three days. Keep files for indefinite local use.",
+  "返回首页挑选官方形象": "Browse official characters on the home page",
+  "公开共创、投稿、作者码及创作者预览暂停。基础木鱼直接免费，官方扩展形象在首页选择。": "Community creation, submissions, creator codes, and previews are on hold. The basic woodfish is free; browse official extras on the home page.",
+  "下载所选形象｜牛马电子功德": "Download selected characters | NiuMa Merit",
+  "把小伙伴带回桌面": "Bring your companion home",
+  "正在读取选择…": "Loading selection…",
+  "查看选择": "View selection",
+  "下载方式": "Download method",
+  "支付方式": "Payment method",
+  "微信支付": "WeChat Pay",
+  "支付宝": "Alipay",
+  "正在读取支付方式…": "Loading payment methods…",
+  "下载形象包": "Download character pack",
+  "付款遇到问题？": "Payment trouble?",
+  "付款后页面尚未更新？查询本次订单即可，不要再次付款。当前订单的下载失败也可以重试。": "Paid but the page has not updated? Check this order instead of paying again. You can also retry a failed download for the current order.",
+  "查询本次付款状态": "Check this payment",
+  "需要协助时，提供订单编号并": "For help, provide the order number and",
+  "，不要发送支付密码或私人下载链接。": ". Do not send payment passwords or private download links.",
+  "官方群码": "Official group code",
+  "验证并免费领取": "Verify & claim free",
+  "官方群码免费领取": "Claim free with official group code",
+  "继续本次下载": "Continue this download",
+  "没有码？去抖音粉丝群领取": "Need a code? Get one in the Douyin fan group",
+  "使用抖音扫一扫，进入开发者主页，加入粉丝群并查看置顶消息。": "Scan using Douyin, open the developer's profile, join the fan group, and check its pinned message.",
+  "群码怎么用？": "How does the group code work?",
+  "GD加六位数字，不区分大小写，每三天更新。有效期内可反复领取，每批最多10个，不扣额度。": "GD followed by six digits, case-insensitive, updated every three days. Claim repeatedly while valid, up to 10 per batch, without using a quota.",
+  "更换官方群码": "Change official group code",
+  "清除验码状态": "Clear code verification",
+  "返回形象库": "Back to character library",
+  "改用群码免费领取": "Use a group code instead",
+  "本次选择": "Your selection",
+  "文件大小与下载限制": "File size and download limits",
+  "每批最多10个不同形象，一个文件最多16 MiB。": "Up to 10 different characters per batch; maximum file size 16 MiB.",
+  "返回图库继续挑选": "Back to the library to choose more",
+  "本次下载已完成": "Download completed",
+  "请保留文件，随时都能再次离线导入。": "Keep the file so you can import it offline again anytime.",
+  "回到形象库": "Back to the library",
+  "接下来怎么导入？": "How do I import it?",
+  "安装客户端后双击形象包，无需解压，再从“更换形象”中选中它。": "Install the app, then double-click the character pack without extracting it. Select the imported character from the app's change-character menu.",
+  "查看导入图解": "See the import guide",
+  "官方扩展每个1元，每批最多10个不同形象，或用三天官方群码免费领取。基础木鱼客户端无需账号或码。": "Official extras cost CNY 1 each, up to 10 different characters per batch, or claim free using an official group code updated every three days. The basic woodfish app needs no account or code.",
+  "GD + 六位数字": "GD + six digits",
+  "关闭选择清单": "Close selection",
+  "页面不存在｜牛马电子功德": "Page not found | NiuMa Merit",
+  "这里没有功德。": "No merit here, yet.",
+  "你访问的页面不存在，返回首页继续看看吧。": "This page does not exist. Head back home to keep exploring.",
+  "01 · 免费安装客户端｜牛马电子功德": "01 · Install the free app | NiuMa Merit",
+  "第一次使用，先装客户端": "First time? Install the app first",
+  "基础木鱼，安装即用。": "Your basic woodfish is ready to go.",
+  "客户端始终免费，无需账号、领取码、关注或进群。安装后就能使用基础木鱼，完全离线，不联网激活。": "The app is always free. No account, claim code, follow, or group membership required. The basic woodfish works immediately after installation, fully offline, with no online activation.",
+  "01 · 先安装": "01 · Install first",
+  "选择你的电脑系统": "Choose your operating system",
+  "下载 01 开头的安装包，安装并打开客户端。Mac 使用 DMG，Windows 使用 EXE；版本和文件大小来自正式发布记录。": "Download the installer starting with 01, install, and open the app. Mac uses DMG; Windows uses EXE. Versions and file sizes come from the official release records.",
+  "查看安装图解": "See the installation guide",
+  "刷新下载信息": "Refresh download information",
+  "已经安装了？直接查看形象导入说明": "Already installed? Go straight to character import",
+  "02 · 再导入": "02 · Then import",
+  "多个形象，只下载一个文件": "Multiple characters, one download file",
+  "如果你已选好扩展形象，回到获取页面下载本批次文件。找到 02 开头的形象文件，先打开客户端，再双击文件导入，无需解压。导入后右键桌面小伙伴，在“更换形象”中选择。": "Once you have selected extra characters, return to the claim or payment page to download this batch. Find the character file starting with 02, open the app, then double-click the file to import it. No extraction needed. Right-click your companion to choose the imported character.",
+  "基础木鱼不需要这一步。扩展形象每个 1 元，每批最多 10 个；也可凭官方群码免费领取。已安装的用户只需下载本批次形象文件，不必再次下载客户端。": "The basic woodfish needs no extra import. Extras cost CNY 1 each, up to 10 per batch, or claim free with an official group code. If the app is already installed, download only this batch's character file; you do not need the installer again.",
+  "扩展形象的客户端兼容说明": "App compatibility for extra characters",
+  "正在读取兼容版本…": "Loading compatible version…",
+  "兼容信息暂不可读时，已发布的客户端仍可直接下载，不需要验证领取码。": "If compatibility information is temporarily unavailable, you can still download the released app without verifying a claim code.",
+  "历史客户端版本：当前版本遇到问题时再查看": "Older app versions: only if the current version causes problems",
+  "通常请选择上方当前版本。安装旧版前请退出正在运行的应用，保留自己的数据与形象文件。": "Normally, choose the current version above. Quit the running app before installing an older version, and keep your data and character files.",
+  "请确认官网下载来源。遇到系统安全拦截时先查看安装说明，不要关闭全局安全保护。": "Confirm that your download is from the official website. If the system blocks installation, read the guide first. Do not disable system-wide protection.",
+  "先安装免费的牛马电子功德客户端，再一次导入所选形象。基础木鱼安装即用，无需账号或领取码。": "Install the free NiuMa Merit app, then import your selected characters in one file. The basic woodfish is included, with no account or claim code.",
+  "当前版本下载": "Download current version",
+  "本次形象包交付｜牛马电子功德": "Current character delivery | NiuMa Merit",
+  "正在查询当前批次…": "Checking current batch…",
+  "查看批次编号": "View batch ID",
+  "查看本次形象": "View this batch's characters",
+  "文件大小与校验信息": "File size and checksum",
+  "下载本批文件": "Download this batch",
+  "重新准备": "Prepare again",
+  "刷新状态": "Refresh status",
+  "复制批次编号": "Copy batch ID",
+  "保留选择，创建新下载": "Keep selection and start a new download",
+  "安装、导入与再次领取": "Install, import, and claim again",
+  "先安装免费客户端，再双击形象包，无需解压。文件保存后可永久离线使用。": "Install the free app, then double-click the character pack without extracting it. Keep the file for indefinite offline use.",
+  "还没安装客户端？": "App not installed yet?",
+  "再次领取": "Claim again",
+  "当前下载失败可重试，完成后不提供历史下载入口。": "Retry a failed current download. There is no download-history portal after completion.",
+  "本次形象包交付，牛马电子功德当前群码批次交付，保存文件永久本地使用。": "Current NiuMa Merit group-code batch delivery. Keep the downloaded file for indefinite local use.",
+  "Mac 权限与计数帮助｜牛马电子功德": "Mac permissions and counting help | NiuMa Merit",
+  "允许输入监控，": "Enable Input Monitoring.",
+  "在其他应用里也能积攒功德。": "Let your work count in other apps, too.",
+  "Mac 的“输入监控”由系统管理。只有点击小伙伴时数字会增加，通常说明应用已运行，但在其他应用中的输入还没有被接收。": "Mac manages Input Monitoring through the system. If the count only increases when you click the companion, the app is probably running but is not yet receiving input from other apps.",
+  "先记住这一条：": "The key thing to remember:",
+  "只为“应用程序”里正在使用的牛马电子功德开启输入监控，然后完全退出并重新打开。不要删除计数、日历或形象包数据。": "Enable Input Monitoring only for the NiuMa Merit app you use in Applications, then quit completely and reopen it. Do not delete counts, calendar data, or character packs.",
+  "开启权限": "Enable permission",
+  "更新后不计数": "Not counting after an update",
+  "仍不正常": "Still not working",
+  "隐私与权限": "Privacy & permissions",
+  "第一次使用：开启输入监控": "First use: enable Input Monitoring",
+  "将牛马电子功德安装到“应用程序”，从那里打开，不要长期运行 DMG 或下载目录中的副本。": "Install NiuMa Merit in Applications and open it from there. Do not keep running a copy from the DMG or Downloads.",
+  "打开 Mac 的“系统设置”，进入“隐私与安全性”，找到“输入监控”。系统版本不同，个别名称可能略有差异。": "Open System Settings → Privacy & Security → Input Monitoring. Names may vary slightly between macOS versions.",
+  "找到“牛马电子功德”并开启开关。没有该条目时，可使用列表中的添加按钮，选择“应用程序”中的当前应用。": "Find NiuMa Merit and turn on its switch. If it is missing, use the list's add button to select the current app in Applications.",
+  "如果系统要求确认身份或“退出并重新打开”，请在系统界面按提示完成。若没有自动重新打开，在小伙伴上右键选择“退出”，再从“应用程序”启动。": "If the system asks you to authenticate or Quit & Reopen, follow its prompts. If it does not reopen automatically, right-click the companion, quit, then launch it from Applications.",
+  "回到平时使用的普通应用，正常打字或点击鼠标，观察功德数字是否增加。不要用密码输入框或系统安全弹窗判断是否正常。": "Return to an ordinary app, type or click normally, and watch the merit count. Do not judge counting using password fields or system security dialogs.",
+  "仅关闭设置窗口不等于退出客户端。权限确认必须在你的 Mac 上完成，本网页不能代替系统授权。": "Closing the settings window does not quit the app. You must grant permission on your Mac; this website cannot authorize it for you.",
+  "Apple 官方：控制对输入监控的访问": "Apple: control access to Input Monitoring",
+  "更新后，开关开着却不计数？": "Updated, switch on, but still no count?",
+  "系统授权针对具体应用。更换版本、安装位置或签名后，旧授权条目可能不能代表当前正在运行的副本；开关显示开启，也不一定说明新副本已经获得有效授权。": "System authorization applies to a specific app. After a version, location, or signature change, an old permission entry may not cover the running copy. A switch showing on does not guarantee valid permission for the new copy.",
+  "先右键小伙伴选择“退出”。保留一个正式安装位置：应用程序中的牛马电子功德，不同时运行旧版、下载目录和 DMG 中的副本。": "Right-click the companion and quit first. Keep one installed copy: NiuMa Merit in Applications. Do not run old, Downloads, and DMG copies simultaneously.",
+  "在“输入监控”中确认授权对象是当前应用。若重新开启并重开应用仍无效，可通过系统界面移除该应用的旧条目，再添加“应用程序”中的当前副本。": "In Input Monitoring, confirm that permission applies to the current app. If toggling permission and reopening does not help, remove the old app entry through System Settings and add the current copy from Applications.",
+  "重新开启权限，按系统提示退出并重开，再在普通应用中观察计数。": "Enable permission again, quit and reopen as prompted, then check counting in an ordinary app.",
+  "移除权限列表中的旧条目，不是删除应用数据。": "Removing an old permission entry does not delete app data.",
+  "不要清空本机记录、功德日历或已导入形象来解决权限问题。": "Do not clear local records, the merit calendar, or imported characters to fix permissions.",
+  "按上述步骤操作后仍不正常": "Still not working after these steps",
+  "确认小伙伴仍在运行，并且只打开了一份客户端。完全退出后，从“应用程序”正常重新打开。": "Make sure the companion is running and only one app copy is open. Quit completely, then reopen normally from Applications.",
+  "确认系统弹出的授权或身份确认已完成；不要只凭一个开启的开关判断权限有效。": "Complete any system authorization or identity-confirmation prompts. Do not rely on an enabled switch alone.",
+  "如果只在密码框、登录界面或个别受保护窗口中不计数，不要为了计数关闭系统保护。": "If only password fields, login screens, or protected windows do not count, do not disable system protection to make them count.",
+  "保留“关于”中的客户端版本、macOS 版本和出现的提示，": "Keep the app version from About, your macOS version, and any prompt details, then",
+  "。不需要提供密码、输入内容或完整桌面截图。": ". You do not need to send passwords, typed content, or a full-desktop screenshot.",
+  "本页帮助你理解系统授权，不要求反复卸载或删除数据。安装阶段无法打开应用时，请另看": "This guide explains system authorization, not repeated reinstalls or data deletion. If you cannot open the app during installation, see the",
+  "Mac 安装说明": "Mac installation guide",
+  "；“允许打开应用”和“允许输入监控”是两件事。": ". Permission to open the app and permission for Input Monitoring are separate.",
+  "允许的权限，和我们实际使用的信息": "What the permission allows, and what we actually use",
+  "“输入监控”是系统提供的输入设备访问权限。牛马电子功德只用按键、鼠标按键和滚轮事件进行计数与动画，不保存具体按键内容、鼠标坐标、窗口内容或当前应用信息。": "Input Monitoring is system permission to access input devices. NiuMa Merit uses keyboard, mouse-button, and scroll events only for counting and animation. It does not save specific keystrokes, mouse coordinates, window contents, or current-app information.",
+  "计数、日历和导入的形象保存在本机，客户端无需联网运行。点击“关于”中的帮助链接，只是由默认浏览器打开本页，不会把客户端计数或输入记录发送到官网。": "Counts, calendar data, and imported characters stay on your computer. The app runs offline. Clicking the help link under About opens this page in your default browser; it does not send app counts or input records to the website.",
+  "本功能不要求你开启屏幕录制、完全磁盘访问或关闭系统安全保护。输入监控是否允许，始终由你决定；不开启时，不能期望其他应用中的操作都被计数。": "This feature does not require Screen Recording, Full Disk Access, or disabling system security. Input Monitoring is always your choice. Without it, you should not expect all actions in other apps to count.",
+  "查看产品隐私说明": "Read the privacy notice",
+  "牛马电子功德 Mac 权限帮助：如何开启输入监控，处理更新后授权失效，以及保护本机计数和形象数据。": "NiuMa Merit Mac permissions guide: enable Input Monitoring, resolve authorization issues after updates, and preserve local counts and character data.",
+  "本页目录": "On this page",
+  "官方形象库": "Official character library",
+  "返回官网": "Back to website",
+  "下载常见问题｜牛马电子功德": "Download FAQ | NiuMa Merit",
+  "客户端和基础木鱼收费吗？": "Do the app and basic woodfish cost anything?",
+  "不收费。Windows / Mac 客户端与内置基础木鱼永久免费，无需注册、登录或领取码。下载并安装客户端，就能使用基础木鱼。": "No. The Windows / Mac app and included basic woodfish are free forever, with no registration, login, or claim code. Download and install the app to start using the basic woodfish.",
+  "扩展形象如何下载？": "How do I download extra characters?",
+  "在首页形象库选择喜欢的形象，再选择付费下载或官方群码免费领取。付费每个 1 元，没有套餐优惠；每批最多 10 个不同形象，2 个就是 2 元，10 个就是 10 元。": "Select characters in the home-page library, then choose paid download or a free official group-code claim. Paid extras cost CNY 1 each with no bundle discount, up to 10 different characters per batch: two cost CNY 2, ten cost CNY 10.",
+  "官方群码在哪里领取？": "Where can I get the official group code?",
+  "前往": "Go to the",
+  "页面，用抖音扫描开发者抖音码，进入粉丝群查看置顶消息。官方群码格式为 GD 加六位数字，不区分大小写，每三天更新一次。有效期内可重复领取，每批最多 10 个，不扣次数或共享额度。": "page. Scan the developer's code using Douyin, join the fan group, and read its pinned message. The official code is GD plus six digits, case-insensitive, and updates every three days. Repeated claims while valid do not use a count or shared quota, with up to 10 per batch.",
+  "下次下载相同形象，还要付费吗？": "Do I pay again to download the same characters later?",
+  "要。每次重新发起的付费下载都是一次新交易，即使选择相同形象，也按每个 1 元收费。你也可以改用当前有效的官方群码免费领取。已经保存在电脑上的文件可反复离线导入，无需再次下载或付款。": "Yes. Each newly started paid download is a new transaction at CNY 1 per character, even for the same selection. You can instead use a currently valid official group code to claim free. Files already saved on your computer can be imported offline repeatedly without another download or payment.",
+  "付款后下载失败，会再次收费吗？": "Will a failed download after payment charge me again?",
+  "不要重新创建订单。在当前页面继续查询这笔订单，文件准备好后重试下载。同一笔订单的状态查询与失败重试不会另建订单。确认文件已保存后再结束本次下载；遇到问题可": "Do not create another order. Continue checking the current order on this page and retry when its file is ready. Status checks and failed-download retries for the same order do not create a new order. Finish only after confirming the file is saved. For help,",
+  "，提供订单编号，不要发送付款凭据密钥或私人下载链接。": ", provide your order number, and do not send payment credential secrets or private download links.",
+  "有历史订单或 7 天重下载入口吗？": "Is there an order history or a seven-day redownload portal?",
+  "没有。本站只提供当前进行中的订单或领取批次操作，不提供历史订单入口，也不承诺 7 天重下载。请在当前页面完成下载，并妥善保存文件。关闭页面、清除浏览器数据或换设备后，不保证能够继续原交易，请先联系项目确认，不要直接重复付款。": "No. The website supports only the current order or claim batch, with no order-history portal or seven-day redownload promise. Finish downloading on the current page and keep your file. Continuing the original transaction is not guaranteed after closing the page, clearing browser data, or changing devices. Contact the project before paying again.",
+  "一次选多个形象，需要下载多少文件？": "How many files do I download for multiple characters?",
+  "同一批形象合成一个文件，单个为 .nmgpack，多个为 .nmgpacks，无需解压。第一次使用需要先安装客户端，再打开形象包导入；已经安装客户端的用户只需下载形象包。": "A batch is combined into one file: .nmgpack for one character, .nmgpacks for multiple characters. No extraction needed. First-time users must install the app before opening the pack to import it. Existing users only need the character pack.",
+  "群码更新后，已经下载的形象会失效吗？": "Will downloaded characters expire when the group code changes?",
+  "不会。群码只用于官网领取，客户端纯本地使用，不校验付款或群码。已保存的形象文件可以长期保存、随时导入，没有首次导入期限。": "No. Group codes are only for claiming on the website. The app works locally and does not verify payments or codes. Keep downloaded character files as long as you like and import anytime, with no first-import deadline.",
+  "现在可以投稿或使用作者推广码吗？": "Can I submit characters or use creator referral codes now?",
+  "目前暂停共创投稿与作者推广码，暂不开放创作者入口。当前仅提供官方形象，以及付费下载和官方群码免费领取两条路线。": "Community submissions and creator referral codes are currently on hold, with no creator entry point. Only official characters are available, through paid downloads or free official group-code claims.",
+  "“复制形象链接”有什么用？": "What does Copy character link do?",
+  "把某个形象的页面链接发给朋友，对方打开后就能找到它。分享的是公开页面，不是形象包文件，不包含你的群码、付款信息或下载权限。对方仍需自行选择下载方式。": "It shares a character's public page so a friend can find it. It does not share the character pack, your group code, payment information, or download permission. Your friend still chooses their own download method.",
+  "安装图解": "Installation guide",
+  "关于这个小项目": "About this little project",
+  "基础木鱼永久免费。扩展形象每个 1 元，也可使用粉丝群码免费领取。已保存的形象文件可以长期离线使用。": "The basic woodfish is free forever. Extras cost CNY 1 each, or claim free with a fan-group code. Saved character files can be used offline indefinitely.",
+  "想了解项目实现？": "Curious how it works?",
+  "查看项目源码": "View the source code",
+  "基础木鱼免费、扩展形象每个1元或官方群码免费领取：下载、订单与安装常见问题。": "Free basic woodfish; extras cost CNY 1 each or are free with an official group code. Answers about downloads, orders, and installation.",
+  "Windows 权限与计数帮助｜牛马电子功德": "Windows permissions and counting help | NiuMa Merit",
+  "正常打开，": "Open normally.",
+  "不必寻找“输入监控”开关。": "No Input Monitoring switch to find.",
+  "Windows 10 / 11 没有 Mac 那样的“输入监控”授权开关。普通使用通常不需要额外权限，也不需要把客户端长期设为管理员运行。": "Windows 10 / 11 has no Mac-style Input Monitoring permission switch. Ordinary use normally needs no extra permission, and the app does not need to run permanently as administrator.",
+  "从正式安装后的快捷方式打开客户端，在普通应用中正常使用。不要为增加计数关闭 UAC、防病毒或其他系统保护。": "Open the app from its installed shortcut and use ordinary apps normally. Do not disable UAC, antivirus, or other system protection to increase the count.",
+  "普通使用": "Everyday use",
+  "只有点击宠物才计数": "Only companion clicks count",
+  "系统权限边界": "System permission limits",
+  "更新与数据": "Updates & data",
+  "普通使用，不需要设置一堆权限": "Everyday use, without a permissions checklist",
+  "从官网下载并安装牛马电子功德，使用安装后的桌面或开始菜单快捷方式打开。": "Download and install NiuMa Merit from the official website, then open it using the installed desktop or Start menu shortcut.",
+  "小伙伴出现后，在普通记事本、浏览器等应用里打字或点击鼠标，功德会随操作增加。": "Once your companion appears, type or click normally in apps such as Notepad or a browser. Your merit count increases with your actions.",
+  "右键小伙伴可以打开“关于”、开启或关闭自启动、更换形象、查看功德日历或退出。": "Right-click the companion to open About, toggle startup, change characters, view the merit calendar, or quit.",
+  "无需开启 Windows 的“墨迹书写和键入个性化”、诊断数据、麦克风或摄像头权限。那些设置不是本软件全局计数的授权入口。": "You do not need to enable Windows inking and typing personalization, diagnostic data, microphone, or camera access. Those settings do not authorize this app's global counting.",
+  "只有点击小伙伴时数字增加？": "Only clicks on the companion increase the count?",
+  "点击计数可用，不等于其他应用中的输入也已被接收。先按下面的短流程处理，不必删除软件数据：": "Direct-click counting does not confirm that input in other apps is being received. Try this short sequence without deleting app data:",
+  "右键小伙伴选择“退出”，再从正式安装的快捷方式重新打开；不要同时运行下载目录中的旧副本。": "Right-click the companion, quit, then reopen using the installed shortcut. Do not run an old copy from Downloads at the same time.",
+  "在普通记事本中输入几个字，或正常点击桌面。不要用登录界面、UAC 提示或密码输入窗口判断全局计数。": "Type a few characters in ordinary Notepad, or click normally on the desktop. Do not judge global counting using the login screen, UAC prompts, or password fields.",
+  "如果普通应用中正常，只在某个特殊窗口中不计数，先查看下方的系统权限边界。": "If ordinary apps count normally but a particular protected window does not, read the system permission limits below.",
+  "如果普通应用中仍没有计数，保留“关于”中的客户端版本、Windows 版本和出现的提示，": "If ordinary apps still do not count, keep the app version from About, your Windows version, and any prompt details, then",
+  "。不要清空功德、日历或形象文件。": ". Do not clear merit counts, calendar data, or character files.",
+  "客户端没有独立“权限检查”或“计数自检”入口，不需要到菜单里寻找这些按钮。": "The app has no separate permission-check or counting-self-test command. There is no need to look for those buttons.",
+  "有些窗口受到 Windows 系统保护": "Some windows are protected by Windows",
+  "UAC 确认窗口、安全桌面，以及不同权限级别的应用，存在系统访问边界。普通应用中的操作正常计数，并不保证所有高权限或安全窗口中的操作都能计数。": "UAC prompts, the secure desktop, and apps with different privilege levels have system access boundaries. Normal counting in ordinary apps does not guarantee counting in every elevated or secure window.",
+  "遇到这种情况，优先在普通权限运行的应用中使用。不要关闭 UAC 或安全桌面，不要为计数绕过系统保护，也不建议把桌面小伙伴始终设为管理员运行。": "Prefer ordinary-privilege apps in this situation. Do not disable UAC or the secure desktop, or bypass system protection for counting. We also do not recommend always running the companion as administrator.",
+  "如果电脑由公司统一管理，部分限制可能由组织策略决定，请遵守组织规定，不要修改安全策略来扩大监听范围。": "On a company-managed computer, some restrictions may come from organization policies. Follow those policies rather than changing security rules to expand monitoring.",
+  "Microsoft 官方：应用权限级别与系统访问边界": "Microsoft: app privilege levels and system access boundaries",
+  "Microsoft 官方：UAC 与安全桌面": "Microsoft: UAC and the secure desktop",
+  "更新应用，不清空你的积累": "Update the app, keep your progress",
+  "先在小伙伴的右键菜单中选择“退出”。": "First choose Quit from the companion's right-click menu.",
+  "用官网新版安装程序更新原安装位置，不同时运行新旧副本。": "Use the new official installer to update the existing location. Do not run old and new copies simultaneously.",
+  "正常重开后，在“关于”查看版本；原计数、日历和导入形象不应因更新而需要清空。": "Reopen normally and check the version under About. Updating should not require clearing your existing count, calendar, or imported characters.",
+  "本软件没有自动更新。安装相关问题请查看": "The app does not update automatically. For installation questions, see the",
+  "Windows 安装与导入说明": "Windows installation and import guide",
+  "；不要按 Mac 的输入监控步骤寻找 Windows 的授权开关。": ". Do not follow Mac Input Monitoring steps to look for a Windows permission switch.",
+  "只统计次数，不记录输入内容": "Counts actions, never records what you type",
+  "牛马电子功德用按键、鼠标按键和滚轮事件进行计数与动画，不保存具体按键内容、鼠标坐标、当前应用或窗口内容。计数、日历和已导入形象保存在本机，客户端无需联网运行。": "NiuMa Merit uses keyboard, mouse-button, and scroll events for counting and animation. It does not save specific keystrokes, mouse coordinates, the current app, or window contents. Counts, calendar data, and imported characters stay on your computer. The app runs offline.",
+  "点击“关于”中的帮助链接，由默认浏览器打开本页，不会把客户端计数或输入记录发送到官网。本页也不会替你修改系统权限、下载安装程序或开启远程控制。": "The help link under About opens this page in your default browser without sending app counts or input records to the website. This page does not change system permissions, download installers, or enable remote control for you.",
+  "牛马电子功德 Windows 权限帮助：普通使用无需额外授权，了解系统安全窗口的计数边界，以及更新后如何保留数据。": "NiuMa Merit Windows permissions guide: no extra authorization for ordinary use, counting limits in protected system windows, and preserving data after updates.",
+  "隐私与账号说明｜牛马电子功德": "Privacy and accounts | NiuMa Merit",
+  "桌面客户端只在本机运行": "The desktop app runs locally",
+  "客户端只统计操作次数，不保存具体按键内容、鼠标位置、窗口名称或剪贴板内容，不包含遥测、广告、自动更新或联网激活。计数数据只保存在本机。macOS 输入监控由本人通过系统流程授权。下载形象后，客户端不联网校验付款或群码。": "The app counts actions only. It does not save specific keystrokes, mouse positions, window names, or clipboard contents. There is no telemetry, advertising, automatic updating, or online activation. Counts stay on your computer. You grant macOS Input Monitoring through the system yourself. After downloading characters, the app does not go online to verify payment or group codes.",
+  "官网浏览与客户端下载": "Browsing the website and downloading the app",
+  "浏览公开形象、安装说明和下载基础木鱼客户端无需注册或登录。客户端下载文件、版本及校验信息以": "Browsing public characters, reading installation instructions, and downloading the basic woodfish app require no registration or login. For app files, versions, and checksums, see the",
+  "下载页": "Download page",
+  "为准。系统安全提示和权限说明请查看": ". For system security prompts and permissions, see",
+  "Mac 帮助": "Mac help",
+  "或": "or",
+  "Windows 帮助": "Windows help",
+  "，不要关闭全局安全保护。": ". Do not disable system-wide security protection.",
+  "浏览器中的选择和当前交易": "Browser selections and the current transaction",
+  "官网使用浏览器存储保留已选形象，并使用当前标签页的临时存储继续正在进行的订单或领取批次。服务器通过必要的会话与交易凭据识别这次操作，避免网络重试产生重复订单。当前交付结束后清理相应临时记录；这不是用户账号或历史订单服务。清除浏览器数据、关闭标签页或换设备可能使当前操作无法继续。": "The website uses browser storage to keep your selected characters, and temporary storage in the current tab to continue an active order or claim batch. Necessary session and transaction credentials let the server identify the operation and avoid duplicate orders on network retries. Relevant temporary records are cleared after current delivery finishes. This is not a user account or order-history service. Clearing browser data, closing the tab, or switching devices may prevent continuation.",
+  "官方扩展形象每个 1 元，每批最多 10 个不同形象。付款通过页面提供的微信支付或支付宝入口完成；平台处理交付所需的订单编号、形象选择、金额、支付状态及相关交易标识，不要求你向本站提供支付密码。必要的交易记录用于状态查询、交付、异常处理及履行相关义务，不因前台没有历史订单入口而自动删除。": "Official extra characters cost CNY 1 each, up to 10 different characters per batch. Payment uses the WeChat Pay or Alipay option provided on the page. The platform processes the order number, selection, amount, payment status, and related transaction identifiers needed for delivery. It does not ask you to provide payment passwords to this website. Necessary transaction records support status checks, delivery, issue handling, and applicable obligations; they are not automatically deleted just because no order-history portal is offered.",
+  "领取码仅通过 HTTPS 请求提交给服务器验证，不放入网址或浏览器持久存储。服务器通过匿名会话识别有效的验码状态。官方群码每三天更新，不区分字母大小写，有效期内重复领取不扣额度。官网并不通过群码验证你是否关注了开发者抖音，也不据此推断你的抖音身份。": "Claim codes are submitted to the server for verification only over HTTPS, not placed in URLs or persistent browser storage. Anonymous sessions identify valid code-verification status. Official group codes update every three days, are case-insensitive, and allow repeat claims while valid without using a quota. The website does not use the code to verify that you follow the developer on Douyin or infer your Douyin identity.",
+  "暂停共创及既有资料": "Paused community creation and existing records",
+  "当前暂停新的创作者注册、投稿和作者推广码流程，不开放共创入口。此前已经提交的账号、授权、审核或举报资料不因暂停入口而自动删除，仅按原处理目的及必要范围保留。有关既有资料的更正或删除请求，请通过下方联系方式私下联系。": "New creator registration, submissions, and creator referral-code flows are paused, with no community-creation entry point. Previously submitted account, authorization, review, and report records are not automatically deleted by this pause. They are retained only for their original purposes and as necessary. For correction or deletion requests about existing records, contact us privately below.",
+  "本地文件与公开分享": "Local files and public sharing",
+  "下载后的形象文件可长期保存、随时导入、永久离线使用，没有首次导入期限。官网不提供历史订单或 7 天重下载服务；当前订单或批次的失败重试与重新发起下载是不同操作。免费或付费获取文件均不转让作品版权。复制形象链接仅分享公开展示页面，不包含领取码、交易凭据或私人下载链接。": "Downloaded character files can be kept, imported anytime, and used offline indefinitely, with no first-import deadline. The website has no order-history or seven-day redownload service. Retrying a failed current order or batch differs from starting a new download. Neither free nor paid acquisition transfers copyright. Copying a character link shares only its public page, not claim codes, transaction credentials, or private download links.",
+  "联系与隐私请求": "Contact and privacy requests",
+  "隐私、已有资料或订单异常问题，请联系": "For privacy, existing-record, or order issues, contact",
+  "。请只提供处理问题所需的信息，不要发送密码、短信验证码、私钥、群码原文或私人交付地址。": ". Provide only what is needed to handle the issue. Do not send passwords, SMS verification codes, private keys, raw group codes, or private delivery addresses.",
+  "最后更新：2026年10月15日。": "Last updated: October 15, 2026.",
+  "牛马电子功德客户端本地数据、官网支付、官方群码领取与隐私说明。": "NiuMa Merit privacy: local app data, website payments, and official group-code claims.",
+  "。": ".",
+  "。 ": ". ",
+  "，": ", ",
+  "；": "; ",
+  "：": ": ",
+  "简体中文": "Chinese",
+  "英文官网不会改变客户端语言。客户端菜单和安装文件名仍可能使用中文，请按图标、01/02前缀和文件后缀识别。": "The English website does not change the desktop app language. App menus and installer filenames may remain Chinese. Use the icons, 01/02 prefixes, and file extensions to identify them.",
+  "二维码原图可能包含中文；使用微信扫描此码添加项目联系人。": "The original QR image may contain Chinese. Scan this code in WeChat to add the project contact.",
+  "圆码原图可能包含中文；使用抖音扫码，或搜索抖音号1872941388，加入粉丝群查看当前群码。": "The original scan-code image may contain Chinese. Scan in Douyin, or search for ID 1872941388, then join the fan group for the current code."
+};
+
+;
+/* Exact source text and numbered dynamic templates for the shared locale layer.
+ * Download filenames, user content, identifiers and timestamps remain unchanged.
+ * Load this ordinary script before the locale layer consumes the dictionary. */
+window.NiuMaEnglishFlow = {
+  '预览版本已更新，请返回图库重新选择；不会自动重建交易。': 'The preview has been updated. Return to the gallery and select again. No new transaction will be created automatically.',
+  '直接支付暂未开放，可切换官方群码免费领取。': 'Direct payment is not available yet. You can use an official group code to claim for free.',
+  '微信支付暂不可用，请稍后重试。': 'WeChat Pay is temporarily unavailable. Please try again later.',
+  '支付宝暂不可用，请稍后重试。': 'Alipay is temporarily unavailable. Please try again later.',
+  '当前交易凭据无法验证，请私下联系项目。': 'The credentials for this transaction could not be verified. Please contact the project privately.',
+  '当前交易暂未找到，请保留本页并稍后重试。': 'This transaction could not be found right now. Keep this page open and try again later.',
+  '暂时无法向支付平台确认订单结果。请点击“查询本次付款状态”重试；如果已付款，不要重复支付。持续无法确认时请在“付款遇到问题”中联系项目。': 'The payment provider could not confirm the order result right now. Click "Check this payment status" to retry. If you have already paid, do not pay again. If the status remains unconfirmed, contact the project under "Payment problems".',
+  '本次请求与原交易不一致，请继续原交易，不要重复付款。': 'This request does not match the original transaction. Continue the original transaction; do not pay again.',
+  '本次交易仍在创建中，请继续同一次请求，不要重新付款。': 'This transaction is still being created. Retry the same request; do not pay again.',
+  '本次创建请求已到期，请查询当前交易结果后再操作。': 'This creation request has expired. Check the current transaction result before continuing.',
+  '支付请求存储暂不可用，请稍后继续同一次请求。': 'Payment request storage is temporarily unavailable. Continue the same request later.',
+  '本次交付暂不可用，请私下联系项目；已保存文件不受影响。': 'This delivery is temporarily unavailable. Please contact the project privately. Files already saved are not affected.',
+  '本次短时链接已过期，可继续同一次交付。': 'This temporary link has expired. You can continue the same delivery.',
+  '暂时无法连接，请继续本次交易，不要重复付款。': 'Unable to connect right now. Continue this transaction; do not pay again.',
+  '网络结果未确认，请重试同一次请求，不要重新付款。': 'The network result is unconfirmed. Retry the same request; do not pay again.',
+  '操作过于频繁，请稍后继续本次交易。': 'Too many requests. Continue this transaction later.',
+  '服务暂不可用，请保留当前交易并稍后重试。': 'The service is temporarily unavailable. Keep the current transaction and try again later.',
+  '服务信息不完整，请继续本次请求，不要重新付款。': 'The service returned incomplete information. Continue this request; do not pay again.',
+  '官方形象与支付版本暂无法确认，选择已保留。': 'Official appearances and payment revisions could not be confirmed right now. Your selection has been kept.',
+  '直接支付仅支持已确认版本的官方扩展形象，请返回图库重新选择。': 'Direct payment only supports verified revisions of official extra appearances. Return to the gallery and select again.',
+  '每批需选择不同官方扩展形象。': 'Select distinct official extra appearances for each batch.',
+  '当前交易数据损坏，请私下联系项目，勿重复付款。': 'The current transaction data is corrupted. Contact the project privately; do not pay again.',
+  '当前交易无法读取，请私下联系项目，勿重复付款。': 'The current transaction could not be read. Contact the project privately; do not pay again.',
+  '下载链接或文件名尚未确认，请继续本次交付。': 'The download link or filename has not been verified. Continue this delivery.',
+  '文件大小尚未确认，请继续同一次交付。': 'The file size has not been verified. Continue the same delivery.',
+  '已找到文件，完成': 'File found, finish',
+  '{0} 个形象，每个1元，合计{1}元': '{0} appearances, CNY 1 each, CNY {1} total',
+  '重试本次付款请求': 'Retry this payment request',
+  '确认，支付 ¥{0}': 'Confirm and pay ¥{0}',
+  '重新下载本批文件': 'Download this batch again',
+  '下载形象包': 'Download appearance pack',
+  '本次付款入口已到期，正在核对订单是否关闭。请查询本次付款状态；确认关闭后即可重新付款或改用群码。若已付款，请勿重复支付。': 'This payment link has expired. Checking whether the order is closed. Check this payment status; once closure is confirmed, you can start a new payment or use a group code. If you have already paid, do not pay again.',
+  '本次订单的付款入口暂未恢复，请查询本次付款状态重试。订单和选择已保留，不会另建订单。': 'The payment link for this order has not been restored yet. Check this payment status to retry. Your order and selection have been kept; no new order will be created.',
+  '服务端金额与 ¥1/个不一致，已保留交易但不展示付款入口，请联系项目。': 'The server amount does not match ¥1 per appearance. The transaction has been kept, but the payment link is hidden. Please contact the project.',
+  '微信支付本次 {0} 个形象，¥{1}': 'WeChat Pay for {0} appearances, ¥{1}',
+  '支付宝地址尚未确认，请保留交易并联系项目。': 'The Alipay address has not been verified. Keep the transaction and contact the project.',
+  '打开支付宝完成本次付款': 'Open Alipay to complete this payment',
+  '支付入口尚未确认，请查询本次付款状态或联系项目，不要重复创建。': 'The payment link has not been verified. Check this payment status or contact the project. Do not create another transaction.',
+  '直接支付暂未开放或价格配置未确认，可切换官方群码免费领取。': 'Direct payment is not available or pricing has not been verified. You can use an official group code to claim for free.',
+  '当前没有可用支付渠道，可切换官方群码免费领取。': 'No payment methods are available right now. You can use an official group code to claim for free.',
+  '微信支付': 'WeChat Pay',
+  '支付宝': 'Alipay',
+  '选择支付方式后，生成本次付款入口。': 'Choose a payment method to generate a link for this payment.',
+  '交易状态尚未确认，请继续本次交易。': 'The transaction status has not been confirmed. Continue this transaction.',
+  '服务端永久本地使用契约未确认，请保留交易并联系项目。': 'The server has not confirmed permanent local use rights. Keep the transaction and contact the project.',
+  '订单信息与本次选择不一致，请保留本页并联系项目。': 'The order information does not match your selection. Keep this page open and contact the project.',
+  '等待付款': 'Awaiting payment',
+  '已付款，正在准备文件': 'Paid, preparing files',
+  '文件已准备好': 'Files are ready',
+  '订单已关闭': 'Order closed',
+  '订单已过期': 'Order expired',
+  '订单已取消': 'Order canceled',
+  '订单需要处理': 'Order needs attention',
+  '退款处理中': 'Refund in progress',
+  '订单暂未完成': 'Order not completed yet',
+  '已退款': 'Refunded',
+  '订单 {0} · {1}': 'Order {0} · {1}',
+  '已发起下载，请查看浏览器下载记录。': 'Download requested. Check your browser download history.',
+  '付款成功，文件已准备好。下载后可永久离线使用。': 'Payment successful. Your files are ready. Once downloaded, they can be used offline permanently.',
+  '付款成功，正在准备文件，请保持本页打开。': 'Payment successful. Preparing your files; keep this page open.',
+  '等待付款，请使用上方付款入口。付款后，本页会自动显示下载入口。': 'Awaiting payment. Use the payment link above. The download option will appear on this page automatically after payment.',
+  '本次交易已结束，选择已保留。可以重新发起付款，或点击下方“改用群码免费领取”。': 'This transaction has ended. Your selection has been kept. You can start a new payment or click "Use a group code to claim for free" below.',
+  '本次交易未完成，请私下联系项目；为避免重复扣费，仍保留当前交易。': 'This transaction is incomplete. Contact the project privately. The current transaction has been kept to avoid duplicate charges.',
+  '支付配置尚未确认。': 'Payment settings have not been verified.',
+  '正在创建本次订单，请稍候。网络失败可重试本次请求，不会另建订单。': 'Creating this order. Please wait. If the network fails, retry this request; no new order will be created.',
+  '创建结果未确认，请继续同一次创建请求，不要重新付款。': 'The creation result is unconfirmed. Continue the same creation request; do not pay again.',
+  '本次交易：{0}': 'This transaction: {0}',
+  ' 服务端确认尚未创建交易；选择已保留，可以调整或改用官方群码。': ' The server confirmed that no transaction has been created. Your selection has been kept; you can adjust it or use an official group code.',
+  '服务端确认尚未创建交易；选择已保留，可以调整或改用官方群码。': 'The server confirmed that no transaction has been created. Your selection has been kept; you can adjust it or use an official group code.',
+  '{0} 服务端确认尚未创建交易；选择已保留，可以调整或改用官方群码。': '{0} The server confirmed that no transaction has been created. Your selection has been kept; you can adjust it or use an official group code.',
+  '本次下载已完成，请保留本机文件。再次在官网发起下载需重新付款，或使用有效官方群码。': 'This download session is complete. Keep the files on your computer. Starting another download on the website requires a new payment or a valid official group code.',
+  '正在接收本次形象文件，请保持本页打开…': 'Receiving your appearance files. Keep this page open…',
+  '交付许可尚未确认，请保留交易并联系项目。': 'The delivery license has not been verified. Keep the transaction and contact the project.',
+  '交付链接未确认，请重试同一次交付，不要重新付款。': 'The delivery link has not been verified. Retry the same delivery; do not pay again.',
+  '已发起下载，请查看浏览器下载记录；尚未确认文件已保存。': 'Download requested. Check your browser download history; saving the file has not been confirmed.',
+  '正在恢复本次订单及付款入口…': 'Restoring this order and its payment link…',
+  '下载后可长期保存，随时导入，永久离线使用': 'Keep downloaded files indefinitely, import them anytime, and use them offline permanently',
+  '每批需选择不同形象，请检查选择。': 'Select distinct appearances for each batch. Please check your selection.',
+  '当前每批最多 {0} 个，请调整选择；不会自动删除。': 'The current limit is {0} appearances per batch. Adjust your selection; nothing will be removed automatically.',
+  '作品版本或领取状态未能确认，请返回形象库重新选择。': 'The work revision or claim status could not be confirmed. Return to the appearance library and select again.',
+  '所选文件大小暂时无法确认，请刷新形象状态。': 'The selected file sizes could not be confirmed right now. Refresh the appearance status.',
+  '文件总大小超过 16 MiB，请减少形象后分批领取。': 'The total file size exceeds 16 MiB. Select fewer appearances and claim them in separate batches.',
+  '牛马电子功德的基础木鱼直接免费下载。更多桌面形象可用我的推广码免费领取：{0}，每批最多 {1} 个，可重复使用，不扣次数。此码有效至北京时间 {2}，已下载形象可长期保存、随时导入。官网：https://gongde.zqscreen.cn/': 'Download the basic wooden fish from NiuMa Merit for free, directly. Use my promotion code to claim more desktop appearances for free: {0}. Claim up to {1} per batch, with unlimited reuse and no usage deduction. This code is valid until {2} (Beijing time). Keep downloaded appearances indefinitely and import them anytime. Official website: https://gongde.zqscreen.cn/',
+  '请选择侵权、违法有害、恶意内容或其他。': 'Select copyright infringement, illegal or harmful content, malicious content, or other.',
+  '问题说明需为 10 至 1000 个字。': 'The issue description must contain 10 to 1000 characters.',
+  '证据说明最多 1000 个字，不接收附件或自动访问链接。': 'The evidence description may contain up to 1000 characters. Attachments are not accepted, and links will not be opened automatically.',
+  '选填联系方式最多 120 个字。': 'Optional contact details may contain up to 120 characters.',
+  '作品名称应为 1 至 20 个字的单行文字。': 'The work name must be a single line of 1 to 20 characters.',
+  '一句话介绍应为 1 至 40 个字的单行文字。': 'The short description must be a single line of 1 to 40 characters.',
+  '最多 3 个不同标签，每个 1 至 8 个字。': 'Use up to 3 distinct tags, each containing 1 to 8 characters.',
+  '我的抖音号只接受 1 至 32 位字母、数字、下划线、短横线或点，不填写链接。': 'Your Douyin ID must contain 1 to 32 letters, digits, underscores, hyphens, or periods. Do not enter a link.',
+  '请填写 1 至 80 个字的单行更新说明。': 'Enter a single-line update note containing 1 to 80 characters.',
+  '领取码不正确，请检查后重试。': 'The claim code is incorrect. Check it and try again.',
+  '官方群码已更新，请从粉丝群获取最新码。': 'The official group code has changed. Get the latest code from the fan group.',
+  '此官方群码暂不可用，请使用群内最新码。': 'This official group code is temporarily unavailable. Use the latest code shared in the group.',
+  '请先输入有效领取码。': 'Enter a valid claim code first.',
+  '暂时无法验证，已选形象仍保留。': 'Unable to verify right now. Your selected appearances have been kept.',
+  '当前码权限已变化，请刷新状态并调整选择；不会自动删除。': 'The permissions for this code have changed. Refresh the status and adjust your selection; nothing will be removed automatically.',
+  '形象版本已更新，请重新预览并确认选择。': 'The appearance has been updated. Preview it again and confirm your selection.',
+  '该领取记录不存在或无法访问，请在原浏览器打开。': 'This claim record does not exist or cannot be accessed. Open it in the original browser.',
+  '本次交付已到期，已保存文件永久本地使用。': 'This delivery has expired. Files already saved can still be used locally forever.',
+  '包含暂不可分发的作品，本次不能下载。': 'This batch contains works that cannot currently be distributed, so it cannot be downloaded.',
+  '交付服务暂不可用，当前请求仍保留。': 'The delivery service is temporarily unavailable. Your current request has been kept.',
+  '操作过于频繁，请等待 {0} 秒后重试；权限没有被消费。': 'Too many requests. Wait {0} seconds and try again; your claim allowance has not been used.',
+  '服务暂时无法连接或返回的信息不完整，请稍后重试；已有选择与当前请求仍保留。': 'The service could not be reached or returned incomplete information. Try again later; your selection and current request have been kept.',
+  '01 · 下载 {0} 安装包': '01 · Download the {0} installer',
+  '文件名：{0}': 'Filename: {0}',
+  '找到下载文件并导入': 'Find and import your downloaded file',
+  '去哪里找刚下载的文件？': 'Where can I find my downloaded file?',
+  '查看浏览器右上角的下载记录': 'Check the download history in the top-right corner of your browser',
+  '确认下载已完成。通常保存在电脑的“下载”文件夹；如果你选择了其他位置，以浏览器记录为准。': 'Make sure the download has finished. Files are usually saved in your computer\'s Downloads folder. If you chose another location, check the browser download history for the actual location.',
+  '双击形象包，导入客户端': 'Double-click the appearance pack to import it into the app',
+  '已安装牛马电子功德？直接打开形象包，无需解压，再到“更换形象”中选中它。': 'Already installed NiuMa Merit? Open the appearance pack directly, without extracting it, then select it under "Change appearance".',
+  '确认文件已保存后再点击“完成”，完成后将关闭本次下载入口。': 'Click "Finish" only after confirming that the file has been saved. Finishing will close this download session.',
+  '找不到文件，或者下载失败？': 'Cannot find the file, or did the download fail?',
+  '点击浏览器下载图标，查看进度或拦截提示。找到对应记录，选择“在文件夹中显示”；Mac 通常是“在 Finder 中显示”。失败时请重试本批下载，不要重新付款。': 'Click your browser\'s download icon to check progress or blocked-download warnings. Find the matching entry and choose "Show in folder", usually "Show in Finder" on Mac. If the download fails, retry this batch; do not pay again.',
+  '还没安装客户端？': 'Have not installed the app yet?',
+  '先安装免费的客户端，再打开形象包。已有客户端的用户无需重复安装。': 'Install the free app first, then open the appearance pack. If you already have the app, you do not need to install it again.',
+  '下载客户端（新标签页）': 'Download the app (new tab)',
+  '查看安装与导入图解': 'View the illustrated installation and import guide',
+  '本次文件：{0}': 'File for this download: {0}',
+  '请在下载记录中查找刚下载的形象包。': 'Look for the appearance pack you just downloaded in your browser download history.',
+  '根据投稿文件渲染的真实形象预览': 'Actual appearance preview rendered from the submitted files',
+  '已审核作品的真实封面': 'Actual cover of the reviewed work',
+  '预览地址不正确。': 'The preview URL is invalid.',
+  '版本 {0} · 真实文件预览': 'Version {0} · Preview from actual files',
+  '真实预览暂时无法加载，请确认登录状态和素材存储，不要批准此版本。': 'The actual preview could not be loaded right now. Check your sign-in status and asset storage. Do not approve this revision.'
+};
+
+;
+// Public gallery and journey copy. Placeholders preserve numbers and identifiers.
+window.NiuMaEnglishGallery = {
+  '牛马电子功德': 'NiuMa Merit',
+  '功': 'N',
+  '功德 +1': '+1 Merit',
+  '大小尚未确认': 'Size not yet confirmed',
+  '（北京时间）': ' (Beijing time)',
+  '尚未签发': 'Not issued yet',
+  '链接已复制': 'Link copied',
+  '发给朋友即可找到这个形象，不包含你的领取码或付款信息。': 'Share this link to show a friend the character. It contains no access code or payment details.',
+  '形象链接已复制，可以发给朋友。': 'Character link copied. You can now share it.',
+  '请手动复制形象链接：{0}': 'Copy this character link: {0}',
+  '可手动复制的形象链接': 'Character link to copy',
+  '浏览器未允许自动复制。请复制下方链接发给朋友：': 'Your browser could not copy the link. Select and copy it below:',
+  '{0}的真实预览': 'Live preview of {0}',
+  '封面暂未载入，仍可选择或查看作品。': 'Preview unavailable. You can still select this character or view its details.',
+  '预览暂时无法加载，请重试。': 'The preview could not load. Please try again.',
+  '已选 {0} / {1}': 'Selected {0} / {1}',
+  '预计最多 {0} / 16 MiB': 'Estimated maximum: {0} / 16 MiB',
+  '封面可用，动作暂未载入。': 'Image loaded; animation is not available yet.',
+  '悬停或键盘聚焦，看它动一下': 'Hover or focus to see it move',
+  '已按系统设置减少动态效果': 'Motion reduced to match your system setting',
+  '预览未载入，不影响选择。': 'Preview unavailable. You can still select this character.',
+  '已选择': 'Selected',
+  '正在确认…': 'Checking…',
+  '选择此形象': 'Select',
+  '暂不可领取': 'Unavailable',
+  '查看已选（{0}）': 'View selection ({0})',
+  '移除{0}': 'Remove {0}',
+  '已移除，其他选择仍保留。': 'Removed. Your other selections are kept.',
+  '还没选小伙伴。悬停看动作，勾选喜欢的形象。': 'No characters selected. Hover to preview, then select your favorites.',
+  '请先选择至少一个形象。': 'Select at least one character first.',
+  '封面即将载入': 'Loading preview',
+  '免费': 'Free',
+  '官方作品': 'Official character',
+  '选择{0}，编号{1}': 'Select {0}, character #{1}',
+  '免费下载客户端': 'Download the free app',
+  '重试预览': 'Retry preview',
+  '复制形象链接': 'Copy link',
+  '复制这个形象的页面链接，发给朋友': 'Copy this character’s public link to share',
+  '复制{0}的公开作品链接': 'Copy the public link for {0}',
+  '客户端内置 · 无需登录或领取码': 'Included with the app · No account or code needed',
+  '作者抖音号：{0}': 'Creator’s Douyin ID: {0}',
+  '每批最多 {0} 个，请先取消一个再选择。': 'Select up to {0} per batch. Remove one before adding another.',
+  '选择已保留，翻页不会清除。': 'Selection saved. Changing pages will keep it.',
+  '基础木鱼': 'Woodfish',
+  '永久免费，安装客户端即可使用。': 'Free forever. Included when you install the app.',
+  '第 {0} 页 · 每页最多 24 个扩展形象': 'Page {0} · Up to 24 extra characters per page',
+  '基础木鱼永久免费；扩展形象 ¥1/个，或用官方群码免费领取。悬停可看动作。': 'Woodfish is always free. Extra characters cost CNY 1 each, or use a group code for free. Hover to preview.',
+  '没有找到对应形象，试试其他编号或关键词。': 'No matching characters. Try a different number or keyword.',
+  '搜索最多 80 个字。': 'Search queries can contain up to 80 characters.',
+  '已找到分享的作品「{0}」· #{1}，可自行选择领取。': 'Found {0} · #{1}. Select it to download.',
+  '分享的作品暂不可公开或已下架。点击“清除筛选”可浏览其他公开作品。': 'This shared character is unavailable. Clear the filters to browse other characters.',
+  ' 已保留上次列表，请重试。': ' Your previous results are kept. Please try again.',
+  '选择已清空，预览继续保留。': 'Selection cleared. You can keep browsing.',
+  '请输入完整的 100001 至 999999999 形象编号。': 'Enter a complete character number between 100001 and 999999999.',
+  '公开共创暂停，仅开放官方扩展形象；基础木鱼直接免费。': 'Community submissions are paused. Official extra characters are available; Woodfish is free.',
+  '抖音号已复制。': 'Douyin ID copied.',
+  '无法自动复制，请选择账号文字手动复制。': 'Automatic copying failed. Select and copy the ID manually.',
+  '每批最多 10 个，请返回形象库调整选择。': 'Select up to 10 per batch. Return to the gallery to edit your selection.',
+  '已加入选择，可继续挑选或按 ¥1/个支付下载，也可用官方群码免费领取。': 'Added to your selection. Keep browsing, pay CNY 1 per character, or use a group code for free.',
+  '封面可用，动作暂未载入。仍可加入选择。': 'The image is available, but the animation has not loaded. You can still select this character.',
+  '每批最多 10 个不同扩展形象，保存文件后永久本地使用。': 'Up to 10 different extra characters per batch. Keep your files for permanent offline use.',
+  '正在确认领取…': 'Confirming your download…',
+  '继续本次领取请求': 'Continue this request',
+  '官方群码免费领取': 'Download free with a group code',
+  ' 个': ' characters',
+  '官方群码已验证，每批最多 10 个，可重复免费领取，不扣额度。换码时间：{0}': 'Group code verified. Download up to 10 per batch, with no usage quota. Code changes at {0}',
+  '请输入 GD 加六位数字的三天官方群码，字母大小写均可；不接受作者码。': 'Enter the current three-day group code: GD followed by six digits. Letters are case-insensitive. Creator codes are not accepted.',
+  '当前有进行中的付款，请切换到“付费下载”继续；已选形象会保留。': 'You have a payment in progress. Switch to paid download to continue. Your selection is kept.',
+  '当前有进行中的群码交付，请在“群码免费领取”中继续本批交付。': 'A group-code download is in progress. Switch to the group-code route to continue it.',
+  '上次领取结果未确认，请继续本次领取，不会另建批次。': 'The last request is not confirmed yet. Continue it without creating another batch.',
+  '正在确认所选官方形象与版本…': 'Checking your selected characters and versions…',
+  '群码领取暂不可用；可切换直接支付，已选形象仍保留。': 'Group-code downloads are unavailable right now. You can switch to payment; your selection is kept.',
+  '输入官方群码并验证后，即可免费领取，不扣额度。': 'Verify your group code to download free. It has no usage quota.',
+  '官方群码有效，可以免费领取本批形象。': 'Your group code is valid. This batch is free to download.',
+  '只接受 GD 加六位数字的官方群码。': 'Use a group code in the format GD followed by six digits.',
+  '正在验证官方群码…': 'Verifying your group code…',
+  '未确认有效官方群码，请获取群内最新码。': 'The code could not be verified. Get the latest code from the group.',
+  '验证成功，免费领取不扣额度。': 'Code verified. Download free with no usage quota.',
+  '已清除验码状态，选择与当前交付仍保留。': 'Code verification cleared. Your selection and current download are kept.',
+  '当前交付数据无法读取，请联系项目。': 'The current download could not be read. Please contact support.',
+  '正在确认本次领取，请稍候；网络失败可继续本次请求。': 'Confirming this request… If the connection fails, you can continue the same request.',
+  '请先验证有效官方群码。': 'Verify a valid group code first.',
+  '仅开放官方扩展形象，请重新选择。': 'Only official extra characters are available. Please select again.',
+  '没有当前进行中的交付': 'No download in progress',
+  '本站不提供历史领取或重下载入口，请返回图库创建新批次。已保存文件永久本地使用。': 'There is no download history or restore page. Return to the gallery for a new batch. Files you have saved remain usable offline.',
+  '已找到文件，完成': 'I found the file — done',
+  '本次下载已完成': 'Download completed',
+  '请保留本机文件，可长期离线使用。重新在官网下载请创建新批次并使用有效官方群码，或付费下载。': 'Keep your saved files for offline use. A new website download requires a new batch and either a valid group code or payment.',
+  '正在准备你的形象包': 'Preparing your character pack',
+  '小伙伴准备好了': 'Your characters are ready',
+  '本次准备未完成': 'Your files could not be prepared',
+  '本次交付已到期': 'This download has expired',
+  '包含暂不可分发的形象': 'A character in this batch is unavailable',
+  '形象': 'Character',
+  '准备完成后显示': 'Available when ready',
+  ' · 签发时间：': ' · Issued: ',
+  '一个批次、一个文件。': 'One batch, one file. ',
+  '正在准备本批文件，请保留当前页面；不消耗群码额度。': 'Preparing this batch. Keep this page open. Group codes have no usage quota.',
+  '仍在处理，可刷新本批状态。': 'Still processing. You can refresh this batch’s status.',
+  '本次准备未完成，可继续本次交付重试；不消耗群码额度。': 'Preparation failed. Retry this batch; group codes have no usage quota.',
+  '本次交付已结束。可返回图库重新选择，直接支付或用当前官方群码免费领取；已保存文件不受影响。': 'This download has ended. Select a new batch and pay or use the current group code. Your saved files are unaffected.',
+  '当前批次编号已复制，请勿公开私人交付地址。': 'Batch number copied. Keep your private download address private.',
+  '请手动复制批次编号。': 'Please copy the batch number manually.',
+  '请先完成当前交付，不会清除进行中的请求。': 'Finish the current download first. Your request is kept.',
+  '正在接收本批文件，请保持本页打开…': 'Receiving this batch. Keep this page open…',
+  '下一步，找到刚下载的文件': 'Next, find your downloaded file',
+  '重新下载本批文件': 'Download this batch again',
+  '已发起下载，请查看浏览器下载记录；尚未确认文件已保存。': 'Download started. Check your browser’s downloads to confirm that the file was saved.',
+  '适合这台电脑 · 当前版本': 'Recommended for this computer · Current version',
+  '当前版本': 'Current version',
+  '系统要求：{0}': 'System requirements: {0}',
+  '下载后打开 DMG，将应用拖入“应用程序”。': 'Open the DMG and drag the app into Applications.',
+  '下载后双击 EXE，按中文安装步骤完成安装。': 'Open the EXE and follow the installer. Some system or installer screens may use Chinese.',
+  '下载后请查看相应安装说明。': 'Follow the installation instructions for your system.',
+  '免费下载 {0} 版': 'Download for {0}',
+  '下载 {0} {1} 旧版': 'Download {0} {1} (older version)',
+  '查看安装步骤': 'Installation steps',
+  '文件详情与校验信息': 'File details and checksums',
+  '发布编号：{0}': 'Release: {0}',
+  '支持永久离线形象包。': 'Supports character packs for permanent offline use.',
+  '扩展形象的兼容性请查看最低版本说明。': 'Check the minimum app version for extra characters.',
+  '选择你的电脑系统即可下载。基础木鱼内置，不需要登录或领取码。': 'Choose your system to download. Woodfish is included free, with no account or code.',
+  '暂无可确认的正式安装包，请稍后重试。': 'No verified release is available right now. Please try again later.',
+  '领取扩展形象时，请使用 {0} 或更新的客户端。': 'Use app version {0} or later for extra characters.',
+  '扩展形象的最低兼容版本暂未确认。': 'The minimum version for extra characters is not available yet.',
+  '兼容性状态暂不可读，公开客户端下载不受验码服务影响。': 'Compatibility information is unavailable. The public app download is still available.',
+  '抖音号已复制': 'Douyin ID copied',
+  '请手动复制：1872941388': 'Copy manually: 1872941388',
+  '付费下载 ¥{0}': 'Pay CNY {0}',
+  '付费下载': 'Paid download',
+  '下载方式': 'Download method',
+  '付费下载 · ¥1 / 个': 'Pay · CNY 1 each',
+  '群码免费领取': 'Free with a group code',
+  '官方群码免费领取 {0} 个': 'Download {0} characters free',
+  '封面与公开版本一致；点击播放或移入预览查看动作。': 'This preview matches the published version. Play or hover to see it move.',
+  '作品不存在、已下架或暂不可公开。': 'This character does not exist or is no longer publicly available.',
+  '举报已受理，编号：{0}。': 'Report received. Reference: {0}.',
+  '官方群码已验证，每批最多 10 个，可重复免费领取，不扣额度。换码时间：': 'Group code verified. Download up to 10 per batch with no usage quota. Code changes at: ',
+  '免费下载 {0} 版 ↓': 'Download for {0} ↓',
+  '{0} 版 ↗': '{0} version ↗',
+  '确认你的选择': 'Review your selection',
+  '关闭确认窗口': 'Close selection review',
+  '本次购买用于下载所选形象，已保存的文件可永久使用。': 'This payment covers this download. Keep the saved files for permanent offline use.',
+  '继续挑选': 'Keep browsing',
+  '移除': 'Remove',
+  '共 {0} 个形象，合计 ¥{1}': '{0} characters · Total CNY {1}',
+  '确认，去付款 ¥{0}': 'Continue to payment · CNY {0}',
+  '还没有选择形象，返回图库挑选吧。': 'Your selection is empty. Return to the gallery to choose a character.',
+  '小伙伴已到手': 'Your characters are ready to use',
+  '输入群码，免费领回家': 'Enter your code. Download free.',
+  '支付本次形象下载': 'Pay for this download',
+  '共 {0} 个形象': '{0} characters',
+  '不进群，直接付费': 'Pay instead',
+  '改用群码免费领取': 'Use a group code instead',
+  '演示暂时无法加载，请刷新。': 'The demo could not load. Please refresh.',
+  '下班按钮': 'Clock Out',
+  '下班': 'Clock Out',
+  '暴富按钮': 'Jackpot',
+  '暴富': 'Jackpot',
+  '小鸡啄击': 'Pecking Chick',
+  '小鸡啄米': 'Pecking Chick',
+  '小鸡': 'Little Chick',
+  '甜蜜亲亲': 'Sweet Kiss',
+  '啄木鸟啄击': 'Pecking Woodpecker',
+  '啄木鸟啄树': 'Pecking Woodpecker',
+  '啄木鸟': 'Woodpecker',
+  '招财猫': 'Lucky Cat',
+  '海狮拍肚皮': 'Belly-Patting Sea Lion',
+  '海狮': 'Sea Lion',
+  '聚宝盆': 'Treasure Bowl',
+  '仓鼠跑轮': 'Hamster Wheel',
+  '金蟾吐币': 'Coin-Spitting Toad',
+  '金蟾': 'Golden Toad',
+  '小僵尸跳跳': 'Hopping Jiangshi',
+  '小僵尸': 'Hopping Jiangshi',
+  '木鱼': 'Woodfish',
+  '爆单符': 'Order Charm',
+  '蜜蜂扇翅': 'Flapping Bee',
+  '财神接宝': 'God of Wealth',
+  '财神元宝': 'God of Wealth',
+  '转运珠': 'Fortune Bead',
+  '青蛙鼓腮': 'Puffing Frog',
+  '金蟾吐钱': 'Coin Toad',
+  '锦鲤吐泡': 'Bubble Koi',
+  '锦鲤吐泡泡': 'Bubble Koi',
+  '小僵尸蹦跳': 'Hopping Jiangshi',
+  '橘猫招手': 'Waving Orange Cat',
+  '小浣熊欢呼': 'Cheering Raccoon',
+  '小熊猫举爪': 'Waving Red Panda',
+  '柴犬歪头': 'Tilting Shiba',
+  '小鸡低头啄啄米，把忙碌啄成轻快的节拍。': 'A little chick pecks along with your working rhythm.',
+  '握紧小拳头，砸一下暴富按钮，给今天打打气。': 'A tiny fist hits the jackpot button. A little boost for your day.',
+  '两个小伙伴轻轻靠近，给工作间隙一点甜。': 'Two little companions lean in for a sweet workday break.',
+  '啄木鸟点头啄一下，和你的键盘合个拍。': 'A woodpecker taps along with your keyboard.',
+  '小爪轻轻招一招，陪你攒下今天的小确幸。': 'A gentle wave from a lucky little paw.',
+  '海狮拍拍圆肚皮，为你的每一下敲击捧场。': 'A sea lion pats its belly to cheer on every tap.',
+  '小金币依次落进盆里，收好今天的点滴努力。': 'Little coins collect in a bowl, one small effort at a time.',
+  '小符轻轻摇晃、亮起微光，为今天打打气。': 'A softly glowing charm sways to brighten your workday.',
+  '青蛙鼓起小气囊，陪你给忙碌喘口气。': 'A little frog puffs its cheeks. Take a tiny breather.',
+  '小僵尸轻轻蹦一下，把困意也抖掉一点。': 'A tiny hopping jiangshi shakes off a little sleepiness.',
+  '金蟾吐出一枚小金币，让桌面热闹一下。': 'A golden toad flips a coin to liven up your desktop.',
+  '柴犬歪歪脑袋，认真听你敲下每一个字。': 'A curious Shiba tilts its head at every keystroke.',
+  '元宝轻轻落下，闪一点属于桌面的小金光。': 'A little gold ingot drops with a desktop-sized sparkle.',
+  '跑轮里的小仓鼠轻轻晃动，陪你忙里偷闲。': 'A hamster on its wheel keeps you company between tasks.',
+};
+
+;
+/* Shared, local-only website language layer. Never translates credentials or URLs. */
+(() => {
+  'use strict';
+  const key = 'niuma-site-language';
+  const params = new URLSearchParams(location.search);
+  let stored = 'zh';
+  try { stored = localStorage.getItem(key) || 'zh'; } catch { /* Storage is optional. */ }
+  const explicit = params.get('lang');
+  const language = ['en', 'zh'].includes(explicit) ? explicit : stored === 'en' ? 'en' : 'zh';
+  if (explicit === 'en' || explicit === 'zh') {
+    try { localStorage.setItem(key, language); } catch { /* URL still selects the language. */ }
+  }
+  document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN';
+  const dictionary = Object.assign({}, window.NiuMaEnglishPages,
+    window.NiuMaEnglishFlow, window.NiuMaEnglishGallery);
+  const hasChinese = value => /[\u3400-\u9fff]/u.test(value);
+  function searchQuery(value) {
+    if (language !== 'en') return value;
+    const query = String(value).trim().toLowerCase();
+    const aliases = [
+      [/^(?:(?:pecking|little) )?chick(?:en)?$/, '小鸡'],
+      [/^(?:jackpot|wealth button|rich button)$/, '暴富'],
+      [/^(?:sweet )?kiss$/, '甜蜜亲亲'],
+      [/^(?:pecking )?woodpecker$/, '啄木鸟'],
+      [/^(?:lucky )?cat$/, '招财猫'],
+      [/^(?:belly.patting )?sea lion$/, '海狮'],
+      [/^(?:treasure (?:bowl|basin))$/, '聚宝盆'],
+      [/^(?:order )?charm$/, '爆单符'],
+      [/^(?:puffing )?frog$/, '青蛙'],
+      [/^(?:hopping )?jiangshi$/, '小僵尸'],
+      [/^(?:(?:golden|coin.spitting|coin) )?toad$/, '金蟾'],
+      [/^(?:tilting )?shiba$/, '柴犬'],
+      [/^(?:god of wealth|gold ingot)$/, '财神'],
+      [/^hamster(?: wheel)?$/, '仓鼠'],
+      [/^(?:clock out|off.work button)$/, '下班'],
+    ];
+    return aliases.find(([pattern]) => pattern.test(query))?.[1] ?? value;
+  }
+  const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const templates = Object.entries(dictionary).filter(([source]) => /\{\d+\}/.test(source))
+    .sort((a, b) => b[0].replace(/\{\d+\}/g, '').length - a[0].replace(/\{\d+\}/g, '').length)
+    .map(([source, target]) => {
+      const slots = [];
+      let expression = '', last = 0;
+      for (const match of source.matchAll(/\{(\d+)\}/g)) {
+        expression += escape(source.slice(last, match.index)) + '([\\s\\S]+?)';
+        slots.push(match[1]); last = match.index + match[0].length;
+      }
+      return { pattern: new RegExp('^' + expression + escape(source.slice(last)) + '$', 'u'), target, slots };
+    });
+  const fragments = Object.entries(dictionary).filter(([source]) => hasChinese(source) &&
+    source.length > 1 && !/\{\d+\}/.test(source)).sort((a, b) => b[0].length - a[0].length);
+  function translate(value, depth = 0) {
+    const original = String(value ?? '');
+    if (language !== 'en') return original;
+    const source = original.trim();
+    const pad = translated => original.slice(0, original.indexOf(source)) + translated +
+      original.slice(original.indexOf(source) + source.length);
+    if (Object.prototype.hasOwnProperty.call(dictionary, source)) return pad(dictionary[source]);
+    const normalized = source.replace(/\s+/g, ' ');
+    if (Object.prototype.hasOwnProperty.call(dictionary, normalized)) return pad(dictionary[normalized]);
+    if (!hasChinese(original)) return original;
+    if (depth < 5) {
+      for (const template of templates) {
+        const match = source.match(template.pattern);
+        if (!match) continue;
+        const values = {};
+        template.slots.forEach((slot, index) => { values[slot] = translate(match[index + 1], depth + 1); });
+        return pad(template.target.replace(/\{(\d+)\}/g, (_, slot) => values[slot] ?? ''));
+      }
+    }
+    let translated = original;
+    for (const [phrase, english] of fragments) if (translated.includes(phrase)) translated = translated.split(phrase).join(english);
+    return translated;
+  }
+  const textSources = new WeakMap(), attributeSources = new WeakMap();
+  const missing = new Set();
+  function publicText(source, element) {
+    if (language === 'en' && element?.id === 'payment-total' && /^¥[\d.]+$/.test(source))
+      return 'CNY ' + source.slice(1);
+    // A saved file's name must stay literal so the user can find that same file.
+    if (language === 'en' && element?.closest?.('.journey-filename, .onboarding-file-name')) {
+      if (source.startsWith('本次文件：')) return 'Downloaded file: ' + source.slice('本次文件：'.length);
+      if (source.startsWith('文件名：')) return 'Filename: ' + source.slice('文件名：'.length);
+    }
+    const translated = translate(source);
+    if (language !== 'en' || !hasChinese(translated)) return translated;
+    // Public catalogue text can arrive without English metadata. Do not invent a
+    // translation or expose raw server errors as English product copy.
+    const card = element?.closest?.('[data-appearance-number]');
+    if (element?.closest?.('.library-description, #appearance-description'))
+      return 'Preview the animation, then choose this character for your desktop.';
+    if (element?.closest?.('.library-card h3, #appearance-title, .journey-confirm-item strong, #claim-items strong, #selection-chosen a, #delivery-items li')) {
+      const number = card?.dataset.appearanceNumber || source.match(/#(\d{6,9})/)?.[1];
+      return number ? `Character #${number}` : 'Desktop character';
+    }
+    if (element?.closest?.('.library-author, #appearance-author')) return 'Official character';
+    missing.add(source);
+    // Unknown service/user-generated copy is not treated as a translation. Keep
+    // an English recovery message; the surrounding transaction state is intact.
+    return 'This information is unavailable in English. Please contact support.';
+  }
+  function sourceText(element) {
+    if (!element) return '';
+    if (element.nodeType === Node.TEXT_NODE) {
+      const saved = textSources.get(element);
+      return saved && saved.rendered === element.nodeValue ? saved.source : element.nodeValue;
+    }
+    return [...element.childNodes].map(sourceText).join('');
+  }
+  function applyText(node) {
+    const parent = node.parentElement;
+    if (!parent || parent.closest('script, style, noscript, textarea, [data-locale-verbatim]')) return;
+    const before = node.nodeValue;
+    const previous = textSources.get(node);
+    const source = previous && before === previous.rendered ? previous.source : before;
+    const rendered = publicText(source, parent);
+    textSources.set(node, { source, rendered });
+    if (before !== rendered) node.nodeValue = rendered;
+  }
+  const attributes = ['aria-label', 'aria-description', 'aria-valuetext', 'alt', 'title', 'placeholder'];
+  function applyElement(element) {
+    if (!element || element.matches('script, style, [data-locale-verbatim]')) return;
+    let saved = attributeSources.get(element);
+    if (!saved) { saved = {}; attributeSources.set(element, saved); }
+    for (const attribute of attributes) {
+      if (!element.hasAttribute(attribute)) continue;
+      const before = element.getAttribute(attribute);
+      const prior = saved[attribute];
+      const source = prior && before === prior.rendered ? prior.source : before;
+      const rendered = publicText(source, element);
+      saved[attribute] = { source, rendered };
+      if (before !== rendered) element.setAttribute(attribute, rendered);
+    }
+    if (element.tagName === 'META' && /^(description|og:(title|description|site_name))$/.test(element.name || element.getAttribute('property') || '')) {
+      const before = element.content, after = publicText(before, element);
+      if (before !== after) element.content = after;
+    }
+    if (language === 'en' && element.matches('meta[property="og:locale"]')) element.content = 'en_US';
+    if (element.matches('a[href]') && !element.hasAttribute('download')) {
+      try {
+        const url = new URL(element.href, location.href);
+        if (url.origin === location.origin && /(?:\.html|\/)$/i.test(url.pathname) &&
+            (url.searchParams.has('lang') || language === 'en')) {
+          url.searchParams.set('lang', language);
+          if (element.href !== url.href) element.href = url.href;
+        }
+      } catch { /* Leave non-navigation links untouched. */ }
+    }
+  }
+  function applyTree(root) {
+    if (root.nodeType === Node.TEXT_NODE) { applyText(root); return; }
+    if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_NODE) return;
+    if (root.nodeType === Node.ELEMENT_NODE) applyElement(root);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeType === Node.TEXT_NODE) applyText(node); else applyElement(node);
+    }
+  }
+  function init() {
+    const nav = document.querySelector('header nav, .nav nav, .guide-nav nav, header');
+    if (nav && !document.querySelector('[data-site-language]')) {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'site-language'; button.dataset.siteLanguage = 'true';
+      button.dataset.localeVerbatim = 'true';
+      button.textContent = language === 'en' ? 'Chinese' : 'English';
+      button.setAttribute('aria-label', language === 'en' ? 'Switch to Chinese' : 'Switch to English');
+      button.onclick = () => {
+        const next = language === 'en' ? 'zh' : 'en';
+        try { localStorage.setItem(key, next); } catch { /* URL is sufficient. */ }
+        const url = new URL(location.href); url.searchParams.set('lang', next); location.assign(url.href);
+      };
+      nav.append(button);
+    }
+    if (language === 'en') {
+      const pricing = document.querySelector('.characters .section-heading > p:last-child');
+      const codeLink = pricing?.querySelector('a');
+      if (codeLink) {
+        const price = document.createElement('strong'); price.textContent = 'CNY 1 each';
+        codeLink.textContent = 'use a fan-group code for free';
+        pricing.replaceChildren(document.createTextNode('Woodfish is always free. Extra characters cost '),
+          price, document.createTextNode(', or '), codeLink, document.createTextNode('.'));
+      }
+      // Native constraint validation otherwise uses the browser's own language.
+      document.addEventListener('invalid', event => {
+        const input = event.target;
+        if (typeof input.setCustomValidity !== 'function') return;
+        let message = 'Please check this field.';
+        if (input.validity.valueMissing) message = 'Please fill out this field.';
+        else if (input.validity.patternMismatch) message = input.closest('#claim-code-form')
+          ? 'Use GD followed by six digits, for example GD123456.' : 'Please use the requested format.';
+        else if (input.validity.typeMismatch) message = 'Please enter a valid ' + (input.type === 'email' ? 'email address.' : 'value.');
+        else if (input.validity.tooLong) message = 'Please shorten this entry.';
+        else if (input.validity.tooShort) message = 'Please enter the required number of characters.';
+        else if (input.validity.rangeUnderflow || input.validity.rangeOverflow) message = 'Please enter a value within the allowed range.';
+        input.setCustomValidity(message);
+      }, true);
+      document.addEventListener('input', event => {
+        if (typeof event.target.setCustomValidity === 'function') event.target.setCustomValidity('');
+      }, true);
+    }
+    applyTree(document);
+  }
+  window.NiuMaLocale = { language, translate, sourceText, searchQuery,
+    get missingCount() { return missing.size; }, apply: applyTree };
+  // Observe while the document is parsed, before deferred business modules run.
+  // This also keeps later API-driven status messages in the selected language.
+  const observer = new MutationObserver(records => {
+    const roots = new Set();
+    for (const record of records) {
+      if (record.type === 'childList') for (const node of record.addedNodes) roots.add(node);
+      else roots.add(record.target);
+    }
+    for (const root of roots) if (root.isConnected) applyTree(root);
+  });
+  observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true,
+    attributes: true, attributeFilter: attributes });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+})();
+
+;

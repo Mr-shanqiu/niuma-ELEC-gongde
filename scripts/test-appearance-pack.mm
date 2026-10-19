@@ -10,6 +10,40 @@ static void Require(BOOL condition, NSString *message) {
 
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
+    if (argc == 4 && strcmp(argv[1], "--protocol") == 0) {
+      NSString *root = [NSString stringWithUTF8String:argv[3]];
+      setenv("NIUMA_PACK_ROOT", argv[3], 1);
+      NSArray *cases = [NSJSONSerialization JSONObjectWithData:
+          [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]]
+          options:0 error:nil];
+      Require([cases isKindOfClass:NSArray.class] && cases.count > 0, @"missing protocol cases");
+      for (NSDictionary *entry in cases) {
+        [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+        NSURL *archive = [NSURL fileURLWithPath:entry[@"archive"]];
+        NSError *error = nil;
+        NMAppearancePack *pack = [NMAppearancePackStore installArchiveAtURL:archive error:&error];
+        NSString *label = entry[@"name"];
+        if ([entry[@"accept"] boolValue]) {
+          Require(pack != nil, [NSString stringWithFormat:@"%@: %@", label, error.localizedDescription]);
+          Require([NMAppearancePackStore loadInstalledPacks:&error].count == 1, label);
+          NSImage *snapshot = [[NSImage alloc] initWithSize:NSMakeSize(240, 250)];
+          [snapshot lockFocus];
+          [pack drawAtPhase:0.5];
+          [snapshot unlockFocus];
+          Require(snapshot.TIFFRepresentation.length > 100, label);
+          Require([NMAppearancePackStore installArchiveAtURL:archive error:&error] != nil, label);
+          [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+          Require([NMAppearancePackStore installArchiveAtURL:archive error:&error] != nil, label);
+        } else {
+          Require(pack == nil && error != nil, [label stringByAppendingString:@" was accepted"]);
+          if (entry[@"errorCode"]) Require(error.code == [entry[@"errorCode"] integerValue],
+              [NSString stringWithFormat:@"%@: unexpected error %@", label, error]);
+        }
+        printf("PASS macOS protocol %s\n", label.UTF8String);
+      }
+      [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+      return 0;
+    }
     Require(argc == 4, @"usage: test archive unsafe-archive pack-root");
     setenv("NIUMA_PACK_ROOT", argv[3], 1);
     NSFileManager *fm = NSFileManager.defaultManager;

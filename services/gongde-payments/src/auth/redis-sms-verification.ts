@@ -137,13 +137,15 @@ export class RedisSmsVerificationService implements SmsVerificationPort {
     private readonly sender: SmsSender,
     private readonly secret: Buffer,
     private readonly environment = "production",
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly purpose: typeof GONGDE_SMS_PURPOSE | "gongde_creator_login" = GONGDE_SMS_PURPOSE
   ) {
     if (secret.length < 32) throw new Error("sms_identity_secret_too_short");
   }
 
-  static connect(redisUrl: string, sender: SmsSender, secret: Buffer, environment?: string): RedisSmsVerificationService {
-    return new RedisSmsVerificationService(new IoredisSmsClient(redisUrl), sender, secret, environment);
+  static connect(redisUrl: string, sender: SmsSender, secret: Buffer, environment?: string,
+    purpose: typeof GONGDE_SMS_PURPOSE | "gongde_creator_login" = GONGDE_SMS_PURPOSE): RedisSmsVerificationService {
+    return new RedisSmsVerificationService(new IoredisSmsClient(redisUrl), sender, secret, environment, undefined, purpose);
   }
 
   async requestCode(rawPhone: string, clientKey: string): Promise<{
@@ -159,7 +161,7 @@ export class RedisSmsVerificationService implements SmsVerificationPort {
     const codeHmac = this.hmac("code", `${challengeDigest}\0${phoneHmac}\0${code}`);
     const day = new Date(current.getTime() + 8 * 60 * 60_000).toISOString().slice(0, 10);
     const hourWindow = Math.floor(current.getTime() / 3_600_000);
-    const prefix = `gongde:${this.environment}:sms:${GONGDE_SMS_PURPOSE}`;
+    const prefix = `gongde:${this.environment}:sms:${this.purpose}`;
     const keys = [
       `${prefix}:challenge:${challengeDigest}`,
       `${prefix}:cooldown:${phoneHmac}`,
@@ -221,7 +223,7 @@ export class RedisSmsVerificationService implements SmsVerificationPort {
     const sessionToken = randomBytes(32).toString("base64url");
     const sessionDigest = this.hmac("session", sessionToken);
     const userId = `phone_${this.hmac("identity", phone).slice(0, 32)}`;
-    const prefix = `gongde:${this.environment}:sms:${GONGDE_SMS_PURPOSE}`;
+    const prefix = `gongde:${this.environment}:sms:${this.purpose}`;
     let result: number[];
     try {
       result = resultArray(await this.redis.eval(
@@ -251,7 +253,7 @@ export class RedisSmsVerificationService implements SmsVerificationPort {
 
   async requireSession(sessionToken: string): Promise<string> {
     if (!/^[A-Za-z0-9_-]{32,128}$/u.test(sessionToken)) throw new Error("phone_session_invalid");
-    const prefix = `gongde:${this.environment}:sms:${GONGDE_SMS_PURPOSE}`;
+    const prefix = `gongde:${this.environment}:sms:${this.purpose}`;
     try {
       const userId = await this.redis.eval(
         READ_SESSION_SCRIPT,
@@ -279,6 +281,6 @@ export class RedisSmsVerificationService implements SmsVerificationPort {
   }
 
   private hmac(context: string, value: string): string {
-    return createHmac("sha256", this.secret).update(GONGDE_SMS_PURPOSE).update("\0").update(context).update("\0").update(value).digest("hex");
+    return createHmac("sha256", this.secret).update(this.purpose).update("\0").update(context).update("\0").update(value).digest("hex");
   }
 }

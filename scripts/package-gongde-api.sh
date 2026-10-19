@@ -4,7 +4,8 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 SOURCE_DIR="$ROOT_DIR/services/gongde-payments"
 OUT_DIR="$ROOT_DIR/dist/gongde-api-deploy"
-STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/gongde-api.XXXXXX")
+mkdir -p "$ROOT_DIR/.local-work/candidates"
+STAGING_DIR=$(mktemp -d "$ROOT_DIR/.local-work/candidates/gongde-api.XXXXXX")
 PACKAGE_DIR="$STAGING_DIR/gongde-payments"
 
 cleanup() {
