@@ -61,6 +61,20 @@ if(WIN32)
     set_property(TARGET niuma-pack-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_options(niuma-pack-test PRIVATE /W4 /permissive- /utf-8)
   endif()
+
+  add_executable(niuma-woodfish-render-test
+    scripts/test-windows-woodfish-render.cpp
+    src/windows/appearance_pack.cpp
+    third_party/miniz/miniz.c
+  )
+  target_include_directories(niuma-woodfish-render-test PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(niuma-woodfish-render-test PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-woodfish-render-test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-woodfish-render-test PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  if(MSVC)
+    set_property(TARGET niuma-woodfish-render-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(niuma-woodfish-render-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+  endif()
 elseif(APPLE)
   enable_language(OBJCXX)
   set(MACOS_RESOURCES

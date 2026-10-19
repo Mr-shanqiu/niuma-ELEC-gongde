@@ -1088,17 +1088,29 @@ void DrawSceneArtwork(
     return;
   }
 
-  Gdiplus::SolidBrush shadow(Gdiplus::Color(62, 0, 0, 0));
-  graphics.FillEllipse(&shadow, 34.0f, 227.0f, 172.0f, 18.0f);
-  graphics.DrawImage(
-      gFish.image.get(), RectF(18.0f, 102.0f, 232.0f, 140.0f));
-  const GraphicsState state = graphics.Save();
-  graphics.TranslateTransform(280.0f, 90.0f);
-  graphics.RotateTransform(6.0f - 10.5f * strikeAmount);
-  graphics.TranslateTransform(-280.0f, -90.0f);
-  graphics.DrawImage(
-      gMallet.image.get(), RectF(72.0f, 63.0f, 214.0f, 54.0f));
-  graphics.Restore(state);
+  // Mirror the accepted Mac woodfish geometry into the top-left coordinate
+  // system: y = 250 - macY. Keep artwork below the independent +1 band.
+  const GraphicsState woodfishState = graphics.Save();
+  graphics.SetClip(RectF(0.0f, 80.0f, 240.0f, 170.0f), Gdiplus::CombineModeIntersect);
+  graphics.TranslateTransform(120.0f, 250.0f);
+  graphics.ScaleTransform(0.88f, 0.88f);
+  graphics.TranslateTransform(-120.0f, -250.0f);
+  Gdiplus::SolidBrush shadow(Gdiplus::Color(64, 0, 0, 0));
+  graphics.FillEllipse(&shadow, 40.0f, 231.0f, 160.0f, 16.0f);
+  graphics.DrawImage(gFish.image.get(), RectF(26.0f, 121.0f, 214.0f, 129.0f));
+
+  const GraphicsState malletState = graphics.Save();
+  graphics.TranslateTransform(417.0f, 70.0f);
+  graphics.RotateTransform(-(3.0f + 2.2f * strikeAmount));
+  const float sourceWidth = static_cast<float>(gMallet.image->GetWidth());
+  const float sourceHeight = static_cast<float>(gMallet.image->GetHeight());
+  // Extend the shaft separately so the round head keeps the Mac proportions.
+  graphics.DrawImage(gMallet.image.get(), RectF(-260.0f, -28.0f, 266.0f, 54.0f),
+      108.0f, 0.0f, std::max(1.0f, sourceWidth - 108.0f), sourceHeight, Gdiplus::UnitPixel);
+  graphics.DrawImage(gMallet.image.get(), RectF(-309.0f, -27.0f, 60.0f, 54.0f),
+      0.0f, 0.0f, std::min(145.0f, sourceWidth), sourceHeight, Gdiplus::UnitPixel);
+  graphics.Restore(malletState);
+  graphics.Restore(woodfishState);
 }
 
 void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
@@ -1141,7 +1153,7 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
             0.0f,
             appearancePack != nullptr
                 ? 250.0f - static_cast<float>(appearancePack->plusY) - 30.0f
-                : (gState.selectedScene == MeritScene::Woodfish ? 66.0f : 43.0f),
+                : (gState.selectedScene == MeritScene::Woodfish ? 46.0f : 43.0f),
             240.0f, 30.0f),
         22.0f, 255);
   }
