@@ -16,22 +16,19 @@ $types=@{'.nmgpack'='NiuMaMerit.AppearancePack';'.nmgpacks'='NiuMaMerit.Appearan
 $iscc="${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 $legacySource=Join-Path $Output 'legacy-startup.iss'
 $client=(Resolve-Path 'final-output/niuma-merit.exe').Path
-@"
-[Setup]
-AppId={{D1B9D81E-13A1-45E2-9B8F-33C9C7A06F27}
-AppName=NiuMa legacy startup fixture
-AppVersion=0.9.3
-DefaultDirName={localappdata}\Programs\NiumaMerit
-PrivilegesRequired=lowest
-OutputDir=$Output
-OutputBaseFilename=legacy-startup
-Uninstallable=yes
-[Files]
-Source: "$client"; DestDir: "{app}"; Flags: ignoreversion
-[Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "NiuMaMerit"; ValueData: """{app}\niuma-merit.exe"" --autostart"; Flags: uninsdeletevalue
-"@ | Set-Content -Encoding UTF8 $legacySource
-& $iscc $legacySource
+$shared=Get-Content -Raw -Encoding UTF8 'installer/windows/startup-choice.iss'
+$shared=$shared.Substring(0,$shared.IndexOf('function CommandBelongsToApp'))
+$shared=$shared.Replace('; Check: StartAtLoginSelected','; Flags: uninsdeletevalue; Check: StartAtLoginSelected')
+$legacyShared=Join-Path $Output 'legacy-startup-choice.iss'
+$shared | Set-Content -Encoding UTF8 $legacyShared
+# Use the production architecture, identity and languages. A 32-bit stub
+# creates a separate uninstaller and does not model the real upgrade path.
+$template=Get-Content -Raw -Encoding UTF8 'installer/windows/niuma-merit.iss'
+$template=$template.Replace('..\..\dist\{#MyAppExeName}',$client)
+$template=$template.Replace('languages\ChineseSimplified.isl',(Resolve-Path 'installer/windows/languages/ChineseSimplified.isl').Path)
+$template=$template.Replace('#include "startup-choice.iss"',('#include "'+$legacyShared+'"'))
+$template | Set-Content -Encoding UTF8 $legacySource
+& $iscc '/DMyAppVersion=0.9.3' "/O$Output" '/Flegacy-startup' $legacySource
 if($LASTEXITCODE -ne 0){throw 'Legacy uninstall-log fixture did not compile'}
 $results=@()
 function Check($condition,$reason){if(-not $condition){throw $reason}}
@@ -63,7 +60,12 @@ for($scenario=1;$scenario -le 3;$scenario++){
     Check ($LASTEXITCODE -eq 0) 'Retained-copy fixture failed'
   }
   $iniBefore=(Get-FileHash $ini).Hash
-  $p=Start-Process (Join-Path $dir 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=`"$Output\uninstall-$scenario.log`"") -PassThru -Wait
+  $registration=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Uninstall\{D1B9D81E-13A1-45E2-9B8F-33C9C7A06F27}_is1')
+  Check ($null -ne $registration) 'Installed application uninstall registration is missing'
+  $uninstaller=$registration.GetValue('UninstallString').Trim('"')
+  $registration.Close()
+  Check ((Test-Path $uninstaller) -and $uninstaller.StartsWith($dir)) 'Unexpected registered uninstaller'
+  $p=Start-Process $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=`"$Output\uninstall-$scenario.log`"") -PassThru -Wait
   Check ($p.ExitCode -eq 0) 'Uninstall failed'
   Check (-not (Test-Path $exe)) 'Installed executable survived uninstall'
   Check ((Test-Path $sentinel) -and ((Get-FileHash $ini).Hash -eq $iniBefore)) 'User data was changed by uninstall'
