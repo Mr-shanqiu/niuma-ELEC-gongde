@@ -46,7 +46,9 @@ jobs:
 
       - name: Build reminder tests
         shell: bash
-        run: cmake --build build-reminder-tests --target niuma-reminder-activity-test --parallel 2
+        run: |
+          cmake --build build-reminder-tests \
+            --target niuma-reminder-activity-test niuma-login-startup-test --parallel 2
 
       - name: Run reminder tests
         shell: bash
