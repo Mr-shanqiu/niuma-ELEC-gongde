@@ -44,3 +44,10 @@
 - 真实服务启用前必须完成持久化、支付回调、短信模板审核、频控和订单恢复验收。
 
 生产 DNS、COS、Caddy、Compose、容器构建和回滚由桌球智慧屏 00 主控执行。
+
+**分工更正（2026-10-20）**：站点静态文件的发布已由牛马项目自己承担，入口是 `deploy-gongde <archive> <sha256>`（见上文）。上面这句是历史口径，只对 Caddy、DNS、Compose 和主机级运维继续成立。
+
+两者不是同一层，不要混用：
+
+- `deploy-gongde` 只能发站点归档。服务端只接受固定的根级文件和 `assets/*`，远端执行固定的 `deploy <tree_sha> <archive_sha>`，**改不了 Caddyfile**。
+- 主机配置改动（缓存头、反代、TLS）需要直连 `ace-zqscreen-dev` 操作 `/etc/caddy/Caddyfile`。该主机同时服务其他产品，改动前备份、`caddy validate` 通过后用 reload 而非 restart。具体边界见 `AGENTS.md` 的 Shared infrastructure 一节。
