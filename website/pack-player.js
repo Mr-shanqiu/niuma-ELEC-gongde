@@ -9,6 +9,11 @@
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   const duration = isMac ? 231 : 220;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  // Native woodfish manifests are versioned. v1 describes one piece of mallet
+  // artwork in a separate Windows coordinate space; v2 records the geometry
+  // both clients now share. An unknown version is refused rather than drawn
+  // as if it were the latest, so a future format cannot be misread silently.
+  const nativeRenderers = new Set(['native-woodfish-v1', 'native-woodfish-v2']);
   const cache = new Map();
   let indexPromise;
   let requestScheduler = operation => operation();
@@ -49,12 +54,13 @@
       const base = `/assets/previews/packs/${slug}/`;
       const bytes = await checkedFetch(`${base}manifest.json`, entry.manifestSha256);
       const manifest = JSON.parse(new TextDecoder().decode(bytes));
+      if (manifest.renderer && !nativeRenderers.has(manifest.renderer)) throw new Error('preview_contract_unsupported');
       const names = manifest.renderer ? ['body.png', 'mallet.png'] : [...new Set(manifest.layers.map((layer) => layer.image))];
       const images = new Map();
       await Promise.all(names.map(async (name) => {
         const file = entry.files[name];
         if (!file || file.sourceSha256 !== file.projectedSha256) throw new Error('preview_asset_not_exact');
-        const data = await checkedFetch(`${base}${name}`, file.sourceSha256);
+        const data = await checkedFetch(file.publicPath || `${base}${name}`, file.sourceSha256);
         images.set(name, await createImageBitmap(new Blob([data], { type: 'image/png' })));
       }));
       return { manifest, images, fingerprint: entry.manifestSha256 };
@@ -89,7 +95,10 @@
     ctx.restore();
   }
 
-  function windowsWoodfishView(spec) {
+  // v1 Windows specs described a single mallet rotated as one piece, so the
+  // preview had to fit that whole sweep into the canvas. Kept only for indexes
+  // published before the two clients were aligned; new manifests use v2.
+  function windowsWoodfishViewV1(spec) {
     const points = [];
     const corners = ([x, y, w, h]) => [[x, y], [x + w, y], [x, y + h], [x + w, y + h]];
     points.push(...corners(spec.body), ...corners(spec.shadow));
@@ -130,8 +139,13 @@
     const amount = phase < .42 ? smooth : 1 - smooth;
     const body = images.get('body.png');
     const mallet = images.get('mallet.png');
-    const spec = manifest[isMac ? 'macOS' : 'Windows'];
-    if (isMac) {
+    // v2 unified the two clients on the macOS geometry: Windows mirrors it
+    // through y = 250 - y, and this canvas is already flipped to a bottom
+    // origin, so the macOS numbers describe both. Only a v1 index still needs
+    // the old Windows branch, which rotated one-piece artwork.
+    const unified = manifest.renderer !== 'native-woodfish-v1';
+    const spec = unified || isMac ? manifest.macOS : manifest.Windows;
+    if (unified || isMac) {
       ctx.translate(spec.center[0], spec.center[1]);
       ctx.scale(spec.scale, spec.scale);
       ctx.translate(-spec.center[0], -spec.center[1]);
@@ -169,13 +183,13 @@
     canvas.setAttribute('aria-hidden', 'true');
     const ctx = canvas.getContext('2d');
     const windowsView = !isMac && manifest.renderer === 'native-woodfish-v1'
-      ? windowsWoodfishView(manifest.Windows) : null;
+      ? windowsWoodfishViewV1(manifest.Windows) : null;
     function paint(phase) {
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, width, height);
       ctx.save();
       ctx.translate(0, height); ctx.scale(1, -1);
-      if (manifest.renderer === 'native-woodfish-v1') nativeWoodfish(ctx, manifest, images, phase, windowsView);
+      if (nativeRenderers.has(manifest.renderer)) nativeWoodfish(ctx, manifest, images, phase, windowsView);
       else for (const layer of manifest.layers) {
         const frame = sample(layer.keyframes, phase, layer.interpolation);
         const [x, y, w, h] = layer.frame;
@@ -203,7 +217,10 @@
       raf = requestAnimationFrame(tick);
     }
     const play = () => { if (timer) return; strike(); timer = setInterval(strike, 1100); };
-    const card = container.closest('.character-card');
+    // The library renders `.library-card`; `.character-card` is the older name
+    // the hero once used. Binding to either keeps hover-to-animate and the
+    // preview downscale working wherever the player is mounted.
+    const card = container.closest('.library-card, .character-card');
     if (card) {
       card.addEventListener('pointerenter', play);
       card.addEventListener('pointerleave', () => { if (!card.contains(document.activeElement)) stop(); });
