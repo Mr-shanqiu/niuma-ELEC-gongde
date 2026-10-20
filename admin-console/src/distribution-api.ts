@@ -118,7 +118,16 @@ export function codeUsable(data: CodeSnapshot, now: number): boolean {
     Boolean(data.expiresAt) && Date.parse(data.validFrom!) <= now && Date.parse(data.expiresAt!) > now && data.maxItems > 0;
 }
 export function groupAnnouncement(data: CodeSnapshot): string {
-  return `牛马电子功德基础木鱼与客户端直接免费下载。扩展官方形象每个 1 元，每批最多 10 个不同形象，无套餐；也可凭当期官方群码免费领取。当前官方群码：${data.code}，GD 加 6 位数字，不区分大小写，每三天更新，可重复领取、不扣共享额度。本周期北京时间 ${formatTime(data.validFrom)} 起，至 ${formatTime(data.expiresAt)} 失效。首次使用先安装 01 开头的免费客户端，再双击 02 开头的形象文件整批导入；已安装的用户跳过第 1 步。付款仅用于本次下载，以后重新下载须再次付款或使用有效群码；请保存文件，已保存形象可长期离线使用、随时导入。官网下载：https://gongde.zqscreen.cn/`;
+  let expiresAt = "未提供";
+  if (data.expiresAt && Number.isFinite(Date.parse(data.expiresAt))) {
+    const parts = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai", year: "numeric", month: "numeric", day: "numeric",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+    }).formatToParts(new Date(data.expiresAt));
+    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value;
+    expiresAt = `${part("year")} 年 ${part("month")} 月 ${part("day")} 日 ${part("hour")}:${part("minute")}`;
+  }
+  return `权益码：${data.code}\n\n失效时间：${expiresAt}\n\n官网链接：https://gongde.zqscreen.cn/\n\n未及时更新请@群主。`;
 }
 export function revisionBody(revision: number, reason: string): string {
   if (!Number.isSafeInteger(revision) || revision < 0 || reason.trim().length < 5 || reason.trim().length > 1000) {
