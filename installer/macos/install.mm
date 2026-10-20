@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <Security/Security.h>
 #import <CoreServices/CoreServices.h>
+#import "../../src/macos/installation_paths.h"
 #include <unistd.h>
 
 static BOOL Chinese(void) {
@@ -176,6 +177,7 @@ static NSColor *Ink(void) { return [NSColor colorWithCalibratedWhite:.11 alpha:1
   }
   NSWorkspaceOpenConfiguration *configuration = [NSWorkspaceOpenConfiguration configuration];
   configuration.activates = YES;
+  configuration.arguments = @[@"--installed-app-path", self.target.path];
   [NSWorkspace.sharedWorkspace openApplicationAtURL:self.target configuration:configuration
       completionHandler:^(NSRunningApplication *app, NSError *error) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -186,26 +188,15 @@ static NSColor *Ink(void) { return [NSColor colorWithCalibratedWhite:.11 alpha:1
 }
 - (void)ejectOwnDiskAfterExit {
   // Only detach the disk image hosting this installer; never eject physical disks.
-  NSURL *volume = nil; [NSBundle.mainBundle.bundleURL getResourceValue:&volume forKey:NSURLVolumeURLKey error:nil];
-  if (![volume.path hasPrefix:@"/Volumes/"]) return;
   NSTask *info = [[NSTask alloc] init]; info.executableURL = [NSURL fileURLWithPath:@"/usr/bin/hdiutil"];
   info.arguments = @[@"info", @"-plist"]; NSPipe *pipe = NSPipe.pipe; info.standardOutput = pipe;
   info.standardError = NSFileHandle.fileHandleWithNullDevice;
   if (![info launchAndReturnError:nil]) return;
   NSData *data = [pipe.fileHandleForReading readDataToEndOfFile]; [info waitUntilExit];
   NSDictionary *root = [NSPropertyListSerialization propertyListWithData:data options:0 format:nil error:nil];
-  BOOL ownedImage = NO;
-  for (NSDictionary *image in root[@"images"]) {
-    if (![[image[@"image-path"] lowercaseString] hasSuffix:@".dmg"]) continue;
-    for (NSDictionary *entity in image[@"system-entities"])
-      if ([entity[@"mount-point"] isEqualToString:volume.path]) ownedImage = YES;
-  }
-  if (!ownedImage) return;
-  NSTask *helper = [[NSTask alloc] init]; helper.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
-  helper.arguments = @[@"-c", @"sleep 2; /usr/bin/hdiutil detach \"$1\" >/dev/null 2>&1", @"niuma-installer-eject", volume.path];
-  helper.standardOutput = NSFileHandle.fileHandleWithNullDevice;
-  helper.standardError = NSFileHandle.fileHandleWithNullDevice;
-  [helper launchAndReturnError:nil];
+  NSURL *volume = NMInstallerDiskImageVolume(NSBundle.mainBundle.bundleURL, root);
+  if (!volume) return;
+  NMEjectDiskImageAfterExit(volume, NSProcessInfo.processInfo.processIdentifier);
 }
 @end
 

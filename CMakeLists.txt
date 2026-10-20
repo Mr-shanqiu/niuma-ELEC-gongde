@@ -125,6 +125,7 @@ elseif(APPLE)
   target_link_libraries(niuma-merit PRIVATE
     "-framework AppKit"
     "-framework ApplicationServices"
+    "-framework ServiceManagement"
     "-framework Security"
   )
   set_target_properties(niuma-merit PROPERTIES
@@ -134,6 +135,13 @@ elseif(APPLE)
     MACOSX_DEPLOYMENT_TARGET "10.15"
     XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
   )
+  add_executable(niuma-login-startup-test scripts/test-macos-login-startup.mm)
+  target_compile_features(niuma-login-startup-test PRIVATE cxx_std_17)
+  target_compile_options(niuma-login-startup-test PRIVATE -Wall -Wextra -fobjc-arc -mmacosx-version-min=10.15)
+  target_link_libraries(niuma-login-startup-test PRIVATE
+    "-framework AppKit" "-framework ApplicationServices" "-framework Security"
+    "-framework ServiceManagement")
+  add_test(NAME niuma-login-startup COMMAND niuma-login-startup-test)
 else()
   message(FATAL_ERROR "This product supports Windows and macOS only")
 endif()
