@@ -8,14 +8,17 @@ window.NiuMaAppearance?.setRequestScheduler?.(schedulePreviewRequest);
 const $ = id => document.getElementById(id);
 const GALLERY_CACHE_KEY = 'niuma-public-gallery-v1';
 const GALLERY_CACHE_TTL = 10 * 60 * 1000;
+// A snapshot this old is only used to paint something while the network
+// answers; it is never treated as the current catalogue.
+const GALLERY_CACHE_STALE = 7 * 24 * 60 * 60 * 1000;
 const GALLERY_CACHE_LIMIT = 512 * 1024;
-function gallerySnapshots() {
+function gallerySnapshots(maxAge = GALLERY_CACHE_TTL) {
   try {
     const raw = localStorage.getItem(GALLERY_CACHE_KEY);
     if (!raw || raw.length > GALLERY_CACHE_LIMIT) return [];
     const entries = JSON.parse(raw);
     return Array.isArray(entries) ? entries.filter(entry => entry && typeof entry.key === 'string' &&
-      Number.isFinite(entry.at) && entry.at <= Date.now() && Date.now() - entry.at < GALLERY_CACHE_TTL &&
+      Number.isFinite(entry.at) && entry.at <= Date.now() && Date.now() - entry.at < maxAge &&
       Array.isArray(entry.items) && entry.items.length <= 24 && entry.items.every(item =>
         validNumber(item?.number) && typeof item.title === 'string' && typeof item.description === 'string' &&
         typeof item.catalogRevision === 'string')).slice(0, 8) : [];
@@ -103,7 +106,12 @@ async function preview(container, item, options = {}) {
       return { strike: () => {}, stop: () => {}, destroy: () => URL.revokeObjectURL(objectUrl) };
     }
     const spec = resource.spec;
-    if (spec.renderer === 'native-woodfish-v1') {
+    if (spec.renderer === 'native-woodfish-v1' || spec.renderer === 'native-woodfish-v2') {
+      // The player identifies a native pack by slug and re-fetches its own
+      // manifest through the index, so this branch only applies to a JSON spec
+      // served from a stable packs/ address. A current index points previewUrl
+      // at the content-addressed cover instead, which has no manifest.json and
+      // must not be turned into a slug-shaped guess.
       const slug = url.pathname.match(/\/assets\/previews\/packs\/([^/]+)\/manifest\.json$/)?.[1];
       if (!slug || !window.NiuMaAppearance) throw new Error('preview_invalid');
       container.dataset.packPreview = slug;
@@ -346,7 +354,11 @@ export async function library() {
     const catalogueQuery = window.NiuMaLocale?.searchQuery(q) ?? q;
     const params = new URLSearchParams({ sort: form.elements.sort.value });
     for (const [key, value] of [['q', catalogueQuery], ['tag', normalizeText(form.elements.tag.value)], ['author', form.elements.author.value], ['cursor', cursor]]) if (value) params.set(key, value);
-    const key = params.toString(), cached = gallerySnapshots().find(entry => entry.key === key);
+    const key = params.toString();
+    // Paint the last known list immediately, even when it is past its freshness
+    // window: the gallery then appears with the page instead of after the three
+    // catalogue requests finish. The fresh response replaces it in place.
+    const cached = gallerySnapshots(GALLERY_CACHE_STALE).find(entry => entry.key === key);
     if (cached) displayGallery(cached, true);
     else if (!cards.size) status('');
     $('library-previous').disabled = true; $('library-next').disabled = true;
@@ -481,6 +493,16 @@ async function claim() {
     try { return JSON.parse(sessionStorage.getItem(CONFIRMATION_KEY) || 'null')?.sent === true ||
       Boolean(sessionStorage.getItem(ACTIVE_CLAIM_KEY)); } catch { return true; }
   };
+  // Ending the current group batch is the only way out for a user who downloaded
+  // and closed the page without pressing "已找到文件，完成". It clears group state
+  // only; an in-flight payment stays untouched.
+  function endGroupClaim() {
+    try {
+      sessionStorage.removeItem(ACTIVE_CLAIM_KEY);
+      clearConfirmation();
+    } catch { /* Private mode may reject removal; the next render still reflects memory. */ }
+    notice = null; render(); paymentUI?.render();
+  }
   function paying() {
     try { return Boolean(currentPayment()); } catch { return true; }
   }
@@ -490,6 +512,7 @@ async function claim() {
   }
   function render() {
     const paid = paying(), recovering = pendingConfirmation(items), problem = validateSelection(items);
+    const emptySelection = !items.length;
     summary(items);
     $('payment-panel').hidden = route.value !== 'payment';
     $('group-panel').hidden = route.value !== 'group';
@@ -501,8 +524,12 @@ async function claim() {
       remove.disabled = busy || verifying || paid || groupPending();
       row.append(node('strong', item.title + ' · #' + item.number), remove); return row;
     }));
-    $('claim-selection-status').textContent = problem || '每批最多 10 个不同扩展形象，保存文件后永久本地使用。';
-    $('claim-selection-status').dataset.tone = problem ? 'error' : '';
+    // Nothing selected yet is the normal starting state, not an error. Only a
+    // real selection problem earns the red tone.
+    $('claim-selection-status').textContent = emptySelection
+      ? (validAccess(access) ? '群码已验证，请先返回形象库挑选形象。' : '请先在形象库挑选形象，再回到这里用群码领取。')
+      : (problem || '每批最多 10 个不同扩展形象，保存文件后永久本地使用。');
+    $('claim-selection-status').dataset.tone = problem && !emptySelection ? 'error' : '';
     button.disabled = paid || busy || verifying || Boolean(sessionStorage.getItem(ACTIVE_CLAIM_KEY)) ||
       (!recovering && (!configReady || !refreshed || !validAccess(access) || Boolean(problem)));
     button.textContent = busy ? '正在确认领取…' : recovering ? '继续本次领取请求' : '官方群码免费领取' + (items.length ? ' ' + items.length + ' 个' : '');
@@ -514,18 +541,35 @@ async function claim() {
       ? '官方群码已验证，每批最多 10 个，可重复免费领取，不扣额度。换码时间：' + time(access.expiresAt)
       : '请输入 GD 加六位数字的三天官方群码，字母大小写均可；不接受作者码。';
     const activeGroup = sessionStorage.getItem(ACTIVE_CLAIM_KEY);
+    // Both pages that host this script carry the control, but bind defensively so
+    // a page without it keeps working.
+    const abandonButton = $('claim-abandon');
+    if (abandonButton) {
+      abandonButton.hidden = !activeGroup && !recovering;
+      abandonButton.disabled = busy || verifying;
+    }
+    // With a verified code and nothing picked, the next step is the gallery. The
+    // link is the main action there, so it must not hide under the panel.
+    const pickLink = $('claim-pick');
+    if (pickLink) pickLink.hidden = !emptySelection || !validAccess(access) || route.value !== 'group';
     $('claim-continue').hidden = !activeGroup;
     const text = paid ? (route.value === 'payment'
       ? ''
       : '当前有进行中的付款，请切换到“付费下载”继续；已选形象会保留。')
-      : activeGroup ? '当前有进行中的群码交付，请在“群码免费领取”中继续本批交付。'
+      : activeGroup ? '当前有进行中的群码交付，可继续本批下载，或结束本次领取后重新选择。'
       : route.value === 'payment' ? ''
-      : recovering ? '上次领取结果未确认，请继续本次领取，不会另建批次。'
+      : recovering ? (recovering.currentSelectionDiffers
+          ? '上次领取结果未确认，当前选择与那批不同。可继续原批，或结束本次领取后重新选择。'
+          : '上次领取结果未确认，请继续本次领取，不会另建批次。')
       : !refreshed ? '正在确认所选官方形象与版本…'
       : !configReady ? '群码领取暂不可用；可切换直接支付，已选形象仍保留。'
       : !validAccess(access) ? '输入官方群码并验证后，即可免费领取，不扣额度。'
+      // An empty selection under a verified code is a missing step, not a failure:
+      // problem here is only "nothing selected", which the selection panel already
+      // explains in its own words.
+      : emptySelection ? '群码已验证，请先返回形象库挑选形象。'
       : problem || '官方群码有效，可以免费领取本批形象。';
-    status(notice?.text || text, notice?.error || Boolean(problem));
+    status(notice?.text || text, notice?.error || Boolean(problem && !emptySelection));
   }
   function scheduleExpiry() {
     clearTimeout(expiryTimer);
@@ -580,11 +624,15 @@ async function claim() {
       if (active?.claimId) location.assign('delivery.html?claim=' + encodeURIComponent(active.claimId));
     } catch { status('当前交付数据无法读取，请联系项目。', true); }
   };
+  $('claim-abandon')?.addEventListener('click', () => { if (!busy && !verifying) endGroupClaim(); });
   button.onclick = async () => {
     if (button.disabled || busy || verifying) return;
     busy = true; notice = { text: '正在确认本次领取，请稍候；网络失败可继续本次请求。', error: false }; render();
     try {
-      const existing = confirmation(items);
+      // A resume replays the frozen request: the key was created for that exact
+      // selection, and the server rejects the same key with different items.
+      const resuming = pendingConfirmation(items);
+      const existing = resuming || confirmation(items);
       if (!existing.sent) {
         access = await request('/access');
         const problem = validateSelection(items);
@@ -726,7 +774,7 @@ async function installers() {
       if (current) card.append(node('p', platform === recommended ? '适合这台电脑 · 当前版本' : '当前版本', 'installer-badge'));
       card.append(node('h2', platform), node('p', `${item.version} · ${item.format} · ${bytes(item.bytes)}`));
       if (item.systemRequirements) card.append(node('p', `系统要求：${item.systemRequirements}`, 'flow-meta'));
-      card.append(node('p', platform === 'Mac' ? '下载后打开 DMG，将应用拖入“应用程序”。' : platform === 'Windows' ? '下载后双击 EXE，按中文安装步骤完成安装。' : '下载后请查看相应安装说明。', 'flow-meta'));
+      card.append(node('p', platform === 'Mac' ? (current ? (document.documentElement.lang === 'en' ? 'Open the DMG, double-click Install NiuMa Merit, then select Install & Open. This build is signed with Developer ID and notarized by Apple. After installation, follow the prompts to enable Input Monitoring.' : '打开 DMG，双击“安装牛马电子功德”，再点“安装并打开”。本版已完成开发者签名和苹果公证；安装后按提示开启输入监控。') : '下载后打开 DMG，将应用拖入“应用程序”。') : platform === 'Windows' ? '下载后双击 EXE，按中文安装步骤完成安装。' : '下载后请查看相应安装说明。', 'flow-meta'));
       const link = node('a', current ? `免费下载 ${platform} 版` : `下载 ${platform} ${item.version} 旧版`, current ? 'button primary' : 'button');
       link.href = url; link.rel = 'noreferrer'; card.append(link);
       link.dataset.installerPlatform = platform === 'Mac' ? 'macos' : platform === 'Windows' ? 'windows' : '';
@@ -751,6 +799,18 @@ export function developer() {
   for (const button of document.querySelectorAll('[data-copy-developer]')) button.onclick = async () => {
     try { await navigator.clipboard.writeText('1872941388'); button.textContent = '抖音号已复制'; }
     catch { button.textContent = '请手动复制：1872941388'; }
+  };
+  // The group number is plain digits, so a failed clipboard call still leaves a
+  // number the user can select on screen; say so instead of throwing a dialog.
+  // The number is read from the page rather than hard-coded so the entry page
+  // and the claim page cannot drift apart.
+  for (const button of document.querySelectorAll('[data-copy-group-number]')) button.onclick = async () => {
+    const number = (button.dataset.groupNumberSource
+      ? document.getElementById(button.dataset.groupNumberSource)
+      : document.querySelector('.group-entry-number strong'))?.textContent?.trim() || '';
+    if (!/^\d{6,}$/.test(number)) { button.textContent = '请手动选择上方群号'; return; }
+    try { await navigator.clipboard.writeText(number); button.textContent = '群号已复制'; }
+    catch { button.textContent = '请手动选择上方群号'; }
   };
   void request('/config').then(config => {
     const url = safeDownloadUrl(config.developerDouyinHomepageUrl);

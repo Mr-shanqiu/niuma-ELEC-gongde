@@ -7,3 +7,8 @@ preview/
 node_modules/
 website/admin/
 .local-work/
+# Raw creator material stays local; only curated assets belong in the repo.
+imports/
+*.tsbuildinfo
+__pycache__/
+*.pyc

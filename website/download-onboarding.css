@@ -1,7 +1,7 @@
 .download-step { margin: 28px 0; padding: 24px; border: 1px solid #d9cdbc; border-radius: 18px; background: #fffaf1; }
 .download-step-heading { display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px; }
 .download-step-heading h2 { margin: 0; }
-.download-step-number { color: #d6532d; font-weight: 800; letter-spacing: .05em; }
+.download-step-number { color: #d6532d; font-weight: 700; letter-spacing: .05em; }
 .download-step-copy { color: #746858; line-height: 1.75; }
 .download-step-shortcut { display: inline-block; margin-top: 12px; color: #415b49; font-weight: 700; text-underline-offset: 4px; }
 .download-onboarding { margin: 28px 0; padding: 24px; border-radius: 18px; border: 1px solid #d9cdbc; background: #fffaf1; }

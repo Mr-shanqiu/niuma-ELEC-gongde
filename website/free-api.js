@@ -34,20 +34,31 @@ export function readSelection(storage = sessionStorage) {
 export function writeSelection(items, storage = sessionStorage) {
   storage.setItem(SELECTION_KEY, JSON.stringify(items));
 }
+// A submitted request keeps its key and its frozen selection until the user
+// finishes that batch. Resuming must replay the original body, not the current
+// one: the server answers idempotency_conflict when a key arrives with different
+// items, and that would strand a delivery that may already be prepared.
 export function confirmation(items, storage = sessionStorage, createId = () => crypto.randomUUID()) {
   const digest = JSON.stringify(items.map(({ number, catalogRevision }) => ({ number, catalogRevision })));
   let previous;
   try { previous = JSON.parse(storage.getItem(CONFIRMATION_KEY) || 'null'); } catch { /* New confirmation. */ }
-  if ((previous?.sent === true || previous?.digest === digest) && typeof previous.key === 'string') return previous;
+  if (typeof previous?.key === 'string' && (previous.sent === true || previous.digest === digest)) return previous;
   const value = { key: createId(), digest };
   storage.setItem(CONFIRMATION_KEY, JSON.stringify(value));
   return value;
 }
+// The selection frozen into a submitted request, so a resume can send exactly
+// what the key was created for. Returns null when nothing is awaiting a result.
 export function pendingConfirmation(items, storage = sessionStorage) {
   try {
     const value = JSON.parse(storage.getItem(CONFIRMATION_KEY) || 'null');
-    const digest = JSON.stringify(items.map(({ number, catalogRevision }) => ({ number, catalogRevision })));
-    return value?.sent === true && typeof value.key === 'string' && value.key ? value : null;
+    if (value?.sent !== true || typeof value.key !== 'string' || !value.key) return null;
+    const frozen = JSON.parse(value.digest);
+    if (!Array.isArray(frozen) || !frozen.length) return null;
+    // Catalog snapshots are needed to rebuild the request body; mark entries the
+    // user has since deselected so the page can say what it is resuming.
+    const current = new Set(items.map(item => String(item.number)));
+    return { ...value, items: frozen, currentSelectionDiffers: frozen.some(entry => !current.has(String(entry.number))) };
   } catch { return null; }
 }
 export function clearConfirmation(storage = sessionStorage) { storage.removeItem(CONFIRMATION_KEY); }

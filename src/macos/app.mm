@@ -1,6 +1,8 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <CoreServices/CoreServices.h>
 #import <mach/mach_time.h>
+#import "login_startup.h"
 #import "appearance_pack.mm"
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
@@ -25,6 +27,7 @@
 #include <unistd.h>
 #include <unordered_set>
 #import "ui_theme.h"
+#import "installation_paths.h"
 
 // Explicit acceptance launches never consult the user's product preferences.
 // The pack root must be an empty, private directory supplied by the runner;
@@ -73,7 +76,7 @@ static BOOL AcquireSingleInstanceLock(void) {
   return YES;
 }
 
-@protocol NMMeritPreferences <NSObject>
+@protocol NMMeritPreferences <NMLoginStartupPreferences>
 - (id)objectForKey:(NSString *)key;
 - (NSInteger)integerForKey:(NSString *)key;
 - (BOOL)boolForKey:(NSString *)key;
@@ -215,9 +218,6 @@ static constexpr CGFloat kCalendarCellHeight = 64.0;
 static constexpr CGFloat kArtworkTop = 170.0;
 static constexpr CGFloat kFeedbackY = 174.0;
 static constexpr CGFloat kCounterY = 210.0;
-static NSString *const kLaunchAtLoginConfigured = @"launchAtLoginConfigured";
-static NSString *const kLaunchAtLoginEnabled = @"launchAtLoginEnabled";
-static NSString *const kLaunchAgentLabel = @"cn.niuma.merit.autostart";
 static BOOL IsChineseUI(void) {
   NSString *override = NSProcessInfo.processInfo.environment[@"NIUMA_UI_LANGUAGE"];
   if ([override isEqualToString:@"zh"]) return YES;
@@ -418,6 +418,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic, copy) NSSet<NSString *> *lastImportedIds;
 @property(nonatomic, strong) NSAlert *appearancePickerAlert;
 @property(nonatomic, strong) NSError *appearanceLoadError;
+@property(nonatomic, strong) NMLoginStartupCoordinator *loginStartup;
+@property(nonatomic, strong) NSError *loginStartupError;
 - (BOOL)hasLiveEventTap;
 - (NSString *)countStatusTitle;
 - (void)receiveGlobalEvent:(CGEventType)type;
@@ -458,6 +460,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)checkPermission:(NSTimer *)timer;
 - (void)stopPermissionPoll;
 - (void)configureLaunchAtLogin;
+- (NMLoginStartupState)loginStartupState;
+- (void)showLoginStartupApproval;
 - (void)toggleLaunchAtLogin:(id)sender;
 - (NSView *)appearanceGrid;
 - (void)selectAppearance:(NSButton *)sender;
@@ -1295,13 +1299,93 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (BOOL)isLaunchAtLoginEnabled {
   if (gIsolatedAcceptance) return NO;
+  if (@available(macOS 13.0, *)) {
+    return [self loginStartupState] == NMLoginStartupEnabled;
+  }
   id<NMMeritPreferences> defaults = MeritPreferences();
   if (![defaults boolForKey:kLaunchAtLoginEnabled]) return NO;
   return [NSFileManager.defaultManager fileExistsAtPath:self.launchAgentURL.path];
 }
 
+- (NMLoginStartupCoordinator *)modernLoginStartup {
+  if (@available(macOS 13.0, *)) {
+    if (!self.loginStartup) {
+      self.loginStartup = [[NMLoginStartupCoordinator alloc] init];
+      self.loginStartup.service = [[NMMainAppLoginService alloc] init];
+      self.loginStartup.preferences = MeritPreferences();
+      NSURL *legacyURL = self.launchAgentURL;
+      self.loginStartup.retireLegacy = ^BOOL(NSError **error) {
+        return NMRetireLegacyStartup(legacyURL, error);
+      };
+    }
+    return self.loginStartup;
+  }
+  return nil;
+}
+
+- (NMLoginStartupState)loginStartupState {
+  if (gIsolatedAcceptance) return NMLoginStartupDisabled;
+  if (@available(macOS 13.0, *)) return self.modernLoginStartup.service.state;
+  return self.isLaunchAtLoginEnabled ? NMLoginStartupEnabled : NMLoginStartupDisabled;
+}
+
+- (BOOL)canConfigureModernLoginStartup:(BOOL)showError {
+  NSURL *running = NSBundle.mainBundle.bundleURL.URLByResolvingSymlinksInPath.URLByStandardizingPath;
+  NSURL *persistent = NMPersistentApplicationURL(NSBundle.mainBundle,
+      NSProcessInfo.processInfo.arguments);
+  NSString *parent = running.path.stringByDeletingLastPathComponent;
+  BOOL installed = [parent isEqualToString:@"/Applications"] ||
+      [parent isEqualToString:[NSHomeDirectory() stringByAppendingPathComponent:@"Applications"]];
+  if (installed && [running.path isEqualToString:persistent.path] &&
+      !NMIsTemporaryApplicationURL(running)) return YES;
+  if (showError) {
+    NSAlert *alert = [[NMUiAlert alloc] init];
+    alert.messageText = UiText(@"请从应用程序中打开", @"Open the Installed App");
+    alert.informativeText = UiText(@"请完成安装，再从“应用程序”打开牛马后设置登录启动。",
+        @"Finish installation, then open NiuMa Merit from Applications to configure login startup.");
+    [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
+    [alert runModal];
+  }
+  return NO;
+}
+
+- (void)showLoginStartupApproval {
+  if (@available(macOS 13.0, *)) {
+    NSAlert *alert = [[NMUiAlert alloc] init];
+    alert.messageText = UiText(@"登录启动尚未获允许", @"Login Startup Needs Approval");
+    alert.informativeText = UiText(@"请在系统设置的“登录项”中允许牛马。也可以在这里关闭登录启动。",
+        @"Allow NiuMa Merit in System Settings > Login Items. You can also turn login startup off here.");
+    [alert addButtonWithTitle:UiText(@"打开系统设置", @"Open System Settings")];
+    [alert addButtonWithTitle:UiText(@"关闭自启动", @"Turn Off Login Startup")];
+    [alert addButtonWithTitle:UiText(@"取消", @"Cancel")];
+    NSModalResponse response = [alert runModal];
+    if (response == NSAlertFirstButtonReturn) [SMAppService openSystemSettingsLoginItems];
+    else if (response == NSAlertSecondButtonReturn)
+      [self setLaunchAtLoginEnabled:NO showError:YES];
+  }
+}
+
 - (BOOL)setLaunchAtLoginEnabled:(BOOL)enabled showError:(BOOL)showError {
   if (gIsolatedAcceptance) return NO;
+  if (@available(macOS 13.0, *)) {
+    if (![self canConfigureModernLoginStartup:showError]) return NO;
+    NSError *failure = nil;
+    BOOL succeeded = [self.modernLoginStartup setEnabled:enabled error:&failure];
+    self.loginStartupError = failure;
+    if (!succeeded && showError) {
+      NSAlert *alert = [[NMUiAlert alloc] init];
+      alert.messageText = UiText(@"无法修改登录启动项", @"Unable to Change Login Startup");
+      alert.informativeText = UiText(
+          @"系统未能完成登录启动设置或旧启动项迁移，请稍后重试。原有功德、形象和日历不受影响。",
+          @"The system could not finish configuring login startup or migrating the old item. Try again later. Your merit, appearances and calendar are unchanged.");
+      [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
+      [alert runModal];
+    } else if (succeeded && enabled && showError &&
+        [self loginStartupState] == NMLoginStartupRequiresApproval) {
+      [self showLoginStartupApproval];
+    }
+    return succeeded;
+  }
   NSFileManager *fileManager = NSFileManager.defaultManager;
   NSURL *agentURL = self.launchAgentURL;
   NSError *error = nil;
@@ -1313,7 +1397,20 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                            attributes:nil
                                 error:&error];
     if (!error) {
-      NSString *bundlePath = NSBundle.mainBundle.bundlePath;
+      NSURL *persistent = NMPersistentApplicationURL(NSBundle.mainBundle,
+          NSProcessInfo.processInfo.arguments);
+      if (!persistent) {
+        if (showError) {
+          NSAlert *alert = [[NMUiAlert alloc] init];
+          alert.messageText = UiText(@"请先完成安装", @"Complete installation first");
+          alert.informativeText = UiText(@"请将牛马安装到“应用程序”后再开启登录启动。",
+              @"Install NiuMa Merit in Applications before enabling login startup.");
+          [alert addButtonWithTitle:UiText(@"知道了", @"OK")];
+          [alert runModal];
+        }
+        return NO;
+      }
+      NSString *bundlePath = persistent.path;
       NSDictionary *propertyList = @{
         @"Label": kLaunchAgentLabel,
         @"ProgramArguments": @[@"/usr/bin/open", @"-a", bundlePath,
@@ -1359,6 +1456,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (gIsolatedAcceptance) return;
   // A diagnostic candidate must not rewrite the installed login item's path.
   if ([NSProcessInfo.processInfo.arguments containsObject:@"--listener-acceptance"]) return;
+  if (@available(macOS 13.0, *)) {
+    if (![self canConfigureModernLoginStartup:NO]) return;
+    BOOL legacyDenied = [NSFileManager.defaultManager fileExistsAtPath:self.launchAgentURL.path] &&
+        [SMAppService statusForLegacyURL:self.launchAgentURL] == SMAppServiceStatusRequiresApproval;
+    NSError *failure = nil;
+    [self.modernLoginStartup configureRespectingLegacyDenial:legacyDenied error:&failure];
+    self.loginStartupError = failure;
+    return;
+  }
   id<NMMeritPreferences> defaults = MeritPreferences();
   if ([defaults objectForKey:kLaunchAtLoginConfigured] == nil) {
     [self setLaunchAtLoginEnabled:YES showError:NO];
@@ -1372,6 +1478,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)notification;
   self.launchedAutomatically =
       [NSProcessInfo.processInfo.arguments containsObject:@"--autostart"];
+  // SMAppService launches the main app without the legacy --autostart argument.
+  NSAppleEventDescriptor *launchEvent = NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
+  if (launchEvent.eventClass == kCoreEventClass && launchEvent.eventID == kAEOpenApplication &&
+      [launchEvent paramDescriptorForKeyword:keyAEPropData].enumCodeValue == keyAELaunchedAsLogInItem)
+    self.launchedAutomatically = YES;
   self.diagnostics = [NSProcessInfo.processInfo.arguments containsObject:@"--diagnostics"];
   NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
   if (bundleIdentifier.length > 0 && !gIsolatedAcceptance) {
@@ -2368,6 +2479,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       keyEquivalent:@""];
   launchAtLogin.target = self;
   launchAtLogin.enabled = !gIsolatedAcceptance;
+  if ([self loginStartupState] == NMLoginStartupRequiresApproval) {
+    launchAtLogin.title = UiText(@"登录后自动启动（待允许）…", @"Start at Login (Needs Approval)…");
+  }
+  if (self.loginStartupError) launchAtLogin.toolTip = UiText(
+      @"上次设置未能完成，点击可重试。", @"The last change did not complete. Click to try again.");
   launchAtLogin.state = self.isLaunchAtLoginEnabled
       ? NSControlStateValueOn
       : NSControlStateValueOff;
@@ -2476,6 +2592,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)toggleLaunchAtLogin:(id)sender {
   (void)sender;
+  if ([self loginStartupState] == NMLoginStartupRequiresApproval) {
+    [self showLoginStartupApproval];
+    return;
+  }
   [self setLaunchAtLoginEnabled:!self.isLaunchAtLoginEnabled showError:YES];
 }
 

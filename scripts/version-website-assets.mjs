@@ -16,7 +16,9 @@ const hex = /^[a-f0-9]{64}$/;
 const names = (await readdir(stage)).sort();
 const runtimeFiles = names.filter(name => /^[a-z][a-z0-9-]*\.(?:js|css)$/.test(name));
 for (const file of ['assets/site-v4.js', 'assets/site-v4.css', 'assets/journey.js', 'assets/journey.css',
-  'assets/locale-site.js', 'assets/locale-en.css']) {
+  'assets/locale-site.js', 'assets/locale-en.css',
+  'assets/home-feature.js', 'assets/home-feature.css',
+  'assets/installation-guide.js', 'assets/installation-guide.css']) {
   try { await readFile(join(stage, file)); runtimeFiles.push(file); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
 }

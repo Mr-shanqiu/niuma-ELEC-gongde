@@ -1,8 +1,8 @@
 {
-  "renderer": "native-woodfish-v1",
+  "renderer": "native-woodfish-v2",
   "provenance": {
-    "macOS": "ff4dde8cfbf37b5f87de32285e8011ee47e3731227b23dc5a6436ef9e1a4c146",
-    "Windows": "02770b13fc4cfc556e445b98837325857faed0b6dab477fe34fba98d57c6ce00"
+    "macOS": "5d129ff81fb1a01a04d67cd52556a755abb543e111c14a506c49412a18a465e2",
+    "Windows": "348ca1a2464c05831c489c04068707607a7602c6c50e9637962b421cf7dac9a8"
   },
   "macOS": {
     "scale": 0.88,
@@ -46,31 +46,50 @@
     "headSourceWidth": 145
   },
   "Windows": {
+    "clip": [
+      0,
+      80,
+      240,
+      170
+    ],
+    "scale": 0.88,
+    "center": [
+      120,
+      250
+    ],
     "shadow": [
-      34,
-      227,
-      172,
-      18
+      40,
+      231,
+      160,
+      16
     ],
     "body": [
-      18,
-      102,
-      232,
-      140
-    ],
-    "mallet": [
-      72,
-      63,
+      26,
+      121,
       214,
+      129
+    ],
+    "shaft": [
+      -260,
+      -28,
+      266,
+      54
+    ],
+    "head": [
+      -309,
+      -27,
+      60,
       54
     ],
     "pivot": [
-      280,
-      90
+      417,
+      70
     ],
     "angle": [
-      6,
-      10.5
-    ]
+      3,
+      2.2
+    ],
+    "shaftSourceX": 108,
+    "headSourceWidth": 145
   }
 }

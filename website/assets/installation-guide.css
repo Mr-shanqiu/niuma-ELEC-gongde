@@ -1,8 +1,8 @@
 /* Tutorial layout and system-style illustrations. Every example control is inert. */
 body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
-.tutorial-page .install-guide { max-width:1120px; margin:auto; padding:26px 28px 70px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+.tutorial-page .install-guide { max-width:1120px; margin:auto; padding:26px 28px 70px; font-family:var(--font-text),BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
 .tutorial-page .tutorial-heading { margin-bottom:18px; }
-.tutorial-page .tutorial-heading h1 { margin:0 0 10px; font:600 clamp(26px,2.8vw,34px)/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; letter-spacing:-.04em; }
+.tutorial-page .tutorial-heading h1 { margin:0 0 10px; font:500 clamp(30px,2.8vw,38px)/1.3 var(--font-title); letter-spacing:-.04em; }
 .tutorial-page .tutorial-heading p { margin:0; color:#6e6e73; font-size:16px; }
 .install-guide [hidden] { display:none!important; }
 .install-guide button { font:inherit; cursor:pointer; }
@@ -16,7 +16,7 @@ body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
 .guide-visual { height:clamp(230px,36vh,350px); background:linear-gradient(130deg,#e4eaf1,#edf0f5 55%,#dfe7ee); position:relative; overflow:hidden; border-bottom:1px solid #e7e7ed; }
 .system-scene { position:absolute; left:50%; top:50%; width:780px; height:360px; transform:translate(-50%,-50%) scale(var(--scene-scale,1)); transform-origin:center; display:flex; align-items:center; justify-content:center; color:#202023; font-size:14px; line-height:1.5; }
 .system-scene p,.system-scene h3 { margin:0; color:inherit; font:inherit; }
-.tutorial-page .install-guide .system-scene h3 { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; }
+.tutorial-page .install-guide .system-scene h3 { font-family:var(--font-text),BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; }
 .system-scene h3 { font-size:20px; font-weight:600; line-height:1.4; }
 .mock-window { width:670px; border:1px solid #00000024; border-radius:12px; background:#f6f6f7; box-shadow:0 18px 44px #23354d25,0 2px 4px #0000000d; overflow:hidden; }
 .window-bar { min-height:38px; display:flex; align-items:center; gap:12px; padding:0 15px; background:#f2f2f4; border-bottom:1px solid #dedee4; font-size:12px; font-weight:600; }
@@ -25,14 +25,14 @@ body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
 .window-dots i { width:11px; height:11px; border-radius:50%; background:#ff5f57; box-shadow:inset 0 0 0 1px #00000012; }
 .window-dots i:nth-child(2) { background:#febc2e; }
 .window-dots i:nth-child(3) { background:#28c840; }
-.window-close { margin-left:auto; font-size:19px; font-weight:400; }
+.window-close { margin-left:auto; font-size:20px; font-weight:400; }
 .windows-mark { color:#0078d4; font-size:20px; }
 .windows-window { border-radius:8px; background:white; }
 .windows-window .window-bar { background:#fff; }
 .window-content { padding:22px 28px; }
 .app-icon { width:46px; height:46px; object-fit:contain; flex:none; }
 .large-icon { width:104px; height:104px; object-fit:contain; }
-.ui-button { display:inline-flex; align-items:center; justify-content:center; padding:5px 17px; min-height:28px; border-radius:7px; background:white; border:1px solid #d1d1d6; box-shadow:0 1px 2px #00000008; font-size:13px; font-weight:500; color:#202023; white-space:nowrap; }
+.ui-button { display:inline-flex; align-items:center; justify-content:center; padding:5px 17px; min-height:28px; border-radius:7px; background:white; border:1px solid #d1d1d6; box-shadow:0 1px 2px #00000008; font-size:14px; font-weight:500; color:#202023; white-space:nowrap; }
 .ui-button.primary { background:#007aff; border-color:#007aff; color:white; }
 .emphasized { position:relative; outline:2px solid #007aff; outline-offset:5px; border-radius:8px; }
 .hint-number { position:absolute; top:-15px; right:-15px; display:flex; align-items:center; justify-content:center; width:26px; height:26px; background:#007aff; color:white; border:3px solid white; border-radius:50%; font-size:12px; font-weight:700; }
@@ -44,27 +44,27 @@ body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
 .file-sidebar .selected { background:#d5d7dd; color:#222; }
 .file-list { padding:15px 22px; min-width:0; flex:1; }
 .file-list-head { display:flex; justify-content:space-between; padding:0 6px 10px; border-bottom:1px solid #e0e0e5; color:#777; font-size:11px; }
-.file-row { display:flex; align-items:center; gap:13px; margin-top:20px; padding:12px; background:#dceaff; font-size:13px; }
+.file-row { display:flex; align-items:center; gap:13px; margin-top:20px; padding:12px; background:#dceaff; font-size:14px; }
 .file-row strong { font-weight:500; }
-.system-scene .file-action { text-align:center; margin:22px 0 8px; color:#5b5b63; font-size:13px; }
+.system-scene .file-action { text-align:center; margin:22px 0 8px; color:#5b5b63; font-size:14px; }
 .dmg-window { width:560px; }
 .dmg-app { display:flex; flex-direction:column; gap:12px; align-items:center; width:200px; padding:15px; margin:8px auto 0; }
-.dmg-app strong { font-size:15px; }
+.dmg-app strong { font-size:16px; }
 .mac-installer { width:570px; }
 .mac-installer .window-content { text-align:center; padding:18px 30px; }
 .mac-installer .app-icon { margin:0 auto; width:65px; height:65px; }
 .mac-installer h3 { margin:7px 0; }
-.system-scene .system-description { font-size:13px; margin:12px 0 18px; line-height:1.6; }
+.system-scene .system-description { font-size:14px; margin:12px 0 18px; line-height:1.6; }
 .mac-installer .install-action { width:fit-content; margin:24px auto 18px; }
 .mac-installer .ui-button { min-width:160px; }
 .settings-window { width:730px; }
 .settings-layout { display:flex; min-height:270px; }
-.settings-side { width:190px; padding:12px; background:#e8e9ee; flex:none; font-size:13px; }
+.settings-side { width:190px; padding:12px; background:#e8e9ee; flex:none; font-size:14px; }
 .settings-side>div { padding:7px 10px; margin:3px 0; border-radius:6px; }
 .settings-search { display:block; padding:6px; margin-bottom:12px; border:1px solid #cfcfd6; border-radius:6px; color:#777; }
 .settings-side .selected { background:#007aff; color:white; }
 .settings-main { padding:18px 25px; flex:1; min-width:0; }
-.settings-main h3 { font-size:19px; margin-bottom:14px; }
+.settings-main h3 { font-size:20px; margin-bottom:14px; }
 .settings-main h3+h3 { font-size:14px; margin-top:28px; }
 .settings-row { padding:13px; display:flex; align-items:center; gap:12px; background:white; border:1px solid #dfdfe5; border-radius:8px; margin:16px 0; min-height:48px; }
 .settings-row strong { font-size:14px; font-weight:500; }
@@ -73,23 +73,23 @@ body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
 .ui-toggle i { height:19px; width:19px; background:white; border-radius:50%; box-shadow:0 1px 3px #0002; }
 .add-row { border-top:1px solid #dedee4; padding-top:10px; color:#68686d; }
 .security-row { background:white; padding:15px; display:flex; align-items:center; justify-content:space-between; gap:18px; font-size:12px; }
-.chevron { margin-left:auto; color:#777; font-size:23px; }
+.chevron { margin-left:auto; color:#777; font-size:24px; }
 .plain-row { border-bottom:1px solid #dedee4; padding:9px 12px; }
 .security-alert { width:490px; text-align:center; }
 .security-alert .window-content { padding:18px 30px 24px; }
 .security-alert .app-icon { margin:0 auto 10px; width:55px; height:55px; }
-.security-alert h3 { font-size:18px; }
+.security-alert h3 { font-size:20px; }
 .alert-actions { display:flex; justify-content:center; gap:10px; margin:18px 0 0; }
 .alert-actions .ui-button { flex:1; }
 .smartscreen { width:570px; padding:35px 30px 24px; background:#0067b8; color:white; box-shadow:0 18px 44px #23354d30; }
-.smartscreen h3 { font-size:25px; font-weight:400; }
+.smartscreen h3 { font-size:24px; font-weight:400; }
 .smartscreen p { margin:18px 0; font-size:14px; }
 .smartscreen .more-info { display:inline-block; text-decoration:underline; font-size:14px; outline-color:white; }
 .smart-buttons { display:flex; justify-content:flex-end; gap:12px; margin-top:24px; }
 .smart-buttons .ui-button { border:2px solid #ffffffb0; background:#ffffff22; color:white; box-shadow:none; border-radius:0; }
 .win-installer { width:580px; }
 .win-installer h3 { margin-bottom:16px; }
-.path-input { padding:6px 10px; border:1px solid #a7a7ae; margin:7px 0 23px; font-size:13px; }
+.path-input { padding:6px 10px; border:1px solid #a7a7ae; margin:7px 0 23px; font-size:14px; }
 .startup-choice { display:flex; align-items:center; gap:10px; }
 .ui-check { display:inline-flex; width:19px; height:19px; justify-content:center; align-items:center; border-radius:4px; background:#0078d4; color:white; }
 .win-installer .muted { margin:8px 0 16px; }
@@ -98,10 +98,10 @@ body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
 .desktop-topbar { height:25px; background:#ffffff7a; padding:3px 15px; font-size:11px; }
 .desktop-note { margin:48px 0 0 35px; max-width:430px; }
 .desktop-note strong { font-size:20px; }
-.desktop-note p { margin-top:10px; font-size:13px; color:#4e5664; }
+.desktop-note p { margin-top:10px; font-size:14px; color:#4e5664; }
 .desktop-pet { position:absolute; right:44px; bottom:42px; text-align:center; }
 .pet-icon { width:100px; height:100px; object-fit:contain; }
-.merit-number { font-size:28px; color:#a45220; text-shadow:0 1px 2px white; font-variant-numeric:tabular-nums; }
+.merit-number { font-size:30px; color:#a45220; text-shadow:0 1px 2px white; font-variant-numeric:tabular-nums; }
 .desktop-dock { position:absolute; bottom:8px; left:50%; transform:translateX(-50%); background:#ffffff80; padding:4px 28px; border-radius:8px; color:#5c7490; }
 .pet-menu { position:absolute; right:138px; bottom:30px; width:220px; padding:6px; background:#fafafaf5; border:1px solid #ddd; border-radius:10px; box-shadow:0 8px 24px #0002; font-size:12px; }
 .pet-menu>div { padding:5px 12px; border-radius:5px; }
@@ -112,8 +112,8 @@ body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
 .picker-cards .selected { background:#edf5ff; }
 .picker-cards .app-icon { width:75px; height:75px; }
 .step-caption { padding:20px 28px 22px; min-height:130px; }
-.tutorial-page .step-caption h2 { font:600 21px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; margin:0 0 8px; color:#1d1d1f; }
-.step-caption p { margin:0; max-width:88ch; font-size:15px; line-height:1.7; color:#515154; }
+.tutorial-page .step-caption h2 { font:500 20px/1.4 var(--font-title); margin:0 0 8px; color:#1d1d1f; }
+.step-caption p { margin:0; max-width:88ch; font-size:16px; line-height:1.7; color:#515154; }
 .step-controls { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:14px 0 0; }
 .step-controls button { min-height:42px; min-width:108px; border:1px solid #d7d7df; border-radius:10px; padding:8px 16px; background:white; color:#1d1d1f; }
 .step-controls [data-step-next] { border-color:#0071e3; background:#0071e3; color:white; }
@@ -121,16 +121,16 @@ body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
 .step-progress { white-space:nowrap; font-size:14px; color:#6e6e73; font-variant-numeric:tabular-nums; text-align:center; }
 .install-guide .illustration-note { margin:10px 0 0; color:#6e6e73; font-size:12px; line-height:1.6; }
 .tutorial-page .guide-reading { border-top:1px solid #dcdce2; margin-top:42px; padding-top:32px; scroll-margin-top:30px; }
-.tutorial-page .guide-reading h2 { font:600 25px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; margin:0 0 14px; color:#1d1d1f; letter-spacing:-.02em; }
+.tutorial-page .guide-reading h2 { font:500 24px/1.4 var(--font-title); margin:0 0 14px; color:#1d1d1f; letter-spacing:-.02em; }
 .guide-reading>p { color:#515154; font-size:16px; line-height:1.8; max-width:82ch; margin:0 0 22px; }
-.guide-reading .step-caption h2 { font-size:21px; }
+.guide-reading .step-caption h2 { font-size:20px; }
 .guide-reading .guide-visual { height:320px; }
 .guide-detail { margin-top:12px; border-bottom:1px solid #dedee4; }
 .guide-detail summary { padding:18px 30px 18px 0; font-size:16px; font-weight:500; cursor:pointer; list-style:none; position:relative; }
 .guide-detail summary::-webkit-details-marker { display:none; }
 .guide-detail summary:after { content:'＋'; position:absolute; right:3px; color:#6e6e73; }
 .guide-detail[open] summary:after { content:'−'; }
-.guide-detail>div { padding:0 0 18px; color:#515154; font-size:15px; line-height:1.85; max-width:85ch; }
+.guide-detail>div { padding:0 0 18px; color:#515154; font-size:16px; line-height:1.85; max-width:85ch; }
 .guide-detail p { margin:0 0 12px; }
 .install-guide a { color:#0068d3; text-underline-offset:4px; }
 .help-links,.guide-bottom { display:flex; flex-wrap:wrap; gap:14px 28px; }
@@ -139,16 +139,16 @@ body.tutorial-page { background:#f5f5f7; color:#1d1d1f; }
 @media(max-width:700px) {
  .tutorial-page .install-guide { padding:28px 18px 50px; }
  .platform-switch + .step-viewer > .step-controls { position:static; width:auto; padding-top:14px; }
- .tutorial-page .tutorial-heading h1 { font-size:27px; max-width:16ch; }
+ .tutorial-page .tutorial-heading h1 { font-size:30px; max-width:16ch; }
  .tutorial-page .tutorial-heading p { font-size:14px; line-height:1.6; }
  .guide-visual,.guide-reading .guide-visual { height:240px; }
  .step-caption { padding:18px; min-height:172px; }
- .tutorial-page .step-caption h2 { font-size:19px; }
+ .tutorial-page .step-caption h2 { font-size:20px; }
  .step-caption p { font-size:14px; }
  .step-stage { border-radius:16px; }
  .step-controls { gap:10px; }
  .step-controls button { min-width:94px; font-size:14px; padding:8px 12px; }
- .tutorial-page .guide-reading h2 { font-size:23px; }
+ .tutorial-page .guide-reading h2 { font-size:24px; }
  .tutorial-page .guide-reading { margin-top:32px; padding-top:26px; }
 }
 @media(prefers-reduced-motion:reduce) { .install-guide * { scroll-behavior:auto!important; } }

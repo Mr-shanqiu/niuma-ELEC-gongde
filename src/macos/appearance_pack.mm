@@ -9,6 +9,7 @@ static const unsigned long long NMMaxArchiveBytes = 50ull * 1024ull * 1024ull;
 static const unsigned long long NMMaxBatchBytes = 100ull * 1024ull * 1024ull;
 static const NSUInteger NMMaxBatchCount = 10;
 static const unsigned long long NMMaxManifestBytes = 64ull * 1024ull;
+static const NSUInteger NMMaxArchiveListingBytes = 64 * 1024;
 static const size_t NMMaxImageDimension = 2048;
 static const double NMArtworkTop = 170.0;
 static const double NMFeedbackY = 174.0;
@@ -33,7 +34,42 @@ static const unsigned char NMCurrentPublicKey[] = {
 
 // User-facing messages are selected by code, never by tool output or a
 // filesystem exception description. No raw path or stderr is retained here.
+static BOOL NMUsesChinese(void) {
+  return [[NSLocale preferredLanguages].firstObject hasPrefix:@"zh"];
+}
+
 static NSString *NMImportMessage(NSInteger code) {
+  if (!NMUsesChinese()) {
+    switch (code) {
+      case 1: return @"The system extraction tool could not start. Quit and try again; if this continues, reinstall the official app.";
+      case 2: return @"The archive is damaged or in the wrong format. Download the complete appearance pack again.";
+      case 20: case 22: return @"An appearance image is damaged or unreadable. Download it again, or re-export your PNG images.";
+      case 21: return @"An appearance image has an invalid format or size. Use PNG images between 1 and 2048 pixels in each dimension.";
+      case 30: case 41: case 65: return @"The file structure is unsafe or contains duplicate or unsupported files. Download the pack again or rebuild it following the creator guide.";
+      case 31: return @"The appearance pack has no readable configuration file. Download the complete pack again or rebuild it following the creator guide.";
+      case 32: case 33: case 34: case 36: case 42: return @"The appearance pack format, contents, or version is invalid. Download it again or rebuild it following the creator guide.";
+      case 35: return @"The appearance pack is incomplete or contains undeclared files. Download the original pack again; do not edit its contents.";
+      case 37: return @"The appearance pack license is missing or invalid. Download it again from the official website without changing its contents.";
+      case 38: return @"The appearance contents do not match the license. Download the original pack again from the official website.";
+      case 39: return @"The appearance pack signature is invalid. Download it again from the official website; do not use files from unknown sources.";
+      case 40: return @"Choose a valid .nmgpack file, not a folder or link. You can download it again from the official website.";
+      case 43: return @"An appearance with the same name has a different source or cannot be verified. The original remains installed; check the source and download it again.";
+      case 44: return @"The appearance configuration exceeds 64 KB. Reduce it and rebuild the pack.";
+      case 45: return @"An appearance pack exceeds 50 MB. Compress its artwork and rebuild it.";
+      case 46: case 67: return @"The batch file or extracted contents exceed 100 MB. Download a smaller batch.";
+      case 50: return @"Files outside the appearance directory cannot be removed. Select the appearance from the list again.";
+      case 60: return @"Could not create a temporary import file. Check free disk space and folder write permissions.";
+      case 61: return @"An appearance in the batch exceeds 50 MB. Compress its artwork and rebuild it.";
+      case 62: return @"Batch reading or saving was interrupted. Check file permissions and free disk space.";
+      case 63: return @"The batch is damaged or incomplete. Download the complete batch again.";
+      case 64: return @"Choose a valid .nmgpacks batch file, not a folder or link. You can download it again from the official website.";
+      case 66: return @"A batch must contain 2 to 10 separate appearances. Download it again or rebuild it following the creator guide.";
+      case 80: return @"The appearance file could not be found. Select it again or download it again from the official website.";
+      case 81: return @"The appearance file or destination folder is inaccessible. Check local read and write permissions.";
+      case 82: return @"There is not enough free space to import this appearance. Other installed appearances can stay.";
+      default: return @"The appearance file could not be read or saved. Check free disk space and file permissions, then download it again if needed.";
+    }
+  }
   switch (code) {
     case 1:
       return @"系统解包工具未能启动。请退出后重试；仍失败请重新安装官方客户端。";
@@ -109,7 +145,10 @@ static NSError *NMUserFacingImportError(NSError *failure) {
           ? NMUserFacingImportError(cause) : NMError(2, nil);
       return [NSError errorWithDomain:NMErrorDomain code:68 userInfo:@{
         NSLocalizedDescriptionKey: [NSString stringWithFormat:
-            @"已处理 %lu 个形象；第 %lu 个及后续项目未完成。%@",
+            NMUsesChinese() ? @"已处理 %lu 个形象；第 %lu 个及后续项目未完成。%@"
+                            : (completed.count == 1
+                                ? @"Imported %lu appearance; item %lu and later items were not completed. %@"
+                                : @"Imported %lu appearances; item %lu and later items were not completed. %@"),
             (unsigned long)completed.count, (unsigned long)completed.count + 1,
             cause.localizedDescription],
         @"NMSuccessfulImports": completed,
@@ -129,15 +168,23 @@ static NSError *NMUserFacingImportError(NSError *failure) {
           ? NMUserFacingImportError(entry) : NMError(83, nil);
       [safeFailures addObject:safe];
       if (lines.count < 10)
-        [lines addObject:[NSString stringWithFormat:@"第 %lu 项：%@",
+        [lines addObject:[NSString stringWithFormat:
+            NMUsesChinese() ? @"第 %lu 项：%@" : @"Item %lu: %@",
             (unsigned long)safeFailures.count, safe.localizedDescription]];
     }
     if (safeFailures.count > lines.count)
-      [lines addObject:[NSString stringWithFormat:@"另有 %lu 项未能加载，请检查原包后重新导入。",
+      [lines addObject:[NSString stringWithFormat:
+          NMUsesChinese() ? @"另有 %lu 项未能加载，请检查原包后重新导入。"
+                          : ((safeFailures.count - lines.count) == 1
+                              ? @"Another %lu item could not be loaded. Check the original pack and import it again."
+                              : @"Another %lu items could not be loaded. Check the original pack and import it again."),
           (unsigned long)(safeFailures.count - lines.count)]];
     return [NSError errorWithDomain:failure.domain code:1 userInfo:@{
       NSLocalizedDescriptionKey: [NSString stringWithFormat:
-          @"%lu 个本地形象暂不可用；原文件保留，其他正常形象不受影响。\n%@",
+          NMUsesChinese() ? @"%lu 个本地形象暂不可用；原文件保留，其他正常形象不受影响。\n%@"
+                          : (safeFailures.count == 1
+                              ? @"%lu local appearance is unavailable. Its files remain, and other appearances are unaffected.\n%@"
+                              : @"%lu local appearances are unavailable. Their files remain, and other appearances are unaffected.\n%@"),
           (unsigned long)safeFailures.count, [lines componentsJoinedByString:@"\n"]],
       @"NMPublicImportFailures": safeFailures
     }];
@@ -179,22 +226,44 @@ class NMImportErrorScope {
 };
 
 static BOOL NMRun(NSString *launchPath, NSArray<NSString *> *arguments,
-                  NSData **stdoutData, NSError **error) {
+                  NSData **stdoutData, NSInteger oversizedCode, NSError **error) {
   NSTask *task = [[NSTask alloc] init];
-  NSPipe *out = [NSPipe pipe];
+  NSPipe *out = stdoutData ? [NSPipe pipe] : nil;
   task.launchPath = launchPath;
   task.arguments = arguments;
-  task.standardOutput = out;
+  task.standardOutput = out ?: [NSFileHandle fileHandleWithNullDevice];
   task.standardError = [NSFileHandle fileHandleWithNullDevice];
+  NSMutableData *output = stdoutData ? [NSMutableData data] : nil;
+  BOOL oversized = NO;
   @try {
     [task launch];
+    if (stdoutData) {
+      NSFileHandle *reader = out.fileHandleForReading;
+      while (YES) {
+        NSData *chunk = [reader readDataOfLength:8192];
+        if (!chunk.length) break;
+        if (output.length + chunk.length > NMMaxArchiveListingBytes) {
+          oversized = YES;
+          if (task.isRunning) [task terminate];
+          break;
+        }
+        [output appendData:chunk];
+      }
+    }
     [task waitUntilExit];
   } @catch (NSException *exception) {
     (void)exception;
+    if (task.isRunning) {
+      [task terminate];
+      [task waitUntilExit];
+    }
     if (error) *error = NMError(1, nil);
     return NO;
   }
-  NSData *output = [[out fileHandleForReading] readDataToEndOfFile];
+  if (oversized) {
+    if (error) *error = NMError(oversizedCode, nil);
+    return NO;
+  }
   if (task.terminationStatus != 0) {
     if (error) *error = NMError(2, nil);
     return NO;
@@ -749,7 +818,7 @@ invalidLayers:
     return nil;
   }
   NSData *listingData = nil;
-  if (!NMRun(@"/usr/bin/unzip", @[@"-Z1", archiveURL.path], &listingData, error)) return nil;
+  if (!NMRun(@"/usr/bin/unzip", @[@"-Z1", archiveURL.path], &listingData, 42, error)) return nil;
   NSString *listing = [[NSString alloc] initWithData:listingData encoding:NSUTF8StringEncoding];
   NSArray<NSString *> *lines = [listing componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
   NSMutableSet *names = [NSMutableSet set];
@@ -770,7 +839,7 @@ invalidLayers:
   if (![fm createDirectoryAtURL:root withIntermediateDirectories:YES attributes:nil error:error]) return nil;
   NSURL *stage = [root URLByAppendingPathComponent:[NSString stringWithFormat:@".import-%@", NSUUID.UUID.UUIDString] isDirectory:YES];
   if (![fm createDirectoryAtURL:stage withIntermediateDirectories:NO attributes:nil error:error]) return nil;
-  if (!NMRun(@"/usr/bin/ditto", @[@"-x", @"-k", @"--noqtn", archiveURL.path, stage.path], nil, error)) {
+  if (!NMRun(@"/usr/bin/ditto", @[@"-x", @"-k", @"--noqtn", archiveURL.path, stage.path], nil, 0, error)) {
     [fm removeItemAtURL:stage error:nil];
     return nil;
   }
@@ -840,7 +909,7 @@ invalidLayers:
     return nil;
   }
   NSData *listingData = nil;
-  if (!NMRun(@"/usr/bin/unzip", @[@"-Z1", archiveURL.path], &listingData, error)) return nil;
+  if (!NMRun(@"/usr/bin/unzip", @[@"-Z1", archiveURL.path], &listingData, 66, error)) return nil;
   NSString *listing = [[NSString alloc] initWithData:listingData encoding:NSUTF8StringEncoding];
   NSMutableArray<NSString *> *names = [NSMutableArray array];
   NSMutableSet<NSString *> *seen = [NSMutableSet set];

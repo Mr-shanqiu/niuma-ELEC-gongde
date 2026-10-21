@@ -29,13 +29,19 @@ fi
 
 mkdir -p "$SITE_STAGE/assets" "$OUT_DIR"
 
-for file in index.html install.html app.js pack-player.js styles.css healthz.txt privacy.html contact.html 404.html robots.txt sitemap.xml checkout.html checkout.js support.html support.js faq.html community.html community.js community-preview.js creator.html creator.js creator-api.js creator-community.css creator-guide.html creator-preview.html download.html appearance.html claim.html delivery.html free-api.js free-flow.js free-flow.css; do
-  cp "$SITE_DIR/$file" "$SITE_STAGE/$file"
+# Publish every root-level entry point, script and stylesheet. An explicit list
+# silently drifts: a file added to website/ but not listed here 404s in
+# production, and one missing ES module import takes the whole page down.
+for file in "$SITE_DIR"/*.html "$SITE_DIR"/*.js "$SITE_DIR"/*.css \
+            "$SITE_DIR"/healthz.txt "$SITE_DIR"/robots.txt "$SITE_DIR"/sitemap.xml; do
+  test -f "$file" || continue
+  cp "$file" "$SITE_STAGE/"
 done
 cp -R "$SITE_DIR/assets/." "$SITE_STAGE/assets/"
 cp -R "$ROOT_DIR/admin-console/dist" "$SITE_STAGE/admin"
 
 "$NODE_BIN" "$ROOT_DIR/scripts/version-website-assets.mjs" "$SITE_STAGE" "${GONGDE_PREVIOUS_SITE_ARCHIVE:-}"
+"$NODE_BIN" "$ROOT_DIR/scripts/verify-website-references.mjs" "$SITE_STAGE"
 
 if find "$SITE_STAGE" -type l | grep -q .; then
   echo "ERROR: site artifact contains a symbolic link" >&2

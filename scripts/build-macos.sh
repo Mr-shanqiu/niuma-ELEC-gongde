@@ -36,6 +36,7 @@ for ARCH in $ARCHS; do
   "$ROOT_DIR/src/macos/app.mm" \
     -framework AppKit \
     -framework ApplicationServices \
+    -framework ServiceManagement \
     -framework Security \
   -o "$BUILD_DIR/niuma-merit-$ARCH"
 done

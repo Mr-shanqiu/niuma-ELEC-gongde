@@ -1,4 +1,4 @@
-import { library, developer } from './free-flow.js?v=locale-20261017';
+import { library, developer } from './free-flow.js?v=renderer-20261021';
 // The shared locale entry owns language across every public page.
 const stage = document.querySelector('.counter-demo'), total = document.getElementById('demo-total');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');

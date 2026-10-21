@@ -642,23 +642,25 @@
     },
     "woodfish": {
       "id": "builtin.woodfish",
-      "manifestSha256": "e0884aea891bee448a693cebc8b944da66aa8da5a9c06f8bd71a4ba896b0d068",
+      "manifestSha256": "9d7b024b9bd05701cdfad7b21bad117e670695d01f7f303803115f69f9b76ef7",
       "files": {
         "body.png": {
           "source": "assets/woodfish.png",
           "sourceSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
           "projectedSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
-          "projection": "exact-copy"
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386/body.png"
         },
         "mallet.png": {
           "source": "assets/mallet.png",
           "sourceSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
           "projectedSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
-          "projection": "exact-copy"
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249/mallet.png"
         },
         "manifest.json": {
-          "sourceSha256": "e0884aea891bee448a693cebc8b944da66aa8da5a9c06f8bd71a4ba896b0d068",
-          "projectedSha256": "e0884aea891bee448a693cebc8b944da66aa8da5a9c06f8bd71a4ba896b0d068",
+          "sourceSha256": "9d7b024b9bd05701cdfad7b21bad117e670695d01f7f303803115f69f9b76ef7",
+          "projectedSha256": "9d7b024b9bd05701cdfad7b21bad117e670695d01f7f303803115f69f9b76ef7",
           "projection": "native-code-extraction"
         }
       }

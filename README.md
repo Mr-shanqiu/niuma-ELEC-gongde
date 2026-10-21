@@ -2,16 +2,16 @@
 
 一个无音效、低干扰、纯本地运行的桌面小伙伴。你打字、点鼠标，它动一下，把日常忙碌攒成一点「功德」。支持 macOS 和 Windows。
 
-**官网：[gongde.zqscreen.cn](https://gongde.zqscreen.cn/)**  
+**官网：[gongde.zqscreen.cn](https://gongde.zqscreen.cn/)**
 **下载：[官网客户端下载](https://gongde.zqscreen.cn/download.html) · [GitHub 历史发行版](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases)**
 
-## 当前源码与送签版本
+## 当前版本
 
 - 当前客户端源码版本为 **0.9.4**，见 [VERSION](VERSION)。
-- 最新 Mac 送签原包为 **0.9.4 / build 904.11 / Universal 2（Intel 与 Apple Silicon）**，使用一键安装方式。
-- [Mac 送签原包、校验值和说明](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/tree/codex/macos-signing-094-20261019/signing/macos-0.9.4-904.11)。当前原包为 ad-hoc 签名，尚未完成 Developer ID 签名和 Apple 公证；送签交付不代表已签名正式发布。
-- Windows 0.9.4 客户端及安装包正在准备正式代码签名；签名前原文件不代表已获得可信签名。
-- 这次源码同步不替换官网、COS 或 CDN 上的安装文件。正式下载与签名状态以实际发布说明及文件为准。
+- 官网当前提供 **macOS 0.9.4 / build 904.14 / Universal 2** 和 **Windows 0.9.4**。以[官方下载页](https://gongde.zqscreen.cn/download.html)及其校验清单为准。
+- Mac 904.13 已修复异常形象包导入可能卡住的问题，并补齐英文导入错误提示；安装和异常包导入已在本机验收。
+- Mac 904.14 使用官方登录启动接口，已完成开关、状态保留和实际重启自启动验收；客户端、安装器和 DMG 均已完成 Developer ID 签名，客户端与最终 DMG 已完成苹果公证并装订票据。Windows 客户端和安装程序均已完成代码签名。
+- [Mac 904.11 送签材料](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/tree/codex/macos-signing-094-20261019/signing/macos-0.9.4-904.11)是历史交接材料，并非当前官网下载包。源码中的后续修改也不会自动改变已发布安装包。
 
 ## 本地功能
 

@@ -1,0 +1,153 @@
+/* Homepage feature carousel — presentation only, no business contracts touched. */
+.hero-feature .v4-hero-inner{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,600px);align-items:center;gap:48px;height:auto;min-height:600px;padding:56px 0 40px}
+.hero-feature .hero-copy{width:100%}
+.hero-feature .hero-copy h1{font-size:clamp(40px,4.4vw,64px)}
+.hero-feature .microcopy-local{margin-top:-8px}
+.hero-feature .hero-actions{align-items:center;gap:22px;flex-wrap:wrap}
+.hero-feature .v4-browse{font-size:14px;text-decoration:underline;text-underline-offset:4px}
+
+/* Reserve the room the back cards fan into, so they cannot cover the caption. */
+.feature-stage{min-width:0;display:flex;flex-direction:column;gap:16px}
+/* A visible deck: the active panel sits in front, the next two fan out behind
+   it with their right edges exposed. The viewer stands to the LEFT of the
+   stack (perspective-origin on the far left), so the exposed right edge of each
+   back card is the near edge: it swings toward the reader and renders larger
+   than the far left edge. Left edge small, right edge large, receding away. */
+.feature-panels{position:relative;height:472px;display:grid;width:calc(100% - 56px);perspective:1050px;perspective-origin:-30% 50%}
+/* The +1 feedback and counter belong to the front card only. */
+.feature-panels .feature-panel:not(.is-active) #demo-plus{visibility:hidden}
+.feature-panel{grid-area:1/1;display:flex;flex-direction:column;gap:16px;height:100%;opacity:0;visibility:hidden;pointer-events:none;transform-style:preserve-3d;transition:transform .6s cubic-bezier(.22,.61,.36,1),opacity .42s ease,visibility 0s .6s}
+.feature-panel.is-active,.feature-panel.is-behind-1,.feature-panel.is-behind-2{visibility:visible;transition:transform .6s cubic-bezier(.22,.61,.36,1),opacity .42s ease,visibility 0s 0s}
+/* The back cards are real pages of the deck: clicking one brings it forward, so they must accept the pointer instead of sitting behind an inert stack. */
+.feature-panel.is-behind-1,.feature-panel.is-behind-2{pointer-events:auto;cursor:pointer}
+.feature-panel.is-active{opacity:1;transform:none;pointer-events:auto;z-index:3}
+.feature-panel.is-behind-1{opacity:1;transform:translate3d(126px,14px,-58px) rotateY(15deg) scale(.995);z-index:2}
+.feature-panel.is-behind-2{opacity:1;transform:translate3d(236px,28px,-120px) rotateY(27deg) scale(.99);z-index:1}
+/* The cards behind read as blank sheets with a tinted edge: their content would
+   otherwise bleed around the top card as stray text and artwork, and a plain
+   white frame disappears against the hero background. */
+.feature-panel:not(.is-active) .feature-frame>*{opacity:0;transition:opacity .25s ease}
+.feature-panel.is-active .feature-frame>*{opacity:1;transition:opacity .42s ease .14s}
+.feature-panel:not(.is-active) .feature-text{opacity:0;transition:opacity .3s ease}
+.feature-panel.is-active .feature-text{opacity:1;transition:opacity .42s ease .12s}
+.feature-panel.is-behind-1 .feature-frame{border-color:#b3c49f;background:#e3ebd7;box-shadow:0 14px 30px #33481f33,0 0 0 1px #ffffff8c inset}
+.feature-panel.is-behind-2 .feature-frame{border-color:#a2b58d;background:#d5e2c6;box-shadow:0 12px 24px #33481f2b,0 0 0 1px #ffffff73 inset}
+.feature-frame{position:relative;display:flex;align-items:center;justify-content:center;height:360px;flex:none;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 14px 40px #40562e0f;overflow:hidden}
+.feature-frame .desktop-stage{position:relative;right:auto;bottom:auto;width:100%;height:360px;transform:none;display:flex;align-items:center;justify-content:center}
+.feature-frame .counter-demo{position:relative;left:auto;bottom:auto;width:360px;height:290px}
+/* The hero's caption and counter number sit outside the demo box because the
+   hero gives them room above; inside a fixed 360px card that room is gone, so
+   both move back to the top of the frame instead of being clipped away. */
+.feature-frame .v4-counter-caption{top:-26px}
+.feature-frame .counter-demo strong{top:-4px}
+.feature-frame .hero-pack-preview{left:50%;bottom:20px;transform:translateX(-50%) scale(1.35);transform-origin:center bottom}
+.feature-frame .strike-button{position:absolute;bottom:8px;left:50%}
+.feature-text{height:96px;flex:none;overflow:hidden}
+.feature-text h2{font-family:var(--font-title);font-weight:500;font-size:24px;line-height:1.35;margin:0 0 6px;color:#303a2c}
+.feature-text p{font-size:14px;line-height:1.8;color:#64705d;margin:0}
+
+.feature-frame-shot{background:#f2f4ee;padding:18px}
+.feature-frame-shot>img{max-width:100%;max-height:324px;width:auto;height:auto;border-radius:10px;box-shadow:0 8px 24px #40562e14}
+.shot-pair{display:flex;gap:18px;align-items:flex-end;justify-content:center}
+.shot-pair figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+.shot-pair img{height:286px;width:auto;border-radius:10px;box-shadow:0 8px 24px #40562e14}
+.shot-pair figcaption{font-size:12px;color:#7c8972}
+.shot-note{position:absolute;right:12px;bottom:10px;font-size:11px;color:#93a086;margin:0}
+.feature-frame-bubble{background:#f2f4ee}
+.bubble-shot{display:flex;flex-direction:column;align-items:center;gap:14px}
+.bubble-shot img{max-width:min(460px,100%);height:auto;border-radius:8px;box-shadow:0 8px 24px #40562e14;background:#fff}
+.bubble-next{border:1px solid #a3ac9399;background:#f5f4eaa8;border-radius:20px;padding:7px 18px;font-size:12px;color:#59694c;cursor:pointer}
+.bubble-next:hover{border-color:#8ba277;color:#3f5138}
+.bubble-line{margin:0;max-width:min(420px,100%);text-align:center;font-size:14px;line-height:1.7;color:#4d5c43}
+
+/* Numbered tabs read as pages, not as a row of filter chips. */
+.feature-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.feature-nav [role=tab]{display:inline-flex;align-items:baseline;gap:5px;border:1px solid transparent;background:transparent;border-radius:9px;padding:6px 10px;font-size:12px;color:#7c8972;cursor:pointer;transition:background .2s,color .2s,border-color .2s}
+.feature-nav [role=tab]::before{content:counter(feature-tab,decimal-leading-zero);counter-increment:feature-tab;font:11px/1 var(--font-num);color:#a9b79e;letter-spacing:.5px}
+.feature-nav{counter-reset:feature-tab}
+.feature-nav [role=tab]:hover{color:#3f5138;border-color:#dfe5d6}
+.feature-nav [role=tab].is-active{background:#eef2e6;color:#303b32;border-color:#d5dec9;font-weight:600}
+.feature-nav [role=tab].is-active::before{color:#7f9a6b}
+.feature-arrow{border:1px solid #dfe5d6;background:#fff;border-radius:50%;width:30px;height:30px;font-size:16px;line-height:1;color:#65735b;cursor:pointer;margin-left:auto;flex:none}
+.feature-arrow+.feature-arrow{margin-left:0}
+.feature-arrow:hover{border-color:#8ba277;color:#3f5138}
+.feature-pause{border:1px solid #dfe5d6;background:#fff;border-radius:999px;padding:6px 12px;font-size:12px;color:#7c8972;cursor:pointer}
+.feature-pause:hover{border-color:#8ba277;color:#3f5138}
+.feature-note{font-size:12px;color:#64705d;margin:0;align-self:flex-start;background:#f7f8f3d9;border-radius:8px;padding:5px 10px;backdrop-filter:blur(2px)}
+
+.v4-faq{width:min(1240px,calc(100% - 112px));margin:0 auto;padding:8px 0 56px}
+.v4-faq h2{font-family:var(--font-title);font-weight:500;font-size:30px;margin:0 0 16px;color:#303a2c}
+.v4-faq details{border-top:1px solid var(--line);padding:14px 0}
+.v4-faq summary{cursor:pointer;font-weight:600;font-size:16px;color:#3f5138;list-style:none}
+.v4-faq summary::-webkit-details-marker{display:none}
+.v4-faq summary::after{content:'+';float:right;color:#93a086;font-weight:400}
+.v4-faq details[open] summary::after{content:'–'}
+.v4-faq p{margin:8px 0 0;font-size:14px;line-height:1.85;color:#64705d;max-width:820px}
+.library-note{font-size:14px;color:#93a086;margin:8px 0 0}
+.library-note-inline{display:block;font-size:14px;color:#93a086;margin-top:6px}
+
+@media(max-width:1150px){
+  .hero-feature .v4-hero-inner{grid-template-columns:1fr;gap:32px;min-height:0;padding:40px 0 28px}
+  .hero-feature .hero-copy h1{font-size:clamp(36px,6vw,52px)}
+  .feature-panels{height:442px}
+  .feature-frame{height:330px}
+  .feature-frame .desktop-stage{height:330px}
+  /* Shorter demo box so the caption above it still lands inside the frame. */
+  .feature-frame .counter-demo{width:330px;height:250px}
+  .feature-frame .hero-pack-preview{bottom:34px;transform:translateX(-50%) scale(1.12)}
+  .feature-frame-shot>img{max-height:294px}
+  .shot-pair img{height:258px}
+  .v4-faq{width:calc(100% - 72px)}
+}
+@media(max-width:760px){
+  .hero-feature .v4-hero-inner{padding:28px 0 20px}
+  /* Phones have no side room for the fan, so the back cards tuck in closer;
+     otherwise the deck runs off the right edge. */
+  .feature-panel.is-behind-1{transform:translate3d(56px,14px,-58px) rotateY(15deg) scale(.995)}
+  .feature-panel.is-behind-2{transform:translate3d(96px,28px,-120px) rotateY(27deg) scale(.99)}
+  .feature-panels{height:404px}
+  .feature-frame{height:300px;border-radius:14px}
+  .feature-frame .desktop-stage{height:300px}
+  .feature-frame .counter-demo{width:280px;height:220px}
+  .feature-frame .hero-pack-preview{bottom:46px;transform:translateX(-50%) scale(.88)}
+  .feature-frame .v4-counter-caption{top:-22px}
+  .feature-frame-shot{padding:12px}
+  .shot-pair{gap:10px}
+  .shot-pair img{height:200px}
+  .feature-frame-shot>img{max-height:236px}
+  .feature-text{height:88px}
+  .feature-text h2{font-size:24px}
+  .feature-nav [role=tab]{padding:6px 11px;font-size:12px}
+  .feature-arrow{margin-left:0}
+  .v4-faq{width:calc(100% - 36px);padding-bottom:40px}
+}
+@media(prefers-reduced-motion:reduce){
+  .feature-panel{transition:none}
+  .feature-panel.is-active{transition:none}
+}
+/* English headings are longer; keep them to a readable measure instead of
+   stacking one or two words per line. */
+html:lang(en) .hero-feature .hero-copy h1{font-size:clamp(32px,3.1vw,46px);line-height:1.2;max-width:15ch;text-wrap:balance}
+/* The text block now has a fixed height, so a 24ch cap wrapped English titles
+   onto two lines and pushed the description out of the box. */
+html:lang(en) .feature-text h2{font-size:24px;max-width:100%}
+html:lang(en) .hero-feature .v4-hero-inner{grid-template-columns:minmax(0,1fr) minmax(0,580px);gap:40px}
+@media(max-width:1150px){
+  html:lang(en) .hero-feature .hero-copy h1{font-size:clamp(30px,5vw,42px);max-width:18ch}
+}
+@media(max-width:760px){
+  html:lang(en) .hero-feature .hero-copy h1{font-size:clamp(27px,7vw,36px);max-width:20ch}
+}
+
+/* Fourth card: a locked teaser that keeps its place in the deck. The lock has
+   to look deliberate — a dimmed card reads as "not loaded", which would just
+   look broken. */
+.feature-frame-easter{background:linear-gradient(150deg,#f4f6ee,#e8eee0)}
+.easter-veil{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:24px}
+.easter-veil[hidden]{display:none}
+.easter-mark{font-size:24px;line-height:1;color:#a9b79e;margin-bottom:4px}
+.easter-title{font-family:var(--font-title);font-size:24px;color:#4c653f;margin:0}
+.easter-sub{font-size:14px;color:#6d805c;margin:0}
+.easter-hint{margin:10px 0 0;font-size:11px;color:#9aa98d}
+.easter-content[hidden]{display:none}
+.feature-easter-body p{max-width:520px;margin:14px auto 0;font-size:12px;line-height:1.8;color:#7c8972}

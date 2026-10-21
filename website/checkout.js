@@ -1,1 +1,1 @@
-import './free-flow.js?v=locale-20261017';
+import './free-flow.js?v=renderer-20261021';
