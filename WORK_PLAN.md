@@ -5408,3 +5408,5 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
   - 半完成状态（100024 已正确、100025 缺失）：补齐 100025，分配器到 100026。
 - 验证结果：编号组 13/13/0；标准入口 `npm test` 五组全绿——appearance numbers 13、local contracts 267、paid community HTTP 1、creator budgets 12、creator preview 7，全部 0 fail。
 - 未做：未执行生产迁移、未部署、未改价格/群码/安全限额/订单权益、未改 006、未连接生产库。
+- 提交与合入：精确文件清单提交 `5efae1d`（3 个文件，+165/−2），分支 `fix/official-number-bindings-migration` → PR #10 → merge commit `d7d034a`。合并前核对 PR head 为 `5efae1d`、改动仅这三个文件，与授权范围一致。合并后读取远端核对：`git ls-remote --heads origin main` = `d7d034a`，远端 `011_official_number_bindings.sql` 87 行、测试文件含累计绑定断言；远端分支回到 3 条，本地分支已删除，工作区干净。
+- 合并后在 main 上重跑标准入口：`npm test` 退出码 **0**，五组 13 / 267 / 1 / 12 / 7，0 fail。（第一次推送远端时 SSH 连接被断开一次，退避重试后成功；记录在此避免误读。）
