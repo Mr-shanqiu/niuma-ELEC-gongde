@@ -13,6 +13,7 @@ const { OFFICIAL_ASSET_IDS } = await import(new URL('domain/catalog.js', build))
 const { FreeCreatorRepository } = await import(new URL('creators/repository.js', build));
 const { FreeCreatorService } = await import(new URL('creators/free-service.js', build));
 const { AdminObjectStore } = await import(new URL('admin/object-store.js', build));
+const consent = await import(new URL('creators/consent.js', build));
 
 const creatorId = 'a'.repeat(32), workId = `creator.${creatorId}.fixture`;
 const official = { appearanceNumber: '100001', sourceKind: 'official', internalId: 'official.lucky-cat' };
@@ -24,11 +25,22 @@ const dependencies = (item = official, changes = {}) => ({
   communityWork: async () => ({ appearanceNumber: '100020', titleZh: 'Approved title', state: 'PUBLISHED' }),
   ...changes
 });
+// Current free publication: price 0 and the v2 free terms, with the public text
+// digest that hasCurrentFreeConsent() recomputes.
+const approvedFreeMetadata = (changes = {}) => {
+  const metadata = { titleZh: 'Approved title', description: 'Approved description', tags: [],
+    creatorName: 'Approved author', priceFen: 0, acceptFreeDistribution: true, acceptAiContentReview: true,
+    sharingTermsVersion: consent.FREE_CREATOR_TERMS_VERSION,
+    sharingTermsSha256: consent.FREE_CREATOR_TERMS_SHA256,
+    aiReviewTermsVersion: consent.FREE_CREATOR_AI_TERMS_VERSION,
+    aiReviewTermsSha256: consent.FREE_CREATOR_AI_TERMS_SHA256, ...changes };
+  metadata.publicTextSha256 = consent.creatorPublicTextDigest(metadata);
+  return metadata;
+};
 const row = changes => ({ work_id: workId, creator_id: creatorId, slug: 'fixture', title_zh: 'Private draft title',
-  description: 'Private draft description', tags_json: [], price_fen: 20, state: 'PUBLISHED', appearance_serial: 100020,
-  published_version_id: 'b'.repeat(32), published_metadata_json: { titleZh: 'Approved title', description: 'Approved description',
-    tags: [], creatorName: 'Approved author', acceptPaidDistribution: true, sharingTermsVersion: 'creator-paid-distribution-v1',
-    priceFen: 20 }, created_at: new Date(), updated_at: new Date(), ...changes });
+  description: 'Private draft description', tags_json: [], price_fen: 0, state: 'PUBLISHED', appearance_serial: 100020,
+  published_version_id: 'b'.repeat(32), published_metadata_json: approvedFreeMetadata(),
+  created_at: new Date(), updated_at: new Date(), ...changes });
 
 test('complete short numbers only, no order/access-code interpretation or leading-zero alias', () => {
   assert.equal(normalizeAppearanceNumber(' 100001 '), '100001');
@@ -105,33 +117,55 @@ test('unknown, draft, rejected, unpublished and suspended number requests share 
   }
 });
 
+// The fixture answers each of the repository's real reads. publicationState()
+// now also requires the current free-consent evidence row and the approved
+// review's checks, so the stub must serve those tables instead of returning a
+// work row for every query.
+function freeConsentEvidence(metadata = approvedFreeMetadata()) {
+  return { version_id: 'b'.repeat(32), creator_id: creatorId, work_id: workId,
+    terms_version: consent.FREE_CREATOR_TERMS_VERSION, terms_sha256: consent.FREE_CREATOR_TERMS_SHA256,
+    ai_terms_version: consent.FREE_CREATOR_AI_TERMS_VERSION, ai_terms_sha256: consent.FREE_CREATOR_AI_TERMS_SHA256,
+    source_revision: 'b'.repeat(64), archive_sha256: 'c'.repeat(64),
+    public_text_sha256: metadata.publicTextSha256, review_id: 'd'.repeat(32),
+    metadata_snapshot_json: metadata };
+}
+const approvedChecks = { dataOnly: true, realPreview: true, contentAcceptable: true, rightsDeclaration: true };
+const versionRow = (state = 'APPROVED', metadata = approvedFreeMetadata()) => ({ version_id: 'b'.repeat(32),
+  work_id: workId, creator_id: creatorId, slug: 'fixture', version_label: '2.0.0', state,
+  source_revision: 'b'.repeat(64), archive_sha256: 'c'.repeat(64), source_object_key: 'private-source',
+  preview_object_key: 'private-preview', source_manifest_json: {}, validation_json: { imageNames: ['preview.png'] },
+  approved_metadata_json: metadata, delivery_bytes_upper_bound: 1000, created_at: new Date() });
+
 test('community service checks published authority and emits approved metadata and permanent number only', async () => {
   const calls = [];
   const repository = new FreeCreatorRepository({}, { execute: async (sql, values) => {
     calls.push({ sql, values });
     if (sql.includes('SELECT w.*')) return [[row()]];
-    return [[{ version_id: 'b'.repeat(32), work_id: workId, creator_id: creatorId, slug: 'fixture',
-      version_label: '2.0.0', state: 'APPROVED', source_revision: 'b'.repeat(64), archive_sha256: 'c'.repeat(64),
-      source_object_key: 'private-source', preview_object_key: 'private-preview', source_manifest_json: {},
-      validation_json: { imageNames: ['preview.png'] }, approved_metadata_json: {},
-      delivery_bytes_upper_bound: 1000, created_at: new Date() }]];
+    if (sql.includes('gongde_creator_free_consents')) return [[freeConsentEvidence()]];
+    if (sql.includes('FROM gongde_creator_reviews')) return [[{ metadata_snapshot_json: approvedFreeMetadata(),
+      checks_json: approvedChecks }]];
+    return [[versionRow()]];
   } });
   const result = await new FreeCreatorService(repository, {}).publicWork(workId);
   assert.equal(result.appearanceNumber, '100020');
   assert.equal(result.metadata.titleZh, 'Approved title');
-  assert.equal(result.purchasable, true);
-  assert.equal(result.sharePath, '/community.html?number=100020');
+  // Published free community work is not a paid product.
+  assert.equal(result.purchasable, false);
+  assert.equal(result.priceFen, 0);
+  // sharePath now points at the unified appearance page, not the old community page.
+  assert.equal(result.sharePath, '/appearance.html?number=100020');
   const authorization = calls[0].sql;
   for (const gate of ["w.state = 'PUBLISHED'", "c.state = 'ACTIVE'", 'published_metadata_json IS NOT NULL', 'gongde_appearance_numbers']) {
     assert.ok(authorization.includes(gate));
   }
   assert.ok(calls.some(call => call.sql.includes('gongde_creator_work_versions')));
-  const rejectedVersion = new FreeCreatorRepository({}, { execute: async sql => sql.includes('SELECT w.*')
-    ? [[row()]] : [[{ version_id: 'b'.repeat(32), work_id: workId, creator_id: creatorId, slug: 'fixture',
-      version_label: '2.0.0', state: 'REJECTED', source_revision: 'b'.repeat(64), archive_sha256: 'c'.repeat(64),
-      source_object_key: 'private-source', preview_object_key: 'private-preview', source_manifest_json: {},
-      validation_json: { imageNames: ['preview.png'] }, approved_metadata_json: {},
-      delivery_bytes_upper_bound: 1000, created_at: new Date() }]] });
+  const rejectedVersion = new FreeCreatorRepository({}, { execute: async sql => {
+    if (sql.includes('SELECT w.*')) return [[row()]];
+    if (sql.includes('gongde_creator_free_consents')) return [[freeConsentEvidence()]];
+    if (sql.includes('FROM gongde_creator_reviews')) return [[{ metadata_snapshot_json: approvedFreeMetadata(),
+      checks_json: approvedChecks }]];
+    return [[versionRow('REJECTED')]];
+  } });
   await assert.rejects(new FreeCreatorService(rejectedVersion, {}).publicWork(workId), fails('creator_work_not_found', 404));
   assert.doesNotMatch(JSON.stringify(result), /Private draft|private-source|private-preview/);
   const unavailable = new FreeCreatorRepository({}, { execute: async () => [[]] });
@@ -143,21 +177,22 @@ test('community service checks published authority and emits approved metadata a
   } });
   const adminWorks = await adminRepository.adminWorks('PUBLISHED');
   assert.equal(adminWorks.length, 1);
-  assert.equal(adminWorks[0].metadata.priceFen, 20);
+  assert.equal(adminWorks[0].metadata.priceFen, 0);
   assert.doesNotMatch(adminQueries[0], /price_fen\s*=\s*0/u);
 
+  // A work that still carries the retired paid terms must not be published as a
+  // paid product, and it no longer satisfies the current free-consent gate.
   const legacyMetadata = { titleZh: 'Approved legacy preview', description: 'Previously free approved work.', tags: [],
     creatorName: 'Approved author', priceFen: 0, sharingTermsVersion: 'creator-free-sharing-v1' };
-  const legacyRepository = new FreeCreatorRepository({}, { execute: async sql => sql.includes('SELECT w.*')
-    ? [[row({ price_fen: 0, published_metadata_json: legacyMetadata })]]
-    : [[{ version_id: 'b'.repeat(32), work_id: workId, creator_id: creatorId, slug: 'fixture',
-      version_label: '2.0.0', state: 'APPROVED', source_revision: 'b'.repeat(64), archive_sha256: 'c'.repeat(64),
-      source_object_key: 'private-source', preview_object_key: 'private-preview', source_manifest_json: {},
-      validation_json: { imageNames: ['preview.png'] }, approved_metadata_json: legacyMetadata,
-      delivery_bytes_upper_bound: 1000, created_at: new Date() }]] });
-  const legacyPreview = await new FreeCreatorService(legacyRepository, {}).publicWork(workId);
-  assert.equal(legacyPreview.priceFen, 0);
-  assert.equal(legacyPreview.purchasable, false);
+  const legacyRepository = new FreeCreatorRepository({}, { execute: async sql => {
+    if (sql.includes('SELECT w.*')) return [[row({ price_fen: 0, published_metadata_json: legacyMetadata })]];
+    if (sql.includes('gongde_creator_free_consents')) return [[freeConsentEvidence(legacyMetadata)]];
+    if (sql.includes('FROM gongde_creator_reviews')) return [[{ metadata_snapshot_json: legacyMetadata,
+      checks_json: approvedChecks }]];
+    return [[versionRow('APPROVED', legacyMetadata)]];
+  } });
+  await assert.rejects(new FreeCreatorService(legacyRepository, {}).publicWork(workId),
+    fails('creator_work_not_found', 404));
 });
 
 test('allocation uses the creator transaction and a duplicate never gets a replacement number', async () => {
@@ -200,8 +235,16 @@ test('allocation uses the creator transaction and a duplicate never gets a repla
 
 test('changing work metadata and unpublishing does not update/delete/reallocate registry identities', async () => {
   const calls = [];
+  // A blanket row for every SELECT made the "pending review" probe look
+  // non-empty and blocked the edit. Only the owned-work lookup returns a row;
+  // the pending-review probe is empty, as it is for an editable draft.
   const connection = { beginTransaction: async () => {}, commit: async () => {}, rollback: async () => {}, release() {},
-    execute: async (sql) => { calls.push(sql); return sql.startsWith('SELECT') ? [[row()]] : [{ affectedRows: 1 }]; } };
+    execute: async (sql) => {
+      calls.push(sql);
+      if (!sql.startsWith('SELECT')) return [{ affectedRows: 1 }];
+      if (sql.includes('PENDING_REVIEW')) return [[]];
+      return [[row()]];
+    } };
   const repository = new FreeCreatorRepository({}, { getConnection: async () => connection });
   await repository.updateWork(creatorId, workId, { titleZh: 'Changed', description: 'Changed text', tags: [] });
   await repository.unpublish(workId, 'creator', creatorId);

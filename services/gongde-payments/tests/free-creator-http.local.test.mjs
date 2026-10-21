@@ -59,28 +59,28 @@ async function app(options, run) {
 }
 test('retired free route never returns a binary pack', async () => app({}, async ({ request, calls }) => {
   const response = await request();
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error, 'creator_paid_checkout_unavailable');
+  assert.equal(response.status, 410);
+  assert.equal((await response.json()).error, 'creator_free_delivery_retired');
   assert.equal(response.headers.get('content-disposition'), null);
   assert.equal(calls.batch.length, 0);
 }));
 test('legacy multi-pack request is also blocked before service delivery', async () => app({ fileName: 'community-packs.nmgpacks' }, async ({ request, calls }) => {
   const response = await request();
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error, 'creator_paid_checkout_unavailable');
+  assert.equal(response.status, 410);
+  assert.equal((await response.json()).error, 'creator_free_delivery_retired');
   assert.equal(calls.batch.length, 0);
 }));
 test('download capability remains fail-closed', async () => app({ enabled: false }, async ({ request, calls }) => {
   const response = await request();
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error, 'creator_paid_checkout_unavailable');
+  assert.equal(response.status, 410);
+  assert.equal((await response.json()).error, 'creator_free_delivery_retired');
   assert.equal(calls.batch.length, 0);
 }));
 test('legacy filename values cannot affect the retired route response', async () => app({ fileName: '../escape.nmgpack' }, async ({ request }) => {
   const response = await request();
-  assert.equal(response.status, 503);
+  assert.equal(response.status, 410);
   assert.equal(response.headers.get('content-disposition'), null);
-  assert.equal((await response.json()).error, 'creator_paid_checkout_unavailable');
+  assert.equal((await response.json()).error, 'creator_free_delivery_retired');
 }));
 test('cross-origin write is denied before invoking dependencies', async () => app({}, async ({ request, calls }) => {
   const response = await request(batchPath, { headers: { origin: 'https://untrusted.invalid' } });
@@ -92,8 +92,8 @@ test('cross-site write is denied', async () => app({}, async ({ request }) => {
 }));
 test('binary body cannot bypass the JSON contract', async () => app({}, async ({ request, calls }) => {
   const response = await request(batchPath, { headers: { 'content-type': 'application/octet-stream' } });
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error, 'creator_paid_checkout_unavailable');
+  assert.equal(response.status, 410);
+  assert.equal((await response.json()).error, 'creator_free_delivery_retired');
   assert.equal(calls.batch.length, 0);
 }));
 test('unsupported method is denied', async () => app({}, async ({ request }) => {
@@ -101,8 +101,8 @@ test('unsupported method is denied', async () => app({}, async ({ request }) => 
 }));
 test('oversize JSON request is denied without batch generation', async () => app({}, async ({ request, calls }) => {
   const response = await request(batchPath, { body: ' '.repeat(16385) });
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error, 'creator_paid_checkout_unavailable');
+  assert.equal(response.status, 410);
+  assert.equal((await response.json()).error, 'creator_free_delivery_retired');
   assert.equal(calls.batch.length, 0);
 }));
 test('rate limit response preserves retry-after', async () => app({ rateError: true }, async ({ request, calls }) => {
@@ -134,14 +134,16 @@ test('creator router leaves original official purchase routes untouched', async 
   assert.equal(calls.batch.length + calls.limits.length + calls.account + calls.admin, 0);
 }));
 test('spoofed proxy headers cannot reach the retired delivery service', async () => app({}, async ({ request, calls }) => {
-  assert.equal((await request()).status, 503);
-  assert.equal((await request(batchPath, { headers: { 'x-real-ip': '203.0.113.20', 'x-forwarded-for': '203.0.113.20' } })).status, 503);
+  assert.equal((await request()).status, 410);
+  assert.equal((await request(batchPath, { headers: { 'x-real-ip': '203.0.113.20', 'x-forwarded-for': '203.0.113.20' } })).status, 410);
   assert.equal(calls.batch.length, 0);
 }));
 test('retired route does not invoke or leak service diagnostics', async () => app({ serviceError: true }, async ({ request }) => {
   const response = await request();
-  assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), { error: 'creator_paid_checkout_unavailable' });
+  // The route is retired before the service is called, so a service-side error
+  // can never surface here; only the fixed retirement code is returned.
+  assert.equal(response.status, 410);
+  assert.deepEqual(await response.json(), { error: 'creator_free_delivery_retired' });
 }));
 test('actual disabled runtime reports the community closed', async () => app({ disabledRuntime: true }, async ({ request }) => {
   const response = await request('/api/gongde/community/status', { method: 'GET', body: undefined });
@@ -151,5 +153,5 @@ test('actual disabled runtime reports the community closed', async () => app({ d
   assert.equal(status.ready, false);
   assert.equal(status.freeBatchDelivery, false);
   assert.equal(status.paidBatchDelivery, false);
-  assert.equal(status.termsVersion, 'creator-paid-distribution-v1');
+  assert.equal(status.termsVersion, 'creator-free-distribution-v2-20261008');
 }));

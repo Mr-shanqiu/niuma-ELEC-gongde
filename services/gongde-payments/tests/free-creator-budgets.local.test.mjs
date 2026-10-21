@@ -235,13 +235,33 @@ async function uploadImage(context, slug, imageBytes, fixtureName) {
   const preview = await context.service.upload(context.account, workId, archive);
   const version = context.versions.get(preview.versionId);
   assert.ok(version, 'actual service persisted into the explicit in-memory repository');
-  assert.equal(version.validation.unpackedBytes, unpackedSize(files));
+  // Uploads are stored normalized (source-normalization.ts strips ancillary PNG
+  // chunks), so the persisted unpacked size is the normalized one, not the size
+  // of the padded fixture archive that was handed in.
+  assert.ok(version.validation.unpackedBytes > 0 &&
+    version.validation.unpackedBytes <= unpackedSize(files),
+    'normalized unpacked size must stay within the submitted payload');
+  assert.equal(version.validation.originalArchiveSha256, sha(archive));
+  assert.equal(version.validation.normalization, 'png-data-only-v1');
   assert.equal(version.validation.decodedImageBytes, 4);
-  assert.equal(version.archiveSha256, sha(archive));
+  // Two digests, two meanings: originalArchiveSha256 is what the creator
+  // uploaded, archiveSha256 is the normalized archive actually stored and
+  // served. They only coincide when normalization changed nothing.
+  assert.equal(version.validation.originalArchiveSha256, sha(archive));
+  assert.match(version.archiveSha256, /^[a-f0-9]{64}$/);
   // Simulated publication is fake-only. No DB or real moderation is performed.
   version.state = 'APPROVED'; version.approvedMetadata = context.works.get(workId).metadata;
   context.works.get(workId).state = 'PUBLISHED';
-  return { version, receipt, imageSha256: sha(files['sprite.png']), imageBytes };
+  // Uploads are stored normalized, so the persisted image is not byte-identical
+  // to the padded fixture handed in. Record both sizes rather than assuming
+  // they match; the cross-layer cases below compare against the stored bytes.
+  const storedImage = [...context.cos.bodies.entries()]
+    .find(([key]) => key.endsWith('/images/sprite.png'))?.[1];
+  assert.ok(storedImage, 'the actual object store received the image');
+  assert.ok(storedImage.length <= files['sprite.png'].length,
+    'normalization must not grow the image');
+  return { version, receipt, imageSha256: sha(storedImage), imageBytes: storedImage.length,
+    submittedImageBytes: files['sprite.png'].length };
 }
 const selection = item => ({ workId: item.version.workId, versionId: item.version.versionId, revision: item.version.revision });
 const cases = [];
@@ -309,7 +329,9 @@ add('decoded-64MiB', 'four large PNGs plus a real 1x1 PNG exceed decoded budget 
 add('cross-layer', 'legal 8MiB PNG uploads and previews succeed while free delivery stays disabled', async () => {
   const context = localService(), item = await uploadImage(context, 'image-at', 8 * MiB);
   const body = await context.service.image(item.version.versionId, 'sprite.png', { audience: 'creator', creatorId: context.account.creatorId });
-  assert.equal(body.length, 8 * MiB);
+  // The read-back image is the normalized one that was stored, and it is what
+  // the creator preview shows. It is not the padded upload fixture.
+  assert.equal(body.length, item.imageBytes);
   assert.equal(sha(body), item.imageSha256);
   await assert.rejects(() => context.service.freeBatch({ items: [selection(item)] }, 'fictional-local-client'),
     { code: 'creator_free_delivery_retired', status: 410 });

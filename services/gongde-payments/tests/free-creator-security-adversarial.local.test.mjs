@@ -220,11 +220,11 @@ function assertDenied(response, calls, status, code) {
   return { status: response.status, code: data.error, businessCalls: 0 };
 }
 add('HTTP control: valid request still cannot bypass payment into the retired free delivery', () => app({}, async ({ request, calls }) => {
-  const response = await request(); assert.equal(response.status, 503);
+  const response = await request(); assert.equal(response.status, 410);
   assert.equal(response.headers['cache-control'], 'no-store');
-  assert.deepEqual(JSON.parse(response.body.toString('utf8')), { error: 'creator_paid_checkout_unavailable' });
+  assert.deepEqual(JSON.parse(response.body.toString('utf8')), { error: 'creator_free_delivery_retired' });
   assert.equal(calls.batch.length, 0);
-  return { status: 503, retiredFreeDelivery: true };
+  return { status: 410, retiredFreeDelivery: true };
 }));
 for (const [name, options, args, status, code] of [
   ['missing Origin', {}, () => ({ originFields: [] }), 403],
@@ -245,10 +245,12 @@ for (const [name, options, args, status, code] of [
 }
 add('HTTP: direct mode ignores actual repeated and malformed proxy headers', () => app({ trustedProxyAddresses: [] }, async ({ request, calls }) => {
   const response = await request({ proxyFields: [['X-Real-IP', 'invalid'], ['x-real-ip', client], ['X-Forwarded-For', client]] });
-  assert.equal(response.status, 503); assert.equal(calls.batch.length, 0);
-  assert.deepEqual(JSON.parse(response.body.toString('utf8')), { error: 'creator_paid_checkout_unavailable' });
+  assert.equal(response.status, 410); assert.equal(calls.batch.length, 0);
+  assert.deepEqual(JSON.parse(response.body.toString('utf8')), { error: 'creator_free_delivery_retired' });
+  // In direct mode the loopback peer identity is the real limit key; the
+  // malformed forwarded headers are ignored rather than trusted.
   assert.deepEqual(calls.limits, [['http', clientKey('127.0.0.1'), 600, 60]]);
-  return { status: 503, actualLoopbackIdentityPreserved: true };
+  return { status: 410, actualLoopbackIdentityPreserved: true };
 }));
 add('HTTP: Origin rejection precedes a mock exhausted limiter; valid Origin retains Retry-After', () => app({ rateError: true }, async ({ request, calls }) => {
   const first = await request({ originFields: [['Origin', 'https://untrusted.invalid']] });
@@ -260,8 +262,8 @@ add('HTTP: Origin rejection precedes a mock exhausted limiter; valid Origin reta
   return { invalidOrigin: rejected, validOriginStatus: 429, retryAfter: '60', mockLimiterOnly: true };
 }));
 add('HTTP: distinct overwritten real IPs have distinct actual-router limit keys', () => app({}, async ({ request, calls }) => {
-  assert.equal((await request()).status, 503);
-  assert.equal((await request({ proxyFields: [['X-Real-IP', '203.0.113.21'], ['X-Forwarded-For', client]] })).status, 503);
+  assert.equal((await request()).status, 410);
+  assert.equal((await request({ proxyFields: [['X-Real-IP', '203.0.113.21'], ['X-Forwarded-For', client]] })).status, 410);
   assert.equal(calls.batch.length, 0);
   assert.notEqual(calls.limits[0][1], calls.limits[1][1]);
   return { separateKeys: true, mockRepositoryOnly: true };

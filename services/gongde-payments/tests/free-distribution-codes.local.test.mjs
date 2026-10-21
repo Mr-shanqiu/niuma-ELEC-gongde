@@ -39,11 +39,14 @@ test('group and author live non-depleting permission matrix', () => {
   assert.throws(() => rules.batchLimit('CREATOR', -1));
   assert.throws(() => rules.batchLimit('OTHER', 1));
 });
+// Current format: "GD" plus exactly six digits, case-insensitive.
+// docs/WORK_PLAN_BASIC_FREE_PAID_PACKS.zh-CN.md §2.
 test('strict complete-code normalization and ASCII lowercase support', () => {
-  assert.equal(rules.normalizeCode('  nm-2345-abcd\n'), 'NM-2345-ABCD');
-  assert.equal(rules.normalizeCode('nm2345abcd'), 'NM-2345-ABCD');
-  for (const value of ['xxNM-2345-ABCD', 'NM-2345-ABCDyy', 'NM-2345-ABC0', 'NM-2345-ABCI',
-    'NM-2345-ABCO', 'ＮＭ-2345-ABCD', 'NM 2345 ABCD', '', null]) {
+  assert.equal(rules.normalizeCode('  gd524620\n'), 'GD524620');
+  assert.equal(rules.normalizeCode('GD524620'), 'GD524620');
+  // Only leading/trailing whitespace is trimmed; an inner space is not accepted.
+  for (const value of ['xxGD524620', 'GD524620yy', 'GD52462', 'GD5246200', 'GD-524620', 'NM-2345-ABCD',
+    'ＧＤ524620', 'GD 524620', 'GD52462 0', '', null, 'GDABCDEF']) {
     assert.throws(() => rules.normalizeCode(value), error('access_code_invalid'));
   }
 });
@@ -51,12 +54,12 @@ test('HMAC key minimum and identity/cycle/generation/nonce domain isolation', ()
   assert.throws(() => rules.deriveCode(Buffer.alloc(31), family, 0, 0, 0), error('free_distribution_secret_invalid'));
   const code = rules.deriveCode(secret, family, 0, 0, 0);
   assert.equal(rules.deriveCode(secret, family, 0, 0, 0), code);
-  assert.match(code, /^NM-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/);
+  assert.match(code, /^GD[0-9]{6}$/);
   const variants = [code, rules.deriveCode(secret, 'b'.repeat(32), 0, 0, 0), rules.deriveCode(secret, family, 1, 0, 0),
     rules.deriveCode(secret, family, 0, 1, 0), rules.deriveCode(secret, family, 0, 0, 1), rules.deriveCode(Buffer.alloc(32, 8), family, 0, 0, 0)];
   assert.equal(new Set(variants).size, variants.length);
   assert.match(rules.codeDigest(secret, code), /^[a-f0-9]{64}$/);
-  assert.equal(rules.codeDigest(secret, code.toLowerCase().replaceAll('-', '')), rules.codeDigest(secret, code));
+  assert.equal(rules.codeDigest(secret, code.toLowerCase()), rules.codeDigest(secret, code));
 });
 test('256-bit anonymous tokens, canonical credentials and secure cookie contract', () => {
   const a = rules.newSessionToken(), b = rules.newSessionToken();

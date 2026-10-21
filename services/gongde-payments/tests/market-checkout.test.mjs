@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
 import { GongdeOrderService } from '../dist/domain/order-service.js';
 import { InMemoryPaymentStore } from '../dist/domain/store.js';
 
@@ -9,14 +10,16 @@ const community = n => ({
   sourceKind: 'community', assetId: `creator.${creatorId}.work-${n}`,
   creatorId, workId: `creator.${creatorId}.work-${n}`, versionId: n.toString(16).padStart(32, '0'),
   versionLabel: '1.0.0', sourceRevision: 'a'.repeat(64), titleZh: `Work ${n}`,
-  unitPriceFen: 20, revenueRuleVersion: 'creator-paid-distribution-v1'
+  unitPriceFen: 100, revenueRuleVersion: 'creator-paid-distribution-v1'
 });
-const official = { sourceKind: 'official', assetId: 'official.lucky-cat', creatorId: null,
+const official = assetId => ({ sourceKind: 'official', assetId, creatorId: null,
   workId: null, versionId: null, versionLabel: '1.0.0', sourceRevision: 'b'.repeat(64),
-  titleZh: 'Lucky cat', unitPriceFen: 20, revenueRuleVersion: null };
+  titleZh: 'Official appearance', unitPriceFen: 100, revenueRuleVersion: null });
 const input = items => ({ channel: 'wechat', purchaseKind: 'appearance-batch',
   assetIds: items.map(item => item.assetId), marketItems: items });
 
+// Current product scope: public checkout sells official appearances only, and
+// the server resolves every snapshot itself. docs §2 and §5/F1.
 test('community IDs cannot create an order without server-resolved catalog snapshots', async () => {
   const store = new InMemoryPaymentStore();
   const service = new GongdeOrderService(store, () => at);
@@ -24,18 +27,21 @@ test('community IDs cannot create an order without server-resolved catalog snaps
   assert.equal((await store.listOrders({ limit: 100, offset: 0 })).total, 0);
 });
 
-test('mixed official/community batch pays one shared amount and freezes the reviewed versions', async () => {
+test('an official batch of ten costs 1000 fen and freezes the reviewed revisions', async () => {
   const store = new InMemoryPaymentStore();
   const service = new GongdeOrderService(store, () => at);
-  const items = [official, ...Array.from({ length: 9 }, (_, i) => community(i + 1))];
+  const ids = ['official.lucky-cat', 'official.hamster-wheel', 'official.sea-lion-belly-pat',
+    'official.chick-pecking', 'zqscreen.caishen-ingot', 'zqscreen.redpanda-wave', 'zqscreen.shiba-tilt',
+    'zqscreen.orange-cat-wave', 'zqscreen.raccoon-cheer', 'zqscreen.golden-toad-coin'];
+  const items = ids.map(assetId => official(assetId));
   const checkout = await service.createMockCheckout({ ...input(items), amountFen: 1 });
-  assert.equal(checkout.amountFen, 100);
+  assert.equal(checkout.amountFen, 1000);
   assert.equal(checkout.accessCode, null);
-  items[1].versionId = 'f'.repeat(32);
+  items[1].sourceRevision = 'f'.repeat(64);
   const snapshots = await store.findMarketOrderItemsByOrder(checkout.orderNo);
-  assert.equal(snapshots[1].versionId, '1'.padStart(32, '0'));
-  assert.equal(snapshots.reduce((sum, item) => sum + item.amountFen, 0), 100);
-  assert.ok(snapshots.every(item => item.unitPriceFen === 20 && item.amountFen === 10 &&
+  assert.equal(snapshots[1].sourceRevision, 'b'.repeat(64));
+  assert.equal(snapshots.reduce((sum, item) => sum + item.amountFen, 0), 1000);
+  assert.ok(snapshots.every(item => item.unitPriceFen === 100 && item.amountFen === 100 &&
     item.creatorShareBps === 0 && item.creatorAmountFen === 0));
   assert.equal((await service.getOrder(checkout.orderNo, checkout.buyerToken)).entitlements.length, 0);
   const paid = await service.completeMockPayment(checkout.orderNo);
@@ -46,21 +52,15 @@ test('mixed official/community batch pays one shared amount and freezes the revi
   assert.equal((await store.findEntitlementsByOrder(checkout.orderNo)).length, 10);
 });
 
-test('a community singleton is 20 fen; six appearances still cap at 100 fen with exact line allocation', async () => {
+test('a community snapshot cannot be purchased even when every field looks valid', async () => {
   const store = new InMemoryPaymentStore();
   const service = new GongdeOrderService(store, () => at);
-  assert.equal((await service.createMockCheckout(input([community(1)]))).amountFen, 20);
-  const batch = await service.createMockCheckout(input(Array.from({ length: 6 }, (_, i) => community(i + 1))));
-  assert.equal(batch.amountFen, 100);
-  assert.deepEqual((await store.findMarketOrderItemsByOrder(batch.orderNo)).map(item => item.amountFen), [17, 17, 17, 17, 16, 16]);
-});
-
-test('snapshot mismatches and legacy access-code requests cannot grant community delivery', async () => {
-  const store = new InMemoryPaymentStore();
-  const service = new GongdeOrderService(store, () => at);
+  // Each of these is a server-side snapshot inconsistency, not a client typo.
   await assert.rejects(service.createPendingOrder({ ...input([community(1)]), assetIds: [community(2).assetId] }), /market_catalog_snapshot_invalid/u);
   await assert.rejects(service.createPendingOrder(input([{ ...community(1), unitPriceFen: 0 }])), /market_catalog_snapshot_invalid/u);
   await assert.rejects(service.createPendingOrder(input([{ ...community(1), creatorId: 'd'.repeat(32) }])), /market_catalog_snapshot_invalid/u);
-  await assert.rejects(service.createPendingOrder({ ...input([community(1)]), purchaseKind: 'asset-delivery' }), /market_purchase_kind_invalid/u);
+  await assert.rejects(service.createPendingOrder(input([official('official.lucky-cat'), community(1)])), /market_catalog_snapshot_invalid/u);
+  // A retired product kind is still rejected before any snapshot is examined.
+  await assert.rejects(service.createPendingOrder({ ...input([official('official.lucky-cat')]), purchaseKind: 'asset-delivery' }), /invalid_purchase_kind/u);
   assert.equal((await store.listOrders({ limit: 100, offset: 0 })).total, 0);
 });
