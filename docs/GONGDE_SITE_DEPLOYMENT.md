@@ -30,9 +30,14 @@
 下载步骤需要 `release/downloads-manifest.json`（本机文件，不进入 Git；模板见 `release/downloads-manifest.example.json`）。清单逐项写明源文件路径、字节数、摘要、签名与公证状态。脚本在写入前核对每一项：
 
 - 源文件缺失、字节数或摘要不符 → 直接失败，不写任何输出，也不清空已有目录；
-- 声明 Developer ID 或已公证 → 用 `codesign` / `stapler` 核对实际文件，声明不成立就失败；
-- 声明 Authenticode → 检查 PE 证书表；
+- 签名与公证状态由文件本身判定后**双向比对**：`codesign` 判定 Developer ID Application / Apple Development / ad-hoc / unsigned，`xcrun stapler validate` 判定是否已公证，PE 证书表判定 Windows 是否 Authenticode 签名。清单写弱了同样失败——把已公证的 Developer ID 包写成 `unsigned` 会被拒绝，不只有反过来才报错；
+- 取值不在已知集合内（例如无法归类的签名状态、拼错的声明）→ 失败，不当作“已核实”放行；
+- 文件名必须是裸文件名且唯一；`DOWNLOADS.json` 与 `SHA256SUMS.txt` 由脚本自己生成，不能用作产物名；
 - 成功时只清理上一版 `DOWNLOADS.json` 列出的产物，目录中手工放置的材料与回执保留。
+
+清单里除 `source` 外的字段会原样带入 `DOWNLOADS.json`，因此 `publisher`、`certificateThumbprint`、`sourceCommit`、`buildRunId`、`timestamp` 等溯源信息不会在发布时丢失。
+
+回归测试：`node --test scripts/prepare-download-materials.test.mjs`，全部在临时目录中运行，不接触真实项目。
 
 安装包不进入静态站点归档。网站归档内没有软链接、运行时写目录、`.env`、密钥或绝对本机路径。
 

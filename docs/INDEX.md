@@ -29,6 +29,7 @@
 - 0.9.4 当前正式版：以 [GitHub v0.9.4](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.4)、[官网下载页](https://gongde.zqscreen.cn/download.html) 和[当前交接说明](PROJECT_HANDOFF.zh-CN.md)为准，不另建发布文档。
 - [访问与运维](PROJECT_ACCESS_AND_OPERATIONS.zh-CN.md)：服务器、发布器、凭据引用和最新绑定；不是密钥库。
 - [官网发布说明](GONGDE_SITE_DEPLOYMENT.md)。
+- [产物保留策略](ARTIFACT_RETENTION.zh-CN.md)：站点归档与构建产物的保留类别、判断规则和清理前置条件。只定义口径，不是删除授权。
 - [长期发布台账](RELEASE_2026-09-23.md)：包含多日历史及后续补记，按条目日期和状态阅读，不把早期结论当作当前状态。
 
 ## 方案背景与验收资料

@@ -25,7 +25,7 @@
 - `download.html` 通过 `GET /api/gongde/v2/installers` 的 `data.items` 读取批准发布的 `releaseId/platform/format/version/bytes/sha256/publicDownloadUrl/perpetualCompatible`。
 - `GET /api/gongde/v2/config` 提供 `minPerpetualClientVersion` 等真实平台状态。公开客户端下载不依赖领取码验证；新扩展形象领取需等待平台就绪。
 - 不硬写旧版本安装包链接，不编造 0.9 GitHub Release 文件 URL。客户端实际发布后，再由正式发布元数据提供对应公开地址、版本、大小和摘要。
-- 本轮 0.9 Mac 实际新构建使用 Apple Development 签名，不是 Developer ID 分发签名，且未完成 Apple 公证。该签名事实不意味着 Gatekeeper 已认可、不出现提示或可以免安全确认安装。
+- 本轮 0.9.4（904.14）Mac 正式包为 Developer ID 分发签名并已完成 Apple 公证，`stapler` 票据已装订；Windows 0.9.4 正式包为 Authenticode 签名。更早的 0.9.4 候选（904.12、904.13）和 0.9.3 及以前为 ad-hoc 或 Apple Development 签名且未公证，只作为历史回退项保留，签名状态以 `DOWNLOADS.json` 中逐条记录为准。
 - 系统可能阻止首次打开。只能在确认官方来源、文件完整性与愿意运行的前提下按安装说明处理单个应用；不关闭全局 Gatekeeper 或其他安全保护。“已损坏”“将损坏你的电脑”等提示不应绕过。
 
 ## 现有发布工具与证据
@@ -33,7 +33,7 @@
 - 正式官网：`https://gongde.zqscreen.cn`；安装包独立分发域名：`https://download.gongde.zqscreen.cn`。这些域名不替代尚未发布的具体文件 URL。
 - macOS 提供 DMG，Windows 提供安装 EXE；安装包不进入静态站归档，版本与摘要以当前批准发布元数据为准。
 - 静态站：`./scripts/package-website.sh --site`，只构建并打包站点，不需要本机存在客户端安装包。`--site-only` 保留为同义别名。
-- 下载材料：`./scripts/package-website.sh --downloads`，按 `release/downloads-manifest.json` 复制已发布的安装包并生成 `DOWNLOADS.json` 与 `SHA256SUMS.txt`。清单必须逐项写明源文件、字节数、摘要与签名状态；脚本会先核对再写入，缺文件或摘要不符时直接失败且不动已有输出。
+- 下载材料：`./scripts/package-website.sh --downloads`，按 `release/downloads-manifest.json` 复制已发布的安装包并生成 `DOWNLOADS.json` 与 `SHA256SUMS.txt`。清单必须逐项写明源文件、字节数、摘要与签名状态；脚本会先核对，签名/公证声明与文件实际状态双向比对，缺文件、摘要不符或声明不符时直接失败且不动已有输出。回归测试见 `scripts/prepare-download-materials.test.mjs`。
 - 全量：`./scripts/package-website.sh`（等同 `--all`），预览生成 + 静态站 + 下载材料。须有相应授权，本文不是执行命令。
 - API 与静态站分别走专用受限发布器。新收费接口退役为 410，历史合法履行保留；不因回退重新开放新收费。
 - `GET /healthz.txt` 应返回 `gongde-ok`。运行开放情况以实际服务状态和发布回执为准，本地源码、模拟测试与签名构建不等于上线或用户验收。
