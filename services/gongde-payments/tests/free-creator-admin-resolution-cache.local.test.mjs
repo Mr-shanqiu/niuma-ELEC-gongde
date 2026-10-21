@@ -71,20 +71,22 @@ test('closed complaint notes and module cache identities', async t => {
     }
     checked.push('nonstring-note-rejected');
   });
-  await t.test('public entry, both imports and admin preview use the same new module identity', () => {
+  // Public co-creation is paused, so community.html no longer loads any module:
+  // it is a static "paused" page. The remaining live requirement is that the
+  // admin preview, which does still load the renderer, requests it with an
+  // explicit cache-busting version rather than an unversioned URL.
+  await t.test('paused public entry loads no module and the admin preview stays versioned', () => {
     const html = readFileSync(join(root, 'website/community.html'), 'utf8');
-    const js = readFileSync(join(root, 'website/community.js'), 'utf8');
     const admin = readFileSync(join(root, 'admin-console/src/creator-community.tsx'), 'utf8');
-    const key = html.match(/src="community\.js\?v=([a-z0-9-]+)"/)?.[1];
-    assert.ok(key, 'public entry must have an explicit versioned module identity');
+    assert.equal(/<script[^>]+type="module"/u.test(html), false,
+      'the paused public page must not load a module');
+    assert.equal(/src="community\.js\?v=/u.test(html), false);
+    const key = admin.match(/community-preview\.js\?v=([a-z0-9-]+)/u)?.[1];
+    assert.ok(key, 'admin preview must request the renderer with an explicit version');
     assert.match(key, /^[a-z][a-z0-9-]*-\d{8}$/);
-    assert.ok(html.includes(`src="community.js?v=${key}"`));
-    assert.ok(js.includes(`from './creator-api.js?v=${key}'`));
-    assert.ok(js.includes(`from './community-preview.js?v=${key}'`));
-    assert.ok(admin.includes(`/community-preview.js?v=${key}`));
     assert.ok(admin.includes('selected.decidedAt'));
     assert.ok(admin.includes('(view === "complaints" && selected.state === "OPEN")) && <TextField'));
-    checked.push('consistent-versioned-module-identities');
+    checked.push('paused-entry-and-versioned-admin-preview');
   });
   await t.test('cache overlay changes exactly two files and retains every other base file', () => {
     const temp = mkdtempSync(join(tmpdir(), 'gongde-note-cache-overlay-'));

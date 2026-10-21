@@ -23,9 +23,13 @@ register('data:text/javascript,' + encodeURIComponent(loader), { data: {
   ts: fileURLToPath(new URL('../node_modules/typescript/lib/typescript.js', import.meta.url)), root: new URL('../src/', import.meta.url).href
 } });
 const { FreeDistributionRepository, recordFreeContribution } = await import('../src/free-distribution/repository.ts');
+// Seeding is part of the real contract: assertExcluded() refuses every write
+// until this process has published a ready marker for the current seed.
+const { seedFreeDistributionExclusions } = await import('../src/free-distribution/exclusions.ts');
 const consent = await import('../src/creators/consent.ts');
 const { newSessionToken, DOWNLOAD_WINDOW_MS } = await import('../src/free-distribution/codes.ts');
 const OWNER = 'c'.repeat(32), OTHER = 'd'.repeat(32), VERSION = 'e'.repeat(32);
+let currentSeeder = null;
 const start = Date.parse('2026-10-08T04:00:00.000Z');
 const clone = value => structuredClone(value);
 const err = code => value => value.code === code;
@@ -61,15 +65,40 @@ class Fixture {
       return { execute: (...args) => this.execute(...args), beginTransaction: async () => {
         const previous = this.tail;
         this.tail = new Promise(resolve => { releaseLock = resolve; });
-        await previous; backup = clone(this.state); this.metrics.begins += 1;
-      }, commit: async () => { this.metrics.commits += 1; releaseLock(); },
-      rollback: async () => { this.metrics.rollbacks += 1; this.state = backup; releaseLock(); },
+        await previous; backup = clone(this.state); if (!this.quiet) this.metrics.begins += 1;
+      }, commit: async () => { if (!this.quiet) this.metrics.commits += 1; releaseLock(); },
+      rollback: async () => { if (!this.quiet) this.metrics.rollbacks += 1; this.state = backup; releaseLock(); },
       release: () => { this.metrics.releases += 1; } };
     } };
     this.repository = new FreeDistributionRepository(this.pool, { codeSecret: Buffer.alloc(32, 9), enabled: true,
       now: () => new Date(this.time), deliveryReady: () => true,
       validateItems: async () => { this.validations += 1; if (this.catalogChanged) throw Object.assign(new Error('claim_catalog_changed'), { code: 'claim_catalog_changed', status: 409 }); },
       checkSafety: async () => !this.blocked, ...options });
+    this.skipSeeding = options.skipSeeding === true;
+    this.seeding = null;
+  }
+  // Real seeding against the in-memory fixture: one official directory plus the
+  // repository's own guide archive. Nothing here reads production assets.
+  // Seeding is lazy and per-process (the module keeps one ready marker for the
+  // whole process), so a later fixture supersedes an earlier one exactly as a
+  // second server start would; seeding itself is harness setup and is therefore
+  // excluded from the transaction counters the assertions use.
+  async seedExclusions() {
+    this.quiet = true;
+    try {
+      await seedFreeDistributionExclusions(this.pool, {
+        officialDirectories: [fileURLToPath(new URL('../../../assets/appearance-packs/lucky-cat/', import.meta.url))],
+        guideSources: [{ path: fileURLToPath(new URL('../src/free-distribution/creator-guide.zip', import.meta.url)), format: 'guide' }],
+        syntheticSources: [], actor: 'test:exclusions'
+      });
+    } finally { this.quiet = false; }
+  }
+  // Every contribution write is gated on the process-ready marker.
+  async ready() {
+    if (this.skipSeeding || currentSeeder === this) return;
+    this.seeding ??= this.seedExclusions();
+    await this.seeding;
+    currentSeeder = this;
   }
   async tx(operation) {
     const c = await this.pool.getConnection(); await c.beginTransaction();
@@ -224,8 +253,10 @@ function publish(f, workId = 'community.real-one', owner = OWNER, metadata = app
     validation_json: {}, source_manifest_json: {}, title_zh: metadata.titleZh, appearance_serial: 100020 });
   f.state.gongde_creator_reviews.push({ version_id: versionId, state: 'APPROVED', metadata_snapshot_json: clone(metadata) });
 }
-const earn = (f, workId = 'community.real-one', creatorId = OWNER, contentFingerprint = '1'.repeat(64)) =>
-  f.tx(c => recordFreeContribution(c, { workId, creatorId, contentFingerprint }));
+const earn = async (f, workId = 'community.real-one', creatorId = OWNER, contentFingerprint = '1'.repeat(64)) => {
+  await f.ready();
+  return f.tx(c => recordFreeContribution(c, { workId, creatorId, contentFingerprint }));
+};
 async function access(f) {
   const group = await f.repository.ensureGroupFamily();
   const current = await f.repository.getCurrentCode(group.id);
