@@ -5370,3 +5370,20 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 验证：以上三个套件全绿；`appearance-pricing`/`market-pricing`/`order-flow`/`market-checkout` 合并跑为 24 tests / 17 pass / 7 fail，剩余 7 项属第二批逐项归因范围（旧 20 分与旧商品创建等）。
 - 未做：未改业务实现；未处理第二批剩余失败（`order-flow` 3、`market-checkout` 3、`market-pricing` 1 等）；未部署、未动线上。
 - 提交与合入：精确文件清单提交 `5a5a7cc`（4个文件，+118/−45），分支 `test/align-stale-suites` → PR #8 → merge commit `9a42ee8`。合并后读取远端核对：`git ls-remote --heads origin main` = `9a42ee8`，远端 `appearance-pricing.test.mjs` 已含 `count * 100`、`free-creator-preview.local.test.mjs` 已含 `new Headers`。远端分支仍为 3 条。
+
+## 2026-10-21 批次7实施：剩余失败逐项归因与对齐（第二批）
+
+- 依据 Codex §7.4 第二批执行。先逐文件单跑取**首个实际失败断言**，对照当前源码与 `docs/WORK_PLAN_BASIC_FREE_PAID_PACKS.zh-CN.md`，形成归因表（记录在 `.local-work/handoffs/service-test-failures-for-codex-20261021.md` §8）。**未改任何 `src/` 实现**，未改价格、订单权益、群码周期或安全边界，未用 skip、删除套件、放宽安全断言或降低资源预算。
+- 归因分布：测试过时 24 项、夹具失真 10 项、实现缺陷候选 2 项、未确定 3 项，合计 39 项（30 核心 + 3 编号 + 6 预算）。
+- 支付：`official-pass`/`asset-delivery`/`support` 均已停止，测试改为只走 `appearance-batch` 并把拒绝旧商品保留为负向用例；批次价改为每项 100 分、10 项 1000 分。`market-checkout` 的混批用例按 Codex §7.2.2 改为“community 快照一律拒绝”，同时保留快照不一致的三条负向断言。
+- 群码：现行格式 `GD`+6 位数字，归一化与 HMAC 域隔离测试不再期望 `NM-XXXX-XXXX`。
+- 安全：停用的 community batch 路由返回 `410 creator_free_delivery_retired`（原测试期望 503）。Origin 403、方法 405、限流 429/Retry-After、代理头、`calls.batch.length === 0`、无 `content-disposition` 等断言全部原样保留。
+- 交付：批次 1–10 项、每项 100 分，无付款后的独立交付购买；新增去重不撑大批次的断言。
+- 管理端/贡献仓库：6 项失败同根因——夹具从未播种排除门，`assertExcluded` 因此拒绝一切写入。改为真实调用 `seedFreeDistributionExclusions`（官方目录 + 仓库自带 guide），惰性、按进程一次（模块的 ready 标记本就是进程级），且播种不计入断言使用的 begin/commit 计数。
+- 编号：已发布作品夹具补上现行免费同意、审核 checks 与 `publicTextSha256`；待审探针在可编辑草稿时返回空；`sharePath` 改为统一形象页。管理端模块标识用例改为断言真实成立的部分：暂停页不加载模块、管理端预览仍带显式版本号。
+- 字节预算：上传会规范化存储。测试改为对比实际存储字节，并区分 `originalArchiveSha256`（上传原样）与 `archiveSha256`（规范化后存储）两个摘要。`539 !== 8389080` 至此归因清楚：539 是规范化后的真实值。
+- 验证：`npm test` 标准入口。核心契约组 268 tests / 267 pass / **0 fail**（修复前 257/226/30）；creator budgets 12/12/0（原 6 失败）；creator preview 7/7/0；paid community HTTP 1/1/0；appearance numbers 11/10/**1 fail**。
+- **刻意保留的 1 项失败**：`appearance numbers` 的迁移用例。`006_appearance_numbers.sql` 只绑定 19 个官方 id，`OFFICIAL_ASSET_IDS` 已 21 个，007–010 无补充绑定。属实现/迁移缺口，未授权，**没有改断言迁就**。
+- 同批登记的另外 4 项未决：历史未付款订单无法再履行（`purchase_flow_retired`）；`quoteMarketBatch` 无生产调用方；`admin-console` 源码与已构建产物的预览版本号不一致；统一错误码的演进未留档。
+- 提交与合入：精确文件清单提交 `8dc5ce5`（12 个测试文件，+289/−168），分支 `test/attribute-remaining-failures` → PR #9 → merge commit `ca62877`。合并后核对：`git ls-remote --heads origin main` = `ca62877`，远端 `order-flow`/`free-distribution-repository`/`free-creator-http` 三个文件 blob 与本地一致，远端分支 3 条，工作区干净。
+- 真实限制：`npm test` 退出码仍为 1，唯一原因是上述保留项。推送时 SSH 连接被断开两次，退避重试后成功；记录在此避免误读。未部署、未动线上。
