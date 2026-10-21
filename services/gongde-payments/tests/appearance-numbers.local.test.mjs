@@ -50,12 +50,13 @@ test('complete short numbers only, no order/access-code interpretation or leadin
   }
 });
 
-test('migration explicitly binds every current official internal ID without changing SKU/order tables', () => {
+// 006 is frozen: it bound the 19 official appearances that existed then and must
+// keep doing exactly that, so a historical database reaches the same numbers.
+test('migration 006 explicitly binds the 19 original official internal IDs without changing SKU/order tables', () => {
   const sql = readFileSync(new URL('../migrations/006_appearance_numbers.sql', import.meta.url), 'utf8');
   const pairs = [...sql.matchAll(/SELECT (100\d{3})(?: AS serial)?, '([^']+)'(?: AS asset_id)?/g)]
     .map(match => [match[2], match[1]]);
   assert.equal(pairs.length, 19);
-  assert.deepEqual(new Set(pairs.map(([id]) => id)), new Set(OFFICIAL_ASSET_IDS));
   assert.equal(new Set(pairs.map(([, number]) => number)).size, 19);
   assert.equal(new Map(pairs).get('zqscreen.redpanda-wave'), '100006');
   assert.equal(new Map(pairs).get('zqscreen.kiss-couple'), '100015');
@@ -66,6 +67,60 @@ test('migration explicitly binds every current official internal ID without chan
   assert.match(backfill, /WHERE NOT EXISTS/);
   assert.doesNotMatch(backfill, /w\.state|PUBLISHED|REJECTED/);
   assert.doesNotMatch(sql, /(?:ALTER|UPDATE|DELETE FROM) gongde_(?:orders|entitlements|creator_works)/);
+});
+
+// 011 adds the two appearances published after 006. It is a preparation artifact
+// for an operation that already happened in production: it must be safe to run on
+// an already-correct database, must refuse a conflicting binding instead of
+// overwriting it, and must leave the allocator at or above MAX(serial)+1.
+const bindingPairs = (sql, pattern) => [...sql.matchAll(pattern)].map(match => [match[1], match[2]]);
+const migration011 = readFileSync(new URL('../migrations/011_official_number_bindings.sql', import.meta.url), 'utf8');
+const migration006 = readFileSync(new URL('../migrations/006_appearance_numbers.sql', import.meta.url), 'utf8');
+// The prose comments name the constructs this migration must not use, so check
+// the statements themselves.
+const migration011Statements = migration011.replace(/^\s*--.*$/gmu, '');
+const seeded = bindingPairs(migration011Statements, /\((\d{6}), '([^']+)'\)/g).map(([number, id]) => [id, number]);
+const cumulative = new Map([
+  ...bindingPairs(migration006, /SELECT (100\d{3})(?: AS serial)?, '([^']+)'(?: AS asset_id)?/g)
+    .map(([number, id]) => [id, number]),
+  ...seeded
+]);
+
+test('the two migrations together bind every current official internal ID exactly once', () => {
+  assert.equal(cumulative.size, OFFICIAL_ASSET_IDS.length);
+  assert.deepEqual(new Set(cumulative.keys()), new Set(OFFICIAL_ASSET_IDS));
+  assert.equal(new Set(cumulative.values()).size, OFFICIAL_ASSET_IDS.length);
+  // Fixed mapping, not catalog order and not a title or slug.
+  assert.equal(cumulative.get('official.offwork-button'), '100024');
+  assert.equal(cumulative.get('official.wealth-button'), '100025');
+  assert.equal(cumulative.get('official.lucky-cat'), '100001');
+});
+
+test('migration 011 inserts only missing bindings and fails closed on a conflict', () => {
+  // The runner sends one statement at a time, so a stored program body would be
+  // split into invalid fragments.
+  assert.doesNotMatch(migration011Statements, /CREATE\s+(?:PROCEDURE|FUNCTION|TRIGGER)/i);
+  // A conflict must surface as an error, never be swallowed.
+  assert.doesNotMatch(migration011Statements, /INSERT\s+IGNORE|REPLACE\s+INTO/i);
+  assert.doesNotMatch(migration011Statements, /UPDATE\s+gongde_appearance_numbers|DELETE\s+FROM\s+gongde_appearance_numbers/i);
+  assert.doesNotMatch(migration011Statements, /gongde_(?:orders|entitlements|creator_works)/);
+  // The one upsert is the allocator watermark; the binding table is insert-only.
+  const upserts = migration011Statements.split(/;\s*(?:\n|$)/u).map(statement => statement.trim())
+    .filter(statement => /ON DUPLICATE KEY UPDATE/i.test(statement))
+    .map(statement => /INSERT INTO (\w+)/i.exec(statement)?.[1]);
+  assert.deepEqual(upserts, ['gongde_appearance_number_allocator']);
+  // Both conflict directions are guarded, and each guard's unique key names itself
+  // in the ER_DUP_ENTRY message.
+  assert.match(migration011, /uq_official_number_100024_100025_already_bound/);
+  assert.match(migration011, /uq_official_offwork_wealth_bound_elsewhere/);
+  assert.match(migration011, /n\.source_kind <> 'official' OR n\.internal_id <> s\.asset_id/);
+  assert.match(migration011, /n\.source_kind = 'official' AND n\.internal_id = s\.asset_id/);
+  // Only missing rows are inserted, so an exact existing pair is a no-op.
+  const insert = migration011.slice(migration011.indexOf('INSERT INTO gongde_appearance_numbers'));
+  assert.match(insert, /WHERE NOT EXISTS/);
+  assert.match(insert, /n\.appearance_serial = s\.serial AND n\.source_kind = 'official' AND n\.internal_id = s\.asset_id/);
+  // The watermark only moves forward, so a retry cannot rewind a live allocator.
+  assert.match(migration011, /ON DUPLICATE KEY UPDATE next_serial = GREATEST\(next_serial,/);
 });
 
 test('registry reads are parameterized and never allocate, including concurrent/repeated lookups', async () => {
