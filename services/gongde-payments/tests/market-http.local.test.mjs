@@ -47,6 +47,10 @@ test('actual HTTP checkout gates a mixed batch, freezes source identity and sign
   let suspendDuringDownload = false;
   mock.module(new URL('../dist/delivery/private-package-store.js', import.meta.url).href, { namedExports: {
     loadPrivatePackageConfiguration() { return {}; },
+    // The server imports these two alongside the store; a mock that omits them
+    // fails at module instantiation rather than at any assertion.
+    appearanceDownloadFilename(filename, count) { return count > 1 ? filename : filename; },
+    downloadDisposition(filename) { return `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`; },
     PrivatePackageStore: class {
       async prepare(input) {
         if (suspendDuringPrepare) {

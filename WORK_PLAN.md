@@ -5344,3 +5344,13 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 验证：`node --test tests/admin-object-store.test.mjs` 8/8 通过。核心契约组改动前后对比：改动前 253 tests / 207 pass / 45 fail，改动后 256 tests / 210 pass / 45 fail，**失败集合逐条相同**（既有失败，与本次无关）。`npm test` 因 `src/creators/object-store.ts` 的 12 个既存 TS 错误无法启动 tsc，改动前同样如此，已单独核对。
 - 未做：未调用该管理路由、未改线上 `DOWNLOADS.json`、未改 `installers.json`（T4-C 仍暂缓）、未动 `creators/object-store.ts` 的既存编译错误、未发布 API。
 - 提交与合入：精确文件清单提交 `849e9c7`（3个文件，+144/−6），分支 `fix/admin-manifest-preserve-history` → PR #6 → merge commit `d1fe28e`。合并后读取远端核对：`git ls-remote --heads origin main` = `d1fe28e`，3个文件与本地同 blob，远端 `object-store.ts` 中 `signature: "unsigned"` 出现次数为 0、合并逻辑 `sameBytes` 存在。远端分支仍为 3 条。
+
+## 2026-10-21 批次5实施：修复服务端编译与测试启动（npm test 恢复可用）
+
+- 起因：`services/gongde-payments` 的 `npm test` 完全无法启动，因为 `tsc` 有 12 个错误，`npm run build` 退出 2，`run-local.mjs` 因此跑不起来。服务端等于没有可用的回归保护。
+- 根因不是 SDK 缺类型，而是项目里有一个手写的环境声明 `src/types/cos-nodejs-sdk-v5.d.ts`（14 行，只声明 `getBucket`/`putObject`/`deleteObject` 三个方法），把 SDK 自带的完整类型（`export = COS`，60+ 方法）遮蔽掉了。`getBucketAcl`、`getBucketPolicy`、`getObject`、`Options.Timeout`、`ACL` 全都被这个声明判为不存在。
+- 修法：删除该手写声明。SDK 3.0.0 自带 `index.d.ts`，`moduleResolution: bundler` + `esModuleInterop` 下 `import COS from "cos-nodejs-sdk-v5"` 可直接解析到真实类型。删除后 `tsc` 错误从 12 降到 **0**，`npm run build` 退出 0。
+- 连带修一处测试缺陷：`tests/market-http.local.test.mjs` 的 `mock.module` 只 mock 了 `loadPrivatePackageConfiguration` 和 `PrivatePackageStore`，漏了 server 同时导入的 `appearanceDownloadFilename` 与 `downloadDisposition`，导致 `dist/server.js` 在模块实例化阶段就抛 `SyntaxError`。已补齐两个 mock 导出。该失败在改动前就存在（用原手写声明验证过），只是被编译失败掩盖。
+- 补齐缺失素材：`pack-signer` 的 `ALLOWED_ASSETS` 映射了 20 个目录，仓库里只有 19 个，缺 `offwork-button`。该资产线上仍在用（编号 100024，`canClaim: true`），生产环境由 `GONGDE_PACK_ASSET_ROOT` 提供，但仓库不含其素材，导致任何从仓库构建的环境在 `revisions()` 抛 ENOENT。经用户确认，从 `.local-work/candidates/offwork-official-20261017/asset/offwork-button/` 复制 5 个文件（1.9MB）到 `assets/appearance-packs/offwork-button/` 并提交。来源核对：与该候选目录的 `official-offwork-assets.tar.gz` 内容一致；按 `pack-signer` 算法算出的 revision `1d2a85b7…` 与线上 100024 的 `previewRevision` 完全相同，确认是同一份。
+- 结果：`npm test` 从“无法启动”变为可完整运行。核心契约组 256 tests / 213 pass / 42 fail，其中 **3 项由失败转为通过**（`official snapshot reports source version/revision`、`internal officialCatalog clones real manifests`、`real sourceRoot freezes old releases`），**无新增失败**（与改动前 45 项失败集对比，差异只有这 3 项转通过）。
+- 未做：未修复剩余 42 项既存失败、未修复 `appearance numbers` 的 3 项与 `market-http` 的 1 项、未处理 `creator budgets`/`creator preview` 的失败。这些是产品/测试与当前实现之间的既有分歧（例如 `market-http` 仍按 creator 资产下单，而服务端已要求全部为官方资产），需要单独判断，不在本批范围。未部署、未动线上。
