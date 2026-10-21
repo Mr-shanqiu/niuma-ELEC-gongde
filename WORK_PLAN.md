@@ -5300,3 +5300,10 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 用户要求复核并写回handoffs/todo-and-optimization-plan-20261021.md，已完成。实际只读查询远端refs、worktree及prune dry-run；浏览器最终DOM确认当前签名下载无改写、历史0.9.3不在扫描容器，config ready/enabled正常，空间4结束。未重复下载、领取、付款或客户端验收。
 - 重点修订：T1原新文案对旧分支已归档/不可下载的承诺不实，合入前改准；T2只删映射不删导入提示，不为死代码单独发站；T3指出固定ROOT_DIR与先清输出再缺包失败的副作用，禁止真实项目故障试跑，元数据须与确切文件绑定；T4补纠正全免费/作者码等过时规则；T5保留手动CI只去过期push触发，本地引用与远端删除分开；T6按全部跟踪PNG校准统计，仅制定保留策略；T7只补有价值公开页，不凑全站HTML。
 - 证据 `.local-work/acceptance/todo-plan-review-20261021/`。本轮仅修订原方案及本记录/索引，未实施T0—T7、未合并提交推送、清理、构建或部署。等待用户选择后续明确实施范围。
+
+## 2026-10-21 批次1实施：文档与README收尾（T0/T1/T4-A/B）
+
+- 用户授权执行方案第1批次。实际完成：T0 提交交接与执行记录（`c43d43c`）；T1 按复核建议改写README，不再声称904.11分支已归档或仓库内不可下载，改为指向官网与GitHub v0.9.4；T4-A/B 更正 APPEARANCE_PACK_SPEC 与 PURCHASE_AND_BATCH_DOWNLOAD_RULES 的过时规则（“领取服务尚未部署”“不再创建收费订单”“创作者码”），补 docs/INDEX 缺失的0.9.2、0.9.3发布说明（`52b4704`）。
+- 合入方式：推送 `chore/retire-90411-signing-branch` 后走既有PR #3，merge commit `39b682b` 已进远端 main；本地main已快进同步。合并前确认远端main未变动、PR为CLEAN/无CI检查。
+- 验证：Markdown本地链接0条失效；价格与群码周期对照 `docs/WORK_PLAN_BASIC_FREE_PAID_PACKS.zh-CN.md`；线上服务状态取自 `GET /api/gongde/v2/config`（enabled/ready均为true）。
+- 未做：未删除 `codex/macos-signing-094-20261019` 分支及其文件；未改代码、构建脚本、CI或站点；未重建、重签、部署或重跑客户端验收。T2/T3/T5/T6/T7 仍待用户选择。
