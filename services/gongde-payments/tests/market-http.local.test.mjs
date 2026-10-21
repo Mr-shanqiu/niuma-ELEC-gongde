@@ -108,20 +108,38 @@ test('actual HTTP checkout gates a mixed batch, freezes source identity and sign
   const request = (path, options = {}) => fetch(origin + path, { ...options,
     headers: { origin, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json', ...options.headers } });
   const post = (path, body, headers = {}) => request(path, { method: 'POST', body: JSON.stringify(body), headers });
+  // Checkout is idempotent by contract: every request needs a client-held key.
+  let keySequence = 0;
+  const checkoutPost = (body) => post('/api/gongde/checkout', body,
+    { 'idempotency-key': `test-checkout-key-${String(++keySequence).padStart(8, '0')}-000000` });
   const listing = await request('/api/gongde/community/works');
   assert.equal((await listing.json()).works[0].priceFen, 20);
   const free = await post('/api/gongde/community/batches', { items: [{ workId }] });
   assert.notEqual(free.status, 200);
   assert.equal(free.headers.get('content-disposition'), null);
   const officialId = 'official.chick-pecking';
-  const body = { channel: 'wechat', purchaseKind: 'appearance-batch', assetIds: [officialId, workId],
-    previewRevisions: { [officialId]: signer.revisions()[officialId], [workId]: source.revision } };
-  const stale = await post('/api/gongde/checkout', { ...body, previewRevisions: { ...body.previewRevisions, [workId]: 'f'.repeat(64) } });
+  const secondOfficialId = 'official.hamster-wheel';
+  const officialRevisions = signer.revisions();
+
+  // Public co-creation is paused, so a batch may only contain catalogue assets.
+  // A creator id is rejected before any order exists; the negative case is kept
+  // rather than deleted, because that rejection is the current contract.
+  const mixed = await checkoutPost({ channel: 'wechat', purchaseKind: 'appearance-batch',
+    assetIds: [officialId, workId],
+    previewRevisions: { [officialId]: officialRevisions[officialId], [workId]: source.revision } });
+  assert.equal(mixed.status, 400);
+  assert.equal((await mixed.json()).error, 'official_asset_selection_invalid');
+
+  const body = { channel: 'wechat', purchaseKind: 'appearance-batch', assetIds: [officialId, secondOfficialId],
+    previewRevisions: { [officialId]: officialRevisions[officialId], [secondOfficialId]: officialRevisions[secondOfficialId] } };
+  const stale = await checkoutPost({ ...body,
+    previewRevisions: { ...body.previewRevisions, [secondOfficialId]: 'f'.repeat(64) } });
   assert.equal(stale.status, 409);
-  const started = await post('/api/gongde/checkout', body);
+  const started = await checkoutPost(body);
   assert.equal(started.status, 201);
   const checkout = await started.json();
-  assert.equal(checkout.amountFen, 40);
+  // Two official appearances at 100 fen each, no bundle cap.
+  assert.equal(checkout.amountFen, 200);
   const adminDetailPath = `/api/gongde/admin/orders/${checkout.orderNo}`;
   assert.equal((await request(adminDetailPath)).status, 401);
   const adminLogin = await post('/api/gongde/admin/login', { username: 'test-admin', password: adminPassword });
@@ -138,18 +156,15 @@ test('actual HTTP checkout gates a mixed batch, freezes source identity and sign
   assert.equal(adminDetail.status, 200);
   const adminOrder = (await adminDetail.json()).data;
   assert.equal(adminOrder.marketItems.length, 2);
-  assert.deepEqual(new Set(adminOrder.marketItems.map(item => item.sourceKind)), new Set(['official', 'community']));
+  assert.deepEqual(new Set(adminOrder.marketItems.map(item => item.sourceKind)), new Set(['official']));
   for (const item of adminOrder.marketItems) {
-    assert.equal(item.amountFen, 20);
-    assert.equal(item.unitPriceFen, 20);
+    assert.equal(item.amountFen, 100);
+    assert.equal(item.unitPriceFen, 100);
     assert.equal(item.creatorAmountFen, 0);
-    assert.equal(item.platformAmountFen, 20);
+    assert.equal(item.platformAmountFen, 100);
+    // The snapshot frozen at checkout is what the order carries afterwards.
     assert.equal(item.sourceRevision, body.previewRevisions[item.assetId]);
   }
-  const communityItem = adminOrder.marketItems.find(item => item.sourceKind === 'community');
-  assert.equal(communityItem.versionId, snapshot.versionId);
-  assert.equal(communityItem.versionLabel, snapshot.versionLabel);
-  assert.equal(communityItem.titleZh, snapshot.titleZh);
   const linked = await post(`/api/gongde/orders/${checkout.orderNo}/package-link`, {}, headers);
   assert.equal(linked.status, 200);
   const link = await linked.json();
@@ -163,31 +178,21 @@ test('actual HTTP checkout gates a mixed batch, freezes source identity and sign
   assert.deepEqual(new Set(manifests.map(pack => pack.id)), new Set(body.assetIds));
   for (const pack of manifests) {
     const license = pack.license;
+    // New deliveries are perpetual: V2 message, no local import deadline.
+    // Historical timed packs keep V1 and are covered by the legacy fixtures.
+    assert.equal(license.mode, 'perpetual');
+    assert.equal(license.import_before, undefined);
     const verifier = createVerify('SHA256');
-    verifier.update(`NIUMA-PACK-LICENSE-V1\n${pack.id}\n${pack.version}\n${license.issued_at}\n${license.import_before}\n${license.download_id}\n${license.content_sha256}`);
+    verifier.update(`NIUMA-PACK-LICENSE-V2\nperpetual\n${pack.id}\n${pack.version}\n${license.issued_at}\n${license.download_id}\n${license.content_sha256}`);
     verifier.end();
     assert.equal(verifier.verify({ key: publicKey, dsaEncoding: 'ieee-p1363' }, Buffer.from(license.signature, 'hex')), true);
-    assert.equal(license.import_before - license.issued_at, 86400);
   }
-  suspendDuringDownload = true;
-  const interruptedDownload = await request(link.downloadUrl);
-  assert.equal(interruptedDownload.status, 409);
-  assert.equal(interruptedDownload.headers.get('content-disposition'), null);
-  assert.equal((await interruptedDownload.json()).error, 'creator_work_suspended');
-  suspendDuringDownload = false;
-  suspended = false;
-  suspendDuringPrepare = true;
-  const interruptedLink = await post(`/api/gongde/orders/${checkout.orderNo}/package-link`, {}, headers);
-  assert.equal(interruptedLink.status, 409);
-  assert.equal((await interruptedLink.json()).error, 'creator_work_suspended');
-  suspendDuringPrepare = false;
-  assert.equal((await post(`/api/gongde/orders/${checkout.orderNo}/package-link`, {}, headers)).status, 409);
-  suspended = false;
-  const officialCheckout = await post('/api/gongde/checkout', { ...body,
-    assetIds: [officialId], previewRevisions: { [officialId]: signer.revisions()[officialId] } });
+
+  const officialCheckout = await checkoutPost({ ...body,
+    assetIds: [officialId], previewRevisions: { [officialId]: officialRevisions[officialId] } });
   assert.equal(officialCheckout.status, 201);
   const officialOrder = await officialCheckout.json();
-  assert.equal(officialOrder.amountFen, 20);
+  assert.equal(officialOrder.amountFen, 100);
   const actualRevisions = AppearancePackSigner.prototype.revisions;
   const revised = mock.method(AppearancePackSigner.prototype, 'revisions', function () {
     return { ...actualRevisions.call(this), [officialId]: 'f'.repeat(64) };
