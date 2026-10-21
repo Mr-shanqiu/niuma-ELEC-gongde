@@ -5333,3 +5333,4 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - T6：新增 `docs/ARTIFACT_RETENTION.zh-CN.md` 并登记 INDEX，只定义口径不删除。盘点 101 份归档 / 约 1.79 GiB，66 份被引用、35 份未被引用。
 - T7：sitemap 由 5 条扩到 9 条，新增 download/support/help-macos/help-windows；未加 checkout/claim/delivery/admin/API，未加带 noindex 的 creator/404。XML 解析通过，9 条 URL 均有对应文件且无 noindex 冲突。
 - 未做：未发布站点（T2/T7 改动仅在仓库）；未处理 P6（服务端 `publishInstallerManifest` 仍硬编码 `"unsigned"`，权威生产者待用户决定）；未对真实 Windows 安装包跑 Authenticode 校验；未清理任何归档；未实施 T4-C。真实项目未跑打包（downloads 仍空、归档仍 101）。
+- 提交与合入：精确文件清单提交 `6674724`（10个文件，+471/−120），分支 `chore/retention-and-onboarding-t2-t7` → PR #5 → merge commit `6d33300`。合并后实际读取远端：`git ls-remote --heads origin main` = `6d33300`，10个文件 `origin/main` 与本地同 blob，远端 `download-onboarding.js` 已无 `nameCurrentInstallerLinks`，远端 sitemap 为 9 条。远端分支仍为 3 条。合并产生的本地同名追踪引用已按 T5-C 同一标准清除。
