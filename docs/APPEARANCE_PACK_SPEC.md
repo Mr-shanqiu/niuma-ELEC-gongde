@@ -1,18 +1,19 @@
 # 牛马电子功德形象包规范 1.2
 
-> 当前协议以 [全免费领取与共创 PRD 1.1](PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md) 第 14.1 节为准。下文 timed 授权、24 小时首次导入、旧体积限制和收费签发示例属于历史协议，已被新规则替代，不能作为新交付要求。保留原文用于识别与恢复历史文件，不修改其原始签名消息。
+> 当前业务规则以 [基础免费与扩展形象双路线工作方案](WORK_PLAN_BASIC_FREE_PAID_PACKS.zh-CN.md) 为准。本协议的**包格式、签名消息和离线解析约束**继续有效；下文 timed 授权、24 小时首次导入、旧体积限制、按次收费示例和创作者投稿流程属于历史协议，不能作为当前交付要求。保留原文用于识别与恢复历史文件，不修改其原始签名消息。
 
-> 新版业务执行 [全免费领取与共创 PRD](PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md)。本协议的格式、签名与离线导入继续复用；下文“付费”“新订单”“人工逐件审核”和手工填写作品 ID 等历史流程由新版 PRD 替代，免费交付仍须经过安全校验及授权签发。
+> 早期“全免费领取与共创”方案已暂停，不再作为当前规则。下文出现的“全免费”“不再创建收费订单”“创作者码”等表述按历史协议理解。
 
 ## 当前永久包与发布状态
 
-- macOS 与 Windows 0.9.0 客户端已发布，支持 PRD 1.1 的签名永久模式；免费领取服务尚未部署、尚未启用。
-- 新领取全免费；只保留既有付费订单的历史履行和合法恢复，不再创建新收费订单。
-- 永久包使用 `license.mode = "perpetual"`，永久授权签名格式以 PRD 第 14.1 节为准，不沿用下文 timed 签名消息。不存在首次导入截止时间，保存的文件可永久导入并离线使用。
+- 当前正式客户端为 macOS 0.9.4 / build 904.14（Developer ID 签名并公证）和 Windows 0.9.4（已代码签名）。
+- 免费领取服务已上线启用；基础客户端免费，扩展形象每个 1 元、每批最多 10 个不同形象，或使用当期有效官方群码免费领取。
+- 永久包使用 `license.mode = "perpetual"`，签名格式沿用 [历史 PRD](PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md) 第 14.1 节定义的消息结构（该 PRD 的业务规则已暂停，但签名格式仍用于既有文件校验），不沿用下文 timed 签名消息。不存在首次导入截止时间，保存的文件可永久导入并离线使用。
 - 历史 timed 包仍须通过原始签名与内容校验；0.9.0 不因其首次导入日期已过而拒绝导入，不改写旧签名或伪造新授权。
 - 服务启用后，服务器重新下载窗口为签发后 7 日；窗口到期只影响服务器重下，不影响本地永久导入。一次领取交付单个 `.nmgpack` 或一个包含多个独立包的 `.nmgpacks` 文件。
-- 新源包、安全预算、投稿 ID 和审核流程以 PRD 第 14 节及 [创作者投稿规范](CREATOR_PACK_GUIDE.zh-CN.md) 为准。创作者只提交无授权源包，由平台安全校验与签发。
-- 实际客户端：[macOS 0.9.0](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.0.dmg)、[Windows 0.9.0](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.0-setup.exe)、[GitHub v0.9.0](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.0)。macOS 为 Apple Development 签名、非 Developer ID、未公证；Windows 未签名，不能承诺没有系统安全提示。
+- 公开共创与投稿已暂停，不再新增创作者投稿；下文源包、安全预算、投稿 ID 和审核流程仅用于处理既有作品，不恢复投稿入口或作者权益。
+- 当前正式客户端以[官网下载页](https://gongde.zqscreen.cn/download.html)和 [GitHub v0.9.4](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.4) 为准。
+- 历史回退记录（非当前推荐版本）：[macOS 0.9.0](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.0.dmg)、[Windows 0.9.0](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.0-setup.exe)、[GitHub v0.9.0](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.0)。该版 macOS 为 Apple Development 签名、非 Developer ID、未公证；Windows 未签名，仍可能出现系统安全提示。
 
 下文适用范围为历史 macOS 与 Windows 0.7.0 及以后协议说明，不代表旧客户端支持新永久模式。
 
@@ -66,7 +67,7 @@ NIUMA-PACK-LICENSE-V1
 
 `content_sha256` 对全部 PNG 按文件名排序后计算；每项依次写入 UTF-8 文件名、NUL、8字节大端长度和原始文件内容。签名是 P-256 ECDSA SHA-256，manifest 保存原始 `r || s` 的128位小写十六进制。
 
-## 历史文件限制（新投稿与交付以 PRD 第 14 节为准）
+## 历史文件限制（包体约束仍适用于解析；新投稿已暂停）
 
 - 包体最大50MB，`manifest.json` 最大64KB。
 - 最多8个文件，全部位于 ZIP 根目录。
@@ -98,7 +99,7 @@ NIUMA-PACK-LICENSE-V1
 
 ## 历史 Schema 3 与创作者投稿说明
 
-以下“付费交付”、手工填写作品 ID、订单和分成描述仅保留历史背景；新投稿与免费交付以开头引用的 PRD 1.1 为准。
+以下“付费交付”、手工填写作品 ID、订单和分成描述仅保留历史背景；新投稿已暂停，当前收费与领取规则以开头引用的双路线工作方案为准。
 
 - 当前两端源码均支持Schema 3：每层增加 `interpolation`（`linear`或`smoothstep`），每帧增加 `scale_y`。
 - 无 `license` 的Schema 3是制作源包；有授权的Schema 3用于付费交付。
