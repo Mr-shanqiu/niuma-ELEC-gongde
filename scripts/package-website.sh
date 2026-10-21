@@ -1,17 +1,48 @@
 #!/bin/sh
 set -eu
 
+# Three separate steps, because they have different inputs and different risk:
+#
+#   site   - stage and archive the static site only. Needs no client installer,
+#            so a site release is never blocked on artifacts this machine lacks.
+#   downloads - build the public download materials from an explicit source
+#            manifest. Validates every input before writing anything.
+#   all    - previews, site, then downloads. This is the full local release
+#            build, not a site update.
+#
+# --site-only is kept as an alias for "site": it used to mean "site but also
+# skip previews", which conflated two independent choices.
+
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 SITE_DIR="$ROOT_DIR/website"
 OUT_DIR="$ROOT_DIR/dist/gongde-deploy"
 DOWNLOAD_DIR="$OUT_DIR/downloads"
 VERSION=$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")
-SITE_ONLY=false
+STEP=all
 case "${1:-}" in
   "") ;;
-  --site-only) SITE_ONLY=true ;;
-  *) echo "Usage: package-website.sh [--site-only]" >&2; exit 64 ;;
+  --site-only) STEP=site ;;
+  --site) STEP=site ;;
+  --downloads) STEP=downloads ;;
+  --all) STEP=all ;;
+  *) echo "Usage: package-website.sh [--site | --downloads | --all | --site-only]" >&2; exit 64 ;;
 esac
+
+NODE_BIN=${NODE_BIN:-node}
+
+if [ "$STEP" = downloads ]; then
+  MANIFEST=${DOWNLOAD_MANIFEST:-$ROOT_DIR/release/downloads-manifest.json}
+  if [ ! -f "$MANIFEST" ]; then
+    echo "ERROR: download manifest not found: $MANIFEST" >&2
+    echo "The download step needs an explicit manifest naming each source file, its" >&2
+    echo "size, digest and trust state. It never guesses them from VERSION." >&2
+    exit 1
+  fi
+  "$NODE_BIN" "$ROOT_DIR/scripts/prepare-download-materials.mjs" \
+    "$MANIFEST" "$DOWNLOAD_DIR" "${GONGDE_DOWNLOAD_BASE_URL:-}" "${GONGDE_BUILD_TIME:-}"
+  exit 0
+fi
+
 mkdir -p "$ROOT_DIR/.local-work/candidates"
 STAGING_DIR=$(mktemp -d "$ROOT_DIR/.local-work/candidates/gongde-site.XXXXXX")
 SITE_STAGE="$STAGING_DIR/site"
@@ -21,8 +52,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-NODE_BIN=${NODE_BIN:-node}
-if [ "$SITE_ONLY" = false ]; then
+if [ "$STEP" = all ]; then
   "$NODE_BIN" "$ROOT_DIR/scripts/generate-website-previews.mjs"
 fi
 (cd "$ROOT_DIR/admin-console" && npm run build)
@@ -85,7 +115,9 @@ artifact=$ARCHIVE_NAME
 artifact_tree_sha256=$TREE_SHA
 source_full_sha=$SOURCE_FULL_SHA
 source_tree_sha=$SOURCE_TREE_SHA
-build_command=./scripts/package-website.sh
+build_command=./scripts/package-website.sh --$STEP
+package_step=$STEP
+client_version=$VERSION
 node_version=$($NODE_BIN --version)
 build_time_utc=$BUILD_TIME
 file_count=$FILE_COUNT
@@ -101,40 +133,15 @@ EOF
 echo "SITE_ARCHIVE=$ARCHIVE_PATH"
 echo "SITE_SHA256_FILE=$ARCHIVE_PATH.sha256"
 echo "SITE_METADATA=$OUT_DIR/gongde-site-$TREE_SHA.metadata.txt"
-if [ "$SITE_ONLY" = true ]; then
-  exit 0
+
+if [ "$STEP" = all ]; then
+  MANIFEST=${DOWNLOAD_MANIFEST:-$ROOT_DIR/release/downloads-manifest.json}
+  if [ ! -f "$MANIFEST" ]; then
+    echo "ERROR: site archive is complete, but the download step needs a manifest: $MANIFEST" >&2
+    echo "The site archive above is usable; run --downloads with a manifest when the" >&2
+    echo "installer sources are available." >&2
+    exit 1
+  fi
+  "$NODE_BIN" "$ROOT_DIR/scripts/prepare-download-materials.mjs" \
+    "$MANIFEST" "$DOWNLOAD_DIR" "${GONGDE_DOWNLOAD_BASE_URL:-}" "${GONGDE_BUILD_TIME:-$BUILD_TIME}"
 fi
-rm -rf "$DOWNLOAD_DIR"
-mkdir -p "$DOWNLOAD_DIR"
-
-MAC_DMG="niuma-merit-macos-$VERSION.dmg"
-WIN_SETUP="niuma-merit-windows-$VERSION-setup.exe"
-
-cp "$ROOT_DIR/dist/$MAC_DMG" "$DOWNLOAD_DIR/$MAC_DMG"
-cp "$ROOT_DIR/dist/$WIN_SETUP" "$DOWNLOAD_DIR/$WIN_SETUP"
-
-(
-  cd "$DOWNLOAD_DIR"
-  shasum -a 256 \
-    "$MAC_DMG" \
-    "$WIN_SETUP" > SHA256SUMS.txt
-)
-
-MAC_DMG_BYTES=$(stat -f '%z' "$DOWNLOAD_DIR/$MAC_DMG")
-WIN_SETUP_BYTES=$(stat -f '%z' "$DOWNLOAD_DIR/$WIN_SETUP")
-MAC_DMG_SHA=$(shasum -a 256 "$DOWNLOAD_DIR/$MAC_DMG" | awk '{print $1}')
-WIN_SETUP_SHA=$(shasum -a 256 "$DOWNLOAD_DIR/$WIN_SETUP" | awk '{print $1}')
-
-cat > "$DOWNLOAD_DIR/DOWNLOADS.json" <<EOF
-{
-  "baseUrl": "https://download.gongde.zqscreen.cn/",
-  "generatedAt": "$BUILD_TIME",
-  "files": [
-    {"name":"$MAC_DMG","type":"application/x-apple-diskimage","platform":"macOS","architecture":"universal2-arm64-x86_64","version":"$VERSION","bytes":$MAC_DMG_BYTES,"sha256":"$MAC_DMG_SHA","signature":"unsigned","notarization":"not-notarized","url":"https://download.gongde.zqscreen.cn/$MAC_DMG"},
-    {"name":"$WIN_SETUP","type":"application/vnd.microsoft.portable-executable","platform":"Windows","architecture":"x86_64","version":"$VERSION","bytes":$WIN_SETUP_BYTES,"sha256":"$WIN_SETUP_SHA","signature":"unsigned","notarization":"not-applicable","url":"https://download.gongde.zqscreen.cn/$WIN_SETUP"}
-  ]
-}
-EOF
-
-echo "DOWNLOAD_MANIFEST=$DOWNLOAD_DIR/DOWNLOADS.json"
-echo "DOWNLOAD_CHECKSUMS=$DOWNLOAD_DIR/SHA256SUMS.txt"

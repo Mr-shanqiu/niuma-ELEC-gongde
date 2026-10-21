@@ -7,6 +7,8 @@ preview/
 node_modules/
 website/admin/
 .local-work/
+# The download manifest names local artifact paths; the example is the template.
+release/downloads-manifest.json
 # Raw creator material stays local; only curated assets belong in the repo.
 imports/
 *.tsbuildinfo

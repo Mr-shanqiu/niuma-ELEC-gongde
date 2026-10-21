@@ -1,8 +1,8 @@
 name: Final 0.9.4 Windows installer
 
 on:
-  push:
-    branches: ['codex/client-094-final-20261019']
+  # Manual only: the branch this used to watch is gone, and a push trigger on a
+  # deleted branch can never fire. Rebuilding the installer is deliberate.
   workflow_dispatch:
 
 permissions:

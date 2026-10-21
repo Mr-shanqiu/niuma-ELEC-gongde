@@ -2,9 +2,8 @@ name: Offwork Client Compile Only
 run-name: Offwork compile-only ${{ github.sha }}
 
 on:
-  push:
-    branches:
-      - codex/offwork-countdown-20261016
+  # Manual only: the branch this used to watch is gone, and a push trigger on a
+  # deleted branch can never fire.
   workflow_dispatch:
 
 permissions:

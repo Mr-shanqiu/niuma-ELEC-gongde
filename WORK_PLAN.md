@@ -5307,3 +5307,17 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 合入方式：推送 `chore/retire-90411-signing-branch` 后走既有PR #3，merge commit `39b682b` 已进远端 main；本地main已快进同步。合并前确认远端main未变动、PR为CLEAN/无CI检查。
 - 验证：Markdown本地链接0条失效；价格与群码周期对照 `docs/WORK_PLAN_BASIC_FREE_PAID_PACKS.zh-CN.md`；线上服务状态取自 `GET /api/gongde/v2/config`（enabled/ready均为true）。
 - 未做：未删除 `codex/macos-signing-094-20261019` 分支及其文件；未改代码、构建脚本、CI或站点；未重建、重签、部署或重跑客户端验收。T2/T3/T5/T6/T7 仍待用户选择。
+
+## 2026-10-21 文档收尾批次1独立复核通过
+
+- 用户提供批次1执行记录后，已独立核对远端main1f79177、本地main/HEAD一致、开始时工作区干净；94915e7到当前仅7个文档变化。PR #3 merge39b682b及其后执行记录1f79177关系明确，无产品代码改动。
+- 已写回handoffs/todo-and-optimization-plan-20261021.md第8节并更新状态为复核通过。永久授权V2消息与服务端新签发、双端离线校验一致；“既有文件校验”可后续扩为“新签发与离线校验”，属于非阻塞措辞。已有批次7天下载窗口不等于历史订单找回权益，且不取消既有付款履行/故障恢复。
+- 证据acceptance/todo-batch1-review-20261021/GIT_READONLY.json。本轮只评审/记录，没有重复配置请求、客户端验收、付款、构建、提交推送或部署；未实施其他批次。原操作者transient拦截原因未独立审计，不作额外归因。
+
+## 2026-10-21 批次2实施：打包工具边界与过期CI触发（T3/T5-A）
+
+- 用户授权批次2，范围仅T3和T5-A。实际改动：
+- T3：`scripts/package-website.sh` 拆成 `--site`（只打包静态站）、`--downloads`（按清单生成下载材料）、`--all`（全量）三个明确步骤，`--site-only` 保留为 `--site` 别名；移除硬编码的 `unsigned`/`not-notarized` 与按 VERSION 猜文件名；不再预先 `rm -rf` 下载目录。新增 `scripts/prepare-download-materials.mjs`：逐项校验源文件存在、字节数、SHA-256，再用 `codesign`/`stapler` 核对 Developer ID 与公证声明、用 PE 证书表核对 Authenticode 声明；全部通过后才写入，失败时不动已有输出；成功时只清理上一版 `DOWNLOADS.json` 列出的产物。新增 `release/downloads-manifest.example.json` 模板，实际清单文件加入 `.gitignore`。同步更新 `website/README.md` 与 `docs/GONGDE_SITE_DEPLOYMENT.md` 的打包说明。
+- T5-A：`client-final-094.yml`、`offwork-client-build.yml` 仅移除指向已不存在分支的 `push.branches` 触发，保留 `workflow_dispatch`；未删除 workflow，未新增自动构建范围。
+- 验证：在三个独立测试根（`/tmp`）用合成输入跑18个用例，全部符合预期：正常路径；源缺失、摘要不符、字节不符、缺必填字段、伪造 Developer ID、伪造公证、伪造 Authenticode、路径穿越文件名均明确失败且旧输出保留；真实 904.14 公证 DMG 通过 codesign+stapler 双校验；`--site` 不触碰下载目录；`--all` 无清单时站点完成、下载步骤明确失败；第二次运行只清理上一版产物、保留手工文件。测试根已删除；真实项目 `dist/gongde-deploy/downloads` 仍为空、归档数仍为101，未运行真实项目的打包或部署路径。
+- 未做：未部署官网、未发布API、未动 COS/Caddy/CDN、未清理分支或 worktree、未删除归档、未重建或重签客户端、未实施 T2/T4-C/T5-B/T5-C/T6/T7。
