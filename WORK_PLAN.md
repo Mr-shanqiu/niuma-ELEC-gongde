@@ -5323,3 +5323,13 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 未做：未部署官网、未发布API、未动 COS/Caddy/CDN、未清理分支或 worktree、未删除归档、未重建或重签客户端、未实施 T2/T4-C/T5-B/T5-C/T6/T7。
 - 提交与合入：精确文件清单提交 `fc7cf59`（9个文件，+317/−55），推送分支 `chore/packaging-boundaries-t3-t5a` 后走既有PR流程，PR #4 于 2026-10-21T05:46:43Z 合并为 `fdb607f`。合并后读取远端确认：当时 `git ls-remote --heads origin main` = `fdb607f`，9个文件在 `origin/main` 与本地为同一 blob，远端 `offwork-client-build.yml` 的 `on:` 只剩 `workflow_dispatch`。合并用 `--delete-branch`，远端特性分支已删除；远端分支数仍为3，与批次前相同。
 - 真实限制：本机没有 `release/downloads-manifest.json`，因此真实项目里 `--downloads` 与 `--all` 现在会直接失败（缺清单必须明确失败，属设计意图）；未跑真实打包、未重新生成站点归档、未部署；两个 workflow 未 dispatch，T5-A 的效果由 `on:` 块内容确认而非一次运行；Windows Authenticode 校验只用构造的 PE 头验证，未用真实安装包；workflow 只做了结构检查（本机无 PyYAML）。过期追踪引用与 prunable worktree 未清理（T5-C 及清理不在本批范围）。
+
+## 2026-10-21 批次3实施：剩余待办与T3自检修复（T2/T5-B/C/T6/T7）
+
+- 用户授权“直接推进到和codex原定的方案结束”，即方案 §2 剩余的 T2、T5-B/C、T6、T7，加上自检发现的 T3 缺陷修复。
+- T3 自检修复（推翻批次2 §9 的表述）：原 `prepare-download-materials.mjs` 只核对 Developer ID / notarized / authenticode 三类**强声明**，其余取值直接返回 `verified: true`。实测真实公证 DMG 写成 `ad-hoc` 或 `unsigned` 均能通过。改为先由文件判定实际状态、再双向比对：`codesign` 非零退出→unsigned，`Authority=Developer ID Application` / `Apple Development`，`flags=0x…(adhoc)`→ad-hoc，其余→unknown 直接失败；公证用 `stapler validate`；Windows 用 PE 证书表。声明写弱同样失败，未知取值失败。另修：拒绝重名与 `DOWNLOADS.json`/`SHA256SUMS.txt` 保留名；清单字段（除 `source`）原样带入 `DOWNLOADS.json`，不再丢失 publisher/certificateThumbprint/sourceCommit 等溯源。新增 `scripts/prepare-download-materials.test.mjs`（13 项，全过）。
+- T2：删除 `clients`、`nameCurrentInstallerLinks` 及其调用，保留 `addAppearanceInstructions` 与页面 script 引用。线上 DOM 复核：当前 `#installer-list` 4 个链接与映射 key 匹配数 0（历史列表 2 个匹配但不在扫描容器内），删除不改变用户可见行为。本地浏览器复核导入说明仍响应 `niuma-download-started/completed`。
+- T5-B：`git worktree prune -v` 只移除 1 条目录已不存在的登记；另一条有未提交修改的 detached worktree 未触碰。T5-C：移除 3 条本地过期追踪引用，移除前逐条确认与 `archive/codex-*` tag 同提交；未删 tag、未删远端分支。
+- T6：新增 `docs/ARTIFACT_RETENTION.zh-CN.md` 并登记 INDEX，只定义口径不删除。盘点 101 份归档 / 约 1.79 GiB，66 份被引用、35 份未被引用。
+- T7：sitemap 由 5 条扩到 9 条，新增 download/support/help-macos/help-windows；未加 checkout/claim/delivery/admin/API，未加带 noindex 的 creator/404。XML 解析通过，9 条 URL 均有对应文件且无 noindex 冲突。
+- 未做：未发布站点（T2/T7 改动仅在仓库）；未处理 P6（服务端 `publishInstallerManifest` 仍硬编码 `"unsigned"`，权威生产者待用户决定）；未对真实 Windows 安装包跑 Authenticode 校验；未清理任何归档；未实施 T4-C。真实项目未跑打包（downloads 仍空、归档仍 101）。

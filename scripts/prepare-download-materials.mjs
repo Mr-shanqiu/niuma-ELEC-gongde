@@ -7,6 +7,13 @@
 // the real artifacts and described them wrongly. Here every entry names its
 // own source file and declares its own size, digest and trust state; nothing
 // is inferred from the version or borrowed from another release.
+//
+// The trust state is not taken on faith either. It is derived from the file
+// that is about to be published and then required to equal what the manifest
+// declares, in both directions: a manifest may not call a notarized, Developer
+// ID build "unsigned" any more than it may call an ad-hoc build "notarized".
+// Checking only the claims that assert a strong state would leave the weaker
+// (and equally published) descriptions unchecked.
 
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
@@ -30,55 +37,110 @@ function fail(message) {
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
-// Trust claims are checked against the bytes actually being published. A claim
-// we cannot check is reported, never silently upgraded to "verified".
-async function verifyClaim(file, entry) {
-  const signature = entry.signature || '';
-  const notarization = entry.notarization || '';
+// This script writes both of these itself. An entry named after one of them
+// would be copied and then silently replaced by the generated file, publishing
+// a URL that serves something other than the artifact that was validated.
+const RESERVED_NAMES = new Set(['downloads.json', 'sha256sums.txt']);
 
-  if (/^developer id/i.test(signature)) {
-    // codesign writes its report to stderr, so both streams are read here.
-    const result = spawnSync('codesign', ['-dv', '--verbose=2', file], { encoding: 'utf8' });
-    if (result.error && result.error.code === 'ENOENT') {
-      return { verified: false, reason: 'codesign unavailable' };
-    }
-    const report = `${result.stdout || ''}${result.stderr || ''}`;
-    if (result.status !== 0 || !/Developer ID Application/.test(report)) {
-      fail(`${entry.name}: manifest claims a Developer ID signature but codesign does not report one`);
-    }
-  }
+// Accepted spellings of each claim, mapped to the state derived from the file.
+const MAC_SIGNATURE_CLAIMS = new Map([
+  ['developer id application', 'developer id application'],
+  ['apple development', 'apple development'],
+  ['apple-development', 'apple development'],
+  ['ad-hoc', 'ad-hoc'],
+  ['adhoc', 'ad-hoc'],
+  ['unsigned', 'unsigned']
+]);
+const MAC_NOTARIZATION_CLAIMS = new Set(['notarized', 'not-notarized']);
+const WINDOWS_SIGNATURE_CLAIMS = new Map([
+  ['authenticode-sha256', 'authenticode'],
+  ['authenticode', 'authenticode'],
+  ['unsigned', 'unsigned']
+]);
+const WINDOWS_NOTARIZATION = 'not-applicable';
 
-  if (notarization === 'notarized') {
-    const result = spawnSync('xcrun', ['stapler', 'validate', file], { encoding: 'utf8' });
-    if (result.error && result.error.code === 'ENOENT') {
-      return { verified: false, reason: 'xcrun unavailable' };
-    }
-    if (result.status !== 0) {
-      fail(`${entry.name}: manifest claims notarization but no valid ticket is stapled`);
-    }
-  }
+// codesign writes its report to stderr, so both streams are read. The
+// discriminators are: a non-zero exit means no signature at all; an Authority
+// line names the signing identity; an ad-hoc signature has no Authority but
+// carries the adhoc code-directory flag. Anything else is not classifiable and
+// is reported as such rather than being guessed at.
+function macSignatureState(file) {
+  const result = spawnSync('codesign', ['-dv', '--verbose=2', file], { encoding: 'utf8' });
+  if (result.error && result.error.code === 'ENOENT') return null;
+  const report = `${result.stdout || ''}${result.stderr || ''}`;
+  if (result.status !== 0) return 'unsigned';
+  if (/Authority=Developer ID Application/.test(report)) return 'developer id application';
+  if (/Authority=Apple Development/.test(report)) return 'apple development';
+  if (/flags=0x[0-9a-f]+\(adhoc\)/i.test(report)) return 'ad-hoc';
+  return 'unknown';
+}
 
-  if (/authenticode/i.test(signature)) {
-    if (!(await hasAuthenticode(file))) {
-      fail(`${entry.name}: manifest claims an Authenticode signature but the PE has no certificate table`);
-    }
-  }
-
-  return { verified: true };
+function macNotarizationState(file) {
+  const result = spawnSync('xcrun', ['stapler', 'validate', file], { encoding: 'utf8' });
+  if (result.error && result.error.code === 'ENOENT') return null;
+  return result.status === 0 ? 'notarized' : 'not-notarized';
 }
 
 // The certificate table is data directory 4 of the PE optional header. Its
 // presence is what Windows reads before it can trust a publisher.
-async function hasAuthenticode(file) {
-  const buffer = await readFile(file);
-  if (buffer.length < 0x40 || buffer.toString('latin1', 0, 2) !== 'MZ') return false;
+function windowsSignatureState(buffer) {
+  if (buffer.length < 0x40 || buffer.toString('latin1', 0, 2) !== 'MZ') return null;
   const peOffset = buffer.readUInt32LE(0x3c);
-  if (buffer.length < peOffset + 24 || buffer.toString('latin1', peOffset, peOffset + 4) !== 'PE\0\0') return false;
+  if (buffer.length < peOffset + 24 || buffer.toString('latin1', peOffset, peOffset + 4) !== 'PE\0\0') return null;
   const optionalOffset = peOffset + 24;
   const magic = buffer.readUInt16LE(optionalOffset);
-  if (magic !== 0x10b && magic !== 0x20b) return false;
+  if (magic !== 0x10b && magic !== 0x20b) return null;
   const securityDirectory = optionalOffset + (magic === 0x20b ? 112 : 96) + 4 * 8;
-  return buffer.length >= securityDirectory + 8 && buffer.readUInt32LE(securityDirectory + 4) > 0;
+  if (buffer.length < securityDirectory + 8) return 'unsigned';
+  return buffer.readUInt32LE(securityDirectory + 4) > 0 ? 'authenticode' : 'unsigned';
+}
+
+// Derive the real state, then require the manifest to have said exactly that.
+async function assertClaimsMatch(entry, source, buffer) {
+  const platform = String(entry.platform).toLowerCase();
+  const signatureClaim = String(entry.signature).trim();
+  const notarizationClaim = String(entry.notarization).trim();
+
+  if (platform.includes('mac') || platform.includes('darwin')) {
+    const claimedSignature = MAC_SIGNATURE_CLAIMS.get(signatureClaim.toLowerCase());
+    if (!claimedSignature) {
+      fail(`${entry.name}: unrecognized macOS signature claim "${signatureClaim}". Use one of: ${[...MAC_SIGNATURE_CLAIMS.keys()].join(', ')}`);
+    }
+    const actualSignature = macSignatureState(source);
+    if (actualSignature === null) fail(`${entry.name}: cannot check the macOS signature claim because codesign is unavailable`);
+    if (actualSignature === 'unknown') fail(`${entry.name}: codesign reports a signature state this script cannot classify; check the file by hand`);
+    if (actualSignature !== claimedSignature) {
+      fail(`${entry.name}: manifest claims "${signatureClaim}" but codesign reports "${actualSignature}". Do not carry a trust state over from another release.`);
+    }
+
+    if (!MAC_NOTARIZATION_CLAIMS.has(notarizationClaim)) {
+      fail(`${entry.name}: unrecognized macOS notarization claim "${notarizationClaim}". Use "notarized" or "not-notarized".`);
+    }
+    const actualNotarization = macNotarizationState(source);
+    if (actualNotarization === null) fail(`${entry.name}: cannot check the notarization claim because xcrun is unavailable`);
+    if (actualNotarization !== notarizationClaim) {
+      fail(`${entry.name}: manifest claims "${notarizationClaim}" but the stapled ticket says "${actualNotarization}"`);
+    }
+    return;
+  }
+
+  if (platform.includes('windows') || platform.includes('win32')) {
+    const claimedSignature = WINDOWS_SIGNATURE_CLAIMS.get(signatureClaim.toLowerCase());
+    if (!claimedSignature) {
+      fail(`${entry.name}: unrecognized Windows signature claim "${signatureClaim}". Use one of: ${[...WINDOWS_SIGNATURE_CLAIMS.keys()].join(', ')}`);
+    }
+    const actualSignature = windowsSignatureState(buffer);
+    if (actualSignature === null) fail(`${entry.name}: not a readable PE file, so its signature claim cannot be checked`);
+    if (actualSignature !== claimedSignature) {
+      fail(`${entry.name}: manifest claims "${signatureClaim}" but the PE certificate table says "${actualSignature}"`);
+    }
+    if (notarizationClaim !== WINDOWS_NOTARIZATION) {
+      fail(`${entry.name}: Windows entries must use notarization "${WINDOWS_NOTARIZATION}", not "${notarizationClaim}"`);
+    }
+    return;
+  }
+
+  fail(`${entry.name}: unsupported platform "${entry.platform}"; expected macOS or Windows`);
 }
 
 const manifest = JSON.parse(await readFile(manifestArg, 'utf8'));
@@ -86,6 +148,7 @@ const entries = Array.isArray(manifest.files) ? manifest.files : null;
 if (!entries || !entries.length) fail('manifest has no files[] entries');
 
 const problems = [];
+const seenNames = new Set();
 for (const [index, entry] of entries.entries()) {
   const label = entry.name || `files[${index}]`;
   for (const field of ['name', 'source', 'platform', 'version', 'bytes', 'sha256', 'signature', 'notarization']) {
@@ -95,7 +158,18 @@ for (const [index, entry] of entries.entries()) {
   }
   if (!Number.isSafeInteger(entry.bytes) || entry.bytes <= 0) problems.push(`${label}: "bytes" must be a positive integer`);
   if (!/^[a-f0-9]{64}$/i.test(String(entry.sha256 || ''))) problems.push(`${label}: "sha256" must be 64 hex characters`);
-  if (entry.name && basename(String(entry.name)) !== entry.name) problems.push(`${label}: "name" must be a bare filename`);
+  if (entry.name) {
+    const name = String(entry.name);
+    if (basename(name) !== name) {
+      problems.push(`${label}: "name" must be a bare filename`);
+    } else if (RESERVED_NAMES.has(name.toLowerCase())) {
+      problems.push(`${entry.name}: this script writes "${name}" itself; choose a different output name`);
+    } else if (seenNames.has(name)) {
+      problems.push(`${entry.name}: duplicate output name; two entries would overwrite each other`);
+    } else {
+      seenNames.add(name);
+    }
+  }
 }
 if (problems.length) fail(`invalid manifest:\n  ${problems.join('\n  ')}`);
 
@@ -116,15 +190,12 @@ for (const entry of entries) {
   if (digest !== String(entry.sha256).toLowerCase()) {
     fail(`${entry.name}: source digest ${digest} does not match the manifest ${entry.sha256}`);
   }
-  prepared.push({ entry, source, digest });
+  prepared.push({ entry, source, digest, bytes });
 }
 
-for (const { entry, source } of prepared) {
-  const claim = await verifyClaim(source, entry);
-  if (!claim.verified) {
-    console.error(`DOWNLOAD_MATERIALS_WARNING ${entry.name}: trust claim not checked (${claim.reason})`);
-  }
-  entry.claimVerified = claim.verified;
+// Bind the declared trust state to the bytes that are about to be published.
+for (const { entry, source, bytes } of prepared) {
+  await assertClaimsMatch(entry, source, bytes);
 }
 
 await mkdir(outDir, { recursive: true });
@@ -162,20 +233,16 @@ for (const { entry, source, digest } of prepared) {
     fail(`${entry.name}: copy does not match the validated source`);
   }
   checksumLines.push(`${digest}  ${entry.name}`);
-  const item = {
-    name: entry.name,
-    bytes: entry.bytes,
-    sha256: digest,
-    platform: entry.platform,
-    architecture: entry.architecture,
-    signature: entry.signature,
-    notarization: entry.notarization,
-    version: entry.version
-  };
-  if (entry.build) item.build = entry.build;
-  if (entry.releaseId) item.releaseId = entry.releaseId;
-  if (entry.perpetualCompatible !== undefined) item.perpetualCompatible = entry.perpetualCompatible;
-  if (entry.historical !== undefined) item.historical = entry.historical;
+
+  // Carry every declared field through, so build and provenance metadata the
+  // manifest lists (publisher, certificateThumbprint, sourceCommit, ...) is not
+  // silently dropped. "source" is a local path and never published.
+  const item = {};
+  for (const key of Object.keys(entry)) {
+    if (key === 'source' || key.startsWith('_')) continue;
+    item[key] = entry[key];
+  }
+  item.sha256 = digest;
   item.url = `${baseUrl}${entry.name}`;
   files.push(item);
 }

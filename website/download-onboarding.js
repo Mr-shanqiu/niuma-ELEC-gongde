@@ -1,54 +1,12 @@
 // This is a usage guide, not an installation detector or a payment state machine.
-const clients = {
-  '/niuma-merit-macos-0.9.4.dmg': {
-    platform: 'Mac', path: 'https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.4.dmg',
-    filename: '01-牛马电子功德-Mac安装包-0.9.4.dmg'
-  },
-  '/niuma-merit-windows-0.9.4-setup.exe': {
-    platform: 'Windows', path: 'https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.4-setup.exe',
-    filename: '01-牛马电子功德-Windows安装包-0.9.4.exe'
-  },
-  '/niuma-merit-macos-0.9.3.dmg': {
-    platform: 'Mac', path: './client-download/macos.dmg',
-    filename: '01-牛马电子功德-Mac安装包-0.9.3.dmg'
-  },
-  '/niuma-merit-windows-0.9.3-setup.exe': {
-    platform: 'Windows', path: './client-download/windows.exe',
-    filename: '01-牛马电子功德-Windows安装包-0.9.3.exe'
-  }
-};
-
-function nameCurrentInstallerLinks() {
-  const list = document.getElementById('installer-list');
-  if (!list) return;
-  const enhance = () => {
-    for (const link of list.querySelectorAll('a[href]')) {
-      if (link.dataset.onboardingNamed === 'true') continue;
-      let url;
-      try { url = new URL(link.href); } catch { continue; }
-      if (url.origin !== 'https://download.gongde.zqscreen.cn') continue;
-      const client = clients[url.pathname];
-      if (!client) continue;
-      link.dataset.onboardingNamed = 'true';
-      // Fixed same-origin routes preserve the normal attachment fallback.
-      // Keep checksum metadata on links; transfer files only on an explicit click.
-      if (location.protocol === 'https:' || location.protocol === 'http:') {
-        const target = new URL(client.path, document.baseURI);
-        if (/^[a-f0-9]{64}$/i.test(link.dataset.installerSha256 || '')) target.searchParams.set('sha256', link.dataset.installerSha256);
-        link.href = target.href;
-      }
-      link.download = client.filename;
-      link.title = `01 · 下载 ${client.platform} 安装包`;
-      link.textContent = `01 · 下载 ${client.platform} 安装包`;
-      const note = document.createElement('span');
-      note.className = 'onboarding-file-name';
-      note.textContent = `文件名：${client.filename}`;
-      link.after(note);
-    }
-  };
-  enhance();
-  new MutationObserver(enhance).observe(list, { childList: true, subtree: true });
-}
+//
+// It used to rename the download buttons here too, through a path-to-filename
+// table. That table's keys never matched the published installer URLs, so the
+// branch never ran; and because a cross-origin download attribute cannot set a
+// filename anyway, the real name comes from the download host's
+// Content-Disposition. Removing it changes nothing users see, and avoids
+// pointing at a non-existent route if an older release ever returns to the
+// current list.
 
 function addAppearanceInstructions() {
   if (document.body.dataset.downloadGuide !== 'appearance') return;
@@ -70,5 +28,4 @@ function addAppearanceInstructions() {
   document.addEventListener('niuma-download-completed', () => { guide.hidden = true; });
 }
 
-nameCurrentInstallerLinks();
 addAppearanceInstructions();
