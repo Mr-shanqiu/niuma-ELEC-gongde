@@ -5369,3 +5369,4 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - `tests/free-creator-preview.local.test.mjs`：按 Codex 指出补齐模拟响应的 `headers`（实现会读 `content-length`）；options 断言改为逐项核对 `credentials`/`cache`/有效 `AbortSignal`，不再要求整个对象恰好两个字段；超限响应的 `blobCalls` 期望改为 0（实现按 content-length 直接拒绝，不读 body）。7 项全部通过。
 - 验证：以上三个套件全绿；`appearance-pricing`/`market-pricing`/`order-flow`/`market-checkout` 合并跑为 24 tests / 17 pass / 7 fail，剩余 7 项属第二批逐项归因范围（旧 20 分与旧商品创建等）。
 - 未做：未改业务实现；未处理第二批剩余失败（`order-flow` 3、`market-checkout` 3、`market-pricing` 1 等）；未部署、未动线上。
+- 提交与合入：精确文件清单提交 `5a5a7cc`（4个文件，+118/−45），分支 `test/align-stale-suites` → PR #8 → merge commit `9a42ee8`。合并后读取远端核对：`git ls-remote --heads origin main` = `9a42ee8`，远端 `appearance-pricing.test.mjs` 已含 `count * 100`、`free-creator-preview.local.test.mjs` 已含 `new Headers`。远端分支仍为 3 条。
