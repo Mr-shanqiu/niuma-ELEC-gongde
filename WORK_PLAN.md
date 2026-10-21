@@ -5343,3 +5343,4 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 新增 3 项测试（`tests/admin-object-store.test.mjs`）：发布新版本保留其余条目及其签名状态；同名文件字节变化不继承旧的公证状态；旧清单不可读时不产生 2 条覆盖。
 - 验证：`node --test tests/admin-object-store.test.mjs` 8/8 通过。核心契约组改动前后对比：改动前 253 tests / 207 pass / 45 fail，改动后 256 tests / 210 pass / 45 fail，**失败集合逐条相同**（既有失败，与本次无关）。`npm test` 因 `src/creators/object-store.ts` 的 12 个既存 TS 错误无法启动 tsc，改动前同样如此，已单独核对。
 - 未做：未调用该管理路由、未改线上 `DOWNLOADS.json`、未改 `installers.json`（T4-C 仍暂缓）、未动 `creators/object-store.ts` 的既存编译错误、未发布 API。
+- 提交与合入：精确文件清单提交 `849e9c7`（3个文件，+144/−6），分支 `fix/admin-manifest-preserve-history` → PR #6 → merge commit `d1fe28e`。合并后读取远端核对：`git ls-remote --heads origin main` = `d1fe28e`，3个文件与本地同 blob，远端 `object-store.ts` 中 `signature: "unsigned"` 出现次数为 0、合并逻辑 `sameBytes` 存在。远端分支仍为 3 条。
