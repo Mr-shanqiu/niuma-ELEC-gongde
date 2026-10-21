@@ -5334,3 +5334,12 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - T7：sitemap 由 5 条扩到 9 条，新增 download/support/help-macos/help-windows；未加 checkout/claim/delivery/admin/API，未加带 noindex 的 creator/404。XML 解析通过，9 条 URL 均有对应文件且无 noindex 冲突。
 - 未做：未发布站点（T2/T7 改动仅在仓库）；未处理 P6（服务端 `publishInstallerManifest` 仍硬编码 `"unsigned"`，权威生产者待用户决定）；未对真实 Windows 安装包跑 Authenticode 校验；未清理任何归档；未实施 T4-C。真实项目未跑打包（downloads 仍空、归档仍 101）。
 - 提交与合入：精确文件清单提交 `6674724`（10个文件，+471/−120），分支 `chore/retention-and-onboarding-t2-t7` → PR #5 → merge commit `6d33300`。合并后实际读取远端：`git ls-remote --heads origin main` = `6d33300`，10个文件 `origin/main` 与本地同 blob，远端 `download-onboarding.js` 已无 `nameCurrentInstallerLinks`，远端 sitemap 为 9 条。远端分支仍为 3 条。合并产生的本地同名追踪引用已按 T5-C 同一标准清除。
+
+## 2026-10-21 批次4实施：管理端清单生成器的破坏性行为（P6）
+
+- 自检 §10.5 遗留的 P6 已用证据查清，并修正。`POST /api/gongde/admin/download-manifest`（`src/server.ts:662`）线上可达（无凭据返回 401 `admin_auth_required`，说明已注册且需认证），调用后进入 `publishInstallerManifest`。
+- 修正前该函数有两个真实后果，用线上现行 `DOWNLOADS.json` 核对：**(1)** 把整份清单替换成 2 条，线上现有 12 条中的 10 条（含已公证的 `90414-notarized-68b0aeee` 和已签名的 Windows 包）会从清单消失；**(2)** 每条写死 `signature: "unsigned"`、`notarization: "not-notarized"`，与文件实际状态无关。
+- 修法（不需要先裁决“谁是权威生产者”）：先读取现有 `DOWNLOADS.json`，只替换这两个文件名对应的条目，其余原样保留；签名/公证状态**只在摘要相同时**沿用旧记录，字节已变则写 `unknown` 而不是猜测；旧清单不可读时按“没有已知条目”处理，但不会因此把清单缩成 2 条。
+- 新增 3 项测试（`tests/admin-object-store.test.mjs`）：发布新版本保留其余条目及其签名状态；同名文件字节变化不继承旧的公证状态；旧清单不可读时不产生 2 条覆盖。
+- 验证：`node --test tests/admin-object-store.test.mjs` 8/8 通过。核心契约组改动前后对比：改动前 253 tests / 207 pass / 45 fail，改动后 256 tests / 210 pass / 45 fail，**失败集合逐条相同**（既有失败，与本次无关）。`npm test` 因 `src/creators/object-store.ts` 的 12 个既存 TS 错误无法启动 tsc，改动前同样如此，已单独核对。
+- 未做：未调用该管理路由、未改线上 `DOWNLOADS.json`、未改 `installers.json`（T4-C 仍暂缓）、未动 `creators/object-store.ts` 的既存编译错误、未发布 API。

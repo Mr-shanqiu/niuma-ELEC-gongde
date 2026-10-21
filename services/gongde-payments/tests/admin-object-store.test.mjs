@@ -156,3 +156,81 @@ test("release manifest is calculated from two existing installers, never supplie
     `${macSha}  ${macName}\n${winSha}  ${winName}\n`);
   assert.equal(cos.objects.get("DOWNLOADS.json").contentType, "application/json; charset=utf-8");
 });
+
+test("publishing a release keeps the other published entries and their trust state", async () => {
+  const { cos, store } = fixture();
+  // A published list like the live one: current signed builds, an older build
+  // of the same version, and a previous release kept for fallback.
+  const notarized = "niuma-merit-macos-0.9.4-90414-notarized-68b0aeee.dmg";
+  const adhoc = "niuma-merit-macos-0.9.4-90412-1ed7c4ed8bd8.dmg";
+  const old = "niuma-merit-macos-0.9.3.dmg";
+  const published = {
+    baseUrl: "https://download.gongde.zqscreen.cn/",
+    generatedAt: "2026-10-20T18:56:35.761Z",
+    files: [
+      { name: notarized, bytes: 1, sha256: "a".repeat(64), platform: "macOS", signature: "Developer ID Application", notarization: "notarized", version: "0.9.4" },
+      { name: adhoc, bytes: 1, sha256: "b".repeat(64), platform: "macOS", signature: "ad-hoc", notarization: "not-notarized", version: "0.9.4" },
+      { name: old, bytes: 1, sha256: "c".repeat(64), platform: "macOS", signature: "apple-development", notarization: "not-notarized", version: "0.9.3" }
+    ]
+  };
+  cos.objects.set("DOWNLOADS.json", { body: Buffer.from(JSON.stringify(published)), contentType: "application/json", lastModified: new Date().toISOString() });
+
+  const macName = "niuma-merit-macos-0.9.4.dmg";
+  const winName = "niuma-merit-windows-0.9.4-setup.exe";
+  await store.put("installer", macName, Buffer.from("mac"), "application/x-apple-diskimage");
+  await store.put("installer", winName, Buffer.from("win"), "application/vnd.microsoft.portable-executable");
+  await store.publishInstallerManifest("0.9.4");
+
+  const manifest = JSON.parse(cos.objects.get("DOWNLOADS.json").body.toString());
+  const names = manifest.files.map((file) => file.name);
+  // Nothing that was published disappears.
+  for (const name of [notarized, adhoc, old, macName, winName]) assert.ok(names.includes(name), `${name} must survive`);
+  assert.equal(manifest.files.length, 5);
+
+  // A file with no recorded state is not described as unsigned.
+  const macEntry = manifest.files.find((file) => file.name === macName);
+  assert.equal(macEntry.signature, "unknown");
+  assert.equal(macEntry.notarization, "unknown");
+
+  // Untouched entries keep the state that was recorded for them.
+  const untouched = manifest.files.find((file) => file.name === notarized);
+  assert.equal(untouched.signature, "Developer ID Application");
+  assert.equal(untouched.notarization, "notarized");
+
+  // The checksum file describes the same set, not just the two regenerated files.
+  const sums = cos.objects.get("SHA256SUMS.txt").body.toString().trim().split("\n");
+  assert.equal(sums.length, 5);
+});
+
+test("a re-published file keeps the trust state already recorded for it", async () => {
+  const { cos, store } = fixture();
+  const macName = "niuma-merit-macos-0.9.4.dmg";
+  cos.objects.set("DOWNLOADS.json", {
+    body: Buffer.from(JSON.stringify({ files: [
+      { name: macName, bytes: 3, sha256: "a".repeat(64), signature: "Developer ID Application", notarization: "notarized", version: "0.9.4" }
+    ] })),
+    contentType: "application/json",
+    lastModified: new Date().toISOString()
+  });
+  await store.put("installer", macName, Buffer.from("mac"), "application/x-apple-diskimage");
+  await store.put("installer", "niuma-merit-windows-0.9.4-setup.exe", Buffer.from("win"), "application/vnd.microsoft.portable-executable");
+  await store.publishInstallerManifest("0.9.4");
+
+  const manifest = JSON.parse(cos.objects.get("DOWNLOADS.json").body.toString());
+  const macEntry = manifest.files.find((file) => file.name === macName);
+  // The bytes changed, so the recorded state is about the old file; the new
+  // one must not inherit "notarized" from it.
+  assert.equal(macEntry.signature, "unknown");
+  assert.equal(macEntry.notarization, "unknown");
+});
+
+test("an unreadable published manifest is not replaced by a two-entry list", async () => {
+  const { cos, store } = fixture();
+  cos.objects.set("DOWNLOADS.json", { body: Buffer.from("not json"), contentType: "application/json", lastModified: new Date().toISOString() });
+  await store.put("installer", "niuma-merit-macos-0.9.4.dmg", Buffer.from("mac"), "application/x-apple-diskimage");
+  await store.put("installer", "niuma-merit-windows-0.9.4-setup.exe", Buffer.from("win"), "application/vnd.microsoft.portable-executable");
+  await store.publishInstallerManifest("0.9.4");
+  const manifest = JSON.parse(cos.objects.get("DOWNLOADS.json").body.toString());
+  assert.equal(manifest.files.length, 2);
+  assert.equal(manifest.files[0].signature, "unknown");
+});

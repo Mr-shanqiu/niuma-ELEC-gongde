@@ -171,14 +171,49 @@ export class AdminObjectStore {
     });
   }
 
+  // Regenerate DOWNLOADS.json for one release pair.
+  //
+  // Two things this must not do. It must not invent a trust state: the old
+  // version stamped every file "unsigned" without looking at it, which was
+  // wrong for the Developer ID + notarized macOS build and for the Authenticode
+  // Windows build. It also must not replace the published list with just these
+  // two entries: the live manifest carries historical releases and earlier
+  // builds of the current one, and silently dropping them removes the fallback
+  // downloads people are still pointed at.
+  //
+  // So the existing manifest is read first, entries for these two names are
+  // replaced in place, and everything else is carried over untouched. The
+  // signature and notarization of a file are properties of the file, so they
+  // come from the existing entry when there is one; a file with no recorded
+  // state is published as "unknown" rather than being guessed at.
   async publishInstallerManifest(version: string, windowsVersion = version): Promise<InstallerManifestSummary> {
     if (!/^\d+\.\d+\.\d+$/u.test(version) || !/^\d+\.\d+\.\d+$/u.test(windowsVersion)) throw new Error("admin_release_version_invalid");
     const definitions = [
       { name: `niuma-merit-macos-${version}.dmg`, type: "application/x-apple-diskimage",
-        platform: "macOS", architecture: "universal2-arm64-x86_64", notarization: "not-notarized", version },
+        platform: "macOS", architecture: "universal2-arm64-x86_64", notarization: "unknown", version },
       { name: `niuma-merit-windows-${windowsVersion}-setup.exe`, type: "application/vnd.microsoft.portable-executable",
-        platform: "Windows", architecture: "x86_64", notarization: "not-applicable", version: windowsVersion }
+        platform: "Windows", architecture: "x86_64", notarization: "unknown", version: windowsVersion }
     ] as const;
+
+    // A previous manifest that cannot be read is not a licence to overwrite it
+    // with a two-entry list; that would destroy history on a transient error.
+    let previousFiles: Array<Record<string, unknown>> = [];
+    try {
+      const previous = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
+        this.#cos.getObject({
+          Bucket: this.configuration.bucket,
+          Region: this.configuration.region,
+          Key: "DOWNLOADS.json"
+        }, (error, data) => error ? reject(error) : resolve(data));
+      });
+      const raw = Buffer.isBuffer(previous.Body) ? previous.Body.toString("utf8") : String(previous.Body ?? "");
+      const parsed = JSON.parse(raw) as { files?: unknown };
+      if (Array.isArray(parsed.files)) previousFiles = parsed.files.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+    } catch {
+      previousFiles = [];
+    }
+    const previousByName = new Map(previousFiles.map((file) => [String(file.name), file]));
+
     const files = await Promise.all(definitions.map(async (definition) => {
       const object = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
         this.#cos.getObject({
@@ -189,19 +224,35 @@ export class AdminObjectStore {
       });
       const body = Buffer.isBuffer(object.Body) ? object.Body : Buffer.from(object.Body ?? "");
       if (body.length === 0 || body.length > 80 * 1024 * 1024) throw new Error("admin_installer_invalid");
+      const digest = createHash("sha256").update(body).digest("hex");
+      const previous = previousByName.get(definition.name);
+      // Trust state describes the bytes. Only carry a recorded state over when
+      // the recorded digest is the same bytes we just read; a rebuilt file
+      // under the same name is a different artifact and must not inherit
+      // "notarized" from its predecessor.
+      const sameBytes = previous !== undefined && previous.sha256 === digest;
       return {
         ...definition,
+        signature: sameBytes && typeof previous.signature === "string" ? previous.signature : "unknown",
+        notarization: sameBytes && typeof previous.notarization === "string" ? previous.notarization : "unknown",
         bytes: body.length,
-        sha256: createHash("sha256").update(body).digest("hex"),
-        signature: "unsigned",
+        sha256: digest,
         url: this.publicUrl("installer", definition.name)
       };
     }));
-    const checksum = Buffer.from(files.map((file) => `${file.sha256}  ${file.name}`).join("\n") + "\n");
+
+    const replaced = new Set<string>(files.map((file) => file.name));
+    const merged = [
+      ...files,
+      ...previousFiles.filter((file) => !replaced.has(String(file.name)))
+    ];
+    const checksum = Buffer.from(merged
+      .filter((file) => typeof file.sha256 === "string" && typeof file.name === "string")
+      .map((file) => `${String(file.sha256)}  ${String(file.name)}`).join("\n") + "\n");
     const manifest = Buffer.from(JSON.stringify({
       baseUrl: `${this.configuration.publicBaseUrl}/`,
       generatedAt: new Date().toISOString(),
-      files
+      files: merged
     }, null, 2) + "\n");
     const putMetadata = (name: string, body: Buffer, contentType: string) => new Promise<void>((resolve, reject) => {
       this.#cos.putObject({
