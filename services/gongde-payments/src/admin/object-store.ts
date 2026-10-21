@@ -186,6 +186,56 @@ export class AdminObjectStore {
   // signature and notarization of a file are properties of the file, so they
   // come from the existing entry when there is one; a file with no recorded
   // state is published as "unknown" rather than being guessed at.
+
+  // Read the currently published manifest, completely, before anything is
+  // written.
+  //
+  // This must not degrade to "no known entries". A transient COS error, corrupt
+  // JSON, or an unexpected shape says nothing about whether history exists, and
+  // continuing from an empty list is exactly how the published list gets
+  // replaced by the two files being regenerated. So every failure here aborts
+  // before any write, and an entry that cannot be carried over faithfully is a
+  // failure rather than something to filter out silently.
+  async #readPublishedManifest(): Promise<Array<Record<string, unknown>>> {
+    let previous: { Body?: Buffer | string };
+    try {
+      previous = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
+        this.#cos.getObject({
+          Bucket: this.configuration.bucket,
+          Region: this.configuration.region,
+          Key: "DOWNLOADS.json"
+        }, (error, data) => error ? reject(error) : resolve(data));
+      });
+    } catch {
+      throw new Error("admin_manifest_unavailable");
+    }
+    const raw = Buffer.isBuffer(previous.Body) ? previous.Body.toString("utf8") : String(previous.Body ?? "");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error("admin_manifest_invalid");
+    }
+    if (parsed === null || typeof parsed !== "object" || !Array.isArray((parsed as { files?: unknown }).files)) {
+      throw new Error("admin_manifest_invalid");
+    }
+    const files = (parsed as { files: unknown[] }).files;
+    const seen = new Set<string>();
+    for (const file of files) {
+      // An entry is carried over verbatim, so it has to be something the merged
+      // manifest and the checksum file can both describe.
+      if (file === null || typeof file !== "object") throw new Error("admin_manifest_invalid");
+      const entry = file as Record<string, unknown>;
+      if (typeof entry.name !== "string" || entry.name.length === 0) throw new Error("admin_manifest_invalid");
+      if (typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(entry.sha256)) throw new Error("admin_manifest_invalid");
+      // Two entries under one name would make the merged list ambiguous and
+      // would let one of them be overwritten without saying so.
+      if (seen.has(entry.name)) throw new Error("admin_manifest_invalid");
+      seen.add(entry.name);
+    }
+    return files as Array<Record<string, unknown>>;
+  }
+
   async publishInstallerManifest(version: string, windowsVersion = version): Promise<InstallerManifestSummary> {
     if (!/^\d+\.\d+\.\d+$/u.test(version) || !/^\d+\.\d+\.\d+$/u.test(windowsVersion)) throw new Error("admin_release_version_invalid");
     const definitions = [
@@ -195,23 +245,9 @@ export class AdminObjectStore {
         platform: "Windows", architecture: "x86_64", notarization: "unknown", version: windowsVersion }
     ] as const;
 
-    // A previous manifest that cannot be read is not a licence to overwrite it
-    // with a two-entry list; that would destroy history on a transient error.
-    let previousFiles: Array<Record<string, unknown>> = [];
-    try {
-      const previous = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
-        this.#cos.getObject({
-          Bucket: this.configuration.bucket,
-          Region: this.configuration.region,
-          Key: "DOWNLOADS.json"
-        }, (error, data) => error ? reject(error) : resolve(data));
-      });
-      const raw = Buffer.isBuffer(previous.Body) ? previous.Body.toString("utf8") : String(previous.Body ?? "");
-      const parsed = JSON.parse(raw) as { files?: unknown };
-      if (Array.isArray(parsed.files)) previousFiles = parsed.files.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
-    } catch {
-      previousFiles = [];
-    }
+    // Fails closed: no manifest or checksum is written unless the previous
+    // published list was read in full.
+    const previousFiles = await this.#readPublishedManifest();
     const previousByName = new Map(previousFiles.map((file) => [String(file.name), file]));
 
     const files = await Promise.all(definitions.map(async (definition) => {
