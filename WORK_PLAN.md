@@ -5288,3 +5288,15 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 用户指出缓存优化已上线。本机实施文档未同步导致前条全面交接误记“未部署”；现已只读核对公网首页runtimebd91ac6d、内容寻址preload及源站镜像gongde-site:b9acc5a9，确认已部署，前条等待发布/授权事项作废。没有重新部署、改服务或重跑完整验收。
 - 已直接更正PROJECT_HANDOFF、PROJECT_HOME、文档索引和IMPLEMENTATION状态。证据 `.local-work/acceptance/cdn-cache-status-20261021/`；静态tree b9acc5a9a5d0729ed94084b50ef0540ff90e02831da46f0852d4ada15d4552cd，runtime bd91ac6d61f0e2ae7405ddb5f76051318b56b4b5f5e9d752aebe638a6f7c40cf。本机对应归档SHA aa85303b2dabf4489abfc8345fb4fddbd9a576594c300eff53cc86a993917310，不伪造原操作者部署时间或回执。
 - 下一步是按更新交接接手；缓存第一步已完成，不重复发布。官方形象封面/图层静态化仍是未实施的第二步。
+
+## 2026-10-21 Claude Code终端版交接更新
+
+- 用户要求梳理后续变化并重新交接。已按本机只读Git状态及project-inventory最终记录更新：PR #2合入main94915e7，v0.9.4为Latest、旧分支/CI整理完成；当前工作区在chore/retire-90411-signing-branch的b91387d，本轮编辑前干净，其相对本地origin/main仅README一行收尾。未实时fetch或声称该收尾分支已并入。
+- 新终端交接文件 `.local-work/handoffs/CLAUDE_CODE_HANDOFF_20261021.md` 自包含变化清单、正式产物/线上状态、未实施事项、同机接手边界及必要证据。同步更新docs/PROJECT_HANDOFF与PROJECT_HOME，取消旧“大量未提交、Release未同步”的描述。缓存第一步已部署；不重发，不新测，不迁移。
+- 本轮仅文档更新，未切分支、提交、推送、删除分支、重建安装包、访问生产或部署。
+
+## 2026-10-21 待办优化方案独立复核并修订
+
+- 用户要求复核并写回handoffs/todo-and-optimization-plan-20261021.md，已完成。实际只读查询远端refs、worktree及prune dry-run；浏览器最终DOM确认当前签名下载无改写、历史0.9.3不在扫描容器，config ready/enabled正常，空间4结束。未重复下载、领取、付款或客户端验收。
+- 重点修订：T1原新文案对旧分支已归档/不可下载的承诺不实，合入前改准；T2只删映射不删导入提示，不为死代码单独发站；T3指出固定ROOT_DIR与先清输出再缺包失败的副作用，禁止真实项目故障试跑，元数据须与确切文件绑定；T4补纠正全免费/作者码等过时规则；T5保留手动CI只去过期push触发，本地引用与远端删除分开；T6按全部跟踪PNG校准统计，仅制定保留策略；T7只补有价值公开页，不凑全站HTML。
+- 证据 `.local-work/acceptance/todo-plan-review-20261021/`。本轮仅修订原方案及本记录/索引，未实施T0—T7、未合并提交推送、清理、构建或部署。等待用户选择后续明确实施范围。
