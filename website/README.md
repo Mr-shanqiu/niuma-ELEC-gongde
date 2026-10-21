@@ -32,8 +32,9 @@
 
 - 正式官网：`https://gongde.zqscreen.cn`；安装包独立分发域名：`https://download.gongde.zqscreen.cn`。这些域名不替代尚未发布的具体文件 URL。
 - macOS 提供 DMG，Windows 提供安装 EXE；安装包不进入静态站归档，版本与摘要以当前批准发布元数据为准。
-- 仅更新网站：`./scripts/package-website.sh --site-only`，不重生成素材、不改安装包或下载清单。
-- 全量打包：`./scripts/package-website.sh`，包含预览生成、后台构建及独立下载清单生成；须有相应授权，本文不是执行命令。
+- 静态站：`./scripts/package-website.sh --site`，只构建并打包站点，不需要本机存在客户端安装包。`--site-only` 保留为同义别名。
+- 下载材料：`./scripts/package-website.sh --downloads`，按 `release/downloads-manifest.json` 复制已发布的安装包并生成 `DOWNLOADS.json` 与 `SHA256SUMS.txt`。清单必须逐项写明源文件、字节数、摘要与签名状态；脚本会先核对再写入，缺文件或摘要不符时直接失败且不动已有输出。
+- 全量：`./scripts/package-website.sh`（等同 `--all`），预览生成 + 静态站 + 下载材料。须有相应授权，本文不是执行命令。
 - API 与静态站分别走专用受限发布器。新收费接口退役为 410，历史合法履行保留；不因回退重新开放新收费。
 - `GET /healthz.txt` 应返回 `gongde-ok`。运行开放情况以实际服务状态和发布回执为准，本地源码、模拟测试与签名构建不等于上线或用户验收。
 - 本轮仅整理官网说明，未联网、部署、签名、重建指南 ZIP 或修改发布配置。

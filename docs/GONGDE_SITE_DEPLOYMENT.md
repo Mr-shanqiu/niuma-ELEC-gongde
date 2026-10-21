@@ -11,20 +11,28 @@
 
 ## 构建与交付
 
-运行：
+三个步骤互相独立，因为输入和风险不同：
 
 ```sh
-./scripts/package-website.sh
+./scripts/package-website.sh --site        # 只打包静态站，不需要客户端安装包
+./scripts/package-website.sh --downloads   # 只按清单生成下载材料
+./scripts/package-website.sh               # 全量：预览 + 静态站 + 下载材料
 ```
 
-脚本输出：
+`--site-only` 保留为 `--site` 的同义别名。旧的 `--site-only` 同时跳过预览和下载准备，把两个独立选择混成了一个。
+
+静态站输出：
 
 - `dist/gongde-deploy/gongde-site-<full-sha>.tar.gz`
 - 同名 `.sha256`
 - 同名 `.metadata.txt`
-- `dist/gongde-deploy/downloads/` 安装包与形象包
-- `dist/gongde-deploy/downloads/DOWNLOADS.json`
-- `dist/gongde-deploy/downloads/SHA256SUMS.txt`
+
+下载步骤需要 `release/downloads-manifest.json`（本机文件，不进入 Git；模板见 `release/downloads-manifest.example.json`）。清单逐项写明源文件路径、字节数、摘要、签名与公证状态。脚本在写入前核对每一项：
+
+- 源文件缺失、字节数或摘要不符 → 直接失败，不写任何输出，也不清空已有目录；
+- 声明 Developer ID 或已公证 → 用 `codesign` / `stapler` 核对实际文件，声明不成立就失败；
+- 声明 Authenticode → 检查 PE 证书表；
+- 成功时只清理上一版 `DOWNLOADS.json` 列出的产物，目录中手工放置的材料与回执保留。
 
 安装包不进入静态站点归档。网站归档内没有软链接、运行时写目录、`.env`、密钥或绝对本机路径。
 

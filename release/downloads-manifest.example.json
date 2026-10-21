@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Template for the download step. Copy to release/downloads-manifest.json and",
+    "fill in the published artifacts; that file is local and stays out of Git.",
+    "Every field below is required except build, releaseId, perpetualCompatible",
+    "and historical. bytes and sha256 are checked against the source file before",
+    "anything is written. signature and notarization describe THIS file, and the",
+    "script verifies them where the platform tools are available; it fails when a",
+    "claim does not hold. Never copy these values from another release.",
+    "Reference values for 0.9.4 live in the publication receipts under",
+    ".local-work/candidates/, not here."
+  ],
+  "files": [
+    {
+      "name": "niuma-merit-macos-0.9.4-90414-notarized-<sha12>.dmg",
+      "source": "/absolute/path/to/published/artifact.dmg",
+      "platform": "macOS",
+      "architecture": "universal2-arm64-x86_64",
+      "version": "0.9.4",
+      "build": "904.14",
+      "bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "signature": "Developer ID Application",
+      "notarization": "notarized",
+      "perpetualCompatible": true
+    },
+    {
+      "name": "niuma-merit-windows-0.9.4-signed-<sha12>-setup.exe",
+      "source": "/absolute/path/to/published/artifact.exe",
+      "platform": "Windows",
+      "architecture": "x64",
+      "version": "0.9.4",
+      "bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "signature": "authenticode-sha256",
+      "notarization": "not-applicable",
+      "perpetualCompatible": true
+    }
+  ]
+}
