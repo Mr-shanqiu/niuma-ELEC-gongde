@@ -1,19 +1,22 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { GongdeOrderService } from "../dist/domain/order-service.js";
 import { InMemoryPaymentStore } from "../dist/domain/store.js";
 import { OFFICIAL_ASSET_IDS, appearanceBatchPriceFen } from "../dist/domain/catalog.js";
 import { PrivatePackageStore } from "../dist/delivery/private-package-store.js";
 
+// Current rule: every appearance costs 100 fen, no bundle discount and no
+// total cap, 1-10 per batch. docs/WORK_PLAN_BASIC_FREE_PAID_PACKS.zh-CN.md §2.
 for (let count = 1; count <= 10; count += 1) {
-  test(`anonymous batch of ${count} packs costs ${Math.min(count * 20, 100)} fen`, async () => {
+  test(`anonymous batch of ${count} packs costs ${count * 100} fen`, async () => {
     const store = new InMemoryPaymentStore();
     const service = new GongdeOrderService(store);
     const checkout = await service.createMockCheckout({
       channel: "wechat", purchaseKind: "appearance-batch",
       assetIds: OFFICIAL_ASSET_IDS.slice(0, count), amountFen: 1
     });
-    assert.equal(checkout.amountFen, Math.min(count * 20, 100));
+    assert.equal(checkout.amountFen, count * 100);
     assert.equal(checkout.accessCode, null);
     const before = await service.getOrder(checkout.orderNo, checkout.buyerToken);
     assert.equal(before.order.userId, null);
@@ -47,18 +50,64 @@ test("buying a new batch requires a distinct independently charged order", async
   const next = await service.createMockCheckout(input);
   assert.notEqual(next.orderNo, first.orderNo);
   assert.notEqual(next.buyerToken, first.buyerToken);
-  assert.equal(next.amountFen, 40);
+  assert.equal(next.amountFen, 200);
   assert.equal((await service.getOrder(next.orderNo, next.buyerToken)).order.state, "PENDING_PAYMENT");
 });
 
-test("new pricing cannot reprice or invalidate legacy access-code orders", async () => {
+// Legacy products (official-pass, asset-delivery) can no longer be ordered:
+// createPendingOrder only accepts "appearance-batch". Historical orders are
+// still honoured at the amount they were saved with, so this loads one
+// directly into the store instead of opening the old product up again.
+const LEGACY_CODE = "GD-2222-3333-4444-5555-6666";
+const LEGACY_CODE_DIGEST = createHash("sha256").update(LEGACY_CODE).digest("hex");
+
+function legacyOrder(overrides = {}) {
+  return {
+    orderNo: "GD_20260101120000AABBCCDDEE",
+    productId: "official-pass",
+    productVersion: 1,
+    purchaseKind: "official-pass",
+    channel: "wechat",
+    amountFen: 20,
+    state: "FULFILLED",
+    userId: null,
+    accessId: "legacy-access-id",
+    createdAt: new Date("2026-01-01T12:00:00.000Z"),
+    paidAt: new Date("2026-01-01T12:01:00.000Z"),
+    ...overrides
+  };
+}
+
+test("a historical order keeps its saved amount and is never repriced", async () => {
+  const store = new InMemoryPaymentStore();
+  await store.insertAccessAccount({
+    id: "legacy-access-id", codeDigest: LEGACY_CODE_DIGEST, codeHint: "GD-…6666",
+    state: "ACTIVE", createdAt: new Date("2026-01-01T11:00:00.000Z"), activatedAt: new Date("2026-01-01T12:01:00.000Z")
+  });
+  await store.insertOrder(legacyOrder(), []);
+  await store.insertEntitlement({
+    id: "legacy-pass-entitlement", orderNo: "GD_20260101120000AABBCCDDEE", userId: "legacy-access-id",
+    productId: "official-pass", scope: "official-character-pass", assetId: null,
+    state: "ACTIVE", createdAt: new Date("2026-01-01T12:01:00.000Z"),
+    activatedAt: new Date("2026-01-01T12:01:00.000Z"), expiresAt: null, revokedAt: null
+  });
+
+  const service = new GongdeOrderService(store);
+  const access = await service.getAccess(LEGACY_CODE);
+  assert.equal(access.ownsOfficialPass, true);
+  // Reading it back must not apply the current 100-fen rule.
+  const stored = await store.findOrder("GD_20260101120000AABBCCDDEE");
+  assert.equal(stored.amountFen, 20);
+});
+
+test("the retired products cannot be ordered again", async () => {
   const service = new GongdeOrderService(new InMemoryPaymentStore());
-  const old = await service.createMockCheckout({ channel: "wechat", purchaseKind: "official-pass", assetIds: OFFICIAL_ASSET_IDS.slice(0, 5) });
-  await service.completeMockPayment(old.orderNo);
-  assert.equal((await service.getAccess(old.accessCode)).ownsOfficialPass, true);
-  const legacy = await service.createMockCheckout({ channel: "alipay", purchaseKind: "asset-delivery", accessCode: old.accessCode, assetIds: OFFICIAL_ASSET_IDS.slice(0, 5) });
-  assert.equal(legacy.amountFen, 20);
-  await assert.rejects(() => service.createMockCheckout({ channel: "alipay", purchaseKind: "asset-delivery", accessCode: old.accessCode, assetIds: OFFICIAL_ASSET_IDS.slice(0, 6) }), /asset_selection_limit_exceeded/);
+  for (const purchaseKind of ["official-pass", "asset-delivery"]) {
+    await assert.rejects(
+      () => service.createMockCheckout({ channel: "wechat", purchaseKind, assetIds: OFFICIAL_ASSET_IDS.slice(0, 5) }),
+      /invalid_purchase_kind/
+    );
+  }
 });
 
 test("private COS supports ten-pack batches without public access or real requests", async () => {

@@ -115,9 +115,20 @@ globalThis.cancelAnimationFrame = noOp;
 globalThis.addEventListener = noOp;
 globalThis.fetch = async (path, options) => {
   assert.equal(path, imagePath, 'only the exact in-memory fixture URL is allowed');
-  assert.deepEqual(options, { credentials: 'same-origin', cache: 'no-store' });
+  // Check the fields that matter instead of requiring the whole object to have
+  // exactly two keys: the implementation also passes a 10s timeout signal.
+  assert.equal(options.credentials, 'same-origin');
+  assert.equal(options.cache, 'no-store');
+  assert.ok(options.signal instanceof AbortSignal, 'the request must carry a timeout signal');
+  assert.equal(options.signal.aborted, false);
   assert.ok(active); active.fetchCalls += 1;
-  return { ok: true, blob: async () => { active.blobCalls += 1; return active.blob; } };
+  return {
+    ok: true,
+    status: 200,
+    // The implementation reads content-length before decoding the body.
+    headers: new Headers({ 'content-length': String(active.blob.size), 'content-type': 'image/png' }),
+    blob: async () => { active.blobCalls += 1; return active.blob; }
+  };
 };
 globalThis.createImageBitmap = async blob => {
   assert.equal(blob, active.blob); active.bitmapCalls += 1;
@@ -154,7 +165,10 @@ for (const test of tests) {
       await assert.rejects(() => mountCreatorPreview(container, specification), error => error.message === 'creator_preview_invalid');
       assert.equal(active.bitmapCalls, 0); assert.equal(active.canvasCalls, 0); assert.equal(active.mounted, false);
     }
-    assert.equal(active.fetchCalls, 1); assert.equal(active.blobCalls, 1);
+    assert.equal(active.fetchCalls, 1);
+    // An oversize response is refused from its content-length, so the body is
+    // never read; an accepted one is read exactly once.
+    assert.equal(active.blobCalls, test.accepted ? 1 : 0);
     results.push({ name: test.name, passed: true, bytes: test.bytes, accepted: test.accepted,
       fixturePath: path, sha256: createHash('sha256').update(bytes).digest('hex'), counters: { ...active, blob: undefined } });
     console.log('PASS NOT_ACTUAL_BROWSER: ' + test.name);

@@ -5355,3 +5355,17 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 结果：`npm test` 从“无法启动”变为可完整运行。核心契约组 256 tests / 213 pass / 42 fail，其中 **3 项由失败转为通过**（`official snapshot reports source version/revision`、`internal officialCatalog clones real manifests`、`real sourceRoot freezes old releases`），**无新增失败**（与改动前 45 项失败集对比，差异只有这 3 项转通过）。
 - 未做：未修复剩余 42 项既存失败、未修复 `appearance numbers` 的 3 项与 `market-http` 的 1 项、未处理 `creator budgets`/`creator preview` 的失败。这些是产品/测试与当前实现之间的既有分歧（例如 `market-http` 仍按 creator 资产下单，而服务端已要求全部为官方资产），需要单独判断，不在本批范围。未部署、未动线上。
 - 提交与合入：精确文件清单提交 `bf039ee`（8个文件，+179/−14），分支 `fix/restore-service-test-startup` → PR #7 → merge commit `8c09f22`。合并后读取远端核对：`git ls-remote --heads origin main` = `8c09f22`，远端已有 `assets/appearance-packs/offwork-button/` 五个文件，`src/types/cos-nodejs-sdk-v5.d.ts` 已不存在。远端分支仍为 3 条。
+
+## 2026-10-21 服务测试失败记录独立复核
+
+- 已对照main30aa44f、当前产品规则及源码，将结论写回 `.local-work/handoffs/service-test-failures-for-codex-20261021.md` §7。新订单100分/形象、官方图库限定正确；不恢复旧共创混批。预览测试除options断言外还缺响应headers；旧价格测试还混入已禁止的新建旧商品订单，应以历史夹具验证履行。剩余失败须逐项归因，不整体删套件或放宽安全限制。
+- 更正记录开头的证据范围：核心组已有前后对比，不扩大为所有独立套件均已比对；标准入口被编译阻塞不代表此前从未获得测试结果。本轮仅源码/文档复核与建议，未重跑测试、修改产品/测试、提交推送或部署。
+
+## 2026-10-21 批次6实施：修复已确认过时的测试（第一批）
+
+- 依据 Codex §7 裁定执行第一批，只改测试与夹具，未改任何业务实现。
+- `tests/appearance-pricing.test.mjs`：价格断言由 `Math.min(count*20,100)` 改为 `count*100`（现行规则每个 1 元、不封顶、每批 1—10 个），12 项转通过。原 `new pricing cannot reprice or invalidate legacy access-code orders` 用 `createMockCheckout` 新建 `official-pass`/`asset-delivery`，而 `createPendingOrder` 已只允许 `appearance-batch`；改为在 `InMemoryPaymentStore` 中直接装入历史订单与权益，验证历史金额不被重算，并新增负向断言确认两个旧商品无法再下单。全部 15 项通过。
+- `tests/market-http.local.test.mjs`：补上 `idempotency-key`（checkout 的既有契约）、补 mock 缺失的 `appearanceDownloadFilename`/`downloadDisposition`；批次改为两个官方资产，保留 409 版本过期、201 支付、快照锁定与交付验证；新增“官方 + creator 混批被 400 拒绝”的负向用例；许可证校验由 V1（含 `import_before`）改为现行 V2 永久授权。1 项通过。
+- `tests/free-creator-preview.local.test.mjs`：按 Codex 指出补齐模拟响应的 `headers`（实现会读 `content-length`）；options 断言改为逐项核对 `credentials`/`cache`/有效 `AbortSignal`，不再要求整个对象恰好两个字段；超限响应的 `blobCalls` 期望改为 0（实现按 content-length 直接拒绝，不读 body）。7 项全部通过。
+- 验证：以上三个套件全绿；`appearance-pricing`/`market-pricing`/`order-flow`/`market-checkout` 合并跑为 24 tests / 17 pass / 7 fail，剩余 7 项属第二批逐项归因范围（旧 20 分与旧商品创建等）。
+- 未做：未改业务实现；未处理第二批剩余失败（`order-flow` 3、`market-checkout` 3、`market-pricing` 1 等）；未部署、未动线上。
