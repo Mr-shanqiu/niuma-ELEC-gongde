@@ -6,6 +6,8 @@ import { AdminObjectStore, loadAdminObjectStoreConfiguration, parseAdminFileIden
 
 class MemoryCos {
   objects = new Map();
+  writes = [];
+  failGet = new Set();
 
   getBucket(params, callback) {
     const keys = [...this.objects.keys()].filter((key) => key.startsWith(params.Prefix)).sort();
@@ -24,6 +26,7 @@ class MemoryCos {
   }
 
   putObject(params, callback) {
+    this.writes.push(params.Key);
     this.objects.set(params.Key, {
       body: Buffer.from(params.Body),
       contentType: params.ContentType,
@@ -38,6 +41,7 @@ class MemoryCos {
   }
 
   getObject(params, callback) {
+    if (this.failGet.has(params.Key)) return callback(new Error("NetworkError"), {});
     const object = this.objects.get(params.Key);
     if (!object) return callback(new Error("NoSuchKey"), {});
     callback(null, { Body: Buffer.from(object.body) });
@@ -139,8 +143,12 @@ test("release manifest is calculated from two existing installers, never supplie
   const mac = Buffer.from("mac-installer");
   const win = Buffer.from("windows-installer");
   await store.put("installer", macName, mac, "application/x-apple-diskimage");
+  // Publishing now requires a readable published list; an explicitly empty one
+  // is valid, so the missing Windows installer is what rejects here.
+  cos.objects.set("DOWNLOADS.json", { body: Buffer.from(JSON.stringify({ files: [] })),
+    contentType: "application/json", lastModified: new Date().toISOString() });
   await assert.rejects(() => store.publishInstallerManifest("0.8.2"), /NoSuchKey/u);
-  assert.equal(cos.objects.has("DOWNLOADS.json"), false);
+  assert.equal(cos.objects.has("SHA256SUMS.txt"), false);
   await store.put("installer", winName, win, "application/vnd.microsoft.portable-executable");
   await assert.rejects(() => store.publishInstallerManifest("../0.8.2"), /admin_release_version_invalid/u);
   const summary = await store.publishInstallerManifest("0.8.2");
@@ -224,11 +232,62 @@ test("a re-published file keeps the trust state already recorded for it", async 
   assert.equal(macEntry.notarization, "unknown");
 });
 
-test("an unreadable published manifest is not replaced by a two-entry list", async () => {
+// A published list that cannot be read in full is not an empty list. Every one
+// of these states must stop before writing, because continuing would replace the
+// published history with the two files being regenerated.
+test("an unreadable published manifest aborts without writing anything", async () => {
+  const published = JSON.stringify({
+    baseUrl: "https://download.gongde.zqscreen.cn/",
+    generatedAt: "2026-10-20T18:56:35.761Z",
+    files: [
+      { name: "niuma-merit-macos-0.9.4-90414-notarized-68b0aeee.dmg", bytes: 1, sha256: "a".repeat(64), version: "0.9.4" },
+      { name: "niuma-merit-macos-0.9.3.dmg", bytes: 1, sha256: "c".repeat(64), version: "0.9.3" }
+    ]
+  });
+  const macName = "niuma-merit-macos-0.9.4.dmg";
+  const winName = "niuma-merit-windows-0.9.4-setup.exe";
+  // Each case starts from a published two-entry list and breaks it one way.
+  const cases = [
+    ["transient network failure", { failGet: "DOWNLOADS.json" }, /admin_manifest_unavailable/u],
+    ["the manifest object is missing", { remove: true }, /admin_manifest_unavailable/u],
+    ["corrupt JSON", { body: "not json" }, /admin_manifest_invalid/u],
+    ["top level is an array", { body: "[]" }, /admin_manifest_invalid/u],
+    ["files is not an array", { body: JSON.stringify({ files: {} }) }, /admin_manifest_invalid/u],
+    ["an entry is null", { body: JSON.stringify({ files: [null] }) }, /admin_manifest_invalid/u],
+    ["an entry has no usable sha256", { body: JSON.stringify({ files: [{ name: "x.dmg", sha256: "short" }] }) },
+      /admin_manifest_invalid/u],
+    ["an entry has no name", { body: JSON.stringify({ files: [{ sha256: "a".repeat(64) }] }) }, /admin_manifest_invalid/u],
+    ["two entries share a name", { body: JSON.stringify({ files: [
+      { name: "x.dmg", sha256: "a".repeat(64) }, { name: "x.dmg", sha256: "b".repeat(64) }] }) },
+      /admin_manifest_invalid/u]
+  ];
+  for (const [label, change, expected] of cases) {
+    const { cos, store } = fixture();
+    if (change.remove !== true) {
+      cos.objects.set("DOWNLOADS.json", { body: Buffer.from(change.body ?? published),
+        contentType: "application/json", lastModified: new Date().toISOString() });
+    }
+    if (change.failGet) cos.failGet.add(change.failGet);
+    const before = cos.objects.get("DOWNLOADS.json")?.body.toString();
+    await store.put("installer", macName, Buffer.from("mac"), "application/x-apple-diskimage");
+    await store.put("installer", winName, Buffer.from("win"), "application/vnd.microsoft.portable-executable");
+    cos.writes = [];
+    await assert.rejects(() => store.publishInstallerManifest("0.9.4"), expected, label);
+    assert.deepEqual(cos.writes, [], `${label}: nothing may be written`);
+    assert.equal(cos.objects.get("DOWNLOADS.json")?.body.toString(), before, `${label}: manifest must be unchanged`);
+    assert.equal(cos.objects.has("SHA256SUMS.txt"), false, `${label}: no checksum may be written`);
+  }
+});
+
+// An explicitly empty published list is a real state, not a read failure: it
+// means "nothing to carry over", and publishing the pair is correct.
+test("an explicitly empty published list still publishes the pair", async () => {
   const { cos, store } = fixture();
-  cos.objects.set("DOWNLOADS.json", { body: Buffer.from("not json"), contentType: "application/json", lastModified: new Date().toISOString() });
+  cos.objects.set("DOWNLOADS.json", { body: Buffer.from(JSON.stringify({ files: [] })),
+    contentType: "application/json", lastModified: new Date().toISOString() });
   await store.put("installer", "niuma-merit-macos-0.9.4.dmg", Buffer.from("mac"), "application/x-apple-diskimage");
-  await store.put("installer", "niuma-merit-windows-0.9.4-setup.exe", Buffer.from("win"), "application/vnd.microsoft.portable-executable");
+  await store.put("installer", "niuma-merit-windows-0.9.4-setup.exe", Buffer.from("win"),
+    "application/vnd.microsoft.portable-executable");
   await store.publishInstallerManifest("0.9.4");
   const manifest = JSON.parse(cos.objects.get("DOWNLOADS.json").body.toString());
   assert.equal(manifest.files.length, 2);
