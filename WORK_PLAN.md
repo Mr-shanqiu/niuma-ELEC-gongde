@@ -5387,3 +5387,24 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 同批登记的另外 4 项未决：历史未付款订单无法再履行（`purchase_flow_retired`）；`quoteMarketBatch` 无生产调用方；`admin-console` 源码与已构建产物的预览版本号不一致；统一错误码的演进未留档。
 - 提交与合入：精确文件清单提交 `8dc5ce5`（12 个测试文件，+289/−168），分支 `test/attribute-remaining-failures` → PR #9 → merge commit `ca62877`。合并后核对：`git ls-remote --heads origin main` = `ca62877`，远端 `order-flow`/`free-distribution-repository`/`free-creator-http` 三个文件 blob 与本地一致，远端分支 3 条，工作区干净。
 - 真实限制：`npm test` 退出码仍为 1，唯一原因是上述保留项。推送时 SSH 连接被断开两次，退避重试后成功；记录在此避免误读。未部署、未动线上。
+
+## 2026-10-21 服务测试第二批复核与A/B裁定
+
+- 本地main d4de51f，已对照第二批12个测试文件范围及关键源码，复用测试结果，详细结论写入失败记录§9。B应新增幂等迁移：100024=official.offwork-button、100025=official.wealth-button，冲突失败并推进分配器，测试检查累计迁移且保留006历史约束。
+- A不为普通旧未付款订单放宽付款闸门；真实已扣款的延迟回调需对账处理。指出闸门也在旧FULFILLED幂等分支之前，且仅放开会套用当前权益，不能视为安全最小修复。不可达模块保留，管理端查询串差异暂记，统一invalid_purchase_kind接受。未改产品/测试/迁移、未运行测试、未访问生产或提交部署。
+
+## 2026-10-21 批次8实施：新增编号绑定迁移（Codex §9.3 B）
+
+- 依据 Codex §9.3 执行 B。新增 `services/gongde-payments/migrations/011_official_number_bindings.sql`：固定绑定 `100024 → official.offwork-button`、`100025 → official.wealth-button`。006 未改一个字节，历史 19 条固定映射、唯一约束与历史回填断言原样保留。
+- 迁移语义：精确同绑已存在→不动；编号空闲且绑定缺失→插入；编号被其他身份占用，或该官方 id 已指向其他编号→**整条迁移失败**（不 INSERT IGNORE、不 REPLACE、不 UPDATE 旧绑定，不重编号历史 community 作品）。插入后把分配器推进到至少 `MAX(serial)+1` 且不小于原值，只增不减。
+- 冲突失败的实现方式：`scripts/migrate.mjs` 逐条发送（`multipleStatements: false`），存储过程体里的分号会被切碎，故不使用 `SIGNAL`。改为两张单行临时表做守卫，重复插入同一主键触发 `ER_DUP_ENTRY`，键名本身写明是哪种冲突（`uq_official_number_100024_100025_already_bound` / `uq_official_offwork_wealth_bound_elsewhere`）。临时表 DDL 不隐式提交，失败仍整体回滚。
+- 测试：`tests/appearance-numbers.local.test.mjs` 的保留失败改为三条——(1) 006 单文件仍是原 19 条固定映射；(2) 006+011 **累计**恰好覆盖 `OFFICIAL_ASSET_IDS` 的 21 个且编号互不重复；(3) 011 只插缺失行、两个方向都有冲突守卫、唯一的 upsert 只作用于分配器、不含存储程序体。不是把 19 全局改成 21。
+- 真实 MySQL 验证（本机一次性 `mysql:8.4` 容器，库名 `gongde_verify`，验证后容器与临时口令文件已删除，未连接生产）：
+  - 空库全量迁移：`applied=11`，官方绑定 21 条，`100024/100025` 正确，分配器 `next_serial=100026`。
+  - 已正确补过的库重跑 011：`applied=1`，绑定仍 21 条，分配器不变（no-op）。
+  - 分配器先置 200000 再重跑：仍为 200000，不回退。
+  - 编号 100024 已被 community 作品占用：迁移以 `ER_DUP_ENTRY ... uq_official_number_100024_100025_already_bound` 失败；失败后 100025 **未**被插入、分配器仍 200000、`gongde_schema_migrations` 无 011 记录——整体回滚成立。
+  - `official.offwork-button` 已被绑到 100099：以 `uq_official_offwork_wealth_bound_elsewhere` 失败，状态不变。
+  - 半完成状态（100024 已正确、100025 缺失）：补齐 100025，分配器到 100026。
+- 验证结果：编号组 13/13/0；标准入口 `npm test` 五组全绿——appearance numbers 13、local contracts 267、paid community HTTP 1、creator budgets 12、creator preview 7，全部 0 fail。
+- 未做：未执行生产迁移、未部署、未改价格/群码/安全限额/订单权益、未改 006、未连接生产库。
