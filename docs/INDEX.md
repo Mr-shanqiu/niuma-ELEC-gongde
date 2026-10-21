@@ -13,7 +13,7 @@
 - [官网首页功能展示方案](WEBSITE_HOMEPAGE_FEATURE_PLAN_20261020.zh-CN.md)：2026-10-20 首页主题、四项核心功能、真实效果展示及中英文内容补充，已由后续发布实现首页功能卡和文案调整，详见当前交接说明；本稿不是未开工指令。
 - [全免费领取与共创 PRD](PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md)：旧版规则与实现背景，包含领取码、权限、投稿、审核与交付。本轮后续开发按最新工作方案和用户确认执行，实施时同步修订权威需求。
 - [产品体验优化工作方案](PRODUCT_QUALITY_WORK_PLAN.zh-CN.md)：2026-10-11 全面评估后的四批实施安排，包含修改边界、并行分工、验收和发布条件；方案形成不等于已启动开发。
-- [形象包格式](APPEARANCE_PACK_SPEC.md)：制作与解析技术规范，授权规则以当前 PRD 为准。
+- [形象包格式](APPEARANCE_PACK_SPEC.md)：制作与解析技术规范；包格式与离线解析约束有效，授权与收费规则以当前双路线工作方案为准。
 - [通用编号](APPEARANCE_PACK_NUMBERING.zh-CN.md)：作品查找与身份规则。
 - [形象视觉规范](APPEARANCE_VISUAL_STANDARD.zh-CN.md)：画布、布局及展示要求。
 - [创作者制作指南](CREATOR_PACK_GUIDE.zh-CN.md)：供外部制作工具与创作者使用。
@@ -24,6 +24,9 @@
 - [安装与使用](INSTALLATION_GUIDE.zh-CN.md)。
 - [当前安装升级与历史未签名提示](INSTALL_UNSIGNED.md)：当前Mac904.14已签名公证，Windows0.9.4已签名，文件名沿用历史。
 - [0.9.1 发布说明](RELEASE_0.9.1.zh-CN.md)。
+- [0.9.2 发布说明](RELEASE_0.9.2.zh-CN.md)。
+- [0.9.3 发布说明](RELEASE_0.9.3.zh-CN.md)。
+- 0.9.4 当前正式版：以 [GitHub v0.9.4](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.4)、[官网下载页](https://gongde.zqscreen.cn/download.html) 和[当前交接说明](PROJECT_HANDOFF.zh-CN.md)为准，不另建发布文档。
 - [访问与运维](PROJECT_ACCESS_AND_OPERATIONS.zh-CN.md)：服务器、发布器、凭据引用和最新绑定；不是密钥库。
 - [官网发布说明](GONGDE_SITE_DEPLOYMENT.md)。
 - [长期发布台账](RELEASE_2026-09-23.md)：包含多日历史及后续补记，按条目日期和状态阅读，不把早期结论当作当前状态。
@@ -35,7 +38,7 @@
 - [共创历史卡点](CREATOR_COMMUNITY_BLOCKERS.zh-CN.md)：诊断过程，不等同于所有卡点目前仍存在。
 - [招财猫动作对齐](LUCKY_CAT_PARITY_2026-09-23.md)。
 - `visual-review/`：视觉资料。
-- [历史购买与批次规则](PURCHASE_AND_BATCH_DOWNLOAD_RULES.zh-CN.md)：旧付费流程背景，不作为当前免费领取规则。
+- [历史购买与批次规则](PURCHASE_AND_BATCH_DOWNLOAD_RULES.zh-CN.md)：旧付费流程背景与既有订单履行；当前规则（每个 1 元或官方群码免费）以双路线工作方案为准。
 - [历史群福利方案](GROUP_BENEFITS.zh-CN.md)：旧方案背景，当前码格式与周期按 PRD。
 
 ## 已归档文档
