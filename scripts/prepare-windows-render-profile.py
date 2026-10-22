@@ -22,8 +22,9 @@ def once(text, old, new):
 
 
 for version, source in (("before", baseline), ("after", (root / "src/windows/app.cpp").read_bytes())):
-    text = source.decode("utf-8")
-    bindings[version] = hashlib.sha256(source).hexdigest()
+    # Windows checkout may use CRLF; instrument the same canonical source text.
+    text = source.decode("utf-8").replace("\r\n", "\n")
+    bindings[version] = hashlib.sha256(text.encode("utf-8")).hexdigest()
     # The profiling fixture supplies public source artwork directly to the
     # renderer. It never imports a pack or changes any license validation.
     text = once(text, "niuma::AppearancePack* CurrentAppearancePack() {",
@@ -59,5 +60,6 @@ for version, source in (("before", baseline), ("after", (root / "src/windows/app
     (output / f"profile-app-{version}.cpp").write_text(text, encoding="utf-8")
 
 bindings["fixtureManifest"] = hashlib.sha256(
-    (root / "assets/appearance-packs/offwork-button/manifest.json").read_bytes()).hexdigest()
+    (root / "assets/appearance-packs/offwork-button/manifest.json").read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+bindings["lineEndingNormalization"] = "LF"
 (output / "render-profile-source.json").write_text(json.dumps(bindings, indent=2), encoding="utf-8")
