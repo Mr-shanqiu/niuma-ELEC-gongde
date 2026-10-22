@@ -21,6 +21,7 @@ import { toDataURL } from "qrcode";
 import { zipSync } from "fflate";
 import { AdminAuthService, loadAdminAuthConfiguration } from "./admin/auth.js";
 import { AdminObjectStore, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "./admin/object-store.js";
+import { loadDownloadCoverage, loadInstallerRegistry } from "./downloads/installer-registry.js";
 import type { GongdeEntitlement, GongdeOrder, OrderState } from "./domain/types.js";
 import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH } from "./domain/catalog.js";
 import { AppearanceNumberError, AppearanceNumberRepository } from "./domain/appearance-numbers.js";
@@ -512,6 +513,47 @@ export const server = createServer(async (request, response) => {
         return json(response, 503, { error: "group_benefit_code_unavailable" }, headers);
       }
     }
+    if (request.method === "GET" && url.pathname === "/api/gongde/admin/download-report") {
+      requireAdmin(request);
+      const from = parseDate(url.searchParams.get("from"), "from") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const to = parseDate(url.searchParams.get("to"), "to") ?? new Date();
+      const registry = loadInstallerRegistry();
+      const coverage = loadDownloadCoverage();
+      const countedSince = coverage.startedAt ? new Date(coverage.startedAt) : null;
+      const base = {
+        coverage: {
+          status: coverage.status,
+          startedAt: coverage.startedAt,
+          entries: coverage.entries,
+          // Static configuration describes intent only; it is not evidence that
+          // collection is working. The status below is the evidence.
+          scopeNote: "只统计官网下载页入口的请求；CDN 直链、GitHub 与转发安装包不在范围内。"
+        },
+        registry: {
+          status: registry.status,
+          items: registry.items.map((item) => ({
+            name: item.name, platform: item.platform, version: item.version, releaseId: item.releaseId,
+            bytes: item.bytes, sha256: item.sha256, countedUrl: `/api/gongde/downloads/${encodeURIComponent(item.name)}`
+          }))
+        },
+        range: { from: from.toISOString(), to: to.toISOString() }
+      };
+      if (!adminObjectStore) {
+        // Not counting is a distinct state from counting zero. Saying "0" here
+        // would read as "nobody downloaded".
+        return json(response, 200, { ...base, status: "unavailable", error: "download_store_not_enabled", summary: null }, { "cache-control": "private, no-store" });
+      }
+      try {
+        const summary = await adminObjectStore.summarizeDownloads(from, to, {
+          countedSince,
+          registeredNames: registry.items.map((item) => item.name)
+        });
+        return json(response, 200, { ...base, status: "available", summary }, { "cache-control": "private, no-store" });
+      } catch {
+        // A read failure is not an empty period.
+        return json(response, 200, { ...base, status: "error", error: "download_summary_unavailable", summary: null }, { "cache-control": "private, no-store" });
+      }
+    }
     if (request.method === "GET" && url.pathname === "/api/gongde/admin/overview") {
       requireAdmin(request);
       const from = parseDate(url.searchParams.get("from"), "from") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -519,7 +561,15 @@ export const server = createServer(async (request, response) => {
       const [selectedDay, allTime, downloads, recent, storeReady] = await Promise.all([
         store.summarizeOrders(from, to),
         store.summarizeOrders(new Date(0), new Date()),
-        adminObjectStore ? adminObjectStore.summarizeDownloads(from, to) : Promise.resolve({ total: 0, period: 0, byFile: [] }),
+        // Never substitute a zero object here: a missing store or a failed read
+        // must reach the page as "unavailable", not as "nobody downloaded".
+        adminObjectStore
+          ? adminObjectStore.summarizeDownloads(from, to, {
+              countedSince: (() => { const startedAt = loadDownloadCoverage().startedAt; return startedAt ? new Date(startedAt) : null; })(),
+              registeredNames: loadInstallerRegistry().items.map((item) => item.name)
+            }).then((summary) => ({ status: "available" as const, summary }))
+              .catch(() => ({ status: "error" as const, summary: null }))
+          : Promise.resolve({ status: "unconfigured" as const, summary: null }),
         store.listOrders({ effectiveOnly: true, limit: 6, offset: 0 }),
         store.ready()
       ]);
@@ -673,11 +723,24 @@ export const server = createServer(async (request, response) => {
     if (request.method === "GET" && publicDownloadMatch) {
       if (!adminObjectStore) return json(response, 503, { error: "download_store_not_enabled" });
       const name = publicDownloadMatch[1];
-      if (!/\.(?:dmg|exe)$/iu.test(name)) return json(response, 404, { error: "download_not_found" });
-      const platform = name.endsWith(".dmg") ? "macos" : "windows";
-      try { await adminObjectStore.recordDownload(name, platform, new Date()); }
-      catch (error) { audit("download_count_failed", { name }); }
-      response.writeHead(302, { location: adminObjectStore.publicUrl("installer", name), "cache-control": "no-store" });
+      // Only a file that is currently registered can be counted or forwarded.
+      // The old check accepted any .dmg/.exe name, so an unregistered file was
+      // counted and then redirected to the CDN, where it 404s. The target now
+      // comes from the registry entry, never from the request path.
+      const registry = loadInstallerRegistry();
+      if (registry.status !== "available") return json(response, 503, { error: "download_registry_unavailable" }, { "cache-control": "no-store" });
+      const entry = registry.items.find((item) => item.name === name);
+      if (!entry) return json(response, 404, { error: "download_not_found" }, { "cache-control": "no-store" });
+      let counted = true;
+      try { await adminObjectStore.recordDownload(entry.name, entry.platform, new Date()); }
+      catch (error) { counted = false; audit("download_count_failed", { name: entry.name }); }
+      // A counting failure must not block the download itself. The redirect is
+      // no-store in both cases so no cache can skip the next count.
+      response.writeHead(302, {
+        location: entry.publicDownloadUrl,
+        "cache-control": "no-store",
+        ...(counted ? {} : { "x-gongde-count": "failed" })
+      });
       return response.end();
     }
     if (request.method === "POST" && url.pathname === "/api/gongde/checkout") {

@@ -11,6 +11,7 @@ const separate = new Set([
   'free-creator-preview.local.test.mjs',
   'appearance-numbers.local.test.mjs',
   'appearance-numbers-mysql.local.test.mjs',
+  'download-counting.local.test.mjs',
 ]);
 const core = readdirSync(new URL('../tests/', import.meta.url))
   .filter(name => name.endsWith('.test.mjs') && !separate.has(name))
@@ -22,6 +23,8 @@ const groups = [
     ['--max-old-space-size=64', '--test', '--test-concurrency=1', ...core]],
   ['paid community HTTP (actual server/signing; catalog, COS and payment are mocks)',
     ['--max-old-space-size=64', '--experimental-test-module-mocks', '--test', 'tests/market-http.local.test.mjs']],
+  ['download counting (actual server; COS is an in-memory client, redirects are not followed)',
+    ['--max-old-space-size=64', '--experimental-test-module-mocks', '--test', 'tests/download-counting.local.test.mjs']],
   ['creator budgets (mock persistence)',
     ['--expose-gc', '--max-old-space-size=64', 'tests/free-creator-budgets.local.test.mjs']],
   ['creator preview (DOM stubs; not actual browser)',

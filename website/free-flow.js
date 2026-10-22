@@ -753,6 +753,36 @@ async function delivery() {
   addEventListener('pagehide', () => clearTimeout(timer));
   await refresh();
 }
+// Installer downloads go through the API's counting redirect. The redirect
+// target comes from the server's installer registry, so the link never decides
+// where the file comes from. The click is counted by a no-store request whose
+// answer we ignore: if counting is broken or the network fails, the visitor
+// still goes straight to the file, because a download must not depend on the
+// statistics working. The 302 body is empty, so nothing of the installer is
+// fetched twice.
+const COUNTED_DOWNLOAD_BASE = '/api/gongde/downloads/';
+const installerName = value => {
+  try {
+    const segment = new URL(value).pathname.split('/').filter(Boolean).pop() || '';
+    return /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(segment) ? segment : null;
+  } catch { return null; }
+};
+function offerInstaller(link, publicUrl) {
+  const name = installerName(publicUrl);
+  if (!name) { link.href = publicUrl; return; }
+  const counted = COUNTED_DOWNLOAD_BASE + encodeURIComponent(name);
+  link.href = counted;
+  link.addEventListener('click', event => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    const go = () => { location.href = publicUrl; };
+    // Counting is best-effort and bounded: a slow API must not stall the
+    // download, so the direct link opens whether or not this settles.
+    const timer = setTimeout(go, 1200);
+    fetch(counted, { redirect: 'manual', cache: 'no-store', credentials: 'omit' })
+      .catch(() => {}).finally(() => { clearTimeout(timer); go(); });
+  });
+}
 async function installers() {
   try {
     const result = await request('/installers');
@@ -776,7 +806,7 @@ async function installers() {
       if (item.systemRequirements) card.append(node('p', `系统要求：${item.systemRequirements}`, 'flow-meta'));
       card.append(node('p', platform === 'Mac' ? (current ? (document.documentElement.lang === 'en' ? 'Open the DMG, double-click Install NiuMa Merit, then select Install & Open. This build is signed with Developer ID and notarized by Apple. After installation, follow the prompts to enable Input Monitoring.' : '打开 DMG，双击“安装牛马电子功德”，再点“安装并打开”。本版已完成开发者签名和苹果公证；安装后按提示开启输入监控。') : '下载后打开 DMG，将应用拖入“应用程序”。') : platform === 'Windows' ? '下载后双击 EXE，按中文安装步骤完成安装。' : '下载后请查看相应安装说明。', 'flow-meta'));
       const link = node('a', current ? `免费下载 ${platform} 版` : `下载 ${platform} ${item.version} 旧版`, current ? 'button primary' : 'button');
-      link.href = url; link.rel = 'noreferrer'; card.append(link);
+      offerInstaller(link, url); link.rel = 'noreferrer'; card.append(link);
       link.dataset.installerPlatform = platform === 'Mac' ? 'macos' : platform === 'Windows' ? 'windows' : '';
       link.dataset.installerSha256 = item.sha256;
       link.dataset.installerBytes = String(item.bytes);

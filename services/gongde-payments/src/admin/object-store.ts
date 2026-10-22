@@ -17,6 +17,14 @@ export interface AdminDownloadSummary {
   total: number;
   period: number;
   byFile: Array<{ fileName: string; total: number; period: number }>;
+  /** Per-platform totals. A platform with no counted events reports 0, not null. */
+  byPlatform: Record<"macos" | "windows", { total: number; period: number }>;
+  /** Earliest counted event, or null when nothing has been counted yet. */
+  earliest: string | null;
+  /** Events recorded before the counting start, kept but reported separately. */
+  legacyCount: number;
+  /** Events whose file name is not in the current registry: counted by the store, not attributable. */
+  unattributed: number;
 }
 
 export interface InstallerManifestSummary {
@@ -396,29 +404,62 @@ export class AdminObjectStore {
     });
   }
 
-  async summarizeDownloads(createdFrom: Date, createdTo: Date): Promise<AdminDownloadSummary> {
+  async summarizeDownloads(
+    createdFrom: Date,
+    createdTo: Date,
+    options: { countedSince?: Date | null; registeredNames?: readonly string[] } = {}
+  ): Promise<AdminDownloadSummary> {
     const eventPrefix = `${prefixes.installer}.download-events/`;
-    const records = (await this.#listObjects(prefixes.installer)).flatMap((item) => {
+    // Only the events prefix is listed. Every download writes one object that is
+    // never deleted, so this listing grows with traffic forever; the page caches
+    // the result briefly rather than repeating it on each tab switch. A daily
+    // rollup object is the next step if the listing becomes slow, but that needs
+    // an atomic counter this store does not have, so it is not done here.
+    const records = (await this.#listObjects(eventPrefix)).flatMap((item) => {
       const key = item.Key ?? "";
       if (!key.startsWith(eventPrefix)) return [];
       const match = key.slice(eventPrefix.length).match(/^(\d+)-[a-f0-9]+-(.+)$/u);
       if (!match) return [];
       const downloadedAt = new Date(Number(match[1]));
       if (!Number.isFinite(downloadedAt.getTime())) return [];
-      return [{ fileName: match[2], downloadedAt }];
+      // The platform comes from the registered object name, which is what the
+      // counting endpoint verified before recording. Reading every event body
+      // to repeat that would multiply the cost of an already linear scan.
+      const platform = /\.dmg$/iu.test(match[2]) ? "macos" : /\.exe$/iu.test(match[2]) ? "windows" : null;
+      return [{ fileName: match[2], downloadedAt, platform }];
     });
-    const names = [...new Set(records.map((item) => item.fileName))].sort();
+    const countedSince = options.countedSince ?? null;
+    const registered = options.registeredNames ? new Set(options.registeredNames) : null;
+    const inPeriod = (item: { downloadedAt: Date }) => item.downloadedAt >= createdFrom && item.downloadedAt < createdTo;
+    const counted = countedSince === null ? records : records.filter((item) => item.downloadedAt >= countedSince);
+    const legacy = countedSince === null ? [] : records.filter((item) => item.downloadedAt < countedSince);
+    const names = [...new Set(counted.map((item) => item.fileName))].sort();
+    const totalFor = (list: typeof records) => list.length;
     return {
-      total: records.length,
-      period: records.filter((item) => item.downloadedAt >= createdFrom && item.downloadedAt < createdTo).length,
+      total: totalFor(counted),
+      period: counted.filter(inPeriod).length,
       byFile: names.map((fileName) => {
-        const matching = records.filter((item) => item.fileName === fileName);
-        return {
-          fileName,
-          total: matching.length,
-          period: matching.filter((item) => item.downloadedAt >= createdFrom && item.downloadedAt < createdTo).length
-        };
-      })
+        const matching = counted.filter((item) => item.fileName === fileName);
+        return { fileName, total: matching.length, period: matching.filter(inPeriod).length };
+      }),
+      byPlatform: {
+        macos: {
+          total: counted.filter((item) => item.platform === "macos").length,
+          period: counted.filter((item) => item.platform === "macos" && inPeriod(item)).length
+        },
+        windows: {
+          total: counted.filter((item) => item.platform === "windows").length,
+          period: counted.filter((item) => item.platform === "windows" && inPeriod(item)).length
+        }
+      },
+      earliest: counted.reduce<string | null>((soonest, item) => {
+        const iso = item.downloadedAt.toISOString();
+        return soonest === null || iso < soonest ? iso : soonest;
+      }, null),
+      legacyCount: legacy.length,
+      // An event for a name the registry no longer lists is still a real request,
+      // so it stays in the totals; it just cannot be attributed to a platform.
+      unattributed: registered === null ? 0 : counted.filter((item) => !registered.has(item.fileName)).length
     };
   }
 }

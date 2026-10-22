@@ -18,6 +18,7 @@ import { FreeDistributionRepository, recordFreeContribution } from "./repository
 import { assertExcluded, assertFreeExclusionsReady, seedFreeDistributionExclusions } from "./exclusions.js";
 import { FREE_RETENTION_DELETED_ACTION, runFreeRetention } from "./retention.js";
 import { stableJson, MAX_DELIVERY_BYTES, DOWNLOAD_WINDOW_MS } from "./codes.js";
+import { loadInstallerRegistry } from "../downloads/installer-registry.js";
 import { FreeDistributionError, type Claim, type ClaimItemSnapshot } from "./types.js";
 import type { OfficialAppearanceState } from "../domain/appearance-number-query.js";
 import type { AppearanceNumberRepository } from "../domain/appearance-numbers.js";
@@ -55,21 +56,9 @@ const parseNumber = (v: string | null, fallback: number, max: number) => {
   return Number(v);
 };
 function installers(): Installer[] {
-  const path = process.env.GONGDE_FREE_INSTALLERS_FILE;
-  try {
-    const raw = JSON.parse(path ? readFileSync(path, "utf8") :
-      readFileSync(new URL("../../src/free-distribution/installers.json", import.meta.url), "utf8"));
-    if (!Array.isArray(raw.items) || raw.items.length > 12) throw new Error();
-    return raw.items.map((entry: Installer) => {
-      const url = new URL(entry.publicDownloadUrl);
-      if (!["windows", "macos"].includes(entry.platform) || !/^[A-Za-z0-9._-]{1,128}$/u.test(entry.releaseId) ||
-          !/^\d+\.\d+\.\d+$/u.test(entry.version) || !Number.isSafeInteger(entry.bytes) || entry.bytes < 1 ||
-          !/^[a-f0-9]{64}$/u.test(entry.sha256) || url.protocol !== "https:" || url.username || url.password ||
-          !["download.gongde.zqscreen.cn", "github.com", "gongde-download-1460392746.cos.ap-shanghai.myqcloud.com"].includes(url.hostname) ||
-          typeof entry.perpetualCompatible !== "boolean") throw new Error();
-      return entry;
-    });
-  } catch { return []; }
+  // Same registry the counting redirect reads, so the published list and the
+  // countable names cannot drift apart.
+  return loadInstallerRegistry().items.map(({ name: _name, ...entry }) => entry);
 }
 function safeCard({ snapshot, popularity: _popularity, ...card }: CatalogItem) {
   return { ...card, assetId: snapshot.assetId, sourceKind: snapshot.sourceKind,
