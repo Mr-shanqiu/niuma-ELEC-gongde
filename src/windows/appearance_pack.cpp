@@ -75,6 +75,7 @@ struct RenderRasterCache {
     if (pack.layers.size() > entries.size()) return;
     owner = &pack;
     count = pack.layers.size();
+    // Two samples per displayed pixel preserve edges under subpixel transforms.
     density = pixelDensity;
     for (size_t i = 0; i < count; ++i) {
       const auto& layer = pack.layers[i];
@@ -90,8 +91,8 @@ struct RenderRasterCache {
         if (!std::isfinite(displayed) || displayed <= 0) return 0;
         return static_cast<UINT>(std::min(std::ceil(displayed), static_cast<float>(original)));
       };
-      entry.width = dimension(layer.width * density * maximumX, layer.image.image->GetWidth());
-      entry.height = dimension(layer.height * density * maximumY, layer.image.image->GetHeight());
+      entry.width = dimension(layer.width * density * maximumX * 2.0f, layer.image.image->GetWidth());
+      entry.height = dimension(layer.height * density * maximumY * 2.0f, layer.image.image->GetHeight());
     }
   }
   void Invalidate(const Gdiplus::Image* source) {

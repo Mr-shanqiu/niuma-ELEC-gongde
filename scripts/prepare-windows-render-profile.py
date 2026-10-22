@@ -21,7 +21,9 @@ def once(text, old, new):
     return text.replace(old, new)
 
 
-for version, source in (("before", baseline), ("after", (root / "src/windows/app.cpp").read_bytes())):
+previous_commit = "59a2304aee8c83b95889d692ca01d2db9d17fc1b"
+previous = subprocess.check_output(["git", "show", previous_commit + ":src/windows/app.cpp"], cwd=root)
+for version, source in (("before", baseline), ("previous", previous), ("after", (root / "src/windows/app.cpp").read_bytes())):
     # Windows checkout may use CRLF; instrument the same canonical source text.
     text = source.decode("utf-8").replace("\r\n", "\n")
     bindings[version] = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -65,9 +67,9 @@ for version, source in (("before", baseline), ("after", (root / "src/windows/app
         return f'#include "{include.as_posix()}"' if include.is_file() else match.group(0)
     text = re.sub(r'^#include "([^"]+)"', absolute_include, text, flags=re.M)
     (output / f"profile-app-{version}.cpp").write_text(text, encoding="utf-8")
-    pack_source = (subprocess.check_output(["git", "show",
-        "7370e7ab5e5be0c626858930ba34af172151d8ce:src/windows/appearance_pack.cpp"], cwd=root)
-        if version == "before" else (root / "src/windows/appearance_pack.cpp").read_bytes())
+    pack_source = ((root / "src/windows/appearance_pack.cpp").read_bytes() if version == "after"
+        else subprocess.check_output(["git", "show", (previous_commit if version == "previous"
+        else "7370e7ab5e5be0c626858930ba34af172151d8ce") + ":src/windows/appearance_pack.cpp"], cwd=root))
     pack_text = pack_source.decode("utf-8").replace("\r\n", "\n")
     bindings[version + "Pack"] = hashlib.sha256(pack_text.encode("utf-8")).hexdigest()
     pack_text = re.sub(r'^#include "([^"]+)"', absolute_include, pack_text, flags=re.M)

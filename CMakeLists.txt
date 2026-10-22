@@ -101,7 +101,7 @@ if(WIN32)
     set_property(TARGET niuma-woodfish-render-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_options(niuma-woodfish-render-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
   endif()
-  foreach(phase IN ITEMS before after)
+  foreach(phase IN ITEMS before previous after)
     add_executable(niuma-render-profile-${phase}
       scripts/profile-windows-render-path.cpp
       third_party/miniz/miniz.c
@@ -115,6 +115,8 @@ if(WIN32)
       NIUMA_PROFILE_VERSION="${phase}")
     if(phase STREQUAL "after")
       target_compile_definitions(niuma-render-profile-${phase} PRIVATE NIUMA_PROFILE_AFTER)
+    elseif(phase STREQUAL "previous")
+      target_compile_definitions(niuma-render-profile-${phase} PRIVATE NIUMA_PROFILE_PREVIOUS)
     endif()
     target_link_libraries(niuma-render-profile-${phase} PRIVATE psapi shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
     if(MSVC)

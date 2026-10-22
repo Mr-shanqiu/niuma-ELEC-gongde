@@ -199,6 +199,10 @@ int wmain(int argc, wchar_t** argv) {
       gState.todayTotal = 12345;
       for (const int dpi : {96, 192, 288}) for (const bool animated : {false, true}) {
         if (mode == 2 && (!countdown || dpi != 192 || !animated)) continue;
+#if defined(NIUMA_PROFILE_PREVIOUS)
+        // Only the new memory comparison is needed for the unchanged prior candidate.
+        if (mode != 1 || !countdown || dpi != 192) continue;
+#endif
         gState.dpi = static_cast<UINT>(dpi);
         gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
         gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
@@ -223,12 +227,17 @@ int wmain(int argc, wchar_t** argv) {
           RenderLayeredWindow(10000 + (animated ? (frame % 15) * 16 : 0));
         perf::enabled = false;
         observedPrivatePeakBytes = std::max(observedPrivatePeakBytes, PrivateBytes());
-#if defined(NIUMA_PROFILE_AFTER)
+        std::size_t sceneRasterBytes = 0, sceneArtworkBytes = 0;
+#if defined(NIUMA_PROFILE_AFTER) || defined(NIUMA_PROFILE_PREVIOUS)
         Check(niuma::gRenderRasterCache.bytes <= niuma::RenderRasterCache::kByteLimit,
             "decoded cache budget");
         rasterPeakBytes = std::max(rasterPeakBytes, niuma::gRenderRasterCache.bytes);
+        sceneRasterBytes = niuma::gRenderRasterCache.bytes;
+#endif
+#if defined(NIUMA_PROFILE_AFTER)
         Check(gArtworkSurface.bytes() <= kArtworkByteLimit, "artwork surface budget");
         artworkPeakBytes = std::max(artworkPeakBytes, gArtworkSurface.bytes());
+        sceneArtworkBytes = gArtworkSurface.bytes();
 #endif
         if (!first) output << ',';
         first = false;
@@ -237,6 +246,8 @@ int wmain(int argc, wchar_t** argv) {
             << ",\"dpi\":" << dpi << ",\"animated\":" << (animated ? "true" : "false")
             << ",\"firstRequestedFrameMs\":" << firstRequestedFrameMs
             << ",\"privateBytes\":" << PrivateBytes()
+            << ",\"decodedCacheBytes\":" << sceneRasterBytes
+            << ",\"artworkCacheBytes\":" << sceneArtworkBytes
             << ",\"stages\":{";
         WriteStats(output);
         output << "},\"pixelHashes\":[";
