@@ -90,8 +90,8 @@ struct RenderRasterCache {
         if (!std::isfinite(displayed) || displayed <= 0) return 0;
         return static_cast<UINT>(std::min(std::ceil(displayed), static_cast<float>(original)));
       };
-      entry.width = dimension(layer.width * density * maximumX, entry.source->GetWidth());
-      entry.height = dimension(layer.height * density * maximumY, entry.source->GetHeight());
+      entry.width = dimension(layer.width * density * maximumX, layer.image.image->GetWidth());
+      entry.height = dimension(layer.height * density * maximumY, layer.image.image->GetHeight());
     }
   }
   void Invalidate(const Gdiplus::Image* source) {
