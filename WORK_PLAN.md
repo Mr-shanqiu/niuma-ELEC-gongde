@@ -5546,3 +5546,39 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - N1：`appearance_publication_unavailable`文案改为「操作结果未确认，请重新读取核对。」
 - 反向确认：撤掉S3继承后新用例失败；把列表改回`publicationState()`后HTTP用例失败；短路释放分支后MySQL用例2项失败（含独立handle那项）。
 - 验证：payments `npm test`全部通过（local contracts 285、publication lock cleanup 5、其余不变）；真实MySQL 8.4隔离容器锁用例3/3；管理端`npm test`28/28、`tsc -b`+`vite build`通过；浏览器确认N1文案与列表读取失败态。边界不变：未合入、未部署、未访问生产、未改共享配置、未恢复冻结owner。
+
+## 2026-10-22 PR #12第二实施段补修技术评审通过
+
+- 核对本地与GitHub head b06db1f324d7e65fc359a696acd7eacb86881786（parent efff9f9、PR OPEN），仅审10文件新增修订。S1/S2/S3/N1全部关闭，无新增阻断或必须补修项；F1—F8保持结案。完整管理端本地候选技术验收版本为b06db1f，不把它当作已部署/生产验收或新一轮用户视觉确认。
+- 复用已交测试、构建、反向验证及浏览器结果，未重跑。结论追加原PR12评审文件第五轮；主方案§16.5统计按回执校正为285 tests /284 pass /0 fail /1 skipped，§16.6分清真实MySQL正常释放与驱动注入异常清理，不为文案另开代码轮次。
+- 未改产品源码、未合入部署、未访问生产、未恢复冻结owner、未改客户端或签名。后续不再往返不变代码，统一进入完整候选的用户确认与发布准备；生产执行仍需按既定边界明确授权。
+
+## 2026-10-22 完整候选本地预览与统一发布方案
+
+- 用户确认技术验收版本 b06db1f；本轮只交付本地预览地址和最短发布方案，不新增功能、不重调视觉。产品代码未改，`WORK_PLAN.md` 与本轮记录属于本地工作材料，未提交。
+- 预览：管理端 `http://127.0.0.1:8099/admin/`、官网 `http://127.0.0.1:8098/download.html`，合成服务端自动给会话，无登录步骤；不连数据库/COS/支付/生产，所有写入只改进程内存。复用已有构建与 70 张截图，本轮仅确认两端 200、六个入口可打开。
+- 本机实际构建了两份待发布产物：API 归档 sha256 `add37d3a98a191cdfde01a2f120ec7a4173cfca85f67e12aaf9c7a1e9309a4c2`（1,259,787 字节，79 文件）；站点归档 sha256 `88534770317e37193aa00acfff73e7eb1f3a688943ec682e95c14b2aba939fd3`、tree `5620fbaf…`（20,725,793 字节，243 文件，含新管理端 bundle）。两者均出自 b06db1f。
+- 顺序：API 先、官网与管理端后，背靠背执行。依据是对称不适配——新管理端要求 `publicationRevision`，旧 API 不返回；新 API 拒绝旧管理端的无版本 PATCH（400 `appearance_publication_revision_required`）。安全停发接口两边一致不受影响。
+- `GONGDE_DOWNLOAD_COUNT_SINCE` 绑官网切换完成时刻（不是 API 切换、不是构建时刻），此前事件进 `legacyCount` 单列。该变量无默认值，缺失即显示「未接入」；且不在 `production.env.example`、不在受管发布器 `ADMIN_ENV` 白名单，草拟 owner 还断言 Env 与线上逐项相同，现有 payload 路径带不进去。
+- 数据库不需要迁移：分支相对 main 无新增迁移，新版本用的两张表由已上线的 008 建立，形象发布状态在 COS。但归档相对线上多 `migrations/011…` 与 `scripts/copy-assets.mjs`，受管发布器比对 `locked-source.json` 会拒绝（`migration_or_scripts_change_requires_main_control`），需要主控侧锁文件更新。
+- 现有入口需四处适配：登记文件须按线上字节 `dacf0be0` 打包（仓库值是 `94c3f069`，内容逐字段相同仅排版不同）；锁文件更新；新 release 需要新的固定 owner 事务（四钩准入），草拟 owner 当前绑定的 fe98d7b1 与旧范围需整体重算；计数起点变量需显式进 payload 与 env 示例。
+- 回退：API 回 release `78e50c53…`/镜像 `sha256:a92e406…`（旧容器改名保留，另有 45e1912b、4eaf762b、c850a853 可回；但「成功激活后回退」仍被受管入口的 numbering006 与 predecessor 闸门拒绝，反向条款未安装未执行）；官网页回 tree `b9acc5a9…`/sha256 `aa85303b…`（本轮已按 `.sha256` 复核），该归档内含旧管理端，回退站点即回退管理端。
+- 最小发布后检查：`deploy-gongde-api status` 新 release 且 healthy、`/api/live` 200、`/api/gongde/v2/installers` 仍 10 条；计数重定向返回 302、`no-store`、无 `x-gongde-count: failed`，`download-report` 为 available+configured 且起点与回执一致；管理列表返回 `publicationRevision`，过期版本 PATCH 期望 409 且发布对象版本不变；站点 `/admin/` 引用新 bundle、下载页含计数链接。
+- 新发现两处缺陷（未修，交用户决定）：仓库 `services/gongde-payments/Dockerfile` 未 `COPY scripts`，与新的 build 脚本冲突，用它构建会 `MODULE_NOT_FOUND`（本机已复现）；本地 `policy/Dockerfile.gongde-api` 副本与线上实际配方不一致，不能当发布依据。详见主方案 §17。
+- 边界不变：未合入、未部署、未访问生产、未改共享配置或 IAM、未恢复冻结 owner、未改或重签客户端。本轮 head 未变（仍 b06db1f），记录只改本地未提交材料，不需要重审已通过代码。
+
+## 2026-10-22 最小发布适配与生产只读核对
+
+上一条「完整候选本地预览与统一发布方案」中以下四句经生产只读核对后作废，以本条为准：API 归档 `add37d3a…` 作废（登记文件字节不对，受管守卫会拒绝）；计数起点不取官网切换完成时刻，改为 API 切换窗口开始时固定；「本地 `policy/Dockerfile.gongde-api` 副本与线上不一致」这一疑问已查明——本地 `free-090-deploy` 副本与线上逐字节相同（`d5dd2762…`，1593 字节），真正的阻断是它本身缺 `COPY scripts`；「数据库迁移不需要」结论不变，依据换为实测（001–010 已应用、011 未应用、100024/100025 两条绑定已在、最大序号 100025）。
+
+- 产品代码：仅新增一个构建修复 `ae7c0dc`（仓库内 `Dockerfile` build 阶段补 `COPY scripts ./scripts`，一行）。已推送，PR #12 仍 OPEN。未合入。
+- 最终 API 候选：`dist/gongde-api-deploy/gongde-api-49354a3ce160b9b7159c1cf0725b5ddf8f37c0492d4adeae87c4e9a727464d90.tar.gz`，1,259,767 字节，79 文件；其中 `src/free-distribution/installers.json` 用线上字节 `dacf0be0…`。相对线上归档 `78e50c53…`：4 新增（`migrations/011…`、`scripts/copy-assets.mjs`、`src/admin/publication-lock.ts`、`src/downloads/installer-registry.ts`）、6 修改（`package.json`、`src/admin/object-store.ts`、`src/creators/public-preview.ts`、`src/free-distribution/installers.json`、`src/free-distribution/runtime.ts`、`src/server.ts`）、0 删除。本机从该归档解包 `npm ci` + `npm run build` 复现，`dist` 清单 `94de7735…`（60 文件）与记录完全一致。
+- 编译产物相对线上镜像：3 新增（`dist/admin/publication-lock.js`、`dist/downloads/installer-registry.js`、`dist/free-distribution/installers.json`）、4 修改（`dist/admin/object-store.js`、`dist/creators/public-preview.js`、`dist/free-distribution/runtime.js`、`dist/server.js`）、0 删除。线上 57 文件，候选 60 文件。
+- 站点归档未变：`gongde-site-5620fbaf….tar.gz`，sha256 `88534770…`，tree `5620fbaf…`，20,725,793 字节（限额 20,971,520，余量 245,727），243 文件 / 283 成员，全部在 `deploy-gongde-root` 白名单内，`healthz.txt` 内容正确。
+- 真实阻断（需用户授权才能解除）：宿主 `/var/lib/gongde-api-deploy/policy/Dockerfile.gongde-api`（`d5dd2762…`，1593 字节）build 阶段没有 `COPY scripts`，而 `npm run build` 现在是 `tsc && node scripts/copy-assets.mjs`，本机按同样步骤复现缺 `scripts/` 即 `MODULE_NOT_FOUND`。受管 `build_candidate()` 会在构建阶段失败，走不到切换。最小改动一行（改后 1674 字节、`b999b9ee…`），属生产策略文件变更，本轮未执行。
+- 生产基线（只读核对）：release `78e50c53…`、容器 `zqscreen-gongde-api-1` = `7862e61a…`、镜像 `sha256:a92e406…`，healthy；`baseline.json` 与 `state.json` 一致；无 `pending.json`；`numbering006` 受管闸门已满足（`deploy-complete.json` 绑定 run_id `5fb18f23…`/release `c9380eaa…`/镜像 `b741db44…`，与 `state.json` 相符）；`creator-stage.json` = `author-only`；`free-distribution.json` = `restrict: true`、`release_ref 7cebd6d7…`；线上容器没有 `GONGDE_DOWNLOAD_COUNT_SINCE`；`/api/gongde/admin/download-report` 当前 404；站点 `free-flow.js` 当前无计数链接。
+- 准入链实测：用真实 launcher + baseline + extension 离线复算，新 release 的 `free_environment()` 只返回 `GONGDE_FREE_DISTRIBUTION_ENABLED=false`，`require_compatible_release()` 以 `free_release_only_restriction` 拒绝；线上 release 仍被正常接纳。四钩追加是必需项。
+- 锁集合：线上 11 项 / 1185 字节 / `9cdd78c2…`（序列化已复现），新集合 13 项 / 1395 字节 / `f3910b5b…`。受管 `build_candidate()` 只读锁文件、不改写，因此新集合直接作为参数传入，生产锁文件只在切换窗口内更新一次。
+- owner 已按新候选重写（`.local-work/candidates/admin-console-release-20261022/owner/`，本地未安装）：三个动作 build / activate / rollback；四个受管文件（策略文档、extension、宿主配方、锁集合）逐字节断言；`dist` 增量按 3 新增 + 4 修改逐文件摘要断言，不再沿用「仅一个文件变化」「dist 集合不变」的旧假设；计数起点在 `activate()` 入口取 UTC 秒级时间，写入策略文档并随环境变量投影，切换前断言「相对线上环境只新增这一个键、其余键值逐项相同」，切换后回读容器确认；rollback 先走受管 `switch()` 切回、之后才恢复受管文件（顺序不能反）。
+- 验证（本地、离线）：`chain-check.py` 全部通过（含反向准入、缺策略 fail-closed、计数键只增不减）；`negative-controls.py` 六个变异全部按预期失败（含「只加 matcher」这一上一版草稿的错误形态）；`owner-constants-check.py` 全部通过（归档摘要、成员数、清单摘要、锁集合、dist 增量、配方单行差异、站点归档限额与白名单）。
+- 边界：未合入、未在生产构建或切换、未写生产配置、未执行迁移、未改 IAM、未改或重签客户端；未打印或导出任何凭据，未读取客户订单或无关产品数据。交回后等待一次明确的「发布」指令。
