@@ -18,6 +18,7 @@ import { FreeDistributionRepository, recordFreeContribution } from "./repository
 import { assertExcluded, assertFreeExclusionsReady, seedFreeDistributionExclusions } from "./exclusions.js";
 import { FREE_RETENTION_DELETED_ACTION, runFreeRetention } from "./retention.js";
 import { stableJson, MAX_DELIVERY_BYTES, DOWNLOAD_WINDOW_MS } from "./codes.js";
+import { loadInstallerRegistry } from "../downloads/installer-registry.js";
 import { FreeDistributionError, type Claim, type ClaimItemSnapshot } from "./types.js";
 import type { OfficialAppearanceState } from "../domain/appearance-number-query.js";
 import type { AppearanceNumberRepository } from "../domain/appearance-numbers.js";
@@ -55,21 +56,9 @@ const parseNumber = (v: string | null, fallback: number, max: number) => {
   return Number(v);
 };
 function installers(): Installer[] {
-  const path = process.env.GONGDE_FREE_INSTALLERS_FILE;
-  try {
-    const raw = JSON.parse(path ? readFileSync(path, "utf8") :
-      readFileSync(new URL("../../src/free-distribution/installers.json", import.meta.url), "utf8"));
-    if (!Array.isArray(raw.items) || raw.items.length > 12) throw new Error();
-    return raw.items.map((entry: Installer) => {
-      const url = new URL(entry.publicDownloadUrl);
-      if (!["windows", "macos"].includes(entry.platform) || !/^[A-Za-z0-9._-]{1,128}$/u.test(entry.releaseId) ||
-          !/^\d+\.\d+\.\d+$/u.test(entry.version) || !Number.isSafeInteger(entry.bytes) || entry.bytes < 1 ||
-          !/^[a-f0-9]{64}$/u.test(entry.sha256) || url.protocol !== "https:" || url.username || url.password ||
-          !["download.gongde.zqscreen.cn", "github.com", "gongde-download-1460392746.cos.ap-shanghai.myqcloud.com"].includes(url.hostname) ||
-          typeof entry.perpetualCompatible !== "boolean") throw new Error();
-      return entry;
-    });
-  } catch { return []; }
+  // Same registry the counting redirect reads, so the published list and the
+  // countable names cannot drift apart.
+  return loadInstallerRegistry().items.map(({ name: _name, ...entry }) => entry);
 }
 function safeCard({ snapshot, popularity: _popularity, ...card }: CatalogItem) {
   return { ...card, assetId: snapshot.assetId, sourceKind: snapshot.sourceKind,
@@ -638,7 +627,8 @@ export function createFreeDistributionRuntime(deps: DistributionDependencies) {
           if (session.authorization?.kind !== "GROUP") return send({valid:false,authorized:false});
           return send({valid:!!session.authorization,authorized:!!session.authorization,...(session.authorization?{
             kind:session.authorization.kind,authorPublicNumber:session.authorization.publicNumber,
-            maxItems:session.authorization.limit,expiresAt:session.authorization.expiresAt}:{})});
+            maxItems:session.authorization.limit,expiresAt:session.authorization.expiresAt,
+            ...(session.authorization.handover?{handover:true,handoverUntil:session.authorization.handoverUntil}:{})}:{})});
         }
         if(path==="/access/verify"&&method==="POST") {
           if(!await ready())throw new FreeDistributionError("access_service_unavailable",503);
@@ -647,16 +637,25 @@ export function createFreeDistributionRuntime(deps: DistributionDependencies) {
           if(Object.keys(body).some(k=>k!=="code"))throw new FreeDistributionError("request_invalid",400);
           const group = await repo().getGroupCode();
           const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
-          if (!/^GD\d{6}$/u.test(code) || group.status !== "ACTIVE" || !group.code || code !== group.code) {
+          // This route does NOT decide which codes are still usable. Enumerating
+          // them here would be wrong: every rotation's replaced code keeps its
+          // own hour, so more than one old code can be valid at once, and a
+          // single "previousCode" comparison silently drops the earlier ones.
+          // The repository resolves the submitted value to its own token and
+          // authorizes that token against its own deadline.
+          if (!/^GD\d{6}$/u.test(code) || group.status !== "ACTIVE" || !group.code) {
             throw new FreeDistributionError("access_code_invalid", 400);
           }
-          const result=await repo().verifyCode({code,sessionToken:token(request)||undefined});
+          // The guard above proves familyId is present; the route never serves
+          // the "no family" snapshot because status must be ACTIVE.
+          const result=await repo().verifyCode({code,sessionToken:token(request)||undefined,familyId:group.familyId!});
           const a=result.session.authorization!;
           if (a.kind !== "GROUP" || a.codeFamilyId !== group.familyId) {
             await repo().clearAccess(result.sessionToken);
             throw new FreeDistributionError("access_code_invalid", 400);
           }
-          return send({valid:true,authorized:true,kind:a.kind,authorPublicNumber:a.publicNumber,maxItems:a.limit,expiresAt:a.expiresAt},200,
+          return send({valid:true,authorized:true,kind:a.kind,authorPublicNumber:a.publicNumber,maxItems:a.limit,expiresAt:a.expiresAt,
+            ...(a.handover?{handover:true,handoverUntil:a.handoverUntil}:{})},200,
             {"set-cookie":`${COOKIE}=${result.sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure?"; Secure":""}`});
         }
         if(path==="/access"&&method==="DELETE") {if(token(request))await repo().clearAccess(token(request));return send({ok:true});}

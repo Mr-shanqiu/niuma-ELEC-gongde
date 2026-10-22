@@ -20,7 +20,9 @@ import { AlipayError } from "./payments/providers/alipay-page/types.js";
 import { toDataURL } from "qrcode";
 import { zipSync } from "fflate";
 import { AdminAuthService, loadAdminAuthConfiguration } from "./admin/auth.js";
-import { AdminObjectStore, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "./admin/object-store.js";
+import { AdminObjectStore, PublicationBusy, PublicationConflict, PublicationUnavailable, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "./admin/object-store.js";
+import { createPublicationLock } from "./admin/publication-lock.js";
+import { loadDownloadCoverage, loadInstallerRegistry } from "./downloads/installer-registry.js";
 import type { GongdeEntitlement, GongdeOrder, OrderState } from "./domain/types.js";
 import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH } from "./domain/catalog.js";
 import { AppearanceNumberError, AppearanceNumberRepository } from "./domain/appearance-numbers.js";
@@ -57,6 +59,12 @@ const adminConfiguration = loadAdminAuthConfiguration();
 const adminAuth = adminConfiguration ? new AdminAuthService(adminConfiguration) : null;
 const adminObjectStoreConfiguration = loadAdminObjectStoreConfiguration();
 const adminObjectStore = adminObjectStoreConfiguration ? new AdminObjectStore(adminObjectStoreConfiguration) : null;
+// The publication object is the only place where two administrators can lose
+// each other's write, so its lock exists whenever the object store does.
+const publicationLockHandle = adminObjectStoreConfiguration
+  ? createPublicationLock(mysqlConfiguration)
+  : null;
+const publicationLock = publicationLockHandle?.lock ?? null;
 const privatePackageConfiguration = loadPrivatePackageConfiguration();
 const privatePackageStore = privatePackageConfiguration ? new PrivatePackageStore(privatePackageConfiguration) : null;
 if (packSigner) setImmediate(() => {
@@ -512,6 +520,47 @@ export const server = createServer(async (request, response) => {
         return json(response, 503, { error: "group_benefit_code_unavailable" }, headers);
       }
     }
+    if (request.method === "GET" && url.pathname === "/api/gongde/admin/download-report") {
+      requireAdmin(request);
+      const from = parseDate(url.searchParams.get("from"), "from") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const to = parseDate(url.searchParams.get("to"), "to") ?? new Date();
+      const registry = loadInstallerRegistry();
+      const coverage = loadDownloadCoverage();
+      const countedSince = coverage.startedAt ? new Date(coverage.startedAt) : null;
+      const base = {
+        coverage: {
+          status: coverage.status,
+          startedAt: coverage.startedAt,
+          entries: coverage.entries,
+          // Static configuration describes intent only; it is not evidence that
+          // collection is working. The status below is the evidence.
+          scopeNote: "只统计官网下载页入口的请求；CDN 直链、GitHub 与转发安装包不在范围内。"
+        },
+        registry: {
+          status: registry.status,
+          items: registry.items.map((item) => ({
+            name: item.name, platform: item.platform, version: item.version, releaseId: item.releaseId,
+            bytes: item.bytes, sha256: item.sha256, countedUrl: `/api/gongde/downloads/${encodeURIComponent(item.name)}`
+          }))
+        },
+        range: { from: from.toISOString(), to: to.toISOString() }
+      };
+      if (!adminObjectStore) {
+        // Not counting is a distinct state from counting zero. Saying "0" here
+        // would read as "nobody downloaded".
+        return json(response, 200, { ...base, status: "unavailable", error: "download_store_not_enabled", summary: null }, { "cache-control": "private, no-store" });
+      }
+      try {
+        const summary = await adminObjectStore.summarizeDownloads(from, to, {
+          countedSince,
+          registeredNames: registry.items.map((item) => item.name)
+        });
+        return json(response, 200, { ...base, status: "available", summary }, { "cache-control": "private, no-store" });
+      } catch {
+        // A read failure is not an empty period.
+        return json(response, 200, { ...base, status: "error", error: "download_summary_unavailable", summary: null }, { "cache-control": "private, no-store" });
+      }
+    }
     if (request.method === "GET" && url.pathname === "/api/gongde/admin/overview") {
       requireAdmin(request);
       const from = parseDate(url.searchParams.get("from"), "from") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -519,7 +568,15 @@ export const server = createServer(async (request, response) => {
       const [selectedDay, allTime, downloads, recent, storeReady] = await Promise.all([
         store.summarizeOrders(from, to),
         store.summarizeOrders(new Date(0), new Date()),
-        adminObjectStore ? adminObjectStore.summarizeDownloads(from, to) : Promise.resolve({ total: 0, period: 0, byFile: [] }),
+        // Never substitute a zero object here: a missing store or a failed read
+        // must reach the page as "unavailable", not as "nobody downloaded".
+        adminObjectStore
+          ? adminObjectStore.summarizeDownloads(from, to, {
+              countedSince: (() => { const startedAt = loadDownloadCoverage().startedAt; return startedAt ? new Date(startedAt) : null; })(),
+              registeredNames: loadInstallerRegistry().items.map((item) => item.name)
+            }).then((summary) => ({ status: "available" as const, summary }))
+              .catch(() => ({ status: "error" as const, summary: null }))
+          : Promise.resolve({ status: "unconfigured" as const, summary: null }),
         store.listOrders({ effectiveOnly: true, limit: 6, offset: 0 }),
         store.ready()
       ]);
@@ -584,7 +641,23 @@ export const server = createServer(async (request, response) => {
       requireAdmin(request);
       if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
       const revisions = packSigner.revisions();
-      const publishedIds = new Set(adminObjectStore ? await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS) : OFFICIAL_ASSET_IDS);
+      // A read failure must reach the page as a failure. The historic purchase
+      // path keeps its "fall back to the default list" behaviour, but this list
+      // also hands the page a version to write with: reporting revision 0 and
+      // everything published would show state nobody read and enable an action
+      // whose only possible outcome is a 503.
+      let publication;
+      try {
+        publication = adminObjectStore
+          ? await adminObjectStore.publicationStateForAdmin(OFFICIAL_ASSET_IDS)
+          : { revision: 0, publishedAssetIds: [...OFFICIAL_ASSET_IDS], firstPublishedAt: {}, updatedAt: null };
+      } catch (error) {
+        if (error instanceof PublicationUnavailable) {
+          return json(response, 503, { error: "appearance_publication_unavailable" });
+        }
+        throw error;
+      }
+      const publishedIds = new Set(publication.publishedAssetIds);
       const numbers = await optionalOfficialNumbers();
       const data = OFFICIAL_ASSET_IDS.map((assetId) => ({
         id: assetId,
@@ -594,25 +667,45 @@ export const server = createServer(async (request, response) => {
         revision: revisions[assetId] ?? null,
         state: !revisions[assetId] ? "MISSING" : publishedIds.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
       }));
-      return json(response, 200, { data, total: data.length });
+      // `publicationRevision` versions the whole published set. Every write must
+      // send it back; it is deliberately not named `revision`, which already
+      // means the material version on each row.
+      return json(response, 200, { data, total: data.length, publicationRevision: publication.revision });
     }
     const adminAppearanceMatch = url.pathname.match(/^\/api\/gongde\/admin\/appearances\/([A-Za-z0-9._-]+)$/u);
     if (request.method === "PATCH" && adminAppearanceMatch) {
       requireAdmin(request);
       if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
       if (!adminObjectStore) return json(response, 503, { error: "admin_object_store_not_enabled" });
+      if (!publicationLock) return json(response, 503, { error: "appearance_publication_unavailable" });
       const assetId = adminAppearanceMatch[1];
       if (!OFFICIAL_ASSET_IDS.includes(assetId as typeof OFFICIAL_ASSET_IDS[number])) return json(response, 404, { error: "appearance_not_found" });
       const body = await readJson(request);
       if (typeof body.published !== "boolean") return json(response, 400, { error: "invalid_appearance_state" });
+      if (!Number.isSafeInteger(body.publicationRevision) || (body.publicationRevision as number) < 0) {
+        // Refusing an unversioned write is the point: without it the write would
+        // silently overwrite whatever another session changed in the meantime.
+        return json(response, 400, { error: "appearance_publication_revision_required" });
+      }
       const revisions = packSigner.revisions();
       if (!revisions[assetId]) return json(response, 409, { error: "appearance_resource_missing" });
-      const publishedIds = new Set(await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS));
-      if (body.published) publishedIds.add(assetId); else publishedIds.delete(assetId);
-      const orderedIds = OFFICIAL_ASSET_IDS.filter((id) => publishedIds.has(id));
+      let next;
+      try {
+        next = await adminObjectStore.setPublished(
+          OFFICIAL_ASSET_IDS, assetId, body.published, body.publicationRevision as number, publicationLock
+        );
+      } catch (error) {
+        if (error instanceof PublicationConflict) {
+          return json(response, 409, { error: "appearance_publication_conflict", publicationRevision: error.revision });
+        }
+        if (error instanceof PublicationBusy) return json(response, 409, { error: "appearance_publication_busy" });
+        if (error instanceof PublicationUnavailable) {
+          return json(response, 503, { error: "appearance_publication_unavailable" });
+        }
+        throw error;
+      }
       const numbers = await optionalOfficialNumbers();
-      await adminObjectStore.writePublishedAssetIds(orderedIds);
-      audit(body.published ? "appearance_published" : "appearance_unpublished", { assetId });
+      audit(body.published ? "appearance_published" : "appearance_unpublished", { assetId, revision: next.revision });
       return json(response, 200, { data: {
         id: assetId,
         assetId,
@@ -620,7 +713,7 @@ export const server = createServer(async (request, response) => {
         name: OFFICIAL_ASSET_NAMES_ZH[assetId] ?? assetId,
         revision: revisions[assetId],
         state: body.published ? "PUBLISHED" : "UNPUBLISHED"
-      } });
+      }, publicationRevision: next.revision });
     }
     if (url.pathname === "/api/gongde/admin/files") {
       requireAdmin(request);
@@ -673,11 +766,24 @@ export const server = createServer(async (request, response) => {
     if (request.method === "GET" && publicDownloadMatch) {
       if (!adminObjectStore) return json(response, 503, { error: "download_store_not_enabled" });
       const name = publicDownloadMatch[1];
-      if (!/\.(?:dmg|exe)$/iu.test(name)) return json(response, 404, { error: "download_not_found" });
-      const platform = name.endsWith(".dmg") ? "macos" : "windows";
-      try { await adminObjectStore.recordDownload(name, platform, new Date()); }
-      catch (error) { audit("download_count_failed", { name }); }
-      response.writeHead(302, { location: adminObjectStore.publicUrl("installer", name), "cache-control": "no-store" });
+      // Only a file that is currently registered can be counted or forwarded.
+      // The old check accepted any .dmg/.exe name, so an unregistered file was
+      // counted and then redirected to the CDN, where it 404s. The target now
+      // comes from the registry entry, never from the request path.
+      const registry = loadInstallerRegistry();
+      if (registry.status !== "available") return json(response, 503, { error: "download_registry_unavailable" }, { "cache-control": "no-store" });
+      const entry = registry.items.find((item) => item.name === name);
+      if (!entry) return json(response, 404, { error: "download_not_found" }, { "cache-control": "no-store" });
+      let counted = true;
+      try { await adminObjectStore.recordDownload(entry.name, entry.platform, new Date()); }
+      catch (error) { counted = false; audit("download_count_failed", { name: entry.name }); }
+      // A counting failure must not block the download itself. The redirect is
+      // no-store in both cases so no cache can skip the next count.
+      response.writeHead(302, {
+        location: entry.publicDownloadUrl,
+        "cache-control": "no-store",
+        ...(counted ? {} : { "x-gongde-count": "failed" })
+      });
       return response.end();
     }
     if (request.method === "POST" && url.pathname === "/api/gongde/checkout") {
@@ -950,4 +1056,4 @@ server.listen(port, host, () => {
 });
 
 server.on("close", () => {
-  void checkoutRequests.close(); void freeDistributionRuntime.close(); void creatorRuntime.close(); void store.close(); void appearanceNumbers?.close(); });
+  void checkoutRequests.close(); void freeDistributionRuntime.close(); void creatorRuntime.close(); void store.close(); void appearanceNumbers?.close(); void publicationLockHandle?.close(); });

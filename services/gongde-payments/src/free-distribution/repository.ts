@@ -3,7 +3,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql
 import { hasCurrentFreeConsent } from "../creators/consent.js";
 import { assertExcluded, lockFreeExclusionControl } from "./exclusions.js";
 import type { FreeWorkMetadata } from "../creators/repository.js";
-import { assertCodeSecret, batchLimit, claimRequestDigest, codeCycle, codeDigest, creatorPublicNumber,
+import { assertCodeSecret, batchLimit, claimRequestDigest, CODE_HANDOVER_MS, codeCycle, codeDigest, creatorPublicNumber,
   deriveCode, legacyTokenDigest, DOWNLOAD_SESSION_MS, DOWNLOAD_WINDOW_MS, downloadLinkExpiresAt, MAX_DELIVERY_BYTES,
   newSessionToken, sessionDigest, stableJson, validateClaimItems } from "./codes.js";
 import { FreeDistributionError, type AuditMutation, type Claim, type ClaimItemSnapshot, type CodeAuthorization,
@@ -251,16 +251,29 @@ export class FreeDistributionRepository {
     const token = (await rows(connection, "SELECT * FROM gongde_free_code_tokens WHERE id = ? FOR UPDATE", [tokenId]))[0];
     const now = this.#now();
     const cycle = codeCycle(now);
+    // Pause, revoke and every other safety stop stay ahead of the handover: a
+    // rotation never resumes a family an operator paused.
     if (family.state !== "ACTIVE" || (family.creator_id && owner?.state !== "ACTIVE")) throw new FreeDistributionError("access_code_paused", 403);
-    if (token.revoked_at || Number(token.generation) !== Number(family.generation) || Number(token.cycle_index) !== cycle.index ||
-      now.getTime() < new Date(token.valid_from).getTime() || now.getTime() >= new Date(token.expires_at).getTime()) {
+    // A token the server itself replaced in a rotation is still the same code
+    // people already copied. It keeps accepting NEW claims until its own
+    // handover deadline, which was fixed at replacement and is never extended.
+    // This is the ONLY relaxation: it does not touch paused families (checked
+    // above), earlier cycles, revoked tokens or the download rules of claims
+    // that already exist.
+    const handover = token.revoked_at != null && token.server_rotated_at != null &&
+      token.handover_until != null && now.getTime() < new Date(token.handover_until).getTime();
+    if (!handover && (token.revoked_at || Number(token.generation) !== Number(family.generation) ||
+      Number(token.cycle_index) !== cycle.index ||
+      now.getTime() < new Date(token.valid_from).getTime() || now.getTime() >= new Date(token.expires_at).getTime())) {
       throw new FreeDistributionError("access_code_expired", 410);
     }
     const projected = await this.#family(connection, family, owner);
     if (projected.limit === 0) throw new FreeDistributionError("creator_promotion_inactive", 403);
     return { codeFamilyId: family.id, codeTokenId: token.id, kind: family.kind, publicNumber: projected.publicNumber,
-      cycleIndex: cycle.index, generation: Number(family.generation), revision: Number(family.revision), limit: projected.limit,
-      serverNow: now.toISOString(), expiresAt: iso(token.expires_at) };
+      cycleIndex: Number(token.cycle_index), generation: Number(family.generation), revision: Number(family.revision),
+      limit: projected.limit, serverNow: now.toISOString(),
+      expiresAt: iso(handover ? token.handover_until : token.expires_at),
+      handover, handoverUntil: handover ? iso(token.handover_until) : null };
   }
   // Authentication/ownership of this privileged plaintext read belongs to HTTP.
   async getCurrentCode(familyId: string): Promise<{ code: string; authorization: CodeAuthorization }> {
@@ -286,7 +299,7 @@ export class FreeDistributionRepository {
     }
     return session;
   }
-  async verifyCode(input: { code: unknown; sessionToken?: string }): Promise<{ sessionToken: string; session: DownloadSession }> {
+  async verifyCode(input: { code: unknown; sessionToken?: string; familyId?: string }): Promise<{ sessionToken: string; session: DownloadSession }> {
     this.#enabled();
     const digest = codeDigest(this.#secret, input.code);
     return this.#transaction(async connection => {
@@ -296,8 +309,16 @@ export class FreeDistributionRepository {
         try { session = await this.#session(connection, input.sessionToken); }
         catch (error) { if (!(error instanceof FreeDistributionError) || error.code !== "download_session_required") throw error; }
       }
-      const token = (await rows(connection, "SELECT id FROM gongde_free_code_tokens WHERE code_digest = ?", [digest]))[0];
+      const token = (await rows(connection, "SELECT id, family_id FROM gongde_free_code_tokens WHERE code_digest = ?", [digest]))[0];
       if (!token) throw new FreeDistributionError("access_code_invalid", 400);
+      // The public route names the family it serves. Rejecting another family's
+      // code HERE, before any counter or session write, keeps the group page
+      // from touching a creator family's verification statistics. Which codes
+      // are still valid is never decided by the caller: the token carries its
+      // own deadline and `#authorize` applies it.
+      if (input.familyId !== undefined && token.family_id !== input.familyId) {
+        throw new FreeDistributionError("access_code_invalid", 400);
+      }
       const authorization = await this.#authorize(connection, token.id);
       const now = this.#now();
       const sessionToken = session ? input.sessionToken! : newSessionToken();
@@ -581,9 +602,40 @@ export class FreeDistributionRepository {
       const generation = Number(family.generation) + (input.action === "rotate" || input.action === "revoke" ? 1 : 0);
       if (generation > 4294967295) throw new FreeDistributionError("code_generation_exhausted", 503);
       await write(connection, "UPDATE gongde_free_code_families SET state = ?, generation = ?, revision = revision + 1, updated_at = ? WHERE id = ?", [target, generation, now, family.id]);
-      if (generation !== Number(family.generation)) await write(connection, "UPDATE gongde_free_code_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE family_id = ? AND revoked_at IS NULL", [now, family.id]);
+      if (generation !== Number(family.generation)) {
+        // A rotate is the manual handover: the code being replaced keeps accepting
+        // NEW claims until its own deadline, fixed here from this transaction's
+        // clock (so it holds even when that crosses the cycle's own expiry). A
+        // revoke is a stop, not a handover, so it extends nothing.
+        //
+        // Only the token of the cycle being replaced is touched. An older cycle's
+        // token is already outside its window and must not be brought back, and
+        // COALESCE keeps an earlier rotation's deadline from being pushed out.
+        if (input.action === "rotate") {
+          const handoverUntil = new Date(now.getTime() + CODE_HANDOVER_MS);
+          await write(connection, `UPDATE gongde_free_code_tokens SET revoked_at = COALESCE(revoked_at, ?),
+            handover_until = COALESCE(handover_until, ?), server_rotated_at = COALESCE(server_rotated_at, ?)
+            WHERE family_id = ? AND cycle_index = ? AND revoked_at IS NULL`,
+          [now, handoverUntil, now, family.id, codeCycle(now).index]);
+        } else {
+          // A revoke is a stop for the whole family, not only for the code that
+          // is current right now. Every handover still open must close with it:
+          // those tokens already carry `revoked_at` (the rotation set it), so a
+          // predicate of `revoked_at IS NULL` would leave them authorized after
+          // a later restore brings the family back to ACTIVE.
+          //
+          // The current token is stopped exactly as before and is still given no
+          // deadline of its own. The second statement only pulls an already-open
+          // handover back to this transaction's clock, so a code that was never
+          // rotated keeps `handover_until` NULL.
+          await write(connection, "UPDATE gongde_free_code_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE family_id = ? AND revoked_at IS NULL", [now, family.id]);
+          await write(connection, `UPDATE gongde_free_code_tokens SET handover_until = ?
+            WHERE family_id = ? AND server_rotated_at IS NOT NULL AND handover_until > ?`, [now, family.id, now]);
+        }
+      }
       await audit(connection, { ...input, subject: family.id, action: `family.${input.action}`, before,
-        after: { state: target, generation, revision: input.expectedRevision + 1 } }, now);
+        after: { state: target, generation, revision: input.expectedRevision + 1,
+          ...(input.action === "rotate" ? { replacedCodeHandoverUntil: iso(new Date(now.getTime() + CODE_HANDOVER_MS)) } : {}) } }, now);
       return this.#adminCode(connection, (await rows(connection, "SELECT * FROM gongde_free_code_families WHERE id = ?", [family.id]))[0], owner, false);
     });
   }
@@ -689,20 +741,32 @@ export class FreeDistributionRepository {
   }
   async #adminCode(connection: PoolConnection, family: RowDataPacket | null, owner: RowDataPacket | null, viewAudit: boolean): Promise<AdminCodeSnapshot> {
     if (!family) return { familyId: null, revision: null, kind: "CREATOR", status: "INACTIVE", code: null,
-      validFrom: null, expiresAt: null, contributionCount: 0, maxItems: 0, redemptionEnabled: false };
+      validFrom: null, expiresAt: null, contributionCount: 0, maxItems: 0, redemptionEnabled: false,
+      previousCode: null, previousCodeHandoverUntil: null };
     const projected = await this.#family(connection, family, owner);
     const inactive = family.kind === "CREATOR" && projected.activeContributions === 0;
     const paused = family.state !== "ACTIVE" || (!!family.creator_id && owner?.state !== "ACTIVE");
     const status = inactive ? "INACTIVE" : paused ? "PAUSED" : "ACTIVE";
-    const token = status === "ACTIVE" ? await this.#ensureToken(connection, family, this.#now()) : null;
+    const now = this.#now();
+    const token = status === "ACTIVE" ? await this.#ensureToken(connection, family, now) : null;
+    // The code the last manual rotation replaced, while its handover is open and
+    // the current update is still active. It is shown to the operator only, so the
+    // group announcement can say how long the old code still works; the public
+    // catalogue never carries it.
+    const replaced = status === "ACTIVE" ? (await rows(connection, `SELECT * FROM gongde_free_code_tokens
+      WHERE family_id = ? AND server_rotated_at IS NOT NULL AND handover_until > ?
+      ORDER BY server_rotated_at DESC, handover_until DESC LIMIT 1`,
+    [family.id, now]))[0] : undefined;
     if (viewAudit) await audit(connection, { actor: "authenticated_code_reader", action: "code.view", subject: family.id,
       before: null, after: { generation: Number(family.generation), revision: Number(family.revision), status },
-      reason: "explicit_privileged_current_code_read" }, this.#now());
+      reason: "explicit_privileged_current_code_read" }, now);
     return { familyId: family.id, revision: Number(family.revision), kind: family.kind, status,
       code: token ? deriveCode(this.#secret, family.id, Number(token.cycle_index), Number(token.generation), Number(token.nonce)) : null,
       validFrom: token ? iso(token.valid_from) : null, expiresAt: token ? iso(token.expires_at) : null,
       contributionCount: projected.activeContributions, maxItems: batchLimit(family.kind, projected.activeContributions),
-      redemptionEnabled: status === "ACTIVE" && this.#options.enabled === true && this.#options.deliveryReady?.() === true };
+      redemptionEnabled: status === "ACTIVE" && this.#options.enabled === true && this.#options.deliveryReady?.() === true,
+      previousCode: replaced ? deriveCode(this.#secret, family.id, Number(replaced.cycle_index), Number(replaced.generation), Number(replaced.nonce)) : null,
+      previousCodeHandoverUntil: replaced ? iso(replaced.handover_until) : null };
   }
   async getGroupCode(): Promise<AdminCodeSnapshot> {
     const group = await this.ensureGroupFamily();

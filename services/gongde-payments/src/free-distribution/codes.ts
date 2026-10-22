@@ -3,6 +3,14 @@ import { FreeDistributionError, type ClaimItemSnapshot, type CodeFamilyKind } fr
 
 export const FREE_DISTRIBUTION_ANCHOR_MS = Date.parse("2026-10-08T00:00:00+08:00");
 export const FREE_CODE_CYCLE_MS = 72 * 60 * 60 * 1000;
+// A manual rotation replaces the code immediately but keeps the replaced code
+// accepting NEW claims for this long, so a group announcement can be updated
+// without stranding whoever already copied the old code. It is measured from the
+// transaction clock taken after the family lock is held, not from the commit, so
+// the transaction's own duration uses a little of the hour. It is never extended
+// by a later rotation: each replaced token keeps the deadline it was given, and
+// a revoke closes every open handover.
+export const CODE_HANDOVER_MS = 60 * 60 * 1000;
 export const DOWNLOAD_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const DOWNLOAD_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_CLAIM_ITEMS = 10;

@@ -5410,3 +5410,175 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 未做：未执行生产迁移、未部署、未改价格/群码/安全限额/订单权益、未改 006、未连接生产库。
 - 提交与合入：精确文件清单提交 `5efae1d`（3 个文件，+165/−2），分支 `fix/official-number-bindings-migration` → PR #10 → merge commit `d7d034a`。合并前核对 PR head 为 `5efae1d`、改动仅这三个文件，与授权范围一致。合并后读取远端核对：`git ls-remote --heads origin main` = `d7d034a`，远端 `011_official_number_bindings.sql` 87 行、测试文件含累计绑定断言；远端分支回到 3 条，本地分支已删除，工作区干净。
 - 合并后在 main 上重跑标准入口：`npm test` 退出码 **0**，五组 13 / 267 / 1 / 12 / 7，0 fail。（第一次推送远端时 SSH 连接被断开一次，退避重试后成功；记录在此避免误读。）
+
+## 2026-10-21 下一轮执行方案与回执停点
+
+- 按用户要求编写 `.local-work/handoffs/next-release-execution-plan-20261021.md`，目标为已合入清单生成器修复的最小发布准备。R1候选完成或基线/发布路径阻断时停下交Codex；技术复核及用户明确生产授权后才进入发布，R2有限验证后立即交回收尾。
+- 本轮只写方案，不实施候选构建或生产动作；011不作生产前置，官网T2/T7不混发，不重做现有首屏展示，不开展历史支付对账。已有管理端UI不调用该路由，风险不等于当前线上故障。
+
+## 2026-10-21 清单修复R1复核未通过
+
+- 本地核对候选0a076eb9与登记dacf0be0绑定；登记回退已纠正。新增确认阻断：旧清单读取/解析失败仍被catch置空并写成两条；仓库及候选测试标题相反却断言两条成功。此前复核漏检，本次纠正，详见R1回执§10。
+- 建议先修本地错误分支和测试再重建候选，停回R1；准入拒绝仍为旧owner源码推断，无须实测deploy。未来若新owner涉及policy/extension变更须准确列入授权，回退须绑定实际镜像而非旧源包。未连接生产、未改产品/候选、未重跑测试或部署。
+
+## 2026-10-21 清单修复R1第二轮技术复核通过
+
+- 9a339d5/PR #11已解除旧清单读取失败仍覆盖的问题；候选fe98d7b1归档、源码与登记绑定独立核对通过。只修candidate.json残留的旧compiled摘要/sourceCommit/比较基准/回退和owner证据范围，不改候选产物，详见R1回执§12。
+- 产品修复可合入，生产激活条件未满足；后续如用户继续，先限定只读确认准入、构建基线与回退实际身份，再本地准备固定owner草案回R1复核。未连接生产、未重跑测试、未合并PR或部署。
+
+## 2026-10-21 owner草案设计复核
+
+- R1回执§14裁定接受新release、四钩子、build/activate分离、activate内写专属policy。当前仅JSON设计和extension，未具备完整owner.py，不能直接批准生产执行。补明确回退操作、写policy后的失败清理、保护项自身变更例外；离线模拟主要打印结果，需改成真正断言。GONGDE_NEW_PAYMENTS_DISABLED=false含义为未禁用新支付，不是关闭支付。
+- 下一步仅本地实现固定owner与隔离失败验证，停回R1；本轮未生产访问、未重跑测试或模拟、未修改运行配置。
+
+## 2026-10-22 管理端改版前置检查与推荐方案
+
+- 按用户要求完成管理端（管理端 = `admin-console/` 源码、`website/admin/` 构建产物、`services/gongde-payments/` 实际接口）的现状检查、推荐方案与代表性样稿，停在此处交用户与 Codex 评审。主文档 `.local-work/handoffs/admin-redesign-plan-20261021.md`，材料在 `.local-work/candidates/admin-redesign-20261021/`。
+- 关键事实：线上管理端与当前源码构建一致（`cc90bade…`），而 `website/admin/` 是 10-07 的旧构建（导航仍为「数据报表 / 有效订单 / 付费创作者市场」），两者不可混用为同一状态。源码、构建产物、线上版本在报告中分列。
+- 已复现的问题：领取状态筛选提供「已创建」但服务端只接受五个值（400）、形象下架无二次确认且失败无提示、「付费订单」把读取失败渲染成 `No 付费订单 found`、排序只改 URL 不生效、8 个导航项共用同一图标、820px 以下布局塌陷、焦点环缺失。删除确认本身存在（MUI 对话框），但对话框按钮仍是英文。
+- 一处重要更正（记录以免后续误读）：最初按源码推断「多个面板读取失败会显示 0」，**实测不成立**。给本地只读 fixture 加 `MOCK_FAIL` 注入 503 后逐页走查，8 个页面里 6 个正确区分「读取失败 / 未采集 / 真 0」（群码领取页四项统计全部显示「未采集」、举报与形象页显示读取失败且「总数未确认」），只有「付费订单」把失败画成空表；`MOCK_UNAUTH` 注入 401 后，7 个数据页里 6 个正确跳登录页，只有「经营概览」停在原地。结论改为：改版要**保住**这套已落地的 fail-closed 做法，而不是重建。另确认 `operations.tsx` 是写完整但未挂载的运营总览面板（不是废弃代码），新首页应复用其数据契约。
+- 样稿：`candidates/admin-redesign-20261021/prototype/`（Ant Design 5 + Pro Components，MIT，本地构建）与 `mockups/index.html`（单文件静态版）。两者都用合成数据、不连生产写接口、不覆盖正式页面。
+- 边界：未改 `admin-console/` 产品源码、未构建或替换正式管理端、未部署、未合并发布、未访问生产、未读取生产密钥、未调用生成下载清单接口。旧的 owner/清单材料已补记冻结状态（回执 §16）。
+
+## 2026-10-22 管理端改版方案独立复核
+
+- 已读主方案、现状503/401与样稿截图及关键源码，复核写回admin-redesign-plan-20261021.md§9。认可六页503行为的限定结论，重点修订单错误态与概览401；四项真实问题不统一P0。纠正共创接口非全部410、旧bundle保留不等于完整回退、原型字段不等于真实API。
+- 推荐六入口而非重复历史页，固定订单倒序，运营5分钟只作提醒；首页只复用现行领取异常，不搬审核/AI预算。形象发布整列表读改写存在跨形象竞态，素材revision无效，作为写操作接入时明确的后端小项。开发批次不等于多次发布。
+- 本轮复用用户已有注入走查，未启动服务、未新跑浏览器/测试/构建、未访问生产或修改产品/样稿；只追加评审/执行记录，不另建传话报告。
+
+## 2026-10-22 管理端新增双平台下载统计需求
+
+- 用户要求分Windows/Mac看客户端下载量，已补管理端方案§9.10。源码确认已有按文件计数/汇总，但官网free-flow直接到CDN绕过记录；应复用计数重定向、平台汇总并明确采集覆盖/起点，官网入口需一起接入。统计为下载请求不是下载完成/安装人数，历史漏记不补造；客户端与签名不变。仅更新方案，未改代码或生产。
+
+## 2026-10-22 管理端视觉精修第一轮（今日运营、形象管理）
+
+- 按 Codex 复核后的方向，在现有原型里只精修两页，未另搭第二套原型。主文档 `.local-work/handoffs/admin-redesign-plan-20261021.md` §10。
+- 入口收敛为六项：历史交易并入付费订单、编号查询并入形象管理，`LegacyView` 删除；首页不搬共创审核、作者码、AI 预算。
+- 今日运营改成数字带（四条指标靠分隔线分组，只强调「待你处理」）+ 双平台下载请求（今日/累计、统计起点、口径与「部分入口已接入」）+ 单行待办 + 一行服务状态 + 折叠规则。下载数明确是请求次数而非安装人数。
+- 形象管理从文字表格改为图库，主视觉是形象本身；动作预览直接复用官网 `pack-player.js` 与 `assets/previews/packs/` 真实素材，19 个可播，下班/暴富按钮因不在 `source-map.json` 只显示真实封面并标注「无动作预览」。技术字段进详情抽屉；安全停发收成一条紧凑危险区，三种操作的差别写在确认框里。
+- 精修中修掉两个自己引入的问题：①读取失败时只把数字置空、待办仍列真实条目（前后矛盾，已改为整页收敛为「未读取」）；②图库末尾两张卡封面 404（补齐两个按钮形象的封面并注明来源）。
+- 交付：`evidence/before/` 与 `evidence/today-*`、`appearances-*` 同尺寸对照，900px 窄窗、详情抽屉、确认框、两页读取失败态。
+- 边界：未改 `admin-console/` 正式源码、未接生产写接口、未实施后端并发保护、未构建正式发布包、未部署；上一轮清单修复与 owner 材料保持冻结。原型服务在 8797。
+
+## 2026-10-22 管理端视觉精修方向复核通过
+
+- 已查看本轮首页/图库/窄屏/错误与弹窗截图，裁定写回主方案§11。视觉方向可沿用，六项决定：统计覆盖后端元数据且不用“完整”，实际接入时刻起算、旧记录单列；四页统一tokens但不提前泛化；形象并发写前完成；21项不用虚拟化；MISSING只认服务端state。
+- 需纠正示例同日起点累计不一致、3项/4条混用、错误时侧栏徽标来源；下架截图仅遮罩，须在受影响验收补真实弹窗证据，不重跑全套。本轮只评审文档，不改产品/原型、不访问生产、不测试构建或部署。
+
+## 2026-10-22 管理端正式第一实施段（本地完成，待评审）
+
+- 按 §11 裁定完成：六入口壳层与统一视觉、共享请求层（四态读取 + 统一 401 登出）、今日运营/付费订单/群码与领取正式实现、举报处理与安装包同步实现、形象管理只读（写操作留待下一段）。
+- 下载统计：新增 `downloads/installer-registry.ts` 作为官网列表与计数重定向的唯一登记来源；未登记不计数、登记损坏 503、计数失败仍 302 并标 `x-gongde-count: failed`；新增 `/api/gongde/admin/download-report`（含 `range`、`byPlatform`、`legacyCount`、`unattributed`），`/overview` 下载改为状态对象而非假 0；官网 `free-flow.js` 下载按钮改走计数入口并在超时后回退直链。
+- 验证：`services/gongde-payments` `npm test` 退出码 0（新增 download counting 组）、`npm run build` 通过；`admin-console` `tsc -b` + `vite build` 通过；浏览器走查覆盖六页正常/空/失败/401、订单筛选分页、换码确认框与 409、结案确认框、安装包未读取、形象缺失与编号查询、官网计数与计数失败仍下载。截图与合成接口在 `.local-work/acceptance/admin-console-20261022/`。
+- 限制：本地 MySQL 不可用，管理端用合成接口；真实库/COS/CDN 未验证；形象并发写与旧 MUI 依赖未处理；下载事件为线性列举，日汇总需原子计数器，未新建统计平台。
+- 边界：未部署、未执行生产迁移、未访问生产凭据、未改 COS/Caddy/CDN/DNS/IAM、未重签客户端；上一轮清单修复与 owner 材料继续冻结。结果详见 `.local-work/handoffs/admin-redesign-plan-20261021.md` §12。
+
+## 2026-10-22 PR #12第一实施段代码评审：暂不合入
+
+- 核对GitHub/base main/head01a7954及本地diff，评审回执 `handoffs/admin-phase-e-pr12-review-20261022.md`。发现F1默认登记dist路径不存在；F2未配起点展示旧累计且业务error误称未接入；F3群码时钟公式冻结；F4 CREATED无效筛选；F5慢请求双跳转；F6响应守卫不足；F7异常深链未消费；F8规则对照永久disabled。
+- 只做默认loader、实际下载函数假计时器及群码公式最小无网络验证，复用原构建测试。未改产品、合入或部署，未访问生产/跟随真实下载。PR已附本任务供查看，未发外部评论。
+
+## 2026-10-22 PR #12评审F1–F8修复（同一PR，仍未合入）
+
+- F1登记默认布局：loader按dist与src两种实际布局依次读取，`npm run build`新增`scripts/copy-assets.mjs`携带JSON；新增`tests/installer-registry-build.test.mjs`覆盖无env覆盖的编译布局与dist-only容器。
+- F2四态：新增`ui/downloads.ts`共用判定，区分HTTP失败/200业务error/存储未启用/无统计起点/确认0；两个页面共用，历史请求单列不并入累计。
+- F3群码时钟改为响应锚点+真实经过时长，并在到期边界唤醒；F4筛选只用服务端允许的五个状态；F5下载导航加一次性门，计数请求数不变；F6恢复v2 envelope与各接口字段守卫，`revision`必须为安全整数；F7消费`#/code?claimId&date`深链并跟随hash变化；F8规则对照展开时读取、失败可重试。
+- 验证：服务端`npm test`退出码0；`admin-console` `npm test` 17/17；`website`新增点击用例7/7；浏览器定向验证F2/F3/F4/F6/F7/F8并附截图；F5用CDP计数确认单次导航。既有`website/tests/free-v2-frontend.test.mjs` 11项失败经stash对比为既存问题。
+- 边界：未合入、未部署、未执行生产迁移、未访问生产凭据、未改COS/Caddy/CDN/DNS/IAM、未重签客户端；冻结owner材料未恢复。详见`handoffs/admin-redesign-plan-20261021.md` §13。
+
+## 2026-10-22 PR #12第二轮复核：六项关闭，两项剩余
+
+- 已确认PR OPEN/head8571dec与本地一致；F2/F3/F4/F5/F7/F8关闭，F1/F6仍部分修复，详见PR12评审回执第二轮。F1默认布局已恢复但dist优先会遮蔽既有src登记overlay；F6数组null条目仍被接受并导致消费TypeError。
+- 只做真实guard及双布局loader最小无网络验证，临时目录已清理。未重跑已过套件/浏览器、未访问生产或恢复owner、未改产品/合入部署。下一轮仅处理两个剩余项。
+
+## 2026-10-22 PR #12第二轮复核：F1、F6补修
+
+- F1：按发布合同（`registry-owner.py` 的 `/app/src/free-distribution/installers.json`）把权威登记改为 src，dist 副本只在 src 不存在时回退；权限错误与坏 JSON 不回退，统一 unavailable。新增用例覆盖「只更新 src 立即生效」「dist-only」「坏 JSON 不回退」「不可读不回退」，对调优先级后 3 项失败以证明用例有效。
+- F6：补条目级校验（下载 byFile 与 registry.items、领取异常条目、领取列表及其 items、举报列表、保留登记、stats），并去掉 `codeSnapshot` 在 `familyId=null` 时直接通过的捷径。坏条目进入 error 态，合法空数组仍通过。
+- 验证：服务端`npm test`退出码0；`admin-console` `npm test` 24/24；`tsc -b`+`vite build`通过；浏览器`bad-entry`场景四页均为「读取失败」而非崩溃，`normal`四页仍正常。
+- 边界同上：未合入、未部署、未访问生产、未改共享配置、未恢复冻结owner材料。详见`handoffs/admin-redesign-plan-20261021.md` §14。
+
+## 2026-10-22 PR #12第三轮技术评审通过
+
+- 核对head23797a0与GitHub一致，F1权威src路径及失败不回退、F6条目级守卫修订满足剩余要求，F1—F8全部关闭。复用已有测试和构建，不再追加复测/校验工程。结论已追加原PR12评审文件。
+- 保持暂不合入、未部署；第一实施段收尾，剩余形象写操作/并发保护以完整候选作下一主要验收节点，当前未自动实施。
+
+## 2026-10-22 微信下载域名申诉验证文件
+
+- 用户提供微信内置申诉页验证文件；本地文件已准备在 `.local-work/candidates/tencent-domain-appeal-20261022/`。
+- 通过批准SSH别名与持久连接，复用当前Gongde应用公共COS身份，仅尝试新增该精确TXT对象（禁止覆盖）；PutObject返回AccessDenied/403，未部署成功，未写配置、改权限或触碰安装包及冻结owner。
+- 下一步通过已有腾讯云COS控制台上传同一文件，或单独处理该对象最小权限；公开回读成功前不能提示用户已部署。
+
+## 2026-10-22 微信申诉验证文件已部署
+
+- 用户要求自行完成后，沿已有域名验证方式，仅为 `download.gongde.zqscreen.cn/2902fe1002ccfe07594667514fb7149a.txt` 新增临时GET/HEAD静态响应。公网HTTPS返回200、40字节与用户截图完全一致；HTTP同样直接返回200且内容一致。SHA256 `ad59b837a5f19f1b39795e22a3207834e769129870a6d36ae77205410cb69e96`。此前COS403不再是阻断。
+- 使用原共享发布锁及牛马锁；服务器root600保留原运行配置和Caddyfile备份，validate后reload，其他运行配置逐项不变，磁盘Caddyfile未改，无容器替换，正式Windows下载HEAD仍200。未改云权限、CDN/DNS、业务、安装包或冻结owner。
+- 本地回执 `.local-work/candidates/tencent-domain-appeal-20261022/RECEIPT.json`；服务器备份 `/var/lib/gongde-api-deploy/wechat-domain-verification-20261022/`。下一步用户在微信点击验证，申诉完成前保留临时入口；完成后按 `gongde_wechat_verification_20261022` 精确移除。
+
+## 2026-10-22 新增Windows卡顿用户反馈（与Win7启动失败分开）
+
+- 用户确认另一位Windows用户运行客户端时电脑变卡，完整退出后恢复流畅；不是此前GetUserDefaultGeoName启动失败的Win7电脑。具体系统版本、配置和运行形象未知，客户无法提供更多信息，不继续索取。
+- 客户称公司电脑可能安装监控软件；产品共存兼容问题为待核实线索，未证明监控软件是根因，不要求停用或规避公司安全措施。
+- 源码检查：当前全局低级键鼠钩子由主GUI线程注册；动画绘制、本地保存亦在此线程；RenderLayeredWindow每帧创建/销毁DC和DIB，文字路径每帧重建。这些是可检查的性能风险，尚无该客户性能采样或受控复现，不能宣称已定位或修复。
+- 当前用户侧措施为保持客户端退出；未建议反复重装、关闭安全软件或重新运行候选。未改客户端代码、未构建/重签/替换正式包，不触碰CC进行中的管理端改动。后续客户端修订须对监听响应和渲染开销做针对性验证，真实兼容结论限定于实测环境。
+
+## 2026-10-22 PR #12第二实施段：形象写操作与发布状态并发保护（本地候选）
+
+- 基线23797a0，同分支同PR继续；F1–F8沿用第三轮结论未重查。仅本地开发/测试/更新PR：未合入、未部署、未访问生产、未改共享配置、未恢复冻结owner材料、未重签客户端。
+- 并发：COS PUT不支持If-Match，`x-cos-forbid-overwrite`只在对象不存在时拒绝创建且版本控制下失效，故存储层无法做比较并交换。改为MySQL命名锁`gongde:appearance-publication:v1`（生产已在用的GET_LOCK机制，不新建基础设施、不迁移、不改共享存储）覆盖整段读改写，并在发布对象内维护`publicationRevision`做跨请求版本判定；`memory`模式退回进程内链且标注`single-process`，不宣称多实例安全。
+- 四个版本分开：素材revision、publicationRevision、安全停发revision、文件身份。上下架只收publicationRevision，安全停发只收自己的requireCurrentRevision。
+- 管理端接入真实上下架、安全停发/解除、独立文件上传与删除；确认框写明后果与当前版本；409保留原操作信息、停用确认、只给重新读取，不自动重放。
+- 验证：`services/gongde-payments` `npm test`全部通过（含新增appearance publication分组）；真实MySQL 8.4容器上锁用例3/3（互不重叠、异常释放、忙时拒绝）；管理端`npm test`28/28、`tsc -b`+`vite build`通过；合成服务端浏览器走查覆盖成功/取消/失败/冲突/锁忙/连点/读取失败，截图`shot-appear-write-*.png`。
+- 走查修掉四处只有点得出来的缺陷：安全写入读信封、列表形状按数组校验、内联回调导致列表反复重读、重新读取卸载操作者正在操作的区块；另把文件列表读取失败与写入失败的提示分开。
+- 边界：内存COS用例只证服务端判定不证COS原子性；MySQL用例只证锁互斥；未做多实例真机联调；官网11项既存失败不扩大处理。详见`handoffs/admin-redesign-plan-20261021.md` §15。
+
+## 2026-10-22 PR #12第二实施段增量复核
+
+- 已核对GitHub及本地head efff9f974557fa76f94525eff76e2e6813c8038f，仅审23797a0之后12文件增量，F1—F8保持关闭。功能范围可作完整候选，但暂未通过：S1管理列表吞发布读取错误并返回默认上架/revision0；S2释放锁失败被吞且会话归池；S3旧对象首次发布时间在无关上下架时被改写。另N1未知写入结果误说未生效，随修正。
+- 复用已交标准测试/构建/MySQL/浏览器；仅运行当前编译模块三个无网络最小探针确认上述分支，证据在acceptance/admin-console-20261022/phase2-review/probes.mjs，完整评审追加原PR12评审文档第四轮。不需要另起设计/传话报告。
+- 未改产品代码、未访问生产或复测客户端、未合入部署、未恢复冻结owner。下一步同PR集中补S1—S3及N1后一次交回，仅验证新增缺口。
+
+## 2026-10-22 PR #12第二实施段第四轮补修（S1—S3、N1）
+
+- S1：管理列表改用`publicationStateForAdmin()`，仅在对象确实不存在（NoSuchKey/404）时用首次默认集合，网络/权限/坏JSON/非法字段一律抛出并返回503，页面进入已有error态且不启用写入；历史购买路径的宽容回退原样保留。新增store级与HTTP级用例（真实缺对象200+revision0、读取失败503、坏对象503、失败后状态未变）。
+- S2：`RELEASE_LOCK`结果必须读到`released===1`才归还连接；释放报错、结果非1或获取结果未知时`destroy()`该会话，业务操作自身的成功/失败结果不受清理结果影响。重写异常后释放用例为独立handle（独立池）争抢同名锁，避免同会话重入误通过；新增驱动注入的清理分支用例5项（释放报错、NULL结果、确认释放、未获锁、获取异常）。
+- S3：内部读取记录新增`firstPublishedAtRecorded`，区分「旧对象没有该字段」与「显式空元数据」；旧对象的历史时间在锁内被继承并在写入时固化进`firstPublishedAt`，不再由本次`updatedAt`重推。新增回归：改其他形象的上架与下架都不改变暴富按钮时间、显式空map不被提升、新上架形象不继承旧日期。
+- N1：`appearance_publication_unavailable`文案改为「操作结果未确认，请重新读取核对。」
+- 反向确认：撤掉S3继承后新用例失败；把列表改回`publicationState()`后HTTP用例失败；短路释放分支后MySQL用例2项失败（含独立handle那项）。
+- 验证：payments `npm test`全部通过（local contracts 285、publication lock cleanup 5、其余不变）；真实MySQL 8.4隔离容器锁用例3/3；管理端`npm test`28/28、`tsc -b`+`vite build`通过；浏览器确认N1文案与列表读取失败态。边界不变：未合入、未部署、未访问生产、未改共享配置、未恢复冻结owner。
+
+## 2026-10-22 PR #12第二实施段补修技术评审通过
+
+- 核对本地与GitHub head b06db1f324d7e65fc359a696acd7eacb86881786（parent efff9f9、PR OPEN），仅审10文件新增修订。S1/S2/S3/N1全部关闭，无新增阻断或必须补修项；F1—F8保持结案。完整管理端本地候选技术验收版本为b06db1f，不把它当作已部署/生产验收或新一轮用户视觉确认。
+- 复用已交测试、构建、反向验证及浏览器结果，未重跑。结论追加原PR12评审文件第五轮；主方案§16.5统计按回执校正为285 tests /284 pass /0 fail /1 skipped，§16.6分清真实MySQL正常释放与驱动注入异常清理，不为文案另开代码轮次。
+- 未改产品源码、未合入部署、未访问生产、未恢复冻结owner、未改客户端或签名。后续不再往返不变代码，统一进入完整候选的用户确认与发布准备；生产执行仍需按既定边界明确授权。
+
+## 2026-10-22 完整候选本地预览与统一发布方案
+
+- 用户确认技术验收版本 b06db1f；本轮只交付本地预览地址和最短发布方案，不新增功能、不重调视觉。产品代码未改，`WORK_PLAN.md` 与本轮记录属于本地工作材料，未提交。
+- 预览：管理端 `http://127.0.0.1:8099/admin/`、官网 `http://127.0.0.1:8098/download.html`，合成服务端自动给会话，无登录步骤；不连数据库/COS/支付/生产，所有写入只改进程内存。复用已有构建与 70 张截图，本轮仅确认两端 200、六个入口可打开。
+- 本机实际构建了两份待发布产物：API 归档 sha256 `add37d3a98a191cdfde01a2f120ec7a4173cfca85f67e12aaf9c7a1e9309a4c2`（1,259,787 字节，79 文件）；站点归档 sha256 `88534770317e37193aa00acfff73e7eb1f3a688943ec682e95c14b2aba939fd3`、tree `5620fbaf…`（20,725,793 字节，243 文件，含新管理端 bundle）。两者均出自 b06db1f。
+- 顺序：API 先、官网与管理端后，背靠背执行。依据是对称不适配——新管理端要求 `publicationRevision`，旧 API 不返回；新 API 拒绝旧管理端的无版本 PATCH（400 `appearance_publication_revision_required`）。安全停发接口两边一致不受影响。
+- `GONGDE_DOWNLOAD_COUNT_SINCE` 绑官网切换完成时刻（不是 API 切换、不是构建时刻），此前事件进 `legacyCount` 单列。该变量无默认值，缺失即显示「未接入」；且不在 `production.env.example`、不在受管发布器 `ADMIN_ENV` 白名单，草拟 owner 还断言 Env 与线上逐项相同，现有 payload 路径带不进去。
+- 数据库不需要迁移：分支相对 main 无新增迁移，新版本用的两张表由已上线的 008 建立，形象发布状态在 COS。但归档相对线上多 `migrations/011…` 与 `scripts/copy-assets.mjs`，受管发布器比对 `locked-source.json` 会拒绝（`migration_or_scripts_change_requires_main_control`），需要主控侧锁文件更新。
+- 现有入口需四处适配：登记文件须按线上字节 `dacf0be0` 打包（仓库值是 `94c3f069`，内容逐字段相同仅排版不同）；锁文件更新；新 release 需要新的固定 owner 事务（四钩准入），草拟 owner 当前绑定的 fe98d7b1 与旧范围需整体重算；计数起点变量需显式进 payload 与 env 示例。
+- 回退：API 回 release `78e50c53…`/镜像 `sha256:a92e406…`（旧容器改名保留，另有 45e1912b、4eaf762b、c850a853 可回；但「成功激活后回退」仍被受管入口的 numbering006 与 predecessor 闸门拒绝，反向条款未安装未执行）；官网页回 tree `b9acc5a9…`/sha256 `aa85303b…`（本轮已按 `.sha256` 复核），该归档内含旧管理端，回退站点即回退管理端。
+- 最小发布后检查：`deploy-gongde-api status` 新 release 且 healthy、`/api/live` 200、`/api/gongde/v2/installers` 仍 10 条；计数重定向返回 302、`no-store`、无 `x-gongde-count: failed`，`download-report` 为 available+configured 且起点与回执一致；管理列表返回 `publicationRevision`，过期版本 PATCH 期望 409 且发布对象版本不变；站点 `/admin/` 引用新 bundle、下载页含计数链接。
+- 新发现两处缺陷（未修，交用户决定）：仓库 `services/gongde-payments/Dockerfile` 未 `COPY scripts`，与新的 build 脚本冲突，用它构建会 `MODULE_NOT_FOUND`（本机已复现）；本地 `policy/Dockerfile.gongde-api` 副本与线上实际配方不一致，不能当发布依据。详见主方案 §17。
+- 边界不变：未合入、未部署、未访问生产、未改共享配置或 IAM、未恢复冻结 owner、未改或重签客户端。本轮 head 未变（仍 b06db1f），记录只改本地未提交材料，不需要重审已通过代码。
+
+## 2026-10-22 最小发布适配与生产只读核对
+
+上一条「完整候选本地预览与统一发布方案」中以下四句经生产只读核对后作废，以本条为准：API 归档 `add37d3a…` 作废（登记文件字节不对，受管守卫会拒绝）；计数起点不取官网切换完成时刻，改为 API 切换窗口开始时固定；「本地 `policy/Dockerfile.gongde-api` 副本与线上不一致」这一疑问已查明——本地 `free-090-deploy` 副本与线上逐字节相同（`d5dd2762…`，1593 字节），真正的阻断是它本身缺 `COPY scripts`；「数据库迁移不需要」结论不变，依据换为实测（001–010 已应用、011 未应用、100024/100025 两条绑定已在、最大序号 100025）。
+
+- 产品代码：仅新增一个构建修复 `ae7c0dc`（仓库内 `Dockerfile` build 阶段补 `COPY scripts ./scripts`，一行）。已推送，PR #12 仍 OPEN。未合入。
+- 最终 API 候选：`dist/gongde-api-deploy/gongde-api-49354a3ce160b9b7159c1cf0725b5ddf8f37c0492d4adeae87c4e9a727464d90.tar.gz`，1,259,767 字节，79 文件；其中 `src/free-distribution/installers.json` 用线上字节 `dacf0be0…`。相对线上归档 `78e50c53…`：4 新增（`migrations/011…`、`scripts/copy-assets.mjs`、`src/admin/publication-lock.ts`、`src/downloads/installer-registry.ts`）、6 修改（`package.json`、`src/admin/object-store.ts`、`src/creators/public-preview.ts`、`src/free-distribution/installers.json`、`src/free-distribution/runtime.ts`、`src/server.ts`）、0 删除。本机从该归档解包 `npm ci` + `npm run build` 复现，`dist` 清单 `94de7735…`（60 文件）与记录完全一致。
+- 编译产物相对线上镜像：3 新增（`dist/admin/publication-lock.js`、`dist/downloads/installer-registry.js`、`dist/free-distribution/installers.json`）、4 修改（`dist/admin/object-store.js`、`dist/creators/public-preview.js`、`dist/free-distribution/runtime.js`、`dist/server.js`）、0 删除。线上 57 文件，候选 60 文件。
+- 站点归档未变：`gongde-site-5620fbaf….tar.gz`，sha256 `88534770…`，tree `5620fbaf…`，20,725,793 字节（限额 20,971,520，余量 245,727），243 文件 / 283 成员，全部在 `deploy-gongde-root` 白名单内，`healthz.txt` 内容正确。
+- 真实阻断（需用户授权才能解除）：宿主 `/var/lib/gongde-api-deploy/policy/Dockerfile.gongde-api`（`d5dd2762…`，1593 字节）build 阶段没有 `COPY scripts`，而 `npm run build` 现在是 `tsc && node scripts/copy-assets.mjs`，本机按同样步骤复现缺 `scripts/` 即 `MODULE_NOT_FOUND`。受管 `build_candidate()` 会在构建阶段失败，走不到切换。最小改动一行（改后 1674 字节、`b999b9ee…`），属生产策略文件变更，本轮未执行。
+- 生产基线（只读核对）：release `78e50c53…`、容器 `zqscreen-gongde-api-1` = `7862e61a…`、镜像 `sha256:a92e406…`，healthy；`baseline.json` 与 `state.json` 一致；无 `pending.json`；`numbering006` 受管闸门已满足（`deploy-complete.json` 绑定 run_id `5fb18f23…`/release `c9380eaa…`/镜像 `b741db44…`，与 `state.json` 相符）；`creator-stage.json` = `author-only`；`free-distribution.json` = `restrict: true`、`release_ref 7cebd6d7…`；线上容器没有 `GONGDE_DOWNLOAD_COUNT_SINCE`；`/api/gongde/admin/download-report` 当前 404；站点 `free-flow.js` 当前无计数链接。
+- 准入链实测：用真实 launcher + baseline + extension 离线复算，新 release 的 `free_environment()` 只返回 `GONGDE_FREE_DISTRIBUTION_ENABLED=false`，`require_compatible_release()` 以 `free_release_only_restriction` 拒绝；线上 release 仍被正常接纳。四钩追加是必需项。
+- 锁集合：线上 11 项 / 1185 字节 / `9cdd78c2…`（序列化已复现），新集合 13 项 / 1395 字节 / `f3910b5b…`。受管 `build_candidate()` 只读锁文件、不改写，因此新集合直接作为参数传入，生产锁文件只在切换窗口内更新一次。
+- owner 已按新候选重写（`.local-work/candidates/admin-console-release-20261022/owner/`，本地未安装）：三个动作 build / activate / rollback；四个受管文件（策略文档、extension、宿主配方、锁集合）逐字节断言；`dist` 增量按 3 新增 + 4 修改逐文件摘要断言，不再沿用「仅一个文件变化」「dist 集合不变」的旧假设；计数起点在 `activate()` 入口取 UTC 秒级时间，写入策略文档并随环境变量投影，切换前断言「相对线上环境只新增这一个键、其余键值逐项相同」，切换后回读容器确认；rollback 先走受管 `switch()` 切回、之后才恢复受管文件（顺序不能反）。
+- 验证（本地、离线）：`chain-check.py` 全部通过（含反向准入、缺策略 fail-closed、计数键只增不减）；`negative-controls.py` 六个变异全部按预期失败（含「只加 matcher」这一上一版草稿的错误形态）；`owner-constants-check.py` 全部通过（归档摘要、成员数、清单摘要、锁集合、dist 增量、配方单行差异、站点归档限额与白名单）。
+- 边界：未合入、未在生产构建或切换、未写生产配置、未执行迁移、未改 IAM、未改或重签客户端；未打印或导出任何凭据，未读取客户订单或无关产品数据。交回后等待一次明确的「发布」指令。

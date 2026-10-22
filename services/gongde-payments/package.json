@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "db:migrate": "npm run build && node scripts/migrate.mjs",
     "start": "node dist/server.js",
     "test": "npm run build && node tests/run-local.mjs"

@@ -17,6 +17,14 @@ export interface AdminDownloadSummary {
   total: number;
   period: number;
   byFile: Array<{ fileName: string; total: number; period: number }>;
+  /** Per-platform totals. A platform with no counted events reports 0, not null. */
+  byPlatform: Record<"macos" | "windows", { total: number; period: number }>;
+  /** Earliest counted event, or null when nothing has been counted yet. */
+  earliest: string | null;
+  /** Events recorded before the counting start, kept but reported separately. */
+  legacyCount: number;
+  /** Events whose file name is not in the current registry: counted by the store, not attributable. */
+  unattributed: number;
 }
 
 export interface InstallerManifestSummary {
@@ -30,6 +38,64 @@ type CosClient = Pick<COS, "getBucket" | "putObject" | "deleteObject"> & {
     callback: (error: unknown, data: { Body?: Buffer | string }) => void
   ): void;
 };
+
+/**
+ * Publication state: the whole set of published official appearances.
+ *
+ * `revision` versions *this object*, not any appearance's material. Material
+ * revisions come from the pack signer and do not change when something is
+ * published, so they cannot detect a stale publication write.
+ */
+export interface PublicationState {
+  revision: number;
+  publishedAssetIds: string[];
+  firstPublishedAt: Record<string, string>;
+  updatedAt: string | null;
+}
+
+/**
+ * What the object on disk said, before any documented fallback.
+ *
+ * `firstPublishedAtRecorded` separates "this object predates the field" from
+ * "this object recorded that nothing has been published yet". They are written
+ * identically but mean different things, and only the first may have its
+ * history inferred.
+ */
+interface PublicationRecord extends PublicationState {
+  firstPublishedAtRecorded: boolean;
+}
+
+/**
+ * A cross-process mutex around one read-modify-write of the publication object.
+ *
+ * COS `PUT` accepts no `If-Match`, so "compare, then overwrite" cannot be made
+ * atomic by the storage API alone; two writers that both read before either
+ * writes would lose one update. `x-cos-forbid-overwrite` only refuses to create
+ * over an existing key, which every write after the first one does. The state
+ * therefore carries its own revision and the whole cycle runs under a lock all
+ * instances share. An in-process mutex would look identical in a single-process
+ * test and be wrong the moment two instances serve traffic, so it is not used.
+ */
+export type PublicationLock = <T>(operation: () => Promise<T>) => Promise<T>;
+
+/** The write's expected revision was already superseded by another writer. */
+export class PublicationConflict extends Error {
+  constructor(readonly revision: number) {
+    super("publication_revision_conflict");
+  }
+}
+/** Publication state could not be read or written; no partial success. */
+export class PublicationUnavailable extends Error {
+  constructor(readonly reason: string) {
+    super("publication_unavailable");
+  }
+}
+/** The shared lock could not be taken in time; the caller did nothing. */
+export class PublicationBusy extends Error {
+  constructor() {
+    super("publication_busy");
+  }
+}
 
 interface Configuration {
   bucket: string;
@@ -47,6 +113,19 @@ const appearanceCatalogStateKey = `${prefixes.appearance}catalog-state.json`;
 
 function isKind(value: string | null): value is AdminFileKind {
   return value === "appearance" || value === "installer";
+}
+
+/**
+ * COS reports a missing key as an SDK error, not as an empty body.
+ *
+ * Only these codes mean "the object does not exist". Any other failure is a
+ * read problem and must not be mistaken for a first write.
+ */
+function isAbsentObject(error: unknown): boolean {
+  const value = error as { code?: unknown; statusCode?: unknown; error?: { Code?: unknown; code?: unknown } } | null;
+  const code = String(value?.code ?? value?.error?.Code ?? value?.error?.code ?? "");
+  if (code === "NoSuchKey" || code === "NotFound") return true;
+  return Number(value?.statusCode) === 404;
 }
 
 function allowedName(kind: AdminFileKind, name: string): boolean {
@@ -330,56 +409,227 @@ export class AdminObjectStore {
     return (await this.publicationStateStrict(defaultIds)).publishedAssetIds;
   }
 
-  async publicationStateStrict(defaultIds: readonly string[]): Promise<{ publishedAssetIds: string[]; firstPublishedAt: Record<string, string> }> {
-    const result = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
-      this.#cos.getObject({ Bucket: this.configuration.bucket, Region: this.configuration.region,
-        Key: appearanceCatalogStateKey }, (error, data) => error ? reject(error) : resolve(data));
-    });
-    const raw = Buffer.isBuffer(result.Body) ? result.Body.toString("utf8") : String(result.Body ?? "");
-    const parsed: unknown = JSON.parse(raw);
-    const ids = (parsed as { publishedAssetIds?: unknown } | null)?.publishedAssetIds;
-    if (!Array.isArray(ids) || ids.some(item => typeof item !== "string")) throw new Error("appearance_publication_unavailable");
-    const allowed = new Set(defaultIds);
-    const publishedAssetIds = [...new Set((ids as string[]).filter(item => allowed.has(item)))];
-    const metadata = parsed as { firstPublishedAt?: unknown; updatedAt?: unknown };
-    const stored = metadata.firstPublishedAt;
-    const firstPublishedAt: Record<string, string> = Object.fromEntries(
-      stored && typeof stored === "object" && !Array.isArray(stored)
-        ? Object.entries(stored).filter(([id, date]) => allowed.has(id) && typeof date === "string" && Number.isFinite(Date.parse(date)))
-        : []);
-    // The last legacy publication added only wealth-button. Preserve that real
-    // timestamp; do not mark all existing assets as newly published at rollout.
-    if (stored === undefined && publishedAssetIds.includes("official.wealth-button") &&
-      typeof metadata.updatedAt === "string" && Number.isFinite(Date.parse(metadata.updatedAt))) {
-      firstPublishedAt["official.wealth-button"] = metadata.updatedAt;
+  async publicationStateStrict(defaultIds: readonly string[]): Promise<PublicationState> {
+    let state: PublicationRecord | null;
+    try {
+      state = await this.readPublication();
+    } catch {
+      throw new Error("appearance_publication_unavailable");
     }
-    return { publishedAssetIds, firstPublishedAt };
+    if (!state) throw new Error("appearance_publication_unavailable");
+    return this.#publicationView(state, defaultIds);
   }
 
-  async writePublishedAssetIds(assetIds: readonly string[]): Promise<void> {
-    const previous = await this.publicationStateStrict(assetIds);
-    const now = new Date().toISOString();
-    const firstPublishedAt = { ...previous.firstPublishedAt };
-    for (const id of assetIds) {
-      if (!previous.publishedAssetIds.includes(id) && !Object.prototype.hasOwnProperty.call(firstPublishedAt, id)) firstPublishedAt[id] = now;
+  /**
+   * The admin list read: the first-write default only when the object is
+   * genuinely absent.
+   *
+   * `publicationState` (kept for the historic purchase paths) turns every read
+   * failure into "the default list is published at revision 0". That is fine
+   * for a catalogue that must keep serving, and wrong for the page that then
+   * offers a write: it would show a version nobody read and enable an action
+   * whose only possible outcome is a 503. This variant fails closed.
+   */
+  async publicationStateForAdmin(defaultIds: readonly string[]): Promise<PublicationState> {
+    const state = await this.readPublication();
+    if (!state) {
+      return { revision: 0, publishedAssetIds: [...defaultIds], firstPublishedAt: {}, updatedAt: null };
     }
+    return this.#publicationView(state, defaultIds);
+  }
+
+  /**
+   * The first-publication history the object supports.
+   *
+   * The legacy object had no `firstPublishedAt`; the one real publication it
+   * recorded was wealth-button, timestamped by its `updatedAt`. Keep that fact
+   * instead of backdating every asset to the rollout. An object that carries an
+   * explicit (even empty) map already answered the question, so nothing is
+   * inferred for it.
+   */
+  #legacyFirstPublishedAt(state: PublicationRecord): Record<string, string> {
+    const firstPublishedAt = { ...state.firstPublishedAt };
+    if (!state.firstPublishedAtRecorded && state.updatedAt &&
+      state.publishedAssetIds.includes("official.wealth-button")) {
+      firstPublishedAt["official.wealth-button"] = state.updatedAt;
+    }
+    return firstPublishedAt;
+  }
+
+  /** One consistent view for readers: only known ids, only valid stamps. */
+  #publicationView(state: PublicationRecord, defaultIds: readonly string[]): PublicationState {
+    const allowed = new Set(defaultIds);
+    return {
+      revision: state.revision,
+      publishedAssetIds: state.publishedAssetIds.filter((id) => allowed.has(id)),
+      firstPublishedAt: Object.fromEntries(
+        Object.entries(this.#legacyFirstPublishedAt(state))
+          .filter(([id, date]) => allowed.has(id) && Number.isFinite(Date.parse(date)))),
+      updatedAt: state.updatedAt
+    };
+  }
+
+  /**
+   * Read the publication object, or `null` when it has never been written.
+   *
+   * Only a genuine "absent" result is `null`. A network error, a permission
+   * failure or a corrupt body throws, because treating any of those as "no
+   * publication object" would silently republish the default list.
+   */
+  async readPublication(): Promise<PublicationRecord | null> {
+    let raw: string;
+    try {
+      const result = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
+        this.#cos.getObject({ Bucket: this.configuration.bucket, Region: this.configuration.region,
+          Key: appearanceCatalogStateKey }, (error, data) => error ? reject(error) : resolve(data));
+      });
+      raw = Buffer.isBuffer(result.Body) ? result.Body.toString("utf8") : String(result.Body ?? "");
+    } catch (error) {
+      if (isAbsentObject(error)) return null;
+      throw new PublicationUnavailable("publication_read_failed");
+    }
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); }
+    catch { throw new PublicationUnavailable("publication_corrupt"); }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new PublicationUnavailable("publication_corrupt");
+    }
+    const value = parsed as Record<string, unknown>;
+    const ids = value.publishedAssetIds;
+    if (!Array.isArray(ids) || ids.some((item) => typeof item !== "string")) {
+      throw new PublicationUnavailable("publication_corrupt");
+    }
+    const revision = value.revision;
+    // An object written before this field existed carries no version. It is
+    // accepted as revision 0 so the first locked write can upgrade it, but a
+    // non-integer revision is corruption, not "old".
+    if (revision !== undefined && (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)) {
+      throw new PublicationUnavailable("publication_corrupt");
+    }
+    const firstPublishedAt: Record<string, string> = {};
+    const stored = value.firstPublishedAt;
+    if (stored !== undefined) {
+      if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+        throw new PublicationUnavailable("publication_corrupt");
+      }
+      for (const [id, date] of Object.entries(stored as Record<string, unknown>)) {
+        if (typeof date !== "string" || !Number.isFinite(Date.parse(date))) {
+          throw new PublicationUnavailable("publication_corrupt");
+        }
+        firstPublishedAt[id] = date;
+      }
+    }
+    return {
+      revision: typeof revision === "number" ? revision : 0,
+      publishedAssetIds: [...new Set(ids as string[])],
+      firstPublishedAt,
+      updatedAt: typeof value.updatedAt === "string" && Number.isFinite(Date.parse(value.updatedAt)) ? value.updatedAt : null,
+      // An object written before `firstPublishedAt` existed is not the same as
+      // one that explicitly recorded "no first publication yet". Only the
+      // former may have its history inferred from `updatedAt`.
+      firstPublishedAtRecorded: stored !== undefined
+    };
+  }
+
+  async #writePublication(expectedRevision: number, next: Omit<PublicationState, "revision">): Promise<PublicationState> {
+    const state: PublicationState = { revision: expectedRevision + 1, ...next };
     const body = Buffer.from(JSON.stringify({
       version: 1,
-      publishedAssetIds: [...assetIds],
-      firstPublishedAt,
-      updatedAt: now
+      revision: state.revision,
+      publishedAssetIds: state.publishedAssetIds,
+      firstPublishedAt: state.firstPublishedAt,
+      updatedAt: state.updatedAt
     }));
-    await new Promise<void>((resolve, reject) => {
-      this.#cos.putObject({
-        Bucket: this.configuration.bucket,
-        Region: this.configuration.region,
-        Key: appearanceCatalogStateKey,
-        Body: body,
-        ContentLength: body.length,
-        ContentType: "application/json"
-      }, (error) => error ? reject(error) : resolve());
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.#cos.putObject({
+          Bucket: this.configuration.bucket,
+          Region: this.configuration.region,
+          Key: appearanceCatalogStateKey,
+          Body: body,
+          ContentLength: body.length,
+          ContentType: "application/json"
+        }, (error) => error ? reject(error) : resolve());
+      });
+    } catch {
+      // A failed write is not a success and not a conflict: the caller cannot
+      // claim the new state, and must re-read before trying again.
+      throw new PublicationUnavailable("publication_write_failed");
+    }
+    return state;
+  }
+
+  /**
+   * Publish or un-publish one appearance as one atomic read-modify-write.
+   *
+   * `expectedRevision` is the publication revision the operator saw. A stale
+   * value is a conflict, never a silent overwrite — including when the two
+   * writes target *different* appearances, because both change the same object.
+   *
+   * The revision check happens inside `lock`, and the invariant that makes it
+   * sufficient is: the only writer of this object is this method, and it never
+   * writes without holding the lock. Nothing may re-introduce an unlocked
+   * write, whatever its API looks like.
+   */
+  async setPublished(
+    assetIds: readonly string[],
+    assetId: string,
+    published: boolean,
+    expectedRevision: number,
+    lock: PublicationLock
+  ): Promise<PublicationState> {
+    return lock(async () => {
+      const current = await this.readPublication();
+      const revision = current?.revision ?? 0;
+      if (revision !== expectedRevision) throw new PublicationConflict(revision);
+      // With no object yet, the effective state is the documented read
+      // fallback: the default list is published. Seeding from it keeps the
+      // write consistent with what the operator was just shown; seeding from
+      // an empty set would un-publish everything else as a side effect.
+      const set = new Set(current?.publishedAssetIds ?? assetIds);
+      if (published) set.add(assetId); else set.delete(assetId);
+      const ordered = assetIds.filter((id) => set.has(id));
+      // Inherit the history this object can actually vouch for, and write it
+      // back explicitly. Otherwise the next `updatedAt` would become the only
+      // evidence of a first publication and an edit to a *different* appearance
+      // would silently move it.
+      const firstPublishedAt = current ? this.#legacyFirstPublishedAt(current) : {};
+      const now = new Date().toISOString();
+      if (published && !Object.prototype.hasOwnProperty.call(firstPublishedAt, assetId)) {
+        firstPublishedAt[assetId] = now;
+      }
+      return this.#writePublication(revision, {
+        publishedAssetIds: ordered,
+        firstPublishedAt,
+        updatedAt: now
+      });
     });
   }
+
+  /** Publication state for callers that accept the documented default list. */
+  async publicationState(defaultIds: readonly string[]): Promise<PublicationState> {
+    return (await this.readPublicationFor(defaultIds)) ?? {
+      revision: 0, publishedAssetIds: [...defaultIds], firstPublishedAt: {}, updatedAt: null
+    };
+  }
+
+  /**
+   * Read the publication object for a caller that has a default list.
+   *
+   * Unlike `readPublication`, a corrupt or unreadable object yields `null`
+   * here: the historic purchase and catalogue paths keep their documented
+   * "fall back to the default list" behaviour. Publication writes use
+   * `readPublication`, which fails closed instead.
+   */
+  async readPublicationFor(defaultIds: readonly string[]): Promise<PublicationState | null> {
+    try {
+      const state = await this.readPublication();
+      return state ? this.#publicationView(state, defaultIds) : null;
+    } catch {
+      return null;
+    }
+  }
+
 
   async recordDownload(name: string, platform: string, downloadedAt: Date): Promise<void> {
     const key = `${prefixes.installer}.download-events/${downloadedAt.getTime()}-${randomBytes(6).toString("hex")}-${name}`;
@@ -396,29 +646,62 @@ export class AdminObjectStore {
     });
   }
 
-  async summarizeDownloads(createdFrom: Date, createdTo: Date): Promise<AdminDownloadSummary> {
+  async summarizeDownloads(
+    createdFrom: Date,
+    createdTo: Date,
+    options: { countedSince?: Date | null; registeredNames?: readonly string[] } = {}
+  ): Promise<AdminDownloadSummary> {
     const eventPrefix = `${prefixes.installer}.download-events/`;
-    const records = (await this.#listObjects(prefixes.installer)).flatMap((item) => {
+    // Only the events prefix is listed. Every download writes one object that is
+    // never deleted, so this listing grows with traffic forever; the page caches
+    // the result briefly rather than repeating it on each tab switch. A daily
+    // rollup object is the next step if the listing becomes slow, but that needs
+    // an atomic counter this store does not have, so it is not done here.
+    const records = (await this.#listObjects(eventPrefix)).flatMap((item) => {
       const key = item.Key ?? "";
       if (!key.startsWith(eventPrefix)) return [];
       const match = key.slice(eventPrefix.length).match(/^(\d+)-[a-f0-9]+-(.+)$/u);
       if (!match) return [];
       const downloadedAt = new Date(Number(match[1]));
       if (!Number.isFinite(downloadedAt.getTime())) return [];
-      return [{ fileName: match[2], downloadedAt }];
+      // The platform comes from the registered object name, which is what the
+      // counting endpoint verified before recording. Reading every event body
+      // to repeat that would multiply the cost of an already linear scan.
+      const platform = /\.dmg$/iu.test(match[2]) ? "macos" : /\.exe$/iu.test(match[2]) ? "windows" : null;
+      return [{ fileName: match[2], downloadedAt, platform }];
     });
-    const names = [...new Set(records.map((item) => item.fileName))].sort();
+    const countedSince = options.countedSince ?? null;
+    const registered = options.registeredNames ? new Set(options.registeredNames) : null;
+    const inPeriod = (item: { downloadedAt: Date }) => item.downloadedAt >= createdFrom && item.downloadedAt < createdTo;
+    const counted = countedSince === null ? records : records.filter((item) => item.downloadedAt >= countedSince);
+    const legacy = countedSince === null ? [] : records.filter((item) => item.downloadedAt < countedSince);
+    const names = [...new Set(counted.map((item) => item.fileName))].sort();
+    const totalFor = (list: typeof records) => list.length;
     return {
-      total: records.length,
-      period: records.filter((item) => item.downloadedAt >= createdFrom && item.downloadedAt < createdTo).length,
+      total: totalFor(counted),
+      period: counted.filter(inPeriod).length,
       byFile: names.map((fileName) => {
-        const matching = records.filter((item) => item.fileName === fileName);
-        return {
-          fileName,
-          total: matching.length,
-          period: matching.filter((item) => item.downloadedAt >= createdFrom && item.downloadedAt < createdTo).length
-        };
-      })
+        const matching = counted.filter((item) => item.fileName === fileName);
+        return { fileName, total: matching.length, period: matching.filter(inPeriod).length };
+      }),
+      byPlatform: {
+        macos: {
+          total: counted.filter((item) => item.platform === "macos").length,
+          period: counted.filter((item) => item.platform === "macos" && inPeriod(item)).length
+        },
+        windows: {
+          total: counted.filter((item) => item.platform === "windows").length,
+          period: counted.filter((item) => item.platform === "windows" && inPeriod(item)).length
+        }
+      },
+      earliest: counted.reduce<string | null>((soonest, item) => {
+        const iso = item.downloadedAt.toISOString();
+        return soonest === null || iso < soonest ? iso : soonest;
+      }, null),
+      legacyCount: legacy.length,
+      // An event for a name the registry no longer lists is still a real request,
+      // so it stays in the totals; it just cannot be attributed to a platform.
+      unattributed: registered === null ? 0 : counted.filter((item) => !registered.has(item.fileName)).length
     };
   }
 }
