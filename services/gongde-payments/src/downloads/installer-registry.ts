@@ -48,32 +48,40 @@ export function installerObjectName(value: string): string | null {
 /**
  * The shipped registry file, in the layouts the service actually runs in.
  *
- * `npm run build` copies the JSON next to the compiled modules, so a container
- * that only ships `dist/` still has it. The release tarball
- * (`scripts/package-gongde-api.sh`) ships `src/` too and builds on the host, so
- * the source-relative path is kept as a second candidate.
+ * The authoritative location is `src/free-distribution/installers.json`: the
+ * registry-only release path (`registry-owner.py`) overwrites exactly that file
+ * and writes a Dockerfile that copies it to `/app/src/free-distribution/
+ * installers.json`. A registry update therefore lands there while the compiled
+ * modules keep running from `dist/`, which is why that path is read first.
+ *
+ * `dist/free-distribution/installers.json` is a build-time copy, kept as a
+ * fallback for a container that ships only `dist/`. It is read only when the
+ * authoritative file is genuinely absent — a stale copy must never shadow a
+ * published registry update.
  */
-const DEFAULT_REGISTRY_CANDIDATES = [
-  new URL("../free-distribution/installers.json", import.meta.url),        // dist/downloads → dist/free-distribution
-  new URL("../../src/free-distribution/installers.json", import.meta.url)  // dist/downloads → src/free-distribution
-];
+const AUTHORITATIVE_REGISTRY = new URL("../../src/free-distribution/installers.json", import.meta.url);
+const BUILT_REGISTRY_COPY = new URL("../free-distribution/installers.json", import.meta.url);
+
+/** A different layout, as opposed to a file that exists but cannot be read. */
+function isAbsentLayout(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
 
 function readRegistryFile(source: NodeJS.ProcessEnv): string {
   const override = source.GONGDE_FREE_INSTALLERS_FILE?.trim();
   if (override) return readFileSync(override, "utf8");
-  // A single relative path resolved against the compiled location, and `dist/`
-  // held no JSON — the whole registry then read as "unavailable" at runtime
-  // while every test passed, because the tests set an override. Both real
-  // layouts are tried; the last error is the one that surfaces.
-  let lastError: unknown = null;
-  for (const candidate of DEFAULT_REGISTRY_CANDIDATES) {
-    try {
-      return readFileSync(candidate, "utf8");
-    } catch (error) {
-      lastError = error;
-    }
+  // Only "no such file" means this deployment uses a dist-only layout. A
+  // permission or I/O error means the authoritative registry is there but
+  // unreadable, and falling back to the build copy would publish stale values
+  // as current; a malformed authoritative file is handled by the parse below,
+  // which fails closed rather than retrying the older copy.
+  try {
+    return readFileSync(AUTHORITATIVE_REGISTRY, "utf8");
+  } catch (error) {
+    if (!isAbsentLayout(error)) throw error;
   }
-  throw lastError;
+  return readFileSync(BUILT_REGISTRY_COPY, "utf8");
 }
 
 export function loadInstallerRegistry(source: NodeJS.ProcessEnv = process.env): InstallerRegistry {

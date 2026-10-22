@@ -194,11 +194,67 @@ const isCounts = (value: unknown): boolean =>
 const isPlatformCounts = (value: unknown): boolean =>
   Boolean(value) &&
   isCount((value as { total?: unknown }).total) && isCount((value as { period?: unknown }).period);
+
+/**
+ * Item-level guards.
+ *
+ * `Array.isArray(items)` says nothing about what is inside: `[null]` passes it
+ * and then throws on the first property read. Every list the pages map over is
+ * checked entry by entry, against the fields those rows actually read. A list
+ * that is genuinely empty still passes — empty is an answer, a null row is not.
+ */
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const isText = (value: unknown): value is string => typeof value === "string";
+const isTextOrNull = (value: unknown): boolean => value === null || typeof value === "string";
+const isStamp = (value: unknown): boolean => typeof value === "string" && Number.isFinite(Date.parse(value));
+const isStampOrNull = (value: unknown): boolean => value === null || isStamp(value);
+const every = (value: unknown, check: (entry: unknown) => boolean): boolean =>
+  Array.isArray(value) && value.every(check);
+
+/** A per-file row of the download summary. */
+const isDownloadFile = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.fileName) && isCount(entry.total) && isCount(entry.period);
+
+/** One registry entry, as the installer table renders it. */
+const isRegistryItem = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.name) && isText(entry.platform) && isText(entry.version) && isCount(entry.bytes);
+
+/** One row of the "needs attention" list on 今日运营. */
+const isIssueEntry = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.claimId) && isText(entry.state) && isTextOrNull(entry.error) &&
+  every(entry.workNumbers, isText) && isStamp(entry.createdAt) && isCount(entry.waitingSeconds);
+
+/** One appearance inside a claim; the drawer table uses all three fields. */
+const isClaimItem = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.number) && isText(entry.title) && isText(entry.catalogRevision);
+
+/** One claim row, covering the table columns and the drawer it opens. */
+const isClaimEntry = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.claimId) && isText(entry.kind) && isText(entry.state) &&
+  isText(entry.codeFamilyId) && isStamp(entry.createdAt) &&
+  every(entry.items, isClaimItem) &&
+  (entry.bytes === null || isCount(entry.bytes)) &&
+  (entry.durationMs === null || isCount(entry.durationMs)) &&
+  isTextOrNull(entry.error) && isStampOrNull(entry.issuedAt) && isStampOrNull(entry.downloadExpiresAt);
+
+/** One report row; the detail pane formats every field it shows. */
+const isReportEntry = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.id) && isText(entry.number) && isText(entry.state) &&
+  isText(entry.category) && isText(entry.description) && isStamp(entry.createdAt) &&
+  isTextOrNull(entry.versionId) && isTextOrNull(entry.evidence) && isTextOrNull(entry.contact) &&
+  isStampOrNull(entry.resolvedAt) && isTextOrNull(entry.resolution);
+
+/** One retention registration; `references.length` is read directly. */
+const isRetentionEntry = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.platform) && isText(entry.version) && isText(entry.releaseId) &&
+  isText(entry.sha256) && isText(entry.publicDownloadUrl) && every(entry.references, isText);
+
 const isDownloadSummary = (value: unknown): boolean => {
-  if (!value || typeof value !== "object") return false;
-  const summary = value as Record<string, unknown>;
+  if (!isObject(value)) return false;
+  const summary = value;
   const byPlatform = summary.byPlatform as Record<string, unknown> | undefined;
-  return isCount(summary.total) && isCount(summary.period) && Array.isArray(summary.byFile) &&
+  return isCount(summary.total) && isCount(summary.period) && every(summary.byFile, isDownloadFile) &&
     Boolean(byPlatform) && isPlatformCounts(byPlatform!.macos) && isPlatformCounts(byPlatform!.windows) &&
     isCount(summary.legacyCount) && isCount(summary.unattributed);
 };
@@ -223,17 +279,17 @@ export const shapes = {
     const coverage = body.coverage as Record<string, unknown> | undefined;
     const registry = body.registry as Record<string, unknown> | undefined;
     const range = body.range as Record<string, unknown> | undefined;
-    return Boolean(coverage) && (coverage!.status === "configured" || coverage!.status === "unconfigured") &&
-      typeof coverage!.scopeNote === "string" &&
-      Boolean(registry) && Array.isArray(registry!.items) &&
-      typeof body.status === "string" &&
-      Boolean(range) && Number.isFinite(Date.parse(String(range!.from))) && Number.isFinite(Date.parse(String(range!.to))) &&
+    return isObject(coverage) && (coverage.status === "configured" || coverage.status === "unconfigured") &&
+      isText(coverage.scopeNote) &&
+      isObject(registry) && every(registry.items, isRegistryItem) &&
+      isText(body.status) &&
+      isObject(range) && isStamp(range.from) && isStamp(range.to) &&
       (body.status === "available" ? isDownloadSummary(body.summary) : body.summary === null);
   },
   operations: (body: Record<string, unknown>) => {
     const claims = body.claims as Record<string, unknown> | undefined;
-    return Number.isFinite(Date.parse(String(body.asOf))) && Boolean(claims) &&
-      typeof claims!.status === "string" && Array.isArray(claims!.items);
+    return isStamp(body.asOf) && isObject(claims) &&
+      isText(claims.status) && every(claims.items, isIssueEntry);
   },
   paymentConfig: (body: Record<string, unknown>) =>
     Number.isSafeInteger(body.unitPriceFen) && Number.isSafeInteger(body.maxItems) && typeof body.mode === "string",
@@ -248,33 +304,49 @@ export const shapes = {
  * revision at all.
  */
 export const v2Shapes = {
-  /** A code snapshot is actionable only when every writable field is present. */
+  /**
+   * A code snapshot is actionable only when every writable field is present.
+   *
+   * `familyId: null` is a real "no code family" state, but it is only trusted
+   * once the rest of the snapshot also looks like one: the server sends
+   * `revision: null`, `status: "INACTIVE"`, no code and no window. Returning
+   * true for a bare `{familyId: null}` would accept a truncated response as a
+   * confirmed "not enabled".
+   */
   codeSnapshot: (data: unknown): boolean => {
-    if (!data || typeof data !== "object") return false;
-    const snapshot = data as Record<string, unknown>;
+    if (!isObject(data)) return false;
+    const snapshot = data;
     if (!("familyId" in snapshot) || !("revision" in snapshot)) return false;
-    if (snapshot.familyId === null) return true; // genuinely no code family
-    if (typeof snapshot.familyId !== "string" || snapshot.familyId.length === 0) return false;
-    if (!Number.isSafeInteger(snapshot.revision) || (snapshot.revision as number) < 0) return false;
     if (!["ACTIVE", "PAUSED", "INACTIVE"].includes(String(snapshot.status))) return false;
-    if (snapshot.code !== null && typeof snapshot.code !== "string") return false;
-    if (snapshot.expiresAt !== null && !Number.isFinite(Date.parse(String(snapshot.expiresAt)))) return false;
-    if (snapshot.validFrom !== null && !Number.isFinite(Date.parse(String(snapshot.validFrom)))) return false;
-    return Number.isSafeInteger(snapshot.maxItems);
+    if (snapshot.code !== null && !isText(snapshot.code)) return false;
+    if (!isStampOrNull(snapshot.expiresAt) || !isStampOrNull(snapshot.validFrom)) return false;
+    if (!isCount(snapshot.maxItems) || !isCount(snapshot.contributionCount)) return false;
+    if (snapshot.familyId === null) {
+      return snapshot.revision === null && snapshot.status === "INACTIVE" &&
+        snapshot.code === null && snapshot.validFrom === null && snapshot.expiresAt === null;
+    }
+    if (!isText(snapshot.familyId) || snapshot.familyId.length === 0) return false;
+    return Number.isSafeInteger(snapshot.revision) && (snapshot.revision as number) >= 0;
   },
   /** `/operations` answers `{ asOf, claims, reviews, budget }`; claims is the part the page counts. */
   operations: (data: unknown): boolean => {
-    if (!data || typeof data !== "object") return false;
-    const body = data as Record<string, unknown>;
-    const claims = body.claims as Record<string, unknown> | undefined;
-    return Number.isFinite(Date.parse(String(body.asOf))) && Boolean(claims) &&
-      typeof claims!.status === "string" && Array.isArray(claims!.items);
+    if (!isObject(data)) return false;
+    const claims = data.claims as Record<string, unknown> | undefined;
+    return isStamp(data.asOf) && isObject(claims) &&
+      isText(claims.status) && every(claims.items, isIssueEntry);
   },
-  claimsPage: (data: unknown): boolean => Boolean(data) && Array.isArray((data as { items?: unknown }).items) &&
-    Number.isSafeInteger((data as { total?: unknown }).total),
-  stats: (data: unknown): boolean => Boolean(data) && typeof data === "object",
-  reportsPage: (data: unknown): boolean => Boolean(data) && Array.isArray((data as { items?: unknown }).items) &&
-    Number.isSafeInteger((data as { total?: unknown }).total)
+  claimsPage: (data: unknown): boolean => isObject(data) && every(data.items, isClaimEntry) &&
+    isCount(data.total),
+  stats: (data: unknown): boolean => isObject(data) &&
+    (data.readyClaims === null || isCount(data.readyClaims)) &&
+    (data.workClaims === null || isCount(data.workClaims)) &&
+    (data.verifiedCodes === null || isCount(data.verifiedCodes)),
+  reportsPage: (data: unknown): boolean => isObject(data) && every(data.items, isReportEntry) &&
+    isCount(data.total),
+  /** `/installer-retention`; the page reads `references.length` and the stamp. */
+  retention: (data: unknown): boolean => isObject(data) && isStamp(data.asOf) &&
+    isText(data.registryStatus) && isText(data.minimumCompatibleVersion) &&
+    every(data.items, isRetentionEntry)
 };
 
 /** A code the page cannot explain in the operator's language is still a code, not a guess. */

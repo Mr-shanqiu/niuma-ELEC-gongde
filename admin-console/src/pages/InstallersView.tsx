@@ -3,7 +3,7 @@ import { Alert, Button, Card, Collapse, Descriptions, Space, Table, Typography }
 import type { ColumnsType } from "antd/es/table";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useDistributionRead, useRead } from "../ui/api";
-import { shapes } from "../ui/api";
+import { shapes, v2Shapes } from "../ui/api";
 import { classifyDownloads, historicalRequests } from "../ui/downloads";
 import type { DownloadReport } from "../ui/downloads";
 import { ReadGate } from "../ui/ReadGate";
@@ -60,7 +60,7 @@ export function InstallersView() {
   // The registry comes from the same loader the counting endpoint uses, so the
   // two cannot disagree about which file names are valid.
   const report = useRead<DownloadReport>("/download-report", { expect: shapes.downloadReport });
-  const retention = useDistributionRead<Retention>("/installer-retention");
+  const retention = useDistributionRead<Retention>("/installer-retention", { expectData: v2Shapes.retention });
 
   const reload = () => { report.reload(); retention.reload(); };
 

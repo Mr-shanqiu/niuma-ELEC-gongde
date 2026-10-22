@@ -64,7 +64,9 @@ test("F6: a v2 answer without serverTime or data is rejected", () => {
 
 test("F6: a code snapshot missing revision or writable fields is rejected", () => {
   assert.equal(v2Shapes.codeSnapshot(codeSnapshot()), true);
-  assert.equal(v2Shapes.codeSnapshot(codeSnapshot({ familyId: null, revision: null })), true, "no family is a real state");
+  // `familyId: null` alone is not enough; the rest of the snapshot has to look
+  // like the server's real "no family" answer (see the dedicated test below).
+  assert.equal(v2Shapes.codeSnapshot(codeSnapshot({ familyId: null, revision: null })), false);
   // The original defect: `revision: undefined` passed `revision !== null` and
   // enabled a destructive write with no revision at all.
   const { revision: _revision, ...withoutRevision } = codeSnapshot();
@@ -82,6 +84,16 @@ test("F6: a code snapshot missing revision or writable fields is rejected", () =
 
 /* --------------------------------------------------------------- operations */
 
+const issue = (overrides = {}) => ({
+  claimId: "0123456789abcdef0123456789abcdef",
+  state: "FAILED",
+  error: "pack_signing_failed",
+  workNumbers: ["100001", "100002"],
+  createdAt: "2026-10-22T01:00:00.000Z",
+  waitingSeconds: 5400,
+  ...overrides
+});
+
 test("F6: operations needs a real asOf and a claims list", () => {
   const body = { asOf: "2026-10-22T02:00:00.000Z", claims: { status: "available", items: [] }, reviews: {}, budget: {} };
   assert.equal(v2Shapes.operations(body), true);
@@ -89,6 +101,22 @@ test("F6: operations needs a real asOf and a claims list", () => {
   assert.equal(v2Shapes.operations({ asOf: body.asOf }), false);
   assert.equal(v2Shapes.operations({ asOf: body.asOf, claims: { status: "available" } }), false);
   assert.equal(v2Shapes.operations({}), false);
+});
+
+test("F6: an operations issue list with a bad entry is rejected, an empty one is not", () => {
+  const body = (items) => ({ asOf: "2026-10-22T02:00:00.000Z", claims: { status: "available", items } });
+  assert.equal(v2Shapes.operations(body([])), true, "an empty queue is an answer");
+  assert.equal(v2Shapes.operations(body([issue()])), true);
+  // The review's case: `[null]` passed `Array.isArray` and then threw on `item.claimId`.
+  assert.equal(v2Shapes.operations(body([null])), false);
+  assert.equal(v2Shapes.operations(body([{}])), false);
+  assert.equal(v2Shapes.operations(body([issue({ claimId: undefined })])), false);
+  assert.equal(v2Shapes.operations(body([issue({ workNumbers: null })])), false);
+  assert.equal(v2Shapes.operations(body([issue({ workNumbers: [1] })])), false);
+  assert.equal(v2Shapes.operations(body([issue({ createdAt: "yesterday" })])), false);
+  assert.equal(v2Shapes.operations(body([issue({ waitingSeconds: "5400" })])), false);
+  assert.equal(v2Shapes.operations(body([issue({ error: undefined })])), false, "error must be null or a string");
+  assert.equal(v2Shapes.operations(body([issue(), issue({ waitingSeconds: null })])), false, "one bad row spoils the list");
 });
 
 /* ----------------------------------------------------------------- overview */
@@ -126,6 +154,28 @@ test("F6: a download report with a broken coverage or summary is rejected", () =
   assert.equal(shapes.downloadReport(report({ status: "available", summary: null })), false);
   assert.equal(shapes.downloadReport(report({ summary: summary({ byPlatform: { macos: platform() } }) })), false);
   assert.equal(shapes.downloadReport(report({ summary: summary({ legacyCount: undefined }) })), false);
+});
+
+const file = (overrides = {}) => ({ fileName: "niuma-merit-macos-0.9.4.dmg", total: 6, period: 2, ...overrides });
+const registration = (overrides = {}) => ({
+  name: "niuma-merit-macos-0.9.4.dmg", platform: "macos", version: "0.9.4",
+  releaseId: "niuma-merit-macos-0.9.4", bytes: 1024, sha256: "a".repeat(64),
+  countedUrl: "/api/gongde/downloads/niuma-merit-macos-0.9.4.dmg",
+  ...overrides
+});
+
+test("F6: a download report rejects bad entries in byFile and registry.items", () => {
+  // The review's case: `byFile: [null]` passed and InstallersView threw on `entry.fileName`.
+  assert.equal(shapes.downloadReport(report({ summary: summary({ byFile: [null] }) })), false);
+  assert.equal(shapes.downloadReport(report({ summary: summary({ byFile: [{}] }) })), false);
+  assert.equal(shapes.downloadReport(report({ summary: summary({ byFile: [{ fileName: "a", total: 1 }] }) })), false, "period is read too");
+  assert.equal(shapes.downloadReport(report({ summary: summary({ byFile: [] }) })), true, "no files yet is a legal answer");
+
+  assert.equal(shapes.downloadReport(report({ registry: { status: "available", items: [null] } })), false);
+  assert.equal(shapes.downloadReport(report({ registry: { status: "available", items: [registration()] } })), true);
+  assert.equal(shapes.downloadReport(report({ registry: { status: "available", items: [registration({ bytes: undefined })] } })), false);
+  assert.equal(shapes.downloadReport(report({ registry: { status: "available", items: [] } })), true);
+  assert.equal(shapes.downloadReport(report({ registry: { status: "unavailable", items: [] } })), true);
 });
 
 /* --------------------------------------------------- classifyDownloads (F2) */
@@ -178,4 +228,99 @@ test("F2: a store that is off is 未接入 for a different reason than a missing
 
 test("F2: loading is its own state and never borrows a number", () => {
   assert.equal(classifyDownloads({ status: "loading" }).note, "loading");
+});
+
+/* ---------------------------------------- v2 page lists (F6, second round) */
+
+const claimItem = (overrides = {}) => ({ number: "100001", title: "招财猫", catalogRevision: "c0ffee2", ...overrides });
+const claim = (overrides = {}) => ({
+  claimId: "0123456789abcdef0123456789abcdef",
+  kind: "GROUP",
+  state: "READY",
+  codeFamilyId: "group-2026-1",
+  items: [claimItem()],
+  bytes: 2400000,
+  durationMs: 480,
+  error: null,
+  createdAt: "2026-10-22T01:00:00.000Z",
+  issuedAt: "2026-10-22T01:00:05.000Z",
+  downloadExpiresAt: "2026-10-29T01:00:05.000Z",
+  ...overrides
+});
+const reportEntry = (overrides = {}) => ({
+  id: "ab".repeat(16),
+  number: "100001",
+  versionId: null,
+  state: "OPEN",
+  category: "版权归属",
+  description: "原始描述",
+  evidence: null,
+  contact: null,
+  createdAt: "2026-10-22T01:00:00.000Z",
+  resolvedAt: null,
+  resolution: null,
+  ...overrides
+});
+
+test("F6: a claims page rejects bad rows and bad nested items", () => {
+  assert.equal(v2Shapes.claimsPage({ items: [], total: 0 }), true, "an empty day is a legal answer");
+  assert.equal(v2Shapes.claimsPage({ items: [claim()], total: 1 }), true);
+  assert.equal(v2Shapes.claimsPage({ items: [null], total: 1 }), false);
+  assert.equal(v2Shapes.claimsPage({ items: [claim({ claimId: undefined })], total: 1 }), false);
+  assert.equal(v2Shapes.claimsPage({ items: [claim({ items: null })], total: 1 }), false, "the drawer table maps items");
+  assert.equal(v2Shapes.claimsPage({ items: [claim({ items: [null] })], total: 1 }), false);
+  assert.equal(v2Shapes.claimsPage({ items: [claim({ items: [claimItem({ catalogRevision: undefined })] })], total: 1 }), false);
+  assert.equal(v2Shapes.claimsPage({ items: [claim({ createdAt: "nope" })], total: 1 }), false);
+  assert.equal(v2Shapes.claimsPage({ items: [claim()], total: "1" }), false);
+  assert.equal(v2Shapes.claimsPage(null), false);
+});
+
+test("F6: a reports page rejects bad rows", () => {
+  assert.equal(v2Shapes.reportsPage({ items: [], total: 0 }), true);
+  assert.equal(v2Shapes.reportsPage({ items: [reportEntry()], total: 1 }), true);
+  assert.equal(v2Shapes.reportsPage({ items: [null], total: 1 }), false);
+  assert.equal(v2Shapes.reportsPage({ items: [{ ...reportEntry(), description: undefined }], total: 1 }), false);
+  assert.equal(v2Shapes.reportsPage({ items: [{ ...reportEntry(), createdAt: undefined }], total: 1 }), false);
+  assert.equal(v2Shapes.reportsPage({ items: [{ ...reportEntry(), resolution: 1 }], total: 1 }), false);
+});
+
+test("F6: stats must be numbers or null, not an arbitrary object", () => {
+  assert.equal(v2Shapes.stats({ readyClaims: 7, workClaims: 19, verifiedCodes: 24 }), true);
+  assert.equal(v2Shapes.stats({ readyClaims: null, workClaims: null, verifiedCodes: null }), true);
+  assert.equal(v2Shapes.stats({}), false, "missing counts render as zeros otherwise");
+  assert.equal(v2Shapes.stats({ readyClaims: "7", workClaims: 1, verifiedCodes: 1 }), false);
+  assert.equal(v2Shapes.stats(null), false);
+});
+
+test("F6: a retention snapshot rejects bad registrations", () => {
+  const retention = (items) => ({
+    asOf: "2026-10-22T02:00:00.000Z", registryStatus: "available", minimumCompatibleVersion: "0.9.0",
+    items
+  });
+  const entry = (overrides = {}) => ({
+    platform: "macos", version: "0.9.4", releaseId: "niuma-merit-macos-0.9.4",
+    sha256: "a".repeat(64), publicDownloadUrl: "https://download.gongde.zqscreen.cn/a.dmg",
+    references: ["distribution-registry"], ...overrides
+  });
+  assert.equal(v2Shapes.retention(retention([entry()])), true);
+  assert.equal(v2Shapes.retention(retention([])), true);
+  assert.equal(v2Shapes.retention(retention([null])), false);
+  assert.equal(v2Shapes.retention(retention([entry({ references: null })])), false, "the page reads references.length");
+  assert.equal(v2Shapes.retention(retention([entry({ sha256: undefined })])), false);
+  assert.equal(v2Shapes.retention({ ...retention([]), asOf: "today" }), false);
+});
+
+test("F6: a 'no code family' snapshot is only accepted when it looks like one", () => {
+  const none = {
+    familyId: null, revision: null, kind: "CREATOR", status: "INACTIVE", code: null,
+    validFrom: null, expiresAt: null, contributionCount: 0, maxItems: 0, redemptionEnabled: false
+  };
+  assert.equal(v2Shapes.codeSnapshot(none), true);
+  // A truncated response that happens to carry familyId: null is not evidence
+  // that no code exists; it is a failed read.
+  assert.equal(v2Shapes.codeSnapshot({ familyId: null, revision: null }), false);
+  assert.equal(v2Shapes.codeSnapshot({ familyId: null, revision: 3, status: "ACTIVE" }), false);
+  assert.equal(v2Shapes.codeSnapshot({ ...none, status: "ACTIVE" }), false);
+  assert.equal(v2Shapes.codeSnapshot({ ...none, code: "GD123456" }), false);
+  assert.equal(v2Shapes.codeSnapshot({ ...none, maxItems: undefined }), false);
 });

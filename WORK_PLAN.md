@@ -5485,3 +5485,15 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - F3群码时钟改为响应锚点+真实经过时长，并在到期边界唤醒；F4筛选只用服务端允许的五个状态；F5下载导航加一次性门，计数请求数不变；F6恢复v2 envelope与各接口字段守卫，`revision`必须为安全整数；F7消费`#/code?claimId&date`深链并跟随hash变化；F8规则对照展开时读取、失败可重试。
 - 验证：服务端`npm test`退出码0；`admin-console` `npm test` 17/17；`website`新增点击用例7/7；浏览器定向验证F2/F3/F4/F6/F7/F8并附截图；F5用CDP计数确认单次导航。既有`website/tests/free-v2-frontend.test.mjs` 11项失败经stash对比为既存问题。
 - 边界：未合入、未部署、未执行生产迁移、未访问生产凭据、未改COS/Caddy/CDN/DNS/IAM、未重签客户端；冻结owner材料未恢复。详见`handoffs/admin-redesign-plan-20261021.md` §13。
+
+## 2026-10-22 PR #12第二轮复核：六项关闭，两项剩余
+
+- 已确认PR OPEN/head8571dec与本地一致；F2/F3/F4/F5/F7/F8关闭，F1/F6仍部分修复，详见PR12评审回执第二轮。F1默认布局已恢复但dist优先会遮蔽既有src登记overlay；F6数组null条目仍被接受并导致消费TypeError。
+- 只做真实guard及双布局loader最小无网络验证，临时目录已清理。未重跑已过套件/浏览器、未访问生产或恢复owner、未改产品/合入部署。下一轮仅处理两个剩余项。
+
+## 2026-10-22 PR #12第二轮复核：F1、F6补修
+
+- F1：按发布合同（`registry-owner.py` 的 `/app/src/free-distribution/installers.json`）把权威登记改为 src，dist 副本只在 src 不存在时回退；权限错误与坏 JSON 不回退，统一 unavailable。新增用例覆盖「只更新 src 立即生效」「dist-only」「坏 JSON 不回退」「不可读不回退」，对调优先级后 3 项失败以证明用例有效。
+- F6：补条目级校验（下载 byFile 与 registry.items、领取异常条目、领取列表及其 items、举报列表、保留登记、stats），并去掉 `codeSnapshot` 在 `familyId=null` 时直接通过的捷径。坏条目进入 error 态，合法空数组仍通过。
+- 验证：服务端`npm test`退出码0；`admin-console` `npm test` 24/24；`tsc -b`+`vite build`通过；浏览器`bad-entry`场景四页均为「读取失败」而非崩溃，`normal`四页仍正常。
+- 边界同上：未合入、未部署、未访问生产、未改共享配置、未恢复冻结owner材料。详见`handoffs/admin-redesign-plan-20261021.md` §14。
