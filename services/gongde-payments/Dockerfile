@@ -4,6 +4,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+# `npm run build` ends with `node scripts/copy-assets.mjs`, so the build stage
+# needs the scripts directory too; without it the build stops with
+# MODULE_NOT_FOUND before any source is compiled.
+COPY scripts ./scripts
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22.19.0-alpine3.22
