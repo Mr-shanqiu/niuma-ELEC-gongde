@@ -641,9 +641,22 @@ export const server = createServer(async (request, response) => {
       requireAdmin(request);
       if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
       const revisions = packSigner.revisions();
-      const publication = adminObjectStore
-        ? await adminObjectStore.publicationState(OFFICIAL_ASSET_IDS)
-        : { revision: 0, publishedAssetIds: [...OFFICIAL_ASSET_IDS], firstPublishedAt: {}, updatedAt: null };
+      // A read failure must reach the page as a failure. The historic purchase
+      // path keeps its "fall back to the default list" behaviour, but this list
+      // also hands the page a version to write with: reporting revision 0 and
+      // everything published would show state nobody read and enable an action
+      // whose only possible outcome is a 503.
+      let publication;
+      try {
+        publication = adminObjectStore
+          ? await adminObjectStore.publicationStateForAdmin(OFFICIAL_ASSET_IDS)
+          : { revision: 0, publishedAssetIds: [...OFFICIAL_ASSET_IDS], firstPublishedAt: {}, updatedAt: null };
+      } catch (error) {
+        if (error instanceof PublicationUnavailable) {
+          return json(response, 503, { error: "appearance_publication_unavailable" });
+        }
+        throw error;
+      }
       const publishedIds = new Set(publication.publishedAssetIds);
       const numbers = await optionalOfficialNumbers();
       const data = OFFICIAL_ASSET_IDS.map((assetId) => ({

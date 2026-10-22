@@ -201,7 +201,9 @@ function errorMessage(body: Record<string, unknown>, status: number): string {
     // lock is busy" lead to different operator actions, and neither is a retry.
     if (body.error === "appearance_publication_conflict") return "发布状态已被其他会话修改，请重新读取后再确认。";
     if (body.error === "appearance_publication_busy") return "另一位管理员正在提交发布状态，请稍后重新读取再操作。";
-    if (body.error === "appearance_publication_unavailable") return "发布状态暂时无法读取或写入，本次操作没有生效。";
+    // A 503 covers a write that may already have landed with its confirmation
+    // lost, so it cannot be reported as "nothing happened".
+    if (body.error === "appearance_publication_unavailable") return "操作结果未确认，请重新读取核对。";
     if (body.error === "appearance_publication_revision_required") return "缺少发布状态版本，已拒绝写入，请重新读取。";
     if (body.error === "appearance_resource_missing") return "这个形象没有可用素材，不能上架。";
     return chineseError(body.error);

@@ -54,6 +54,18 @@ export interface PublicationState {
 }
 
 /**
+ * What the object on disk said, before any documented fallback.
+ *
+ * `firstPublishedAtRecorded` separates "this object predates the field" from
+ * "this object recorded that nothing has been published yet". They are written
+ * identically but mean different things, and only the first may have its
+ * history inferred.
+ */
+interface PublicationRecord extends PublicationState {
+  firstPublishedAtRecorded: boolean;
+}
+
+/**
  * A cross-process mutex around one read-modify-write of the publication object.
  *
  * COS `PUT` accepts no `If-Match`, so "compare, then overwrite" cannot be made
@@ -398,27 +410,62 @@ export class AdminObjectStore {
   }
 
   async publicationStateStrict(defaultIds: readonly string[]): Promise<PublicationState> {
-    let state: PublicationState | null;
+    let state: PublicationRecord | null;
     try {
       state = await this.readPublication();
     } catch {
       throw new Error("appearance_publication_unavailable");
     }
     if (!state) throw new Error("appearance_publication_unavailable");
-    const allowed = new Set(defaultIds);
-    // The legacy object had no `firstPublishedAt`; the one real publication it
-    // recorded was wealth-button, timestamped by its `updatedAt`. Keep that fact
-    // instead of backdating every asset to the rollout.
+    return this.#publicationView(state, defaultIds);
+  }
+
+  /**
+   * The admin list read: the first-write default only when the object is
+   * genuinely absent.
+   *
+   * `publicationState` (kept for the historic purchase paths) turns every read
+   * failure into "the default list is published at revision 0". That is fine
+   * for a catalogue that must keep serving, and wrong for the page that then
+   * offers a write: it would show a version nobody read and enable an action
+   * whose only possible outcome is a 503. This variant fails closed.
+   */
+  async publicationStateForAdmin(defaultIds: readonly string[]): Promise<PublicationState> {
+    const state = await this.readPublication();
+    if (!state) {
+      return { revision: 0, publishedAssetIds: [...defaultIds], firstPublishedAt: {}, updatedAt: null };
+    }
+    return this.#publicationView(state, defaultIds);
+  }
+
+  /**
+   * The first-publication history the object supports.
+   *
+   * The legacy object had no `firstPublishedAt`; the one real publication it
+   * recorded was wealth-button, timestamped by its `updatedAt`. Keep that fact
+   * instead of backdating every asset to the rollout. An object that carries an
+   * explicit (even empty) map already answered the question, so nothing is
+   * inferred for it.
+   */
+  #legacyFirstPublishedAt(state: PublicationRecord): Record<string, string> {
     const firstPublishedAt = { ...state.firstPublishedAt };
-    if (Object.keys(state.firstPublishedAt).length === 0 && state.updatedAt &&
+    if (!state.firstPublishedAtRecorded && state.updatedAt &&
       state.publishedAssetIds.includes("official.wealth-button")) {
       firstPublishedAt["official.wealth-button"] = state.updatedAt;
     }
+    return firstPublishedAt;
+  }
+
+  /** One consistent view for readers: only known ids, only valid stamps. */
+  #publicationView(state: PublicationRecord, defaultIds: readonly string[]): PublicationState {
+    const allowed = new Set(defaultIds);
     return {
-      ...state,
+      revision: state.revision,
       publishedAssetIds: state.publishedAssetIds.filter((id) => allowed.has(id)),
       firstPublishedAt: Object.fromEntries(
-        Object.entries(firstPublishedAt).filter(([id, date]) => allowed.has(id) && Number.isFinite(Date.parse(date))))
+        Object.entries(this.#legacyFirstPublishedAt(state))
+          .filter(([id, date]) => allowed.has(id) && Number.isFinite(Date.parse(date)))),
+      updatedAt: state.updatedAt
     };
   }
 
@@ -429,7 +476,7 @@ export class AdminObjectStore {
    * failure or a corrupt body throws, because treating any of those as "no
    * publication object" would silently republish the default list.
    */
-  async readPublication(): Promise<PublicationState | null> {
+  async readPublication(): Promise<PublicationRecord | null> {
     let raw: string;
     try {
       const result = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
@@ -476,7 +523,11 @@ export class AdminObjectStore {
       revision: typeof revision === "number" ? revision : 0,
       publishedAssetIds: [...new Set(ids as string[])],
       firstPublishedAt,
-      updatedAt: typeof value.updatedAt === "string" && Number.isFinite(Date.parse(value.updatedAt)) ? value.updatedAt : null
+      updatedAt: typeof value.updatedAt === "string" && Number.isFinite(Date.parse(value.updatedAt)) ? value.updatedAt : null,
+      // An object written before `firstPublishedAt` existed is not the same as
+      // one that explicitly recorded "no first publication yet". Only the
+      // former may have its history inferred from `updatedAt`.
+      firstPublishedAtRecorded: stored !== undefined
     };
   }
 
@@ -538,7 +589,11 @@ export class AdminObjectStore {
       const set = new Set(current?.publishedAssetIds ?? assetIds);
       if (published) set.add(assetId); else set.delete(assetId);
       const ordered = assetIds.filter((id) => set.has(id));
-      const firstPublishedAt = { ...(current?.firstPublishedAt ?? {}) };
+      // Inherit the history this object can actually vouch for, and write it
+      // back explicitly. Otherwise the next `updatedAt` would become the only
+      // evidence of a first publication and an edit to a *different* appearance
+      // would silently move it.
+      const firstPublishedAt = current ? this.#legacyFirstPublishedAt(current) : {};
       const now = new Date().toISOString();
       if (published && !Object.prototype.hasOwnProperty.call(firstPublishedAt, assetId)) {
         firstPublishedAt[assetId] = now;
@@ -569,24 +624,7 @@ export class AdminObjectStore {
   async readPublicationFor(defaultIds: readonly string[]): Promise<PublicationState | null> {
     try {
       const state = await this.readPublication();
-      const allowed = new Set(defaultIds);
-      if (!state) return null;
-      // The legacy object had no `firstPublishedAt`; the one real publication
-      // it recorded was wealth-button, timestamped by its `updatedAt`. Keep that
-      // fact instead of backdating every asset to the rollout.
-      const firstPublishedAt = { ...state.firstPublishedAt };
-      if (Object.keys(state.firstPublishedAt).length === 0 && state.updatedAt &&
-        state.publishedAssetIds.includes("official.wealth-button")) {
-        firstPublishedAt["official.wealth-button"] = state.updatedAt;
-      }
-      return {
-        ...state,
-        firstPublishedAt: Object.fromEntries(
-          Object.entries(firstPublishedAt).filter(([id, date]) =>
-            allowed.has(id) && Number.isFinite(Date.parse(date)))
-        ),
-        publishedAssetIds: state.publishedAssetIds.filter((id) => allowed.has(id))
-      };
+      return state ? this.#publicationView(state, defaultIds) : null;
     } catch {
       return null;
     }

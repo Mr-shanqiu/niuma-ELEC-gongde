@@ -46,15 +46,19 @@ test("two instances never run inside the lock at the same time", { timeout: 2000
   assert.equal(overlaps, 0, "two operations observed the lock as free at the same time");
 });
 
-test("a lock that is never released is released when its operation throws", { timeout: 20000 }, async (t) => {
-  const handle = createPublicationLock(configuration);
-  t.after(async () => { await handle.close(); });
+test("a lock is released when its operation throws, proven by a different instance", { timeout: 20000 }, async (t) => {
+  const failed = createPublicationLock(configuration);
+  const witness = createPublicationLock(configuration);
+  t.after(async () => { await failed.close(); await witness.close(); });
 
-  await assert.rejects(handle.lock(async () => { throw new Error("writer_failed"); }), /writer_failed/);
-  // If the failed operation had leaked the named lock, this would block for the
-  // whole timeout and fail instead of returning immediately.
+  await assert.rejects(failed.lock(async () => { throw new Error("writer_failed"); }), /writer_failed/);
+
+  // The witness is a separate pool, so it cannot re-enter the failed handle's
+  // session. `GET_LOCK` is re-entrant *per session*: asking the same handle
+  // again could succeed by deepening its own count while the name was still
+  // held, which would prove nothing about the failure path.
   const started = Date.now();
-  const value = await handle.lock(async () => "after_failure");
+  const value = await witness.lock(async () => "after_failure");
   assert.equal(value, "after_failure");
   assert.ok(Date.now() - started < 2000, "the lock was still held after a failed operation");
 });

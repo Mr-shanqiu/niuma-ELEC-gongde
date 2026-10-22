@@ -21,6 +21,8 @@ class MemoryCos {
   objects = new Map();
   writes = [];
   failPut = false;
+  /** Makes the publication object unreadable, as a network or permission error would. */
+  failRead = false;
   /** Runs before each put resolves, to interleave a competing writer. */
   beforePut = null;
 
@@ -56,6 +58,7 @@ class MemoryCos {
   }
 
   getObject(params, callback) {
+    if (this.failRead) return callback(Object.assign(new Error("synthetic_read_failure"), { statusCode: 503 }));
     const body = this.objects.get(params.Key);
     if (!body) return callback(Object.assign(new Error("NoSuchKey"), { code: "NoSuchKey", statusCode: 404 }));
     callback(null, { Body: body });
@@ -124,6 +127,22 @@ test("publication writes are fenced by the publication revision", { timeout: 200
   const seed = (ids, revision) => cos.objects.set(STATE_KEY, Buffer.from(JSON.stringify({
     version: 1, revision, publishedAssetIds: ids, firstPublishedAt: {}, updatedAt: new Date().toISOString()
   })));
+
+  /* ---- an unreadable publication object is a failure, not "all published at 0" ---- */
+  // Before any seed there is genuinely no object, and the documented first-write
+  // default applies. Then make the read fail: the same list must stop answering
+  // 200, because a page that showed "published, revision 0" here would enable a
+  // write whose only possible outcome is a 503.
+  const noObject = await list();
+  assert.equal(noObject.publicationRevision, 0);
+  assert.ok(noObject.data.every((item) => item.state !== "UNPUBLISHED"),
+    "with no object the documented default is that everything is published");
+  cos.failRead = true;
+  const unreadable = await call("/api/gongde/admin/appearances");
+  assert.equal(unreadable.status, 503);
+  assert.equal((await unreadable.json()).error, "appearance_publication_unavailable");
+  cos.failRead = false;
+  assert.equal((await list()).publicationRevision, 0, "a failed read must not have changed anything");
 
   const initial = await list();
   const withMaterial = initial.data.filter((item) => item.revision);

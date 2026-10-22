@@ -1,5 +1,5 @@
 import mysql from "mysql2/promise";
-import type { Pool, RowDataPacket } from "mysql2/promise";
+import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import type { GongdeMySqlConfiguration } from "../storage/mysql-store.js";
 import { PublicationBusy, type PublicationLock } from "./object-store.js";
 
@@ -18,8 +18,9 @@ const LOCK_NAME = "gongde:appearance-publication:v1";
 const LOCK_TIMEOUT_SECONDS = 5;
 // Sent verbatim rather than prepared: a release is one statement with a fixed
 // name, and a statement that cannot be lost to a prepare/drain interaction is
-// one fewer way to leave the lock held.
-const RELEASE_SQL = `SELECT RELEASE_LOCK('${LOCK_NAME}')`;
+// one fewer way to leave the lock held. The alias names the column, because a
+// result we cannot read is indistinguishable from a release we cannot confirm.
+const RELEASE_SQL = `SELECT RELEASE_LOCK('${LOCK_NAME}') AS released`;
 
 export interface PublicationLockHandle {
   lock: PublicationLock;
@@ -57,18 +58,38 @@ export function createPublicationLock(
 
   const lock: PublicationLock = async (operation) => {
     const connection = await pool.getConnection();
+    // `GET_LOCK` is re-entrant per session and only `RELEASE_LOCK` (or the
+    // session ending) drops it. A connection whose lock state is unknown must
+    // therefore never go back into the pool: it would keep the name held while
+    // looking idle, and the next `GET_LOCK` on it would merely deepen its own
+    // count while every other instance waited out the timeout.
+    let destroy = false;
+    // Only a session that actually acquired the lock has anything to release.
     let acquired = false;
     try {
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT GET_LOCK(?, ?) AS acquired`,
-        [LOCK_NAME, LOCK_TIMEOUT_SECONDS]
-      );
+      let rows: RowDataPacket[];
+      try {
+        [rows] = await connection.execute<RowDataPacket[]>(
+          `SELECT GET_LOCK(?, ?) AS acquired`,
+          [LOCK_NAME, LOCK_TIMEOUT_SECONDS]
+        );
+      } catch (error) {
+        // The server may have granted the lock before the reply was lost, so
+        // this session might hold it.
+        destroy = true;
+        throw error;
+      }
+      // 1 means acquired; 0 is the wait timeout and NULL reports an error. In
+      // neither of the latter two does this session hold the lock.
       if (Number(rows[0]?.acquired) !== 1) throw new PublicationBusy();
       acquired = true;
       return await operation();
     } finally {
-      if (acquired) await connection.query(RELEASE_SQL).catch(() => {});
-      connection.release();
+      // The operation's own result, or its own error, stands. A cleanup failure
+      // is recorded only as "do not reuse this connection"; it never turns a
+      // completed write into a failure or the other way round.
+      if (!destroy && acquired) destroy = !(await releaseLock(connection));
+      if (destroy) connection.destroy(); else connection.release();
     }
   };
 
@@ -77,6 +98,16 @@ export function createPublicationLock(
     mode: "mysql-named-lock",
     close: async () => { await pool.end().catch(() => {}); }
   };
+}
+
+/** True only when the server confirmed this session no longer holds the lock. */
+async function releaseLock(connection: PoolConnection): Promise<boolean> {
+  try {
+    const [rows] = await connection.query<RowDataPacket[]>(RELEASE_SQL);
+    return Number(rows[0]?.released) === 1;
+  } catch {
+    return false;
+  }
 }
 
 /**

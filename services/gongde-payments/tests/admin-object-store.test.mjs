@@ -382,3 +382,71 @@ test("publication write: a legacy object with no revision upgrades from 0", asyn
   assert.equal(next.revision, 1);
   assert.equal(next.firstPublishedAt["official.b"] !== undefined, true);
 });
+
+test("admin list read: only a genuinely absent object gets the first-write default", async () => {
+  const { cos, store } = fixture();
+  // Absent: the documented first-write default, and there is nothing else to go on.
+  assert.deepEqual(await store.publicationStateForAdmin(IDS), {
+    revision: 0, publishedAssetIds: IDS, firstPublishedAt: {}, updatedAt: null
+  });
+
+  // A storage failure is not absence. The lenient reader used by the historic
+  // purchase path still falls back, and that behaviour is deliberately kept;
+  // the admin list must not, because it hands the page a version to write with.
+  cos.getObject = (_params, callback) => callback(Object.assign(new Error("NetworkError"), { statusCode: 503 }));
+  await assert.rejects(store.publicationStateForAdmin(IDS), /publication_unavailable/);
+  assert.deepEqual((await store.publicationState(IDS)).publishedAssetIds, IDS,
+    "the historic fallback is unchanged");
+
+  // A corrupt body is not absence either.
+  cos.getObject = (params, callback) => callback(null, { Body: Buffer.from('{"publishedAssetIds":"all"}') });
+  await assert.rejects(store.publicationStateForAdmin(IDS), /publication_unavailable/);
+
+  // A present object is reported as itself, filtered to the known ids.
+  cos.getObject = (params, callback) => callback(null, { Body: Buffer.from(JSON.stringify({
+    version: 1, revision: 4, publishedAssetIds: ["official.b", "official.zzz"],
+    firstPublishedAt: { "official.b": "2026-10-02T00:00:00.000Z" }, updatedAt: "2026-10-03T00:00:00.000Z"
+  })) });
+  const read = await store.publicationStateForAdmin(IDS);
+  assert.equal(read.revision, 4);
+  assert.deepEqual(read.publishedAssetIds, ["official.b"]);
+});
+
+test("legacy history survives a write to a different appearance", async () => {
+  const { cos, store } = fixture();
+  const LEGACY = ["official.a", "official.wealth-button"];
+  const oldDate = "2026-10-16T00:00:00.000Z";
+  const seedLegacy = () => cos.objects.set(STATE, { body: Buffer.from(JSON.stringify({
+    version: 1, publishedAssetIds: LEGACY, updatedAt: oldDate
+  })), contentType: "application/json", lastModified: new Date().toISOString() });
+
+  // The object predates `firstPublishedAt`. Its one recorded publication was
+  // wealth-button, and the read paths reconstruct that from `updatedAt`.
+  seedLegacy();
+  assert.equal((await store.publicationStateStrict(LEGACY)).firstPublishedAt["official.wealth-button"], oldDate);
+
+  // Un-publishing the *other* appearance must not move it: the inferred history
+  // is carried into the write, not re-derived from the new `updatedAt`.
+  await store.setPublished(LEGACY, "official.a", false, 0, directLock);
+  assert.equal((await store.publicationStateStrict(LEGACY)).firstPublishedAt["official.wealth-button"], oldDate,
+    "unpublishing another appearance moved the recorded first publication");
+
+  // Same for publishing the other one, which also adds a new timestamp.
+  seedLegacy();
+  await store.setPublished(LEGACY, "official.a", true, 0, directLock);
+  const published = await store.publicationStateStrict(LEGACY);
+  assert.equal(published.firstPublishedAt["official.wealth-button"], oldDate,
+    "publishing another appearance moved the recorded first publication");
+  assert.deepEqual(Object.keys(published.firstPublishedAt).sort(), ["official.a", "official.wealth-button"],
+    "the appearance just published gets its own time; nothing is invented for others");
+  assert.notEqual(published.firstPublishedAt["official.a"], oldDate,
+    "a newly published appearance must not inherit the legacy date");
+
+  // An object that explicitly carries an empty map has already answered the
+  // question, so `updatedAt` must not be promoted into a first publication.
+  cos.objects.set(STATE, { body: Buffer.from(JSON.stringify({
+    version: 1, revision: 3, publishedAssetIds: LEGACY, firstPublishedAt: {}, updatedAt: oldDate
+  })), contentType: "application/json", lastModified: new Date().toISOString() });
+  assert.deepEqual((await store.publicationStateStrict(LEGACY)).firstPublishedAt, {},
+    "an explicit empty map is not the same as a missing one");
+});
