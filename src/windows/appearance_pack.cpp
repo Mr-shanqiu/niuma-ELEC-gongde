@@ -43,18 +43,21 @@ constexpr size_t kMaximumFiles = 8;
 constexpr size_t kMaximumLayers = 6;
 constexpr size_t kMaximumKeyframes = 8;
 
-// UI-thread-only decoded rasters for the currently drawn pack. Keep source PNGs
-// for fades: premultiplying them first can change color-matrix rounding.
+// UI-thread-only rasters sized for this display, not the source PNG dimensions.
+// Keep source PNGs for fades, where premultiplying changes color rounding.
+std::uint64_t gRenderSourceGeneration = 0;
 struct RenderRasterCache {
-  static constexpr size_t kByteLimit = 32ULL * 1024ULL * 1024ULL;
+  static constexpr size_t kByteLimit = 8ULL * 1024ULL * 1024ULL;
   struct Entry {
     const Gdiplus::Image* source = nullptr;
     bool attempted = false;
+    UINT width = 0, height = 0;
     std::unique_ptr<Gdiplus::Bitmap> raster;
   };
   const AppearancePack* owner = nullptr;
   size_t count = 0;
   size_t bytes = 0;
+  float density = 0;
   std::array<Entry, kMaximumLayers> entries;
 
   void Clear() {
@@ -62,8 +65,9 @@ struct RenderRasterCache {
     owner = nullptr;
     count = bytes = 0;
   }
-  void Select(const AppearancePack& pack) {
-    bool same = owner == &pack && count == pack.layers.size();
+  void Select(const AppearancePack& pack, float pixelDensity = 1.0f) {
+    if (!std::isfinite(pixelDensity) || pixelDensity <= 0) { Clear(); return; }
+    bool same = owner == &pack && count == pack.layers.size() && density == pixelDensity;
     if (same) for (size_t i = 0; i < count; ++i)
       if (entries[i].source != pack.layers[i].image.image.get()) same = false;
     if (same) return;
@@ -71,10 +75,28 @@ struct RenderRasterCache {
     if (pack.layers.size() > entries.size()) return;
     owner = &pack;
     count = pack.layers.size();
-    for (size_t i = 0; i < count; ++i) entries[i].source = pack.layers[i].image.image.get();
+    density = pixelDensity;
+    for (size_t i = 0; i < count; ++i) {
+      const auto& layer = pack.layers[i];
+      auto& entry = entries[i];
+      entry.source = layer.image.image.get();
+      if (!entry.source) continue;
+      float maximumX = 1, maximumY = 1;
+      for (const auto& key : layer.keyframes) {
+        maximumX = std::max(maximumX, std::abs(key.scale));
+        maximumY = std::max(maximumY, std::abs(key.scale * key.scaleY));
+      }
+      const auto dimension = [](float displayed, UINT original) -> UINT {
+        if (!std::isfinite(displayed) || displayed <= 0) return 0;
+        return static_cast<UINT>(std::min(std::ceil(displayed), static_cast<float>(original)));
+      };
+      entry.width = dimension(layer.width * density * maximumX, entry.source->GetWidth());
+      entry.height = dimension(layer.height * density * maximumY, entry.source->GetHeight());
+    }
   }
   void Invalidate(const Gdiplus::Image* source) {
     if (!source) return;
+    ++gRenderSourceGeneration;
     for (const auto& entry : entries) if (entry.source == source) { Clear(); return; }
   }
   Gdiplus::Image* Image(size_t index, Gdiplus::Image* source) {
@@ -83,7 +105,7 @@ struct RenderRasterCache {
     if (entry.raster) return entry.raster.get();
     if (entry.attempted) return source;
     entry.attempted = true;
-    const auto width = source->GetWidth(), height = source->GetHeight();
+    const auto width = entry.width, height = entry.height;
     if (!width || !height || width > 2048 || height > 2048) return source;
     const size_t needed = static_cast<size_t>(width) * height * 4;
     if (needed > kByteLimit - bytes) return source;
@@ -95,8 +117,10 @@ struct RenderRasterCache {
     {
       Gdiplus::Graphics graphics(raster.get());
       if (graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy) != Gdiplus::Ok ||
+          graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic) != Gdiplus::Ok ||
+          graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality) != Gdiplus::Ok ||
           graphics.DrawImage(source, Gdiplus::Rect(0, 0, width, height), 0, 0,
-              width, height, Gdiplus::UnitPixel) != Gdiplus::Ok) return source;
+              source->GetWidth(), source->GetHeight(), Gdiplus::UnitPixel) != Gdiplus::Ok) return source;
     }
     entry.raster = std::move(raster);
     bytes += needed;
@@ -1362,6 +1386,8 @@ bool RegisterPackFileAssociations(const std::wstring& executable,
   return true;
 }
 
+std::uint64_t AppearanceRenderGeneration() { return gRenderSourceGeneration; }
+
 void ClearAppearanceRenderCache() {
   gRenderRasterCache.Clear();
 }
@@ -1371,7 +1397,13 @@ void DrawAppearancePack(Gdiplus::Graphics& graphics,
                         float progress) {
   const Gdiplus::GraphicsState clipState = graphics.Save();
   graphics.SetClip(Gdiplus::RectF(0.0f, 80.0f, 240.0f, 170.0f));
-  gRenderRasterCache.Select(pack);
+  Gdiplus::Matrix transform;
+  graphics.GetTransform(&transform);
+  Gdiplus::REAL elements[6]{};
+  transform.GetElements(elements);
+  const float density = std::max(std::hypot(elements[0], elements[1]),
+      std::hypot(elements[2], elements[3]));
+  gRenderRasterCache.Select(pack, density);
   size_t layerIndex = 0;
   for (const PackLayer& layer : pack.layers) {
     const PackKeyframe keyframe = Interpolate(

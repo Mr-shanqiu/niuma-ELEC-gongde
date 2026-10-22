@@ -44,12 +44,16 @@ for version, source in (("before", baseline), ("after", (root / "src/windows/app
     render = text[begin:end]
     render = once(render, "  HDC screen = GetDC(nullptr);",
         '  perf::Scope profileSurface("surface.prepare");\n  HDC screen = GetDC(nullptr);')
-    render = once(render, "  {\n    Gdiplus::Graphics graphics(memoryDc);",
-        "  profileSurface.Stop();\n  {\n    Gdiplus::Graphics graphics(memoryDc);")
+    if version == "after":
+        render = once(render, "  HDC memoryDc = gLayeredSurface.dc();",
+            "  HDC memoryDc = gLayeredSurface.dc();\n  profileSurface.Stop();")
+    else:
+        render = once(render, "  {\n    Gdiplus::Graphics graphics(memoryDc);",
+            "  profileSurface.Stop();\n  {\n    Gdiplus::Graphics graphics(memoryDc);")
     render = once(render, "  UpdateLayeredWindow(",
         '  if (perf::captureNext) perf::Capture(' +
         ('pixels' if version == 'before' else 'gLayeredSurface.pixels()') +
-        ', static_cast<std::size_t>(gState.windowWidth) * gState.windowHeight * 4);\n'
+        ', static_cast<std::size_t>(gState.windowWidth) * gState.windowHeight * 4, gState.windowWidth, gState.windowHeight);\n'
         '  {\n  perf::Scope profileSubmit("window.submit");\n  const BOOL submitted = UpdateLayeredWindow(')
     render = once(render, "RGB(0, 0, 0), &blend, ULW_ALPHA);",
         "RGB(0, 0, 0), &blend, ULW_ALPHA);\n"

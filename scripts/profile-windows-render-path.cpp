@@ -1,4 +1,6 @@
 #include <windows.h>
+#include <psapi.h>
+#include <filesystem>
 #include <objidl.h>
 #include <gdiplus.h>
 #include "../src/windows/appearance_pack.h"
@@ -18,13 +20,21 @@ bool captureNext = false;
 std::vector<std::uint64_t> captures;
 unsigned submitFailures = 0;
 std::map<std::string, std::vector<double>> samples;
-void Capture(const void* buffer, std::size_t bytes) {
+std::filesystem::path captureDirectory;
+void Capture(const void* buffer, std::size_t bytes, int width, int height) {
   std::uint64_t hash = 14695981039346656037ULL;
   const auto* pixels = static_cast<const unsigned char*>(buffer);
   for (std::size_t i = 0; i < bytes; ++i) {
     hash ^= pixels[i];
     hash *= 1099511628211ULL;
   }
+  // Each scene has five captures; prefix with a monotonic index across scenes.
+  static unsigned captureIndex = 0;
+  std::ofstream raw(captureDirectory / (std::to_string(captureIndex++) + ".frame"), std::ios::binary);
+  const std::uint32_t dimensions[] = {static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height)};
+  raw.write(reinterpret_cast<const char*>(dimensions), sizeof(dimensions));
+  raw.write(static_cast<const char*>(buffer), bytes);
+  if (!raw.good()) { std::fprintf(stderr, "frame capture write failed\n"); std::exit(1); }
   captures.push_back(hash);
   captureNext = false;
 }
@@ -106,6 +116,13 @@ static LRESULT CALLBACK FixtureProcedure(HWND window, UINT message, WPARAM wp, L
   return DefWindowProcW(window, message, wp, lp);
 }
 
+static std::uint64_t PrivateBytes() {
+  PROCESS_MEMORY_COUNTERS_EX memory{};
+  Check(GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)) != 0,
+      "private memory measurement");
+  return memory.PrivateUsage;
+}
+
 static void WriteStats(std::ostream& output) {
   bool first = true;
   for (auto& [name, values] : perf::samples) {
@@ -126,6 +143,8 @@ int wmain(int argc, wchar_t** argv) {
   const bool rasterExperiment = argc == 4 && wcscmp(argv[3], L"--decode-source-once") == 0;
   if (argc == 4 && !rasterExperiment) return 2;
   const std::filesystem::path root(argv[1]), report(argv[2]);
+  perf::captureDirectory = report.parent_path() / (std::string("frames-") + NIUMA_PROFILE_VERSION);
+  std::filesystem::create_directories(perf::captureDirectory);
   gIsolatedAcceptance = true;
   gAcceptanceRoot = report.parent_path().wstring();
   std::ofstream output(report);
@@ -148,7 +167,9 @@ int wmain(int argc, wchar_t** argv) {
       << "\",\"experimentalDecodedRaster\":" << (rasterExperiment ? "true" : "false")
       << ",\"scope\":\"instrumented production drawing; hidden owned window; no real hook chain\",\"scenes\":[";
   bool first = true;
-  std::size_t rasterPeakBytes = 0;
+  std::size_t rasterPeakBytes = 0, artworkPeakBytes = 0;
+  const auto initialPrivateBytes = PrivateBytes();
+  auto observedPrivatePeakBytes = initialPrivateBytes;
   {
     niuma::AppearancePack offwork;
     LoadFixture(root / L"assets/appearance-packs/offwork-button", offwork);
@@ -187,6 +208,10 @@ int wmain(int argc, wchar_t** argv) {
         gState.strikeStarted = 10000;
         gState.strikeDurationMs = 240;
         perf::enabled = false;
+        const auto firstStarted = std::chrono::steady_clock::now();
+        RenderLayeredWindow(10000);
+        const auto firstRequestedFrameMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - firstStarted).count();
         perf::captures.clear();
         for (int phase : {0, 64, 128, 192, 240}) {
           perf::captureNext = true;
@@ -197,16 +222,21 @@ int wmain(int argc, wchar_t** argv) {
         for (int frame = 0; frame < 60; ++frame)
           RenderLayeredWindow(10000 + (animated ? (frame % 15) * 16 : 0));
         perf::enabled = false;
+        observedPrivatePeakBytes = std::max(observedPrivatePeakBytes, PrivateBytes());
 #if defined(NIUMA_PROFILE_AFTER)
         Check(niuma::gRenderRasterCache.bytes <= niuma::RenderRasterCache::kByteLimit,
             "decoded cache budget");
         rasterPeakBytes = std::max(rasterPeakBytes, niuma::gRenderRasterCache.bytes);
+        Check(gArtworkSurface.bytes() <= kArtworkByteLimit, "artwork surface budget");
+        artworkPeakBytes = std::max(artworkPeakBytes, gArtworkSurface.bytes());
 #endif
         if (!first) output << ',';
         first = false;
         output << "{\"appearance\":\"" << (mode == 2 ? "offwork-fade-fixture" : pack ? "offwork" : "woodfish")
             << "\",\"countdown\":" << (countdown ? "true" : "false")
             << ",\"dpi\":" << dpi << ",\"animated\":" << (animated ? "true" : "false")
+            << ",\"firstRequestedFrameMs\":" << firstRequestedFrameMs
+            << ",\"privateBytes\":" << PrivateBytes()
             << ",\"stages\":{";
         WriteStats(output);
         output << "},\"pixelHashes\":[";
@@ -221,6 +251,20 @@ int wmain(int argc, wchar_t** argv) {
     }
     gProfileFixturePack = nullptr;
 #if defined(NIUMA_PROFILE_AFTER)
+    // Refresh the countdown and number independently while the shape is idle.
+    gProfileFixturePack = &offwork;
+    gState.striking = false;
+    RenderLayeredWindow(10000);
+    const auto builds = gArtworkBuilds;
+    const auto hits = gArtworkHits;
+    for (unsigned i = 1; i <= 60; ++i) {
+      ++gState.todayTotal;
+      --gOffwork.snapshot.remainingSeconds;
+      RenderLayeredWindow(10000 + i * 1000);
+    }
+    Check(gArtworkBuilds == builds && gArtworkHits >= hits + 60,
+        "60 counter/countdown changes do not rebuild idle artwork");
+    gProfileFixturePack = nullptr;
     RenderLayeredWindow(10000);
     Check(niuma::gRenderRasterCache.bytes == 0, "builtin switch releases decoded cache");
     for (auto& layer : offwork.layers) for (auto& key : layer.keyframes) key.alpha = 1.0f;
@@ -238,14 +282,15 @@ int wmain(int argc, wchar_t** argv) {
     niuma::AppearancePack large;
     for (int i = 0; i < 3; ++i) {
       niuma::PackLayer layer;
-      layer.image.image = std::make_unique<Gdiplus::Bitmap>(2048, 2048, PixelFormat32bppPARGB);
+      layer.image.image = std::make_unique<Gdiplus::Bitmap>(1024, 1024, PixelFormat32bppPARGB);
+      layer.width = layer.height = 1024;
       large.layers.push_back(std::move(layer));
     }
     niuma::gRenderRasterCache.Select(large);
     for (std::size_t i = 0; i < large.layers.size(); ++i)
       niuma::gRenderRasterCache.Image(i, large.layers[i].image.image.get());
     Check(niuma::gRenderRasterCache.bytes == niuma::RenderRasterCache::kByteLimit,
-        "capacity stops at 32MiB without rejecting uncached layers");
+        "capacity stops at 8MiB without rejecting uncached layers");
     Check(!niuma::gRenderRasterCache.entries[2].raster, "over-budget layer falls back");
   }
   Check(niuma::gRenderRasterCache.bytes == 0, "large fixture resources released");
@@ -270,6 +315,9 @@ int wmain(int argc, wchar_t** argv) {
       << ",\"inputStages\":{";
   WriteStats(output);
   output << "},\"submitFailures\":0,\"decodedCacheObservedPeakBytes\":" << rasterPeakBytes
+      << ",\"artworkCacheObservedPeakBytes\":" << artworkPeakBytes
+      << ",\"initialPrivateBytes\":" << initialPrivateBytes
+      << ",\"observedPrivatePeakBytes\":" << observedPrivatePeakBytes
       << ",\"realHooksInstalled\":false,\"userProfileRead\":false,"
       "\"limitations\":\"offline fixed frames; hidden window submission; does not measure physical input latency or real hook scheduling\"}";
   DestroyWindow(gState.window);

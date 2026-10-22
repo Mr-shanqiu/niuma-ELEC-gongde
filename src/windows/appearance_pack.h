@@ -4,6 +4,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -89,6 +90,7 @@ bool RegisterPackFileAssociations(const std::wstring& executable,
 void DrawAppearancePack(Gdiplus::Graphics& graphics,
                         const AppearancePack& pack,
                         float progress);
+std::uint64_t AppearanceRenderGeneration();
 void ClearAppearanceRenderCache();
 
 }  // namespace niuma

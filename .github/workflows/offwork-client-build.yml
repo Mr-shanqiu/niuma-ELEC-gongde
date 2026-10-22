@@ -49,27 +49,11 @@ jobs:
           & ./build-offwork/Release/niuma-render-profile-after.exe $PWD (Join-Path $PWD 'build-offwork/profile-after.json')
           if ($LASTEXITCODE -ne 0) { throw "Candidate profile failed" }
 
-      - name: Compare complete frame pixels before and after
+      - name: Compare controls and display-sized image quality
         shell: pwsh
         run: |
-          @'
-          import json
-          from pathlib import Path
-          root = Path('build-offwork')
-          before = json.loads((root/'profile-before.json').read_text())
-          after = json.loads((root/'profile-after.json').read_text())
-          key = lambda row: (row['appearance'], row['countdown'], row['dpi'], row['animated'])
-          old = {key(row): row for row in before['scenes']}
-          new = {key(row): row for row in after['scenes']}
-          assert old.keys() == new.keys()
-          mismatches = [k for k in old if old[k]['pixelHashes'] != new[k]['pixelHashes']]
-          result = {'scenes':len(old), 'frames':sum(len(r['pixelHashes']) for r in old.values()),
-                    'mismatches':mismatches, 'physicalInputLatencyMeasured':False}
-          (root/'frame-comparison.json').write_text(json.dumps(result,indent=2))
-          print(json.dumps(result))
-          assert not mismatches, 'Complete frame pixel mismatch'
-          '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw "Complete frame comparison failed" }
+          python scripts/compare-windows-render-frames.py build-offwork
+          if ($LASTEXITCODE -ne 0) { throw "Frame comparison failed" }
 
       - name: Bind the unpublished candidate to its source
         shell: pwsh
@@ -105,6 +89,7 @@ jobs:
             build-offwork/profile-before.json
             build-offwork/profile-after.json
             build-offwork/render-profile-source.json
+            build-offwork/comparison-phase-*.png
             build-offwork/frame-comparison.json
             build-offwork/build-info.json
           if-no-files-found: error

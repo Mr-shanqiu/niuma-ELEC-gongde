@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <cwchar>
 #include <ctime>
 #include <cstdio>
@@ -185,6 +186,23 @@ struct AppState {
 
 AppState gState;
 niuma::render::LayeredSurface gLayeredSurface;
+niuma::render::LayeredSurface gArtworkSurface;
+struct ArtworkFrameKey {
+  const niuma::AppearancePack* pack = nullptr;
+  std::uint64_t sourceGeneration = 0;
+  MeritScene scene = MeritScene::Woodfish;
+  int width = 0, height = 0;
+  float progress = 0;
+  bool operator==(const ArtworkFrameKey& other) const {
+    return pack == other.pack && sourceGeneration == other.sourceGeneration &&
+        scene == other.scene && width == other.width && height == other.height &&
+        progress == other.progress;
+  }
+};
+ArtworkFrameKey gArtworkKey;
+bool gArtworkValid = false;
+std::uint64_t gArtworkBuilds = 0, gArtworkHits = 0;
+constexpr std::size_t kArtworkByteLimit = 8ULL * 1024 * 1024;
 niuma::render::WidgetGlyphCache gWidgetGlyphCache;
 std::vector<std::wstring> gPendingImports;
 bool gImportReady = false;
@@ -1009,6 +1027,8 @@ void ReleaseAllPngResources() {
   niuma::ClearAppearanceRenderCache();
   gWidgetGlyphCache.Clear();
   gLayeredSurface.Reset();
+  gArtworkSurface.Reset();
+  gArtworkValid = false;
   // The catalog also owns GDI+ images. Release it before GDI+ or COM stops,
   // including on the startup-failure paths that share this cleanup function.
   gAppearanceCatalog = niuma::AppearanceCatalog{};
@@ -1132,7 +1152,8 @@ void DrawSceneArtwork(
   graphics.Restore(woodfishState);
 }
 
-void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
+void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now,
+    bool artworkOnly = false, bool omitArtwork = false) {
   graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
   graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
   graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
@@ -1157,12 +1178,16 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
     }
   }
   niuma::AppearancePack* appearancePack = CurrentAppearancePack();
+  if (!omitArtwork) {
   if (appearancePack != nullptr) {
     niuma::DrawAppearancePack(graphics, *appearancePack, progress);
   } else {
     niuma::ClearAppearanceRenderCache();
     DrawSceneArtwork(graphics, gState.selectedScene, strikeAmount);
   }
+
+  }
+  if (artworkOnly) return;
 
   // Draw the middle band last so the mallet can never cover it.
   if (gState.striking && progress >= kPlusStartPhase &&
@@ -1200,8 +1225,39 @@ void RenderLayeredWindow(ULONGLONG now) {
     return;
   }
   HDC memoryDc = gLayeredSurface.dc();
-  // Reusing a surface must never leave pixels from the preceding frame.
-  gLayeredSurface.Clear();
+  // Keep only the latest exact artwork pose. Text/clock changes reuse it;
+  // animated poses are never quantized and no animation frame queue is retained.
+  ArtworkFrameKey key;
+  key.pack = CurrentAppearancePack();
+  key.sourceGeneration = niuma::AppearanceRenderGeneration();
+  key.scene = gState.selectedScene;
+  key.width = gState.windowWidth;
+  key.height = gState.windowHeight;
+  if (gState.striking) key.progress = std::clamp(
+      static_cast<float>(now - gState.strikeStarted) / gState.strikeDurationMs, 0.0f, 1.0f);
+  bool reusedArtwork = false;
+  if (gLayeredSurface.bytes() <= kArtworkByteLimit &&
+      gArtworkSurface.Ensure(screen, key.width, key.height)) {
+    if (!gArtworkValid || !(key == gArtworkKey)) {
+      gArtworkSurface.Clear();
+      {
+        Gdiplus::Graphics artwork(gArtworkSurface.dc());
+        artwork.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
+        const float scale = static_cast<float>(key.width) / kDesignWidth;
+        artwork.ScaleTransform(scale, scale);
+        DrawScene(artwork, now, true);
+      }
+      gArtworkKey = key;
+      gArtworkValid = true;
+      ++gArtworkBuilds;
+    } else ++gArtworkHits;
+    std::memcpy(gLayeredSurface.pixels(), gArtworkSurface.pixels(), gLayeredSurface.bytes());
+    reusedArtwork = true;
+  } else {
+    gArtworkSurface.Reset();
+    gArtworkValid = false;
+    gLayeredSurface.Clear();
+  }
 
   {
     Gdiplus::Graphics graphics(memoryDc);
@@ -1210,7 +1266,7 @@ void RenderLayeredWindow(ULONGLONG now) {
         static_cast<float>(gState.windowWidth) /
         static_cast<float>(kDesignWidth);
     graphics.ScaleTransform(scale, scale);
-    DrawScene(graphics, now);
+    DrawScene(graphics, now, false, reusedArtwork);
     if (gOffwork.enabled) {
       // Match the merit text without painting a panel over the desktop.
       const auto& snapshot = gOffwork.snapshot;
@@ -3539,8 +3595,14 @@ LRESULT CALLBACK WindowProcedure(
       }
       if (wParam == kOffworkTimer) {
         if (gOffwork.enabled && !gOffwork.suspended) {
+          const auto previous = gOffwork.snapshot;
           RefreshOffwork();
-          RenderLayeredWindow(GetTickCount64());
+          const auto& current = gOffwork.snapshot;
+          if (previous.valid != current.valid || previous.overtime != current.overtime ||
+              (current.valid && (current.overtime
+                  ? previous.overtimeSeconds != current.overtimeSeconds
+                  : previous.remainingSeconds != current.remainingSeconds)))
+            RenderLayeredWindow(GetTickCount64());
         }
         return 0;
       }
