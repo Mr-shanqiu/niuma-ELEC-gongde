@@ -96,7 +96,13 @@ static int RunRenderSoak(const std::filesystem::path& root,
   perf::soakMode = true;
   while (!sourceDone) {
     MSG message{};
-    while (PeekMessageW(&message, gState.window, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
+    const auto pumpStarted = std::chrono::steady_clock::now();
+    // An overdue 16ms timer can stay ready when an original frame takes 100ms.
+    // Bound only this diagnostic pump batch so monitoring/churn still executes.
+    for (unsigned batch = 0; batch < 16 && PeekMessageW(&message, gState.window, 0, 0, PM_REMOVE); ++batch) {
+      DispatchMessageW(&message);
+      if (std::chrono::steady_clock::now() - pumpStarted >= std::chrono::milliseconds(20)) break;
+    }
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration<double>(now - started).count();
     if (elapsed > duration + 15) { stop = true; break; }
