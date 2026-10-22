@@ -1313,19 +1313,26 @@ void DrawAppearancePack(Gdiplus::Graphics& graphics,
     graphics.RotateTransform(-keyframe.rotation);
     graphics.ScaleTransform(keyframe.scale, keyframe.scale * keyframe.scaleY);
     graphics.TranslateTransform(-anchorX, -anchorY);
-    Gdiplus::ImageAttributes attributes;
-    Gdiplus::ColorMatrix matrix = {
-        1, 0, 0, 0, 0,
-        0, 1, 0, 0, 0,
-        0, 0, 1, 0, 0,
-        0, 0, 0, keyframe.alpha, 0,
-        0, 0, 0, 0, 1};
-    attributes.SetColorMatrix(&matrix);
     const Gdiplus::RectF destination(layer.x, top, layer.width, layer.height);
-    graphics.DrawImage(layer.image.image.get(), destination, 0, 0,
-                       static_cast<Gdiplus::REAL>(layer.image.image->GetWidth()),
-                       static_cast<Gdiplus::REAL>(layer.image.image->GetHeight()),
-                       Gdiplus::UnitPixel, &attributes);
+    const auto width = static_cast<Gdiplus::REAL>(layer.image.image->GetWidth());
+    const auto height = static_cast<Gdiplus::REAL>(layer.image.image->GetHeight());
+    if (keyframe.alpha == 1.0f) {
+      // Preserve the PNG's own transparency. An identity color matrix is not
+      // needed when no additional layer opacity adjustment is requested.
+      graphics.DrawImage(layer.image.image.get(), destination, 0, 0, width, height,
+                         Gdiplus::UnitPixel);
+    } else {
+      Gdiplus::ImageAttributes attributes;
+      Gdiplus::ColorMatrix matrix = {
+          1, 0, 0, 0, 0,
+          0, 1, 0, 0, 0,
+          0, 0, 1, 0, 0,
+          0, 0, 0, keyframe.alpha, 0,
+          0, 0, 0, 0, 1};
+      attributes.SetColorMatrix(&matrix);
+      graphics.DrawImage(layer.image.image.get(), destination, 0, 0, width, height,
+                         Gdiplus::UnitPixel, &attributes);
+    }
     graphics.Restore(state);
   }
   graphics.Restore(clipState);

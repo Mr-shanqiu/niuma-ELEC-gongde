@@ -111,6 +111,7 @@ if(WIN32)
     target_compile_definitions(niuma-render-profile-${phase} PRIVATE
       UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS
       NIUMA_PROFILE_APP_SOURCE="${CMAKE_CURRENT_BINARY_DIR}/profile-app-${phase}.cpp"
+      NIUMA_PROFILE_PACK_SOURCE="${CMAKE_CURRENT_BINARY_DIR}/profile-pack-${phase}.cpp"
       NIUMA_PROFILE_VERSION="${phase}")
     target_link_libraries(niuma-render-profile-${phase} PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
     if(MSVC)

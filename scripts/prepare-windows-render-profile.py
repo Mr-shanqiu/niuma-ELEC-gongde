@@ -47,6 +47,9 @@ for version, source in (("before", baseline), ("after", (root / "src/windows/app
     render = once(render, "  {\n    Gdiplus::Graphics graphics(memoryDc);",
         "  profileSurface.Stop();\n  {\n    Gdiplus::Graphics graphics(memoryDc);")
     render = once(render, "  UpdateLayeredWindow(",
+        '  if (perf::captureNext) perf::Capture(' +
+        ('pixels' if version == 'before' else 'gLayeredSurface.pixels()') +
+        ', static_cast<std::size_t>(gState.windowWidth) * gState.windowHeight * 4);\n'
         '  {\n  perf::Scope profileSubmit("window.submit");\n  const BOOL submitted = UpdateLayeredWindow(')
     render = once(render, "RGB(0, 0, 0), &blend, ULW_ALPHA);",
         "RGB(0, 0, 0), &blend, ULW_ALPHA);\n"
@@ -58,6 +61,13 @@ for version, source in (("before", baseline), ("after", (root / "src/windows/app
         return f'#include "{include.as_posix()}"' if include.is_file() else match.group(0)
     text = re.sub(r'^#include "([^"]+)"', absolute_include, text, flags=re.M)
     (output / f"profile-app-{version}.cpp").write_text(text, encoding="utf-8")
+    pack_source = (subprocess.check_output(["git", "show",
+        "7370e7ab5e5be0c626858930ba34af172151d8ce:src/windows/appearance_pack.cpp"], cwd=root)
+        if version == "before" else (root / "src/windows/appearance_pack.cpp").read_bytes())
+    pack_text = pack_source.decode("utf-8").replace("\r\n", "\n")
+    bindings[version + "Pack"] = hashlib.sha256(pack_text.encode("utf-8")).hexdigest()
+    pack_text = re.sub(r'^#include "([^"]+)"', absolute_include, pack_text, flags=re.M)
+    (output / f"profile-pack-{version}.cpp").write_text(pack_text, encoding="utf-8")
 
 bindings["fixtureManifest"] = hashlib.sha256(
     (root / "assets/appearance-packs/offwork-button/manifest.json").read_text(encoding="utf-8").encode("utf-8")).hexdigest()

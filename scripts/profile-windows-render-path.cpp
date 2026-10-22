@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -13,8 +14,20 @@
 
 namespace perf {
 bool enabled = false;
+bool captureNext = false;
+std::vector<std::uint64_t> captures;
 unsigned submitFailures = 0;
 std::map<std::string, std::vector<double>> samples;
+void Capture(const void* buffer, std::size_t bytes) {
+  std::uint64_t hash = 14695981039346656037ULL;
+  const auto* pixels = static_cast<const unsigned char*>(buffer);
+  for (std::size_t i = 0; i < bytes; ++i) {
+    hash ^= pixels[i];
+    hash *= 1099511628211ULL;
+  }
+  captures.push_back(hash);
+  captureNext = false;
+}
 class Scope {
  public:
   explicit Scope(const char* label) : label_(label), active_(enabled),
@@ -38,7 +51,7 @@ niuma::AppearancePack* gProfileFixturePack = nullptr;
 #include NIUMA_PROFILE_APP_SOURCE
 #undef wWinMain
 // Reuse the real source PNG loader and JSON reader in this test translation unit.
-#include "../src/windows/appearance_pack.cpp"
+#include NIUMA_PROFILE_PACK_SOURCE
 
 static void Check(bool condition, const char* message) {
   if (!condition) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
@@ -135,7 +148,10 @@ int wmain(int argc, wchar_t** argv) {
   {
     niuma::AppearancePack offwork;
     LoadFixture(root / L"assets/appearance-packs/offwork-button", offwork);
-    for (const bool pack : {false, true}) for (const bool countdown : {false, true}) {
+    for (const int mode : {0, 1, 2}) for (const bool countdown : {false, true}) {
+      const bool pack = mode != 0;
+      if (mode == 2) for (auto& layer : offwork.layers)
+        for (auto& key : layer.keyframes) key.alpha = 0.5f;
       gProfileFixturePack = pack ? &offwork : nullptr;
       gState.selectedScene = MeritScene::Woodfish;
       gOffwork.enabled = countdown;
@@ -143,6 +159,7 @@ int wmain(int argc, wchar_t** argv) {
       gOffwork.snapshot.remainingSeconds = 30659;
       gState.todayTotal = 12345;
       for (const int dpi : {96, 192, 288}) for (const bool animated : {false, true}) {
+        if (mode == 2 && (!countdown || dpi != 192 || !animated)) continue;
         gState.dpi = static_cast<UINT>(dpi);
         gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
         gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
@@ -152,7 +169,11 @@ int wmain(int argc, wchar_t** argv) {
         gState.strikeStarted = 10000;
         gState.strikeDurationMs = 240;
         perf::enabled = false;
-        for (int frame = 0; frame < 5; ++frame) RenderLayeredWindow(10000 + frame * 16);
+        perf::captures.clear();
+        for (int phase : {0, 64, 128, 192, 240}) {
+          perf::captureNext = true;
+          RenderLayeredWindow(10000 + (animated ? phase : 0));
+        }
         perf::samples.clear();
         perf::enabled = true;
         for (int frame = 0; frame < 60; ++frame)
@@ -160,12 +181,19 @@ int wmain(int argc, wchar_t** argv) {
         perf::enabled = false;
         if (!first) output << ',';
         first = false;
-        output << "{\"appearance\":\"" << (pack ? "offwork" : "woodfish")
+        output << "{\"appearance\":\"" << (mode == 2 ? "offwork-fade-fixture" : pack ? "offwork" : "woodfish")
             << "\",\"countdown\":" << (countdown ? "true" : "false")
             << ",\"dpi\":" << dpi << ",\"animated\":" << (animated ? "true" : "false")
             << ",\"stages\":{";
         WriteStats(output);
-        output << "}}";
+        output << "},\"pixelHashes\":[";
+        bool firstHash = true;
+        for (auto hash : perf::captures) {
+          if (!firstHash) output << ',';
+          firstHash = false;
+          output << '"' << std::hex << hash << std::dec << '"';
+        }
+        output << "]}";
       }
     }
     gProfileFixturePack = nullptr;
