@@ -121,7 +121,7 @@ class Fixture {
     assert.ok(match, 'known INSERT shape');
     const [, table, fields, tokens] = match; let position = 0;
     const row = { ...({ gongde_free_code_families: { verification_count: 0 },
-      gongde_free_code_tokens: { revoked_at: null }, gongde_free_contributions: { revoked_at: null, restored_at: null, reason: null },
+      gongde_free_code_tokens: { revoked_at: null, handover_until: null, server_rotated_at: null }, gongde_free_contributions: { revoked_at: null, restored_at: null, reason: null },
       gongde_free_claims: { state: 'PREPARING', revision: 1, issued_at: null, download_expires_at: null, error_code: null,
         retryable: false, stage: 'queued', attempts: 0, lease_digest: null, lease_expires_at: null, generation_started_at: null }
     }[table] ?? {}) };
@@ -158,7 +158,23 @@ class Fixture {
     });
     const lookup = /^(\w+) = (\?|1)/.exec(where); assert.ok(lookup);
     const key = lookup[1], wanted = lookup[2] === '?' ? values[position] : 1;
-    const selected = this.state[table].filter(row => row[key] === wanted && (!where.includes('revoked_at IS NULL') || row.revoked_at == null));
+    position += lookup[2] === '?' ? 1 : 0;
+    // Every further condition is honoured with the next positional value (or as a
+    // NULL test), so a query that narrows by cycle, rotation state or deadline
+    // cannot pass the fixture by touching every row. This is what makes a
+    // revoke's "close the handovers that are still open" predicate testable.
+    const conditions = where.split(' AND ').slice(1).map(part => {
+      const equality = /^(\w+) = \?$/.exec(part);
+      if (equality) { const value = values[position]; position += 1; return row => row[equality[1]] === value; }
+      const comparison = /^(\w+) > \?$/.exec(part);
+      if (comparison) { const value = values[position]; position += 1; return row => row[comparison[1]] != null && row[comparison[1]] > value; }
+      const present = /^(\w+) IS NOT NULL$/.exec(part);
+      if (present) return row => row[present[1]] != null;
+      return () => true;
+    });
+    const selected = this.state[table].filter(row => row[key] === wanted &&
+      (!where.includes('revoked_at IS NULL') || row.revoked_at == null) &&
+      conditions.every(condition => condition(row)));
     for (const row of selected) for (const { field, expression, args } of changes) {
       row[field] = expression === '?' ? args[0] : expression === 'NULL' ? null : expression === 'TRUE' ? true : expression === 'FALSE' ? false :
         expression.startsWith("'") ? expression.slice(1, -1) : expression.endsWith(' + 1') ? Number(row[field]) + 1 :
@@ -192,9 +208,15 @@ class Fixture {
     if (q.includes('FROM gongde_free_code_tokens')) {
       let selected = data('gongde_free_code_tokens');
       if (q.includes('WHERE code_digest')) selected = selected.filter(row => row.code_digest === v[0]);
+      else if (q.includes('WHERE family_id = ? AND server_rotated_at')) selected = selected.filter(row => row.family_id === v[0] &&
+        row.server_rotated_at != null && row.handover_until != null && +row.handover_until > +v[1]);
       else if (q.includes('WHERE family_id')) selected = selected.filter(row => row.family_id === v[0] && row.cycle_index === v[1] && row.generation === v[2]);
       else if (q.includes('WHERE id')) selected = selected.filter(row => row.id === v[0]);
-      return selected;
+      // The one replaced-token query names the most recent rotation, so the
+      // operator is told about the code that was just replaced.
+      return q.includes('ORDER BY server_rotated_at DESC')
+        ? [...selected].sort((a, b) => +b.server_rotated_at - +a.server_rotated_at || +b.handover_until - +a.handover_until).slice(0, 1)
+        : selected;
     }
     if (q.includes('FROM gongde_free_contributions')) {
       let selected = data('gongde_free_contributions');
@@ -382,7 +404,10 @@ test('pause/resume and generation rotation preserve original claim and attributi
   assert.equal(resumed.code, auth.code);
   const rotated = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'rotate', expectedRevision: 3, actor: 'admin', reason: 'immediate operator rotation' });
   assert.notEqual(rotated.code, auth.code); assert.equal(rotated.revision, 4);
-  await assert.rejects(() => f.repository.verifyCode({ code: auth.code }), err('access_code_expired'));
+  // A rotation now hands over: the replaced code still creates claims until its
+  // own one-hour deadline, and the admin snapshot names it for the announcement.
+  assert.equal(rotated.previousCode, auth.code);
+  assert.equal(Date.parse(rotated.previousCodeHandoverUntil), start + 3600000);
   const recovered = await f.repository.findClaimByKey({ sessionToken: auth.sessionToken, idempotencyKey: 'confirm-one' });
   assert.equal(recovered.id, claim.id); assert.equal(recovered.codeFamilyId, auth.family.id);
 });
@@ -395,6 +420,157 @@ test('fixed cycle boundary rejects prior code but idempotent old confirmation su
   assert.equal((await create(f, auth)).id, claim.id);
   await assert.rejects(() => create(f, auth, 'fresh-confirmation'), err('access_code_expired'));
 });
+// A manual rotation is a handover, not a stop: the replaced code keeps creating
+// claims for one hour from the server's rotation clock, and only for that.
+test('rotation handover keeps the replaced code usable for new claims for exactly one hour', async () => {
+  const f = new Fixture(), auth = await access(f);
+  const rotated = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'rotate', expectedRevision: 1, actor: 'admin', reason: 'hand over to a fresh announcement' });
+  assert.equal(Date.parse(rotated.previousCodeHandoverUntil), start + 3600000);
+  // The new code works at once.
+  const fresh = await f.repository.verifyCode({ code: rotated.code });
+  assert.equal(fresh.session.authorization.codeFamilyId, auth.family.id);
+  // So does the replaced one, and its authorization is marked as handover.
+  const old = await f.repository.verifyCode({ code: auth.code });
+  assert.equal(old.session.authorization.handover, true);
+  assert.equal(old.session.authorization.handoverUntil, rotated.previousCodeHandoverUntil);
+  assert.equal(old.session.authorization.codeFamilyId, auth.family.id);
+  // A claim created with the replaced code is a normal claim: its own window is
+  // the download window, not the handover deadline.
+  const claim = await create(f, { sessionToken: old.sessionToken }, 'handover-claim');
+  assert.equal(claim.codeFamilyId, auth.family.id); assert.equal(claim.state, 'PREPARING');
+  // One millisecond before the deadline the replaced code still creates claims...
+  f.time = Date.parse(rotated.previousCodeHandoverUntil) - 1;
+  const edge = await f.repository.verifyCode({ code: auth.code });
+  assert.equal((await create(f, { sessionToken: edge.sessionToken }, 'handover-edge')).codeFamilyId, auth.family.id);
+  // The claim already created with the replaced code is still owned and payable
+  // by the same session; only a not-yet-READY claim answers claim_not_ready.
+  assert.equal((await f.repository.getClaim({ sessionToken: old.sessionToken, claimId: claim.id })).state, 'PREPARING');  // ...and at the deadline it is refused for new claims, exactly.
+  f.time = Date.parse(rotated.previousCodeHandoverUntil);
+  await assert.rejects(() => f.repository.verifyCode({ code: auth.code }), err('access_code_expired'));
+  await assert.rejects(() => create(f, { sessionToken: old.sessionToken }, 'handover-late'), err('access_code_expired'));
+  // The claim it already created is not cancelled or shortened by that.
+  assert.equal((await f.repository.getClaim({ sessionToken: old.sessionToken, claimId: claim.id })).state, 'PREPARING');
+  assert.equal((await f.repository.findClaimByKey({ sessionToken: old.sessionToken, idempotencyKey: 'handover-claim' })).id, claim.id);
+});
+// The handover is a full hour from the rotation, even when that crosses the
+// cycle's own scheduled expiry, and the new code keeps the ordinary cycle.
+test('rotation handover survives the cycle boundary and does not move the new code expiry', async () => {
+  const f = new Fixture(), auth = await access(f);
+  // The cycle the fixture starts in ends 72 hours after the 2026-10-08 00:00
+  // +08:00 anchor, i.e. at 2026-10-10T16:00:00Z.
+  const boundary = Date.parse('2026-10-10T16:00:00.000Z');
+  f.time = boundary - 60000;
+  const before = await f.repository.getCurrentCode(auth.family.id);
+  assert.equal(Date.parse(before.authorization.expiresAt), boundary);
+  const rotated = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'rotate', expectedRevision: 1, actor: 'admin', reason: 'rotate shortly before the boundary' });
+  // The handover is a full hour from the rotation, not from the boundary.
+  assert.equal(Date.parse(rotated.previousCodeHandoverUntil), f.time + 3600000);
+  // The new code keeps the ordinary cycle rule: a manual rotation does NOT
+  // restart a three-day period, so it still ends at the same boundary.
+  assert.equal(Date.parse(rotated.expiresAt), boundary);
+  // Past the boundary, inside the handover, the replaced code still works: the
+  // full hour is kept even though its own cycle ended.
+  f.time = boundary;
+  const old = await f.repository.verifyCode({ code: before.code });
+  assert.equal(old.session.authorization.handover, true);
+  await create(f, { sessionToken: old.sessionToken }, 'past-boundary');
+  // The current code moved on to the next cycle as it always did.
+  const next = await f.repository.getCurrentCode(auth.family.id);
+  assert.notEqual(next.code, rotated.code);
+  assert.equal(Date.parse(next.authorization.expiresAt), boundary + 72 * 3600000);
+  f.time = Date.parse(rotated.previousCodeHandoverUntil) - 1;
+  assert.equal((await f.repository.verifyCode({ code: before.code })).session.authorization.handover, true);
+  f.time = Date.parse(rotated.previousCodeHandoverUntil);
+  await assert.rejects(() => f.repository.verifyCode({ code: before.code }), err('access_code_expired'));
+});
+// Each replaced code keeps its own hour; a later rotation never extends an
+// earlier one, and a revoke is a stop rather than a handover.
+test('consecutive rotations keep each handover deadline and revoke does not create one', async () => {
+  const f = new Fixture(), auth = await access(f);
+  const first = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'rotate', expectedRevision: 1, actor: 'admin', reason: 'first rotation' });
+  f.time = start + 600000;
+  const second = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'rotate', expectedRevision: 2, actor: 'admin', reason: 'second rotation' });
+  assert.equal(Date.parse(first.previousCodeHandoverUntil), start + 3600000);
+  assert.equal(Date.parse(second.previousCodeHandoverUntil), start + 600000 + 3600000);
+  // The first replaced code still ends at its own deadline.
+  f.time = start + 3600000;
+  await assert.rejects(() => f.repository.verifyCode({ code: auth.code }), err('access_code_expired'));
+  assert.equal((await f.repository.verifyCode({ code: first.code })).session.authorization.handover, true);
+  // Before that deadline, the FIRST replaced code is still a live code. Two
+  // rotations inside one hour leave two handover windows open at once, so a
+  // caller must not be limited to the most recent one.
+  f.time = start + 600000;
+  const firstStillOpen = await f.repository.verifyCode({ code: auth.code });
+  assert.equal(firstStillOpen.session.authorization.handover, true);
+  assert.equal(firstStillOpen.session.authorization.handoverUntil, first.previousCodeHandoverUntil);
+  assert.equal((await create(f, { sessionToken: firstStillOpen.sessionToken }, 'first-of-two-claims')).codeFamilyId, auth.family.id);
+  f.time = start + 3600000;
+  // A revoke ends everything at once: the current code stops, and the token it
+  // revokes gets no handover of its own.
+  const revoked = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'revoke', expectedRevision: 3, actor: 'admin', reason: 'operator stop' });
+  assert.equal(revoked.status, 'PAUSED');
+  await assert.rejects(() => f.repository.verifyCode({ code: second.code }), err('access_code_paused'));
+  // The token the revoke stopped is the one that carried `second.code`; it was
+  // never given a deadline, so it stays refused even after a resume.
+  const revokedToken = f.state.gongde_free_code_tokens.find(row => row.revoked_at != null && row.server_rotated_at == null);
+  assert.ok(revokedToken, 'the token the revoke stopped exists'); assert.equal(revokedToken.handover_until, null);
+  await f.repository.mutateFamily({ familyId: auth.family.id, action: 'restore', expectedRevision: 4, actor: 'admin', reason: 'restore after the stop' });
+  await assert.rejects(() => f.repository.verifyCode({ code: second.code }), err('access_code_expired'));
+});
+// A revoke is a stop, not a pause: it must cancel every handover still open,
+// not only the current code. Otherwise a later restore brings codes back that
+// an operator explicitly stopped.
+test('revoke cancels every open handover so a restore cannot revive a stopped code', async () => {
+  const f = new Fixture(), auth = await access(f);
+  // Two rotations inside one hour leave TWO replaced codes in their own
+  // handover windows at once. Both are usable before the stop.
+  const first = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'rotate', expectedRevision: 1, actor: 'admin', reason: 'first rotation before the stop' });
+  f.time = start + 600000;
+  const second = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'rotate', expectedRevision: 2, actor: 'admin', reason: 'second rotation before the stop' });
+  f.time = start + 900000;
+  assert.equal((await f.repository.verifyCode({ code: auth.code })).session.authorization.handover, true);
+  assert.equal((await f.repository.verifyCode({ code: first.code })).session.authorization.handover, true);
+  // A claim created while the handover was legitimately open.
+  const verified = await f.repository.verifyCode({ code: auth.code });
+  const claim = await create(f, { sessionToken: verified.sessionToken }, 'claim-before-the-stop');
+  // The operator stops the family. Both open handovers must close with it.
+  const revoked = await f.repository.mutateFamily({ familyId: auth.family.id, action: 'revoke', expectedRevision: 3, actor: 'admin', reason: 'operator stop during two handovers' });
+  assert.equal(revoked.status, 'PAUSED');
+  for (const code of [auth.code, first.code, second.code]) {
+    await assert.rejects(() => f.repository.verifyCode({ code }), err('access_code_paused'));
+  }
+  // A stopped code is not advertised as usable either.
+  const stopped = await f.repository.getGroupCode();
+  assert.equal(stopped.previousCode, null); assert.equal(stopped.previousCodeHandoverUntil, null);
+  // Restoring the family resumes NEW codes; it does not undo the stop for the
+  // codes that were mid-handover when it happened.
+  await f.repository.mutateFamily({ familyId: auth.family.id, action: 'restore', expectedRevision: 4, actor: 'admin', reason: 'restore after the stop' });
+  for (const code of [auth.code, first.code]) {
+    await assert.rejects(() => f.repository.verifyCode({ code }), err('access_code_expired'));
+  }
+  // The new code the restore brings back works, so the restore is not a no-op.
+  const restored = await f.repository.getCurrentCode(auth.family.id);
+  assert.equal((await f.repository.verifyCode({ code: restored.code })).session.authorization.codeFamilyId, auth.family.id);
+  // The claim created before the stop is untouched: same owner, same state,
+  // same idempotent answer.
+  assert.equal((await f.repository.getClaim({ sessionToken: verified.sessionToken, claimId: claim.id })).state, 'PREPARING');
+  assert.equal((await f.repository.findClaimByKey({ sessionToken: verified.sessionToken, idempotencyKey: 'claim-before-the-stop' })).id, claim.id);
+});
+// The handover relaxes time only. A pause still wins, and the reduced batch of
+// a creator who lost contributions still applies to the replaced code.
+test('handover never overrides a pause or the current batch limit', async () => {
+  const f = new Fixture(), auth = await access(f);
+  await f.repository.mutateFamily({ familyId: auth.family.id, action: 'rotate', expectedRevision: 1, actor: 'admin', reason: 'rotate then pause' });
+  await f.repository.mutateFamily({ familyId: auth.family.id, action: 'pause', expectedRevision: 2, actor: 'admin', reason: 'pause wins over handover' });
+  await assert.rejects(() => f.repository.verifyCode({ code: auth.code }), err('access_code_paused'));
+  await f.repository.mutateFamily({ familyId: auth.family.id, action: 'resume', expectedRevision: 3, actor: 'admin', reason: 'resume during the same hour' });
+  // The old code's handover is still measured from its own rotation, not from
+  // the resume, so pausing did not extend it.
+  assert.equal((await f.repository.getGroupCode()).previousCodeHandoverUntil, new Date(start + 3600000).toISOString());
+  const old = await f.repository.verifyCode({ code: auth.code });
+  assert.equal(old.session.authorization.limit, 10);
+});
+
 test('frozen snapshotRecord and order-independent idempotency; conflict does not truncate', async () => {
   const f = new Fixture(), auth = await access(f), items = [snapshot(), snapshot('100002')];
   const claim = await create(f, auth, 'two-items', items);
@@ -506,8 +682,10 @@ test('admin contract: no-family creator, exact code shape and uncollected instal
   assert.equal(promotion.familyId, null); assert.equal(promotion.revision, null); assert.equal(promotion.status, 'INACTIVE');
   assert.equal(promotion.authorPublicNumber, 'C100001'); assert.deepEqual(promotion.contributions, []);
   const code = await f.repository.getGroupCode();
-  assert.deepEqual(Object.keys(code).sort(), ['familyId', 'revision', 'kind', 'status', 'code', 'validFrom', 'expiresAt', 'contributionCount', 'maxItems', 'redemptionEnabled'].sort());
+  assert.deepEqual(Object.keys(code).sort(), ['familyId', 'revision', 'kind', 'status', 'code', 'validFrom', 'expiresAt', 'contributionCount', 'maxItems', 'redemptionEnabled', 'previousCode', 'previousCodeHandoverUntil'].sort());
   assert.equal(code.redemptionEnabled, true);
+  // No rotation has happened yet, so there is no replaced code to announce.
+  assert.equal(code.previousCode, null); assert.equal(code.previousCodeHandoverUntil, null);
   assert.deepEqual(await f.repository.getStats(day), { readyClaims: 0, workClaims: 0, verifiedCodes: 0, installerRequests: null });
 });
 test('admin family revision CAS and reason validation have no mutation on conflict', async () => {

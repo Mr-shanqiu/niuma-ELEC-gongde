@@ -45,6 +45,8 @@ const codeSnapshot = (overrides = {}) => ({
   contributionCount: 1,
   maxItems: 10,
   redemptionEnabled: true,
+  previousCode: null,
+  previousCodeHandoverUntil: null,
   ...overrides
 });
 
@@ -78,6 +80,22 @@ test("F6: a code snapshot missing revision or writable fields is rejected", () =
   assert.equal(v2Shapes.codeSnapshot(codeSnapshot({ status: "RUNNING" })), false);
   assert.equal(v2Shapes.codeSnapshot(codeSnapshot({ expiresAt: "not-a-date" })), false);
   assert.equal(v2Shapes.codeSnapshot(codeSnapshot({ maxItems: undefined })), false);
+  // The replaced code and its deadline are a pair. A rotation that is still in
+  // its handover hour must survive the guard; half of the pair, or a deadline
+  // without a code, is a truncated read rather than "no handover".
+  const { previousCode: _previousCode, ...withoutPrevious } = codeSnapshot();
+  assert.equal(v2Shapes.codeSnapshot(withoutPrevious), false);
+  const { previousCodeHandoverUntil: _handover, ...withoutHandover } = codeSnapshot();
+  assert.equal(v2Shapes.codeSnapshot(withoutHandover), false);
+  const handover = codeSnapshot({
+    previousCode: "GD654321",
+    previousCodeHandoverUntil: "2026-10-22T03:00:00.000Z"
+  });
+  assert.equal(v2Shapes.codeSnapshot(handover), true);
+  assert.equal(v2Shapes.codeSnapshot({ ...handover, previousCode: null }), false);
+  assert.equal(v2Shapes.codeSnapshot({ ...handover, previousCodeHandoverUntil: null }), false);
+  assert.equal(v2Shapes.codeSnapshot({ ...handover, previousCodeHandoverUntil: "soon" }), false);
+  assert.equal(v2Shapes.codeSnapshot({ ...handover, previousCode: 123456 }), false);
   assert.equal(v2Shapes.codeSnapshot(null), false);
   assert.equal(v2Shapes.codeSnapshot([]), false);
 });
@@ -313,7 +331,8 @@ test("F6: a retention snapshot rejects bad registrations", () => {
 test("F6: a 'no code family' snapshot is only accepted when it looks like one", () => {
   const none = {
     familyId: null, revision: null, kind: "CREATOR", status: "INACTIVE", code: null,
-    validFrom: null, expiresAt: null, contributionCount: 0, maxItems: 0, redemptionEnabled: false
+    validFrom: null, expiresAt: null, contributionCount: 0, maxItems: 0, redemptionEnabled: false,
+    previousCode: null, previousCodeHandoverUntil: null
   };
   assert.equal(v2Shapes.codeSnapshot(none), true);
   // A truncated response that happens to carry familyId: null is not evidence

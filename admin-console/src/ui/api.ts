@@ -394,6 +394,12 @@ export const v2Shapes = {
     if (snapshot.code !== null && !isText(snapshot.code)) return false;
     if (!isStampOrNull(snapshot.expiresAt) || !isStampOrNull(snapshot.validFrom)) return false;
     if (!isCount(snapshot.maxItems) || !isCount(snapshot.contributionCount)) return false;
+    // The replaced code and its handover deadline are always present; either may
+    // be null, and a non-null pair is only meaningful together.
+    if (!("previousCode" in snapshot) || !("previousCodeHandoverUntil" in snapshot)) return false;
+    if (snapshot.previousCode !== null && !isText(snapshot.previousCode)) return false;
+    if (!isStampOrNull(snapshot.previousCodeHandoverUntil)) return false;
+    if ((snapshot.previousCode === null) !== (snapshot.previousCodeHandoverUntil === null)) return false;
     if (snapshot.familyId === null) {
       return snapshot.revision === null && snapshot.status === "INACTIVE" &&
         snapshot.code === null && snapshot.validFrom === null && snapshot.expiresAt === null;

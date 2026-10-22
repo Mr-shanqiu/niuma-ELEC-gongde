@@ -50,6 +50,11 @@ export interface CodeAuthorization {
   limit: number;
   serverNow: string;
   expiresAt: string;
+  // True only when this authorization comes from a code the server itself
+  // replaced, and only while that code's own handover window is still open.
+  // A code that merely belongs to an older 72-hour cycle is never "handover".
+  handover?: boolean;
+  handoverUntil?: string | null;
 }
 
 export interface DownloadSession {
@@ -144,6 +149,11 @@ export interface AdminCodeSnapshot {
   contributionCount: number;
   maxItems: number;
   redemptionEnabled: boolean;
+  // The code the server replaced at the last manual rotation, while its one-hour
+  // handover is still open. Only the authenticated admin pages receive it; the
+  // public catalogue never carries an old code.
+  previousCode: string | null;
+  previousCodeHandoverUntil: string | null;
 }
 export interface AdminContribution {
   workId: string;

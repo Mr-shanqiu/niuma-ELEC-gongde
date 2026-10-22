@@ -137,7 +137,12 @@ if (previousArchive) {
     if (!Array.isArray(bundle) || !bundle.every(name => adminPattern.test(name))) throw new Error('Previous admin bundle manifest is invalid');
     if (bundle.length && !adminBundles.some(existing => JSON.stringify(existing) === JSON.stringify(bundle))) adminBundles.push(bundle);
   }
-  adminBundles = adminBundles.slice(0, 3);
+  // Two admin bundles, not three: the deployer accepts at most 20 MiB and the
+  // site is already within a few hundred KiB of that. Each admin bundle is
+  // ~1.3 MB of JS, so a third generation is the difference between a release
+  // the deployer accepts and one it rejects. Two is the depth the live archive
+  // already carries, so nothing the current release guarantees is lost.
+  adminBundles = adminBundles.slice(0, 2);
   const keepAdmin = new Set(adminBundles.flat());
   const keepRuntime = new Set(runtimeVersions.slice(1));
   const selected = members.filter(member => {

@@ -627,7 +627,8 @@ export function createFreeDistributionRuntime(deps: DistributionDependencies) {
           if (session.authorization?.kind !== "GROUP") return send({valid:false,authorized:false});
           return send({valid:!!session.authorization,authorized:!!session.authorization,...(session.authorization?{
             kind:session.authorization.kind,authorPublicNumber:session.authorization.publicNumber,
-            maxItems:session.authorization.limit,expiresAt:session.authorization.expiresAt}:{})});
+            maxItems:session.authorization.limit,expiresAt:session.authorization.expiresAt,
+            ...(session.authorization.handover?{handover:true,handoverUntil:session.authorization.handoverUntil}:{})}:{})});
         }
         if(path==="/access/verify"&&method==="POST") {
           if(!await ready())throw new FreeDistributionError("access_service_unavailable",503);
@@ -636,16 +637,25 @@ export function createFreeDistributionRuntime(deps: DistributionDependencies) {
           if(Object.keys(body).some(k=>k!=="code"))throw new FreeDistributionError("request_invalid",400);
           const group = await repo().getGroupCode();
           const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
-          if (!/^GD\d{6}$/u.test(code) || group.status !== "ACTIVE" || !group.code || code !== group.code) {
+          // This route does NOT decide which codes are still usable. Enumerating
+          // them here would be wrong: every rotation's replaced code keeps its
+          // own hour, so more than one old code can be valid at once, and a
+          // single "previousCode" comparison silently drops the earlier ones.
+          // The repository resolves the submitted value to its own token and
+          // authorizes that token against its own deadline.
+          if (!/^GD\d{6}$/u.test(code) || group.status !== "ACTIVE" || !group.code) {
             throw new FreeDistributionError("access_code_invalid", 400);
           }
-          const result=await repo().verifyCode({code,sessionToken:token(request)||undefined});
+          // The guard above proves familyId is present; the route never serves
+          // the "no family" snapshot because status must be ACTIVE.
+          const result=await repo().verifyCode({code,sessionToken:token(request)||undefined,familyId:group.familyId!});
           const a=result.session.authorization!;
           if (a.kind !== "GROUP" || a.codeFamilyId !== group.familyId) {
             await repo().clearAccess(result.sessionToken);
             throw new FreeDistributionError("access_code_invalid", 400);
           }
-          return send({valid:true,authorized:true,kind:a.kind,authorPublicNumber:a.publicNumber,maxItems:a.limit,expiresAt:a.expiresAt},200,
+          return send({valid:true,authorized:true,kind:a.kind,authorPublicNumber:a.publicNumber,maxItems:a.limit,expiresAt:a.expiresAt,
+            ...(a.handover?{handover:true,handoverUntil:a.handoverUntil}:{})},200,
             {"set-cookie":`${COOKIE}=${result.sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure?"; Secure":""}`});
         }
         if(path==="/access"&&method==="DELETE") {if(token(request))await repo().clearAccess(token(request));return send({ok:true});}

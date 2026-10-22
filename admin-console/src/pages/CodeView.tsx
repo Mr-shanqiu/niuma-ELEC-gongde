@@ -31,6 +31,8 @@ type CodeSnapshot = {
   contributionCount: number;
   maxItems: number;
   redemptionEnabled: boolean;
+  previousCode: string | null;
+  previousCodeHandoverUntil: string | null;
 };
 
 type ClaimItem = { number: string; title: string; catalogRevision: string };
@@ -94,14 +96,34 @@ const count = (value: unknown) =>
     ? value.toLocaleString("zh-CN")
     : "未统计";
 
-/** Mirrors the server rule: a code is usable only inside its own window and while active. */
+/**
+ * The group announcement.
+ *
+ * During a rotation's one-hour handover the replaced code still works, so the
+ * announcement says so explicitly: whoever copied the old code before the edit
+ * has until that moment, and the deadline is the server's own, not the page's
+ * idea of it. Without a handover the text is exactly what it was before.
+ */
 function announcement(snapshot: CodeSnapshot): string {
   const parts = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai", year: "numeric", month: "numeric", day: "numeric",
     hour: "2-digit", minute: "2-digit", hourCycle: "h23"
   }).formatToParts(new Date(snapshot.expiresAt!));
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
-  return `权益码：${snapshot.code}\n\n失效时间：${part("year")} 年 ${part("month")} 月 ${part("day")} 日 ${part("hour")}:${part("minute")}\n\n官网链接：https://gongde.zqscreen.cn/\n\n未及时更新请@群主。`;
+  const handover = snapshot.previousCode && snapshot.previousCodeHandoverUntil
+    ? `\n\n旧码 ${snapshot.previousCode} 可用至 ${beijingHandover(snapshot.previousCodeHandoverUntil)}，此前仍可领取；之后请用新码。`
+    : "";
+  return `权益码：${snapshot.code}\n\n失效时间：${part("year")} 年 ${part("month")} 月 ${part("day")} 日 ${part("hour")}:${part("minute")}${handover}\n\n官网链接：https://gongde.zqscreen.cn/\n\n未及时更新请@群主。`;
+}
+
+/** The handover deadline, in the same Beijing wall-clock form as the code expiry. */
+function beijingHandover(value: string): string {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "numeric", day: "numeric",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("month")} 月 ${part("day")} 日 ${part("hour")}:${part("minute")}`;
 }
 
 type Action = "pause" | "resume" | "rotate";
@@ -110,7 +132,7 @@ const actionCopy: Record<Action, { title: string; ok: string; body: string; dang
   rotate: {
     title: "确认立即换码？",
     ok: "确认换码",
-    body: "旧码立即失效，不会取消已经创建的合法领取。换码会连同原因与操作人写入审计。",
+    body: "新码立即生效。旧码在一小时内仍可用于新的领取，方便群成员换公告；一小时后旧码停止接受新领取。已经创建的合法领取不受影响。换码会连同原因与操作人写入审计。",
     danger: true
   },
   pause: {
@@ -293,6 +315,21 @@ export function CodeView() {
                       <Typography.Text type="secondary" className="code-readat">
                         以服务器北京时间为准 · 最近读取 {beijingTime(body.serverTime)}
                       </Typography.Text>
+                      {/*
+                        The replaced code is never published on the site, but the
+                        operator needs its deadline on screen to answer "can I
+                        still use the old one?" without guessing. It is shown only
+                        while the server says the handover is open.
+                      */}
+                      {value.previousCode && value.previousCodeHandoverUntil ? (
+                        <Alert
+                          type="info"
+                          showIcon
+                          className="code-warning"
+                          message={`旧码 ${value.previousCode} 可用至 ${beijingHandover(value.previousCodeHandoverUntil)}`}
+                          description="此前旧码仍可创建新的领取；到点后停止接受新领取。已经创建的领取不受影响。旧码不在官网展示。"
+                        />
+                      ) : null}
                     </>
                   );
                 }}
