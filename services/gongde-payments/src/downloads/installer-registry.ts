@@ -45,12 +45,41 @@ export function installerObjectName(value: string): string | null {
   }
 }
 
+/**
+ * The shipped registry file, in the layouts the service actually runs in.
+ *
+ * `npm run build` copies the JSON next to the compiled modules, so a container
+ * that only ships `dist/` still has it. The release tarball
+ * (`scripts/package-gongde-api.sh`) ships `src/` too and builds on the host, so
+ * the source-relative path is kept as a second candidate.
+ */
+const DEFAULT_REGISTRY_CANDIDATES = [
+  new URL("../free-distribution/installers.json", import.meta.url),        // dist/downloads → dist/free-distribution
+  new URL("../../src/free-distribution/installers.json", import.meta.url)  // dist/downloads → src/free-distribution
+];
+
+function readRegistryFile(source: NodeJS.ProcessEnv): string {
+  const override = source.GONGDE_FREE_INSTALLERS_FILE?.trim();
+  if (override) return readFileSync(override, "utf8");
+  // A single relative path resolved against the compiled location, and `dist/`
+  // held no JSON — the whole registry then read as "unavailable" at runtime
+  // while every test passed, because the tests set an override. Both real
+  // layouts are tried; the last error is the one that surfaces.
+  let lastError: unknown = null;
+  for (const candidate of DEFAULT_REGISTRY_CANDIDATES) {
+    try {
+      return readFileSync(candidate, "utf8");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 export function loadInstallerRegistry(source: NodeJS.ProcessEnv = process.env): InstallerRegistry {
   let raw: unknown;
   try {
-    const path = source.GONGDE_FREE_INSTALLERS_FILE?.trim();
-    raw = JSON.parse(path ? readFileSync(path, "utf8") :
-      readFileSync(new URL("../free-distribution/installers.json", import.meta.url), "utf8"));
+    raw = JSON.parse(readRegistryFile(source));
   } catch {
     return { status: "unavailable", items: [] };
   }

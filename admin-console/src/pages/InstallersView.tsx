@@ -4,6 +4,8 @@ import type { ColumnsType } from "antd/es/table";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useDistributionRead, useRead } from "../ui/api";
 import { shapes } from "../ui/api";
+import { classifyDownloads, historicalRequests } from "../ui/downloads";
+import type { DownloadReport } from "../ui/downloads";
 import { ReadGate } from "../ui/ReadGate";
 import { StatusTag } from "../ui/StatusTag";
 
@@ -29,21 +31,7 @@ type Retention = {
   minimumCompatibleVersion: string;
   items: Registration[];
 };
-type RegistryItem = { name: string; platform: string; version: string; releaseId: string; bytes: number; sha256: string; countedUrl: string };
-type DownloadReport = {
-  status: "available" | "error" | "unavailable";
-  coverage: { status: "configured" | "unconfigured"; startedAt: string | null; scopeNote: string };
-  registry: { status: "available" | "unavailable"; items: RegistryItem[] };
-  range?: { from: string; to: string };
-  summary: null | {
-    total: number;
-    period: number;
-    byFile: Array<{ fileName: string; total: number; period: number }>;
-    byPlatform: Record<"macos" | "windows", { total: number; period: number }>;
-    legacyCount: number;
-    unattributed: number;
-  };
-};
+type RegistryItem = DownloadReport["registry"]["items"][number];
 
 const platformLabel: Record<string, string> = { macos: "Mac", windows: "Windows" };
 
@@ -78,7 +66,20 @@ export function InstallersView() {
 
   const registry = report.state.status === "ready" || report.state.status === "empty" ? report.state.data : null;
   const items = registry?.registry.status === "available" ? registry.registry.items : [];
-  const summary = registry?.status === "available" ? registry.summary : null;
+  // Costs per file and per platform are only shown when counting has a real
+  // start. Without one the numbers are earlier recorded events, so they are
+  // reported as history instead of being labelled 累计.
+  const cell = classifyDownloads(report.state);
+  const summary = cell.note === "ready" ? cell.summary : null;
+  const historyCount = historicalRequests(cell);
+  /**
+   * Why a count is missing, in the words that match the cause: counting off
+   * (未接入) and counting on without a start (无统计起点) are different facts,
+   * and "no start" would be a false claim about a store that never counted.
+   */
+  const missingNote = cell.note === "unconfigured"
+    ? (cell.reason === "coverage" ? "无统计起点" : "未接入")
+    : "未读取";
 
   const counts = useMemo(() => {
     const map = new Map<string, { period: number; total: number }>();
@@ -135,8 +136,9 @@ export function InstallersView() {
       width: 104,
       align: "right",
       render: (_: unknown, record: RegistryItem) => {
-        if (report.state.status !== "ready" && report.state.status !== "empty") return <span className="missing-value">未读取</span>;
-        if (!summary) return <span className="missing-value">未接入</span>;
+        if (cell.note === "loading") return <span className="missing-value">读取中</span>;
+        if (cell.note === "unread") return <span className="missing-value">未读取</span>;
+        if (cell.note === "unconfigured") return <span className="missing-value">{missingNote}</span>;
         return (counts.get(record.name)?.period ?? 0).toLocaleString("zh-CN");
       }
     },
@@ -146,8 +148,11 @@ export function InstallersView() {
       width: 104,
       align: "right",
       render: (_: unknown, record: RegistryItem) => {
-        if (report.state.status !== "ready" && report.state.status !== "empty") return <span className="missing-value">未读取</span>;
-        if (!summary) return <span className="missing-value">未接入</span>;
+        if (cell.note === "loading") return <span className="missing-value">读取中</span>;
+        if (cell.note === "unread") return <span className="missing-value">未读取</span>;
+        // No start means no cumulative total; the history band below carries
+        // the number that does exist.
+        if (cell.note === "unconfigured") return <span className="missing-value">{missingNote}</span>;
         return (counts.get(record.name)?.total ?? 0).toLocaleString("zh-CN");
       }
     }
@@ -163,12 +168,29 @@ export function InstallersView() {
         <Button icon={<ReloadOutlined />} onClick={reload}>重新读取</Button>
       </div>
 
-      {registry?.coverage.status === "unconfigured" ? (
+      {cell.note === "unconfigured" && cell.reason === "coverage" ? (
         <Alert
           type="warning"
           showIcon
-          message="下载统计没有配置统计起点"
-          description="下方文件与版本来自登记表，仍然可信；请求数字则不完整，不能当作累计。"
+          message="已接入计数，但没有配置统计起点"
+          description="下方文件与版本来自登记表，仍然可信；没有起点就没有累计，请求数字只能按历史上已记录的请求单列。"
+        />
+      ) : null}
+      {cell.note === "unconfigured" && cell.reason === "store" ? (
+        <Alert
+          type="info"
+          showIcon
+          message="下载统计未接入"
+          description="服务端还没有启用下载计数的文件存储。下方文件与版本仍然可信，请求次数不显示 0，因为 0 会被读成「没人下载」。"
+        />
+      ) : null}
+      {cell.note === "unread" ? (
+        <Alert
+          type="error"
+          showIcon
+          message={cell.reason === "read" ? "下载统计读取失败" : "下载登记读取失败"}
+          description="这是读取失败，不是没有请求，也不是统计未接入；下方不会显示 0。"
+          action={<Button size="small" onClick={report.reload}>重试</Button>}
         />
       ) : null}
 
@@ -206,11 +228,23 @@ export function InstallersView() {
         </div>
       </Card>
 
-      {report.state.status === "ready" && registry?.summary ? (
+      {cell.note === "unconfigured" && cell.reason === "coverage" && historyCount !== null ? (
+        <Card className="flat-card" title="历史已记录请求（覆盖不完整）" styles={{ body: { padding: 18 } }}>
+          <Typography.Paragraph>
+            统计起点未配置，因此这些记录不能当作「自接入起的累计」：
+            <strong> {historyCount.toLocaleString("zh-CN")} 条</strong>
+          </Typography.Paragraph>
+          <Typography.Paragraph type="secondary" className="drawer-note">
+            它们来自计数接入前的存储，覆盖哪些入口、是否完整都无法确认。这里不补造历史，也不把它们并入任何累计。
+          </Typography.Paragraph>
+        </Card>
+      ) : null}
+
+      {summary && cell.note === "ready" ? (
         <Card className="flat-card" title="按平台汇总" styles={{ body: { padding: 0 } }}>
           <div className="dl-grid">
             {(["windows", "macos"] as const).map((platform) => {
-              const value = registry.summary!.byPlatform[platform];
+              const value = summary.byPlatform[platform];
               return (
                 <div className="dl-row" key={platform}>
                   <div className="dl-platform"><span>{platformLabel[platform]}</span></div>
@@ -227,21 +261,21 @@ export function InstallersView() {
             })}
           </div>
           <div className="dl-note">
-            <span>{registry.coverage.scopeNote} CDN 直链、GitHub 与转发安装包不在范围内。</span>
+            <span>{cell.report.coverage.scopeNote} CDN 直链、GitHub 与转发安装包不在范围内。</span>
             <details>
               <summary>统计状态与历史记录</summary>
               <p>
                 统计起点：
-                {registry.coverage.status === "configured" && registry.coverage.startedAt
+                {cell.report.coverage.startedAt
                   ? new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "long", timeStyle: "short" })
-                      .format(new Date(registry.coverage.startedAt))
+                      .format(new Date(cell.report.coverage.startedAt))
                   : "未配置（累计因此不完整）"}
                 。
-                {registry.summary.legacyCount > 0
-                  ? ` 起点之前另有 ${registry.summary.legacyCount.toLocaleString("zh-CN")} 条已记录请求，覆盖不完整，未计入上方累计。`
+                {summary.legacyCount > 0
+                  ? ` 起点之前另有 ${summary.legacyCount.toLocaleString("zh-CN")} 条已记录请求，覆盖不完整，未计入上方累计。`
                   : ""}
-                {registry.summary.unattributed > 0
-                  ? ` 另有 ${registry.summary.unattributed.toLocaleString("zh-CN")} 次请求的文件已不在当前登记中，计入总数但不归属平台。`
+                {summary.unattributed > 0
+                  ? ` 另有 ${summary.unattributed.toLocaleString("zh-CN")} 次请求的文件已不在当前登记中：仍计入总数，平台按历史文件扩展名归类。`
                   : ""}
               </p>
             </details>

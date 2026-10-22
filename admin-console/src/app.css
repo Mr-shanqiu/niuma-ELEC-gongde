@@ -720,6 +720,15 @@ body {
   color: var(--muted);
 }
 
+.rules-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
 /* ---------- 群码 ---------- */
 .code-main {
   padding: 22px 24px;

@@ -3,8 +3,10 @@ import { Alert, Button, Card, Collapse, DatePicker, Space, Tooltip, Typography }
 import { ArrowRightOutlined, InfoCircleOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { beijingDate, beijingDayRange } from "../Shell";
-import { shapes, useDistributionRead, useRead } from "../ui/api";
+import { shapes, useDistributionRead, useRead, v2Shapes } from "../ui/api";
 import type { ReadState } from "../ui/api";
+import { classifyDownloads, historicalRequests } from "../ui/downloads";
+import type { DownloadCell, DownloadReport, DownloadSummary } from "../ui/downloads";
 import { ReadGate } from "../ui/ReadGate";
 import { StatusTag, type Tone } from "../ui/StatusTag";
 
@@ -14,20 +16,6 @@ type Overview = {
   downloads: { status: string; summary: DownloadSummary | null };
   recent: Array<{ orderNo: string; purchaseKind: string; state: string; amountFen: number; createdAt: string }>;
   services: Record<string, string>;
-};
-type DownloadSummary = {
-  total: number;
-  period: number;
-  byPlatform: { macos: { total: number; period: number }; windows: { total: number; period: number } };
-  earliest: string | null;
-  legacyCount: number;
-  unattributed: number;
-};
-type DownloadReport = {
-  status: "available" | "error" | "unavailable";
-  coverage: { status: "configured" | "unconfigured"; startedAt: string | null; entries: string[]; scopeNote: string };
-  registry: { status: "available" | "unavailable"; items: Array<{ name: string; platform: string; version: string }> };
-  summary: DownloadSummary | null;
 };
 type ClaimIssue = { claimId: string; state: string; error: string | null; workNumbers: string[]; createdAt: string; waitingSeconds: number };
 type Operations = {
@@ -98,12 +86,20 @@ export function TodayView() {
 
   const overview = useRead<Overview>(query ? `/overview?${query}` : null, { expect: shapes.overview });
   const downloads = useRead<DownloadReport>(query ? `/download-report?${query}` : null, { expect: shapes.downloadReport });
-  const operations = useDistributionRead<Operations>("/operations");
-  const config = useRead<PaymentConfig>("/payment-config", { enabled: false, expect: shapes.paymentConfig });
+  const operations = useDistributionRead<Operations>("/operations", { expectData: v2Shapes.operations });
+  // Loaded only when the rules section is opened: it is reference material, not
+  // something the operator needs on every visit. `enabled` is a real gate, so
+  // until it is opened nothing is requested and nothing is claimed as loading.
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const config = useRead<PaymentConfig>("/payment-config", { enabled: rulesOpen, expect: shapes.paymentConfig });
   // Reports live on the v2 surface, not the legacy admin one.
-  const reports = useDistributionRead<ReportPage>("/reports?page=1&perPage=1&state=OPEN");
+  const reports = useDistributionRead<ReportPage>("/reports?page=1&perPage=1&state=OPEN", { expectData: v2Shapes.reportsPage });
 
-  const reloadAll = () => { overview.reload(); downloads.reload(); operations.reload(); reports.reload(); };
+  const reloadAll = () => {
+    overview.reload(); downloads.reload(); operations.reload(); reports.reload();
+    // Only re-read the rules if they are on screen; opening them reads them.
+    if (rulesOpen) config.reload();
+  };
 
   const ready = (state: ReadState<unknown>) => state.status === "ready" || state.status === "empty";
 
@@ -113,15 +109,9 @@ export function TodayView() {
     : overview.state.status === "loading" ? "loading" as const : "unread" as const;
 
   /* 下载：三个口径分别处理，0 只在真正读到时才出现。 */
-  const downloadCell = (() => {
-    if (downloads.state.status === "loading") return { note: "loading" as const };
-    if (downloads.state.status === "error") return { note: "unread" as const };
-    const report = downloads.state.data;
-    if (report.status !== "available" || !report.summary) return { note: "unconfigured" as const, report };
-    return { note: "ready" as const, report, summary: report.summary };
-  })();
-  const macos = downloadCell.note === "ready" ? downloadCell.summary!.byPlatform.macos : null;
-  const windows = downloadCell.note === "ready" ? downloadCell.summary!.byPlatform.windows : null;
+  const downloadCell = classifyDownloads(downloads.state);
+  const macos = downloadCell.note === "ready" ? downloadCell.summary.byPlatform.macos : null;
+  const windows = downloadCell.note === "ready" ? downloadCell.summary.byPlatform.windows : null;
 
   /* 领取异常：类别数与事项数是两个数字，不要合成一个「3 项」。 */
   const operationsBody = ready(operations.state) ? (operations.state as { data: { data: Operations } }).data.data : null;
@@ -178,8 +168,9 @@ export function TodayView() {
                   <InfoCircleOutlined />
                 </span>
               </Tooltip>
-            ) : downloadCell.note === "unread" ? "下载统计未读取"
-              : downloadCell.note === "loading" ? "正在读取" : "下载统计尚未接入"
+            ) : downloadCell.note === "unread" ? "下载统计未读取（不是 0）"
+              : downloadCell.note === "loading" ? "正在读取"
+              : downloadCell.reason === "coverage" ? "已接入但没有统计起点" : "下载统计未接入"
           }
         />
         <Stat
@@ -254,10 +245,12 @@ export function TodayView() {
       <Collapse
         ghost
         className="rules-collapse"
+        activeKey={rulesOpen ? ["rules"] : []}
+        onChange={(keys) => setRulesOpen(Array.isArray(keys) ? keys.includes("rules") : keys === "rules")}
         items={[{
           key: "rules",
           label: <span className="rules-title">当前产品规则与服务端配置对照</span>,
-          children: <Rules state={config.state} />
+          children: <Rules state={config.state} onRetry={config.reload} />
         }]}
       />
     </div>
@@ -312,18 +305,15 @@ function formatDuration(seconds: number): string {
   return `${Math.max(0, Math.floor(seconds / 60))} 分钟`;
 }
 
-type DownloadCell =
-  | { note: "loading" }
-  | { note: "unread" }
-  | { note: "unconfigured"; report: DownloadReport }
-  | { note: "ready"; report: DownloadReport; summary: DownloadSummary };
-
 /**
  * Download counts, one row per platform.
  *
  * The long explanation is collapsed: the numbers are the point, and what the
  * numbers are *not* is one line plus a disclosure. The coverage sentence comes
  * from the server; the page never writes "采集完整" on its own.
+ *
+ * The four states come from `classifyDownloads`, so this page and 安装包 cannot
+ * disagree about what "未接入" means.
  */
 function DownloadCard({ state, cell, onRetry }: {
   state: ReadState<DownloadReport>;
@@ -332,7 +322,11 @@ function DownloadCard({ state, cell, onRetry }: {
 }) {
   const report = cell.note === "ready" || cell.note === "unconfigured" ? cell.report : null;
   const coverage = report?.coverage;
-  const configured = coverage?.status === "configured" && Boolean(coverage.startedAt);
+  const configured = cell.note === "ready";
+  const history = historicalRequests(cell);
+  const label = cell.note === "ready" ? "官网安装包入口已接入"
+    : cell.note === "unconfigured" ? (cell.reason === "coverage" ? "已接入，但没有统计起点" : "未接入")
+    : cell.note === "loading" ? "读取中" : "未读取";
 
   return (
     <Card
@@ -340,10 +334,9 @@ function DownloadCard({ state, cell, onRetry }: {
       title={
         <Space size={8}>
           <span>客户端下载请求</span>
-          <StatusTag tone={cell.note === "ready" ? (configured ? "ok" : "warn") : cell.note === "unconfigured" ? "mute" : "warn"} dot>
-            {cell.note === "ready"
-              ? (configured ? "官网安装包入口已接入" : "已接入，但统计起点未配置")
-              : cell.note === "unconfigured" ? "未接入" : "未读取"}
+          {/* "已接入但没起点" is a warning: counting works, the total has no beginning. */}
+          <StatusTag tone={cell.note === "ready" ? "ok" : cell.note === "unconfigured" ? (cell.reason === "coverage" ? "warn" : "mute") : "warn"} dot>
+            {label}
           </StatusTag>
         </Space>
       }
@@ -354,8 +347,8 @@ function DownloadCard({ state, cell, onRetry }: {
             "统计起点未配置" here would turn "we do not know" into a
             configuration fact the server never reported.
           */}
-          {cell.note === "ready" || cell.note === "unconfigured"
-            ? (configured ? `统计起点 ${beijingStamp(coverage.startedAt)}` : "统计起点未配置")
+          {configured ? `统计起点 ${beijingStamp(coverage!.startedAt)}`
+            : cell.note === "unconfigured" ? (cell.reason === "coverage" ? "统计起点未配置" : "文件存储未启用")
             : cell.note === "loading" ? "正在读取统计起点" : "统计起点未读取"}
         </Typography.Text>
       }
@@ -363,18 +356,58 @@ function DownloadCard({ state, cell, onRetry }: {
     >
       {cell.note === "unread" ? (
         <div className="inline-alert">
-          <ReadGate state={state} onRetry={onRetry}>{() => null}</ReadGate>
+          {/*
+            A 200 whose store read failed is not "未接入": the operator has to
+            retry, and saying the feature was never switched on sends them to
+            the wrong place.
+          */}
+          {cell.reason === "read" ? (
+            <Alert
+              type="error"
+              showIcon
+              message="下载统计读取失败"
+              description="服务端接受了请求，但汇总没有读出来。这是读取失败，不是没有下载，也不是统计未接入。"
+              action={<Button size="small" icon={<ReloadOutlined />} onClick={onRetry}>重试</Button>}
+            />
+          ) : (
+            <ReadGate state={state} onRetry={onRetry}>{() => null}</ReadGate>
+          )}
         </div>
       ) : cell.note === "loading" ? (
         <div className="todo-empty">正在读取下载统计…</div>
       ) : cell.note === "unconfigured" ? (
-        <Alert
-          type="info"
-          showIcon
-          className="inline-alert"
-          message="下载统计尚未接入"
-          description="服务端没有启用下载计数：文件存储未启用，或这次读取失败。这里不显示 0，因为 0 会被读成「今天没人下载」。"
-        />
+        <div className="inline-alert">
+          {cell.reason === "coverage" ? (
+            <>
+              <Alert
+                type="warning"
+                showIcon
+                message="已接入计数，但没有配置统计起点"
+                description="没有起点就没有「累计」：下面的数字只能当作历史上已记录到的请求，覆盖不完整，不能与接入后的累计混用。"
+              />
+              {history !== null ? (
+                <div className="dl-note">
+                  <span>历史已记录请求 {history.toLocaleString("zh-CN")} 条（覆盖不完整，不并入累计）。</span>
+                  <details>
+                    <summary>口径、覆盖范围与限制</summary>
+                    <p>
+                      {coverage?.scopeNote ?? "只统计官网下载入口的请求。"}
+                      这些请求来自计数接入前的记录，覆盖范围不明，不能代表官网全部下载。
+                      同一动作重复点击会重复计数；已保存的文件离线使用不产生请求。
+                    </p>
+                  </details>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message="下载统计未接入"
+              description="服务端还没有启用下载计数的文件存储。这里不显示 0，因为 0 会被读成「今天没人下载」。"
+            />
+          )}
+        </div>
       ) : (
         <>
           <div className="dl-grid">
@@ -382,10 +415,7 @@ function DownloadCard({ state, cell, onRetry }: {
             <PlatformRow label="macOS" icon="" today={cell.summary.byPlatform.macos.period} total={cell.summary.byPlatform.macos.total} />
           </div>
           <div className="dl-note">
-            <span>
-              按官网安装包入口的请求计数，不是安装人数或独立用户。
-              {configured ? "" : " 统计起点未配置，累计可能包含早期记录，不能当作完整口径。"}
-            </span>
+            <span>按官网安装包入口的请求计数，不是安装人数或独立用户。</span>
             <details>
               <summary>口径、覆盖范围与限制</summary>
               <p>
@@ -396,7 +426,7 @@ function DownloadCard({ state, cell, onRetry }: {
                   ? ` 历史已记录请求 ${cell.summary.legacyCount.toLocaleString("zh-CN")} 条，覆盖不完整，未计入上方累计。`
                   : ""}
                 {cell.summary.unattributed > 0
-                  ? ` 另有 ${cell.summary.unattributed.toLocaleString("zh-CN")} 次请求的文件已不在当前登记中，计入总数但无法归属平台。`
+                  ? ` 另有 ${cell.summary.unattributed.toLocaleString("zh-CN")} 次请求的文件已不在当前登记中：仍计入总数，平台按历史文件扩展名归类。`
                   : ""}
                 {cell.summary.earliest ? ` 累计范围内最早一次请求：${beijingStamp(cell.summary.earliest, true)}。` : ""}
               </p>
@@ -427,12 +457,15 @@ function PlatformRow({ label, icon, today, total }: { label: string; icon: strin
   );
 }
 
-function Rules({ state }: { state: ReadState<PaymentConfig> }) {
+function Rules({ state, onRetry }: { state: ReadState<PaymentConfig>; onRetry: () => void }) {
+  // A section that is closed has not asked yet; saying "读取中" there would
+  // describe a request that is not happening.
   const serverRule = state.status === "ready"
     ? `¥${(state.data.unitPriceFen / 100).toFixed(2)} / 每批上限 ${state.data.maxItems} / ${
         state.data.mode === "live" ? "真实支付模式" : `非真实支付模式（${state.data.mode}）`} · ${
         state.data.unitPriceFen === 100 && state.data.maxItems === 10 ? "与产品规则一致" : "与产品规则不一致，需先处理配置"}`
-    : state.status === "error" ? "未读取，未与产品规则对照" : "读取中";
+    : state.status === "error" ? "未读取，未与产品规则对照"
+    : state.status === "loading" ? "读取中" : "尚未读取";
   const rows: Array<[string, string]> = [
     ["基础形象", "免费，客户端直接下载，无需登录或付款"],
     ["扩展形象", "每个 1 元，每批最多 10 个不同形象，无套餐"],
@@ -442,13 +475,21 @@ function Rules({ state }: { state: ReadState<PaymentConfig> }) {
     ["服务端配置", serverRule]
   ];
   return (
-    <div className="rules-grid">
-      {rows.map(([key, value]) => (
-        <div className="rules-row" key={key}>
-          <span className="rules-key">{key}</span>
-          <span className="rules-value">{value}</span>
+    <>
+      <div className="rules-grid">
+        {rows.map(([key, value]) => (
+          <div className="rules-row" key={key}>
+            <span className="rules-key">{key}</span>
+            <span className="rules-value">{value}</span>
+          </div>
+        ))}
+      </div>
+      {state.status === "error" ? (
+        <div className="rules-error">
+          <Typography.Text type="secondary">{state.message} 这一块没有读取成功，不代表配置正确。</Typography.Text>
+          <Button size="small" icon={<ReloadOutlined />} onClick={onRetry}>重新读取服务端配置</Button>
         </div>
-      ))}
-    </div>
+      ) : null}
+    </>
   );
 }

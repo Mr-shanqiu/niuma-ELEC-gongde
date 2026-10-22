@@ -4,8 +4,11 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs, { type Dayjs } from "dayjs";
 import { CopyOutlined, ReloadOutlined } from "@ant-design/icons";
 import { beijingDate, beijingDayRange } from "../Shell";
-import { useDistributionRead } from "../ui/api";
+import { useDistributionRead, v2Shapes } from "../ui/api";
 import type { ApiError } from "../ui/api";
+import { parseClaimLink, type ClaimLink } from "../ui/claim-link";
+import { useServerClock } from "../ui/clock";
+import { usable } from "../ui/code-window";
 import { ReadGate } from "../ui/ReadGate";
 import { StatusTag, type Tone } from "../ui/StatusTag";
 import { isUnauthorized, useSessionActions } from "../ui/session";
@@ -57,6 +60,27 @@ const claimStates: Record<string, { tone: Tone; label: string }> = {
   EXPIRED: { tone: "mute", label: "交付已到期" }
 };
 
+/**
+ * States the server accepts as a filter.
+ *
+ * `claimStates` keeps CREATED so an old record can still be explained, but the
+ * server's `listClaims` rejects it with 400, so it must never be offered here.
+ */
+const filterStates = (["PREPARING", "READY", "FAILED", "BLOCKED", "EXPIRED"] as const)
+  .map((value) => ({ value, label: claimStates[value].label }));
+
+/** Read `#/code?claimId=…&date=…` and keep following it while the page stays mounted. */
+function useClaimLink(): ClaimLink {
+  const read = () => parseClaimLink(location.hash);
+  const [link, setLink] = useState<ClaimLink>(read);
+  useEffect(() => {
+    const sync = () => setLink(read());
+    addEventListener("hashchange", sync);
+    return () => removeEventListener("hashchange", sync);
+  }, []);
+  return link;
+}
+
 const beijingTime = (value: string | null) => {
   if (!value || !Number.isFinite(Date.parse(value))) return "未提供";
   return new Intl.DateTimeFormat("zh-CN", {
@@ -71,12 +95,6 @@ const count = (value: unknown) =>
     : "未统计";
 
 /** Mirrors the server rule: a code is usable only inside its own window and while active. */
-function usable(snapshot: CodeSnapshot, now: number): boolean {
-  return snapshot.status === "ACTIVE" && Boolean(snapshot.code) && Boolean(snapshot.validFrom) &&
-    Boolean(snapshot.expiresAt) && Date.parse(snapshot.validFrom!) <= now &&
-    Date.parse(snapshot.expiresAt!) > now && snapshot.maxItems > 0;
-}
-
 function announcement(snapshot: CodeSnapshot): string {
   const parts = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai", year: "numeric", month: "numeric", day: "numeric",
@@ -111,12 +129,29 @@ const actionCopy: Record<Action, { title: string; ok: string; body: string; dang
 
 export function CodeView() {
   const { message, endSession } = useSessionActions();
-  const [day, setDay] = useState<Dayjs>(() => dayjs(beijingDate(new Date()), "YYYY-MM-DD"));
+  // A link from today's issue list carries the day and the batch it came from;
+  // landing on today's unfiltered list would hide the batch that was clicked.
+  const link = useClaimLink();
+  const [day, setDay] = useState<Dayjs>(() => dayjs(link.date ?? beijingDate(new Date()), "YYYY-MM-DD"));
   const [state, setState] = useState<string | undefined>();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Claim | null>(null);
+  // Cleared by the operator, not by a re-render: after "clear" the page is a
+  // normal day view again.
+  const [focusClaim, setFocusClaim] = useState<string | null>(link.claimId);
 
-  const code = useDistributionRead<CodeSnapshot>("/group-code");
+  // Same page, different hash (`#/code?claimId=…`) — the shell only remounts on
+  // a nav change, so the query has to be followed here as well. The hash is the
+  // whole truth: navigating to plain `#/code` clears a previous focus instead of
+  // leaving a stale one on screen. A date the operator picked in the DatePicker
+  // is untouched, because that does not change the hash.
+  useEffect(() => {
+    setDay(dayjs(link.date ?? beijingDate(new Date()), "YYYY-MM-DD"));
+    setFocusClaim(link.claimId);
+    setPage(1);
+  }, [link.date, link.claimId]);
+
+  const code = useDistributionRead<CodeSnapshot>("/group-code", { expectData: v2Shapes.codeSnapshot });
   const range = beijingDayRange(day.format("YYYY-MM-DD"));
   const claimsQuery = useMemo(() => {
     if (!range) return null;
@@ -124,22 +159,18 @@ export function CodeView() {
       from: range.from, to: range.to, page: String(page), perPage: "25"
     });
     if (state) query.set("state", state);
+    if (focusClaim) query.set("claimId", focusClaim);
     return `/claims?${query.toString()}`;
-  }, [range, state, page]);
-  const claims = useDistributionRead<ClaimsPage>(claimsQuery);
-  const stats = useDistributionRead<Stats>(range ? `/stats?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}` : null);
+  }, [range, state, page, focusClaim]);
+  const claims = useDistributionRead<ClaimsPage>(claimsQuery, { expectData: v2Shapes.claimsPage });
+  const stats = useDistributionRead<Stats>(range ? `/stats?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}` : null, { expectData: v2Shapes.stats });
 
-  /* One clock for "remaining", driven by the server's own answer so a wrong
-     laptop clock cannot make an expired code look usable. */
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
+  const serverTime = code.state.status === "ready" ? code.state.data.serverTime : null;
   const snapshot = code.state.status === "ready" ? code.state.data.data : null;
-  const serverTime = code.state.status === "ready" ? Date.parse(code.state.data.serverTime) : null;
-  const offset = snapshot && serverTime ? serverTime - now : 0;
+  // The clock wakes at the expiry boundary, not only on its regular tick: a code
+  // that expires between ticks must stop looking valid immediately.
+  const expiresAt = snapshot?.expiresAt ? Date.parse(snapshot.expiresAt) : NaN;
+  const { now } = useServerClock(serverTime, Number.isFinite(expiresAt) ? expiresAt : null);
 
   // A 401 is a session problem, not a data problem; it is handled once, outside render.
   const unauthorized = (code.state.status === "error" && code.state.unauthorized);
@@ -201,11 +232,19 @@ export function CodeView() {
     }
   };
 
-  const current = snapshot ? usable(snapshot, now + offset) : false;
+  // `now` is the anchored server clock (see `useServerClock`), or null when the
+  // snapshot has not been read — in which case nothing is usable.
+  const anchorNow = now ?? Number.NEGATIVE_INFINITY;
+  const current = snapshot ? usable(snapshot, anchorNow) : false;
   const remaining = current && snapshot?.expiresAt
-    ? Math.ceil((Date.parse(snapshot.expiresAt) - (now + offset)) / 1000)
+    ? Math.ceil((Date.parse(snapshot.expiresAt) - anchorNow) / 1000)
     : 0;
-  const revisionReady = Boolean(snapshot && snapshot.familyId && snapshot.revision !== null);
+  // `revision !== null` alone is not enough: a response that omits `revision`
+  // gives `undefined`, which satisfies `!== null` and would enable the write.
+  const revisionReady = Boolean(
+    snapshot && typeof snapshot.familyId === "string" && snapshot.familyId.length > 0 &&
+    Number.isSafeInteger(snapshot.revision)
+  );
   const reasonValid = reason.trim().length >= 5 && reason.trim().length <= 1000;
 
   const canPause = revisionReady && snapshot?.status === "ACTIVE";
@@ -221,7 +260,10 @@ export function CodeView() {
               <ReadGate state={code.state} onRetry={code.reload} skeletonRows={3}>
                 {(body) => {
                   const value = body.data;
-                  const live = usable(value, Date.now() + (Date.parse(body.serverTime) - Date.now()));
+                  // Same anchored clock as the side panel: a wrong laptop clock
+                  // cannot make an expired code look usable, and time keeps
+                  // moving between reads.
+                  const live = usable(value, anchorNow);
                   return (
                     <>
                       <Typography.Text type="secondary" className="eyebrow-line">官方群免费领取码</Typography.Text>
@@ -330,7 +372,7 @@ export function CodeView() {
 
       <Card
         className="flat-card"
-        title="当日领取批次"
+        title={focusClaim ? "定位到的领取批次" : "当日领取批次"}
         extra={<Typography.Text type="secondary" className="card-extra">{day.format("YYYY-MM-DD")} · 北京时间一天</Typography.Text>}
         styles={{ body: { padding: 0 } }}
       >
@@ -347,10 +389,25 @@ export function CodeView() {
             style={{ width: 150 }}
             value={state}
             onChange={(value) => { setState(value); setPage(1); }}
-            options={Object.entries(claimStates).map(([value, meta]) => ({ value, label: meta.label }))}
+            options={filterStates}
           />
           <Button icon={<ReloadOutlined />} onClick={() => { claims.reload(); stats.reload(); }}>重新读取</Button>
           <span className="grow" />
+          {focusClaim ? (
+            <Button
+              size="small"
+              type="text"
+              onClick={() => {
+                // The hash stays the source of truth: clearing only the local
+                // state would leave a link that re-focuses on reload.
+                setFocusClaim(null);
+                setPage(1);
+                if (location.hash.includes("?")) history.replaceState(null, "", "#/code");
+              }}
+            >
+              取消定位，查看当天全部批次
+            </Button>
+          ) : null}
           <span className="mini-stats">
             <span>有效批次 {stats.state.status === "ready" ? count(stats.state.data.data.readyClaims) : "未读取"}</span>
             <span className="sep">·</span>

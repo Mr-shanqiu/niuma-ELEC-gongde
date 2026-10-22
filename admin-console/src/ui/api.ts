@@ -49,10 +49,17 @@ export function useRead<T>(path: string | null, options: Options = {}) {
   return useApiRead<T>(url, options);
 }
 
-/** v2 distribution endpoints answer with `{ data, serverTime }`. */
-export function useDistributionRead<T>(path: string | null, options: { enabled?: boolean } = {}) {
+/** v2 distribution endpoints answer with `{ data, serverTime, requestId }`. */
+export function useDistributionRead<T>(path: string | null, options: { enabled?: boolean; expectData?: (data: unknown) => boolean } = {}) {
   const url = path === null ? null : `/api/gongde/v2/admin${path}`;
-  return useApiRead<{ data: T; serverTime: string }>(url, { enabled: options.enabled });
+  const expectData = options.expectData;
+  // The envelope is checked here, once, so no caller can forget `serverTime`
+  // and then treat a broken answer as fresh data.
+  const expectEnvelope = useCallback((body: Record<string, unknown>) => {
+    if (!("data" in body) || !Number.isFinite(Date.parse(String(body.serverTime)))) return false;
+    return expectData ? expectData(body.data) : true;
+  }, [expectData]);
+  return useApiRead<{ data: T; serverTime: string }>(url, { enabled: options.enabled, expect: expectEnvelope });
 }
 
 /**
@@ -171,7 +178,31 @@ function errorMessage(body: Record<string, unknown>, status: number): string {
   return "接口暂时不可用，请稍后重试。";
 }
 
-/** Documented-shape guards for the endpoints the console reads. */
+/**
+ * Documented-shape guards for the endpoints the console reads.
+ *
+ * These check the fields the pages actually consume, not just that a top-level
+ * key exists. `{periods:{},services:{},recent:[],downloads:{}}` is a 200 and
+ * passes a truthiness check, then throws inside render — which is the bug these
+ * guards exist to keep out of the page. A guard returning false lands the read
+ * in `error`, so the page says "未读取" instead of showing zero.
+ */
+const isCount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const isCounts = (value: unknown): boolean =>
+  Boolean(value) && isCount((value as { orders?: unknown }).orders) && isCount((value as { amountFen?: unknown }).amountFen);
+const isPlatformCounts = (value: unknown): boolean =>
+  Boolean(value) &&
+  isCount((value as { total?: unknown }).total) && isCount((value as { period?: unknown }).period);
+const isDownloadSummary = (value: unknown): boolean => {
+  if (!value || typeof value !== "object") return false;
+  const summary = value as Record<string, unknown>;
+  const byPlatform = summary.byPlatform as Record<string, unknown> | undefined;
+  return isCount(summary.total) && isCount(summary.period) && Array.isArray(summary.byFile) &&
+    Boolean(byPlatform) && isPlatformCounts(byPlatform!.macos) && isPlatformCounts(byPlatform!.windows) &&
+    isCount(summary.legacyCount) && isCount(summary.unattributed);
+};
+
 export const shapes = {
   session: (body: Record<string, unknown>) => typeof body.username === "string" && body.username.length > 0,
   list: (body: Record<string, unknown>) =>
@@ -179,16 +210,71 @@ export const shapes = {
   page: (body: Record<string, unknown>) =>
     Boolean(body.data) && Array.isArray((body.data as Record<string, unknown>).items) &&
     Number.isSafeInteger((body.data as Record<string, unknown>).total),
-  overview: (body: Record<string, unknown>) =>
-    Boolean(body.periods) && Boolean(body.services) && Array.isArray(body.recent) && Boolean(body.downloads),
-  downloadReport: (body: Record<string, unknown>) =>
-    Boolean(body.coverage) && Boolean(body.registry) && typeof body.status === "string",
-  operations: (body: Record<string, unknown>) =>
-    Boolean(body.claims) && Boolean(body.asOf) && Number.isFinite(Date.parse(String(body.asOf))),
+  overview: (body: Record<string, unknown>) => {
+    const periods = body.periods as Record<string, unknown> | undefined;
+    const services = body.services as Record<string, unknown> | undefined;
+    const downloads = body.downloads as Record<string, unknown> | undefined;
+    if (!periods || !services || !downloads || !Array.isArray(body.recent)) return false;
+    if (!isCounts(periods.selectedDay) || !isCounts(periods.allTime)) return false;
+    if (typeof services !== "object" || typeof downloads.status !== "string") return false;
+    return downloads.status === "available" ? isDownloadSummary(downloads.summary) : downloads.summary === null;
+  },
+  downloadReport: (body: Record<string, unknown>) => {
+    const coverage = body.coverage as Record<string, unknown> | undefined;
+    const registry = body.registry as Record<string, unknown> | undefined;
+    const range = body.range as Record<string, unknown> | undefined;
+    return Boolean(coverage) && (coverage!.status === "configured" || coverage!.status === "unconfigured") &&
+      typeof coverage!.scopeNote === "string" &&
+      Boolean(registry) && Array.isArray(registry!.items) &&
+      typeof body.status === "string" &&
+      Boolean(range) && Number.isFinite(Date.parse(String(range!.from))) && Number.isFinite(Date.parse(String(range!.to))) &&
+      (body.status === "available" ? isDownloadSummary(body.summary) : body.summary === null);
+  },
+  operations: (body: Record<string, unknown>) => {
+    const claims = body.claims as Record<string, unknown> | undefined;
+    return Number.isFinite(Date.parse(String(body.asOf))) && Boolean(claims) &&
+      typeof claims!.status === "string" && Array.isArray(claims!.items);
+  },
   paymentConfig: (body: Record<string, unknown>) =>
     Number.isSafeInteger(body.unitPriceFen) && Number.isSafeInteger(body.maxItems) && typeof body.mode === "string",
   orderDetail: (body: Record<string, unknown>) =>
     Boolean(body.data) && Array.isArray((body.data as Record<string, unknown>).marketItems)
+};
+
+/**
+ * v2 data guards, for the payloads where a missing field would otherwise read
+ * as a usable value. `revision: undefined` satisfies `revision !== null`, which
+ * is enough to enable a destructive button on a response that never carried a
+ * revision at all.
+ */
+export const v2Shapes = {
+  /** A code snapshot is actionable only when every writable field is present. */
+  codeSnapshot: (data: unknown): boolean => {
+    if (!data || typeof data !== "object") return false;
+    const snapshot = data as Record<string, unknown>;
+    if (!("familyId" in snapshot) || !("revision" in snapshot)) return false;
+    if (snapshot.familyId === null) return true; // genuinely no code family
+    if (typeof snapshot.familyId !== "string" || snapshot.familyId.length === 0) return false;
+    if (!Number.isSafeInteger(snapshot.revision) || (snapshot.revision as number) < 0) return false;
+    if (!["ACTIVE", "PAUSED", "INACTIVE"].includes(String(snapshot.status))) return false;
+    if (snapshot.code !== null && typeof snapshot.code !== "string") return false;
+    if (snapshot.expiresAt !== null && !Number.isFinite(Date.parse(String(snapshot.expiresAt)))) return false;
+    if (snapshot.validFrom !== null && !Number.isFinite(Date.parse(String(snapshot.validFrom)))) return false;
+    return Number.isSafeInteger(snapshot.maxItems);
+  },
+  /** `/operations` answers `{ asOf, claims, reviews, budget }`; claims is the part the page counts. */
+  operations: (data: unknown): boolean => {
+    if (!data || typeof data !== "object") return false;
+    const body = data as Record<string, unknown>;
+    const claims = body.claims as Record<string, unknown> | undefined;
+    return Number.isFinite(Date.parse(String(body.asOf))) && Boolean(claims) &&
+      typeof claims!.status === "string" && Array.isArray(claims!.items);
+  },
+  claimsPage: (data: unknown): boolean => Boolean(data) && Array.isArray((data as { items?: unknown }).items) &&
+    Number.isSafeInteger((data as { total?: unknown }).total),
+  stats: (data: unknown): boolean => Boolean(data) && typeof data === "object",
+  reportsPage: (data: unknown): boolean => Boolean(data) && Array.isArray((data as { items?: unknown }).items) &&
+    Number.isSafeInteger((data as { total?: unknown }).total)
 };
 
 /** A code the page cannot explain in the operator's language is still a code, not a guess. */

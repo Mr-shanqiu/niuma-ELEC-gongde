@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Alert, Button, Card, Descriptions, Empty, Input, Modal, Select, Space, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { useDistributionRead } from "../ui/api";
+import { useDistributionRead, v2Shapes } from "../ui/api";
 import type { ApiError } from "../ui/api";
 import { ReadGate } from "../ui/ReadGate";
 import { StatusTag, type Tone } from "../ui/StatusTag";
@@ -60,7 +60,7 @@ export function ReportsView() {
   const [busy, setBusy] = useState(false);
   const [writeError, setWriteError] = useState("");
 
-  const list = useDistributionRead<ReportPage>(`/reports?page=${page}&perPage=25&state=${state}`);
+  const list = useDistributionRead<ReportPage>(`/reports?page=${page}&perPage=25&state=${state}`, { expectData: v2Shapes.reportsPage });
 
   const rows = list.state.status === "ready" ? list.state.data.data.items : [];
   const total = list.state.status === "ready" ? list.state.data.data.total : null;

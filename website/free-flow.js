@@ -767,7 +767,7 @@ const installerName = value => {
     return /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(segment) ? segment : null;
   } catch { return null; }
 };
-function offerInstaller(link, publicUrl) {
+export function offerInstaller(link, publicUrl) {
   const name = installerName(publicUrl);
   if (!name) { link.href = publicUrl; return; }
   const counted = COUNTED_DOWNLOAD_BASE + encodeURIComponent(name);
@@ -775,12 +775,24 @@ function offerInstaller(link, publicUrl) {
   link.addEventListener('click', event => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     event.preventDefault();
-    const go = () => { location.href = publicUrl; };
+    // One navigation per click. The timeout, a settled fetch and a rejected
+    // fetch can all arrive in either order; without this latch the second one
+    // would assign `location` again and the browser would jump twice (a second
+    // request for the file, an extra navigation entry). Counting is still
+    // exactly one request: the latch only guards the navigation.
+    let navigated = false;
+    let timer = 0;
+    const go = () => {
+      if (navigated) return;
+      navigated = true;
+      clearTimeout(timer);
+      location.href = publicUrl;
+    };
     // Counting is best-effort and bounded: a slow API must not stall the
     // download, so the direct link opens whether or not this settles.
-    const timer = setTimeout(go, 1200);
+    timer = setTimeout(go, 1200);
     fetch(counted, { redirect: 'manual', cache: 'no-store', credentials: 'omit' })
-      .catch(() => {}).finally(() => { clearTimeout(timer); go(); });
+      .catch(() => {}).finally(go);
   });
 }
 async function installers() {

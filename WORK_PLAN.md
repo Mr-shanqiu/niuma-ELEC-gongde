@@ -5472,3 +5472,16 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - 验证：`services/gongde-payments` `npm test` 退出码 0（新增 download counting 组）、`npm run build` 通过；`admin-console` `tsc -b` + `vite build` 通过；浏览器走查覆盖六页正常/空/失败/401、订单筛选分页、换码确认框与 409、结案确认框、安装包未读取、形象缺失与编号查询、官网计数与计数失败仍下载。截图与合成接口在 `.local-work/acceptance/admin-console-20261022/`。
 - 限制：本地 MySQL 不可用，管理端用合成接口；真实库/COS/CDN 未验证；形象并发写与旧 MUI 依赖未处理；下载事件为线性列举，日汇总需原子计数器，未新建统计平台。
 - 边界：未部署、未执行生产迁移、未访问生产凭据、未改 COS/Caddy/CDN/DNS/IAM、未重签客户端；上一轮清单修复与 owner 材料继续冻结。结果详见 `.local-work/handoffs/admin-redesign-plan-20261021.md` §12。
+
+## 2026-10-22 PR #12第一实施段代码评审：暂不合入
+
+- 核对GitHub/base main/head01a7954及本地diff，评审回执 `handoffs/admin-phase-e-pr12-review-20261022.md`。发现F1默认登记dist路径不存在；F2未配起点展示旧累计且业务error误称未接入；F3群码时钟公式冻结；F4 CREATED无效筛选；F5慢请求双跳转；F6响应守卫不足；F7异常深链未消费；F8规则对照永久disabled。
+- 只做默认loader、实际下载函数假计时器及群码公式最小无网络验证，复用原构建测试。未改产品、合入或部署，未访问生产/跟随真实下载。PR已附本任务供查看，未发外部评论。
+
+## 2026-10-22 PR #12评审F1–F8修复（同一PR，仍未合入）
+
+- F1登记默认布局：loader按dist与src两种实际布局依次读取，`npm run build`新增`scripts/copy-assets.mjs`携带JSON；新增`tests/installer-registry-build.test.mjs`覆盖无env覆盖的编译布局与dist-only容器。
+- F2四态：新增`ui/downloads.ts`共用判定，区分HTTP失败/200业务error/存储未启用/无统计起点/确认0；两个页面共用，历史请求单列不并入累计。
+- F3群码时钟改为响应锚点+真实经过时长，并在到期边界唤醒；F4筛选只用服务端允许的五个状态；F5下载导航加一次性门，计数请求数不变；F6恢复v2 envelope与各接口字段守卫，`revision`必须为安全整数；F7消费`#/code?claimId&date`深链并跟随hash变化；F8规则对照展开时读取、失败可重试。
+- 验证：服务端`npm test`退出码0；`admin-console` `npm test` 17/17；`website`新增点击用例7/7；浏览器定向验证F2/F3/F4/F6/F7/F8并附截图；F5用CDP计数确认单次导航。既有`website/tests/free-v2-frontend.test.mjs` 11项失败经stash对比为既存问题。
+- 边界：未合入、未部署、未执行生产迁移、未访问生产凭据、未改COS/Caddy/CDN/DNS/IAM、未重签客户端；冻结owner材料未恢复。详见`handoffs/admin-redesign-plan-20261021.md` §13。

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -b && vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "test": "node --experimental-transform-types --test tests/*.test.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "5.6.1",
