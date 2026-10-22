@@ -15,6 +15,7 @@
 #include <bcrypt.h>
 
 #include "appearance_pack.h"
+#include "render_cache.h"
 #include "app_version.h"
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
@@ -183,6 +184,8 @@ struct AppState {
 };
 
 AppState gState;
+niuma::render::LayeredSurface gLayeredSurface;
+niuma::render::WidgetGlyphCache gWidgetGlyphCache;
 std::vector<std::wstring> gPendingImports;
 bool gImportReady = false;
 bool gImportActive = false;
@@ -1003,6 +1006,8 @@ void ReleasePngResource(PngResource& resource) {
 }
 
 void ReleaseAllPngResources() {
+  gWidgetGlyphCache.Clear();
+  gLayeredSurface.Reset();
   // The catalog also owns GDI+ images. Release it before GDI+ or COM stops,
   // including on the startup-failure paths that share this cleanup function.
   gAppearanceCatalog = niuma::AppearanceCatalog{};
@@ -1043,19 +1048,14 @@ void DrawWidgetText(Gdiplus::Graphics& graphics,
                     float fontSize,
                     const Gdiplus::Color& color,
                     Gdiplus::FontStyle style = Gdiplus::FontStyleRegular) {
-  Gdiplus::FontFamily family(L"Microsoft YaHei UI");
-  Gdiplus::StringFormat format;
-  format.SetAlignment(Gdiplus::StringAlignmentCenter);
-  format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-  format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-  Gdiplus::GraphicsPath glyphs;
-  glyphs.AddString(text.c_str(), -1, &family, style, fontSize, rect, &format);
+  const auto* glyphs = gWidgetGlyphCache.Get(text, rect, fontSize, style);
+  if (!glyphs) return;
   // Outline glyphs only; the surrounding layered surface stays transparent.
   Gdiplus::Pen outline(Gdiplus::Color(190, 24, 24, 24), 1.5f);
   outline.SetLineJoin(Gdiplus::LineJoinRound);
-  graphics.DrawPath(&outline, &glyphs);
+  graphics.DrawPath(&outline, glyphs);
   Gdiplus::SolidBrush fill(color);
-  graphics.FillPath(&fill, &glyphs);
+  graphics.FillPath(&fill, glyphs);
 }
 
 void DrawSceneArtwork(
@@ -1193,33 +1193,13 @@ void RenderLayeredWindow(ULONGLONG now) {
   if (screen == nullptr) {
     return;
   }
-  HDC memoryDc = CreateCompatibleDC(screen);
-  if (memoryDc == nullptr) {
+  if (!gLayeredSurface.Ensure(screen, gState.windowWidth, gState.windowHeight)) {
     ReleaseDC(nullptr, screen);
     return;
   }
-
-  BITMAPINFO bitmap = {};
-  bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  bitmap.bmiHeader.biWidth = gState.windowWidth;
-  bitmap.bmiHeader.biHeight = -gState.windowHeight;
-  bitmap.bmiHeader.biPlanes = 1;
-  bitmap.bmiHeader.biBitCount = 32;
-  bitmap.bmiHeader.biCompression = BI_RGB;
-
-  void* pixels = nullptr;
-  HBITMAP surface =
-      CreateDIBSection(screen, &bitmap, DIB_RGB_COLORS, &pixels, nullptr, 0);
-  if (surface == nullptr) {
-    DeleteDC(memoryDc);
-    ReleaseDC(nullptr, screen);
-    return;
-  }
-  HGDIOBJ previous = SelectObject(memoryDc, surface);
-  ZeroMemory(
-      pixels,
-      static_cast<SIZE_T>(gState.windowWidth) *
-          static_cast<SIZE_T>(gState.windowHeight) * 4);
+  HDC memoryDc = gLayeredSurface.dc();
+  // Reusing a surface must never leave pixels from the preceding frame.
+  gLayeredSurface.Clear();
 
   {
     Gdiplus::Graphics graphics(memoryDc);
@@ -1263,9 +1243,6 @@ void RenderLayeredWindow(ULONGLONG now) {
       gState.window, screen, &destination, &size, memoryDc, &source,
       RGB(0, 0, 0), &blend, ULW_ALPHA);
 
-  SelectObject(memoryDc, previous);
-  DeleteObject(surface);
-  DeleteDC(memoryDc);
   ReleaseDC(nullptr, screen);
 }
 
