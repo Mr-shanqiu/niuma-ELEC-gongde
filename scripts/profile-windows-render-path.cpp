@@ -6,8 +6,10 @@
 #include "../src/windows/appearance_pack.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -16,6 +18,25 @@
 
 namespace perf {
 bool enabled = false;
+bool soakMode = false;
+struct RollingTiming {
+  std::uint64_t count = 0;
+  double total = 0, maximum = 0;
+  std::array<std::uint64_t, 2049> bins{};
+  void Add(double ms) {
+    ++count; total += ms; maximum = std::max(maximum, ms);
+    ++bins[std::min<std::size_t>(2048, static_cast<std::size_t>(std::max(0.0, ms)))];
+  }
+  double P95() const {
+    if (!count) return 0;
+    std::uint64_t cumulative = 0;
+    for (std::size_t i = 0; i < bins.size(); ++i) {
+      cumulative += bins[i]; if (cumulative >= (count * 95 + 99) / 100) return static_cast<double>(i);
+    }
+    return 2048;
+  }
+};
+RollingTiming soakFrames;
 bool captureNext = false;
 std::vector<std::uint64_t> captures;
 unsigned submitFailures = 0;
@@ -40,13 +61,16 @@ void Capture(const void* buffer, std::size_t bytes, int width, int height) {
 }
 class Scope {
  public:
-  explicit Scope(const char* label) : label_(label), active_(enabled),
+  explicit Scope(const char* label) : label_(label), active_(enabled || soakMode),
       start_(std::chrono::steady_clock::now()) {}
   ~Scope() { Stop(); }
   void Stop() {
     if (!active_) return;
-    samples[label_].push_back(std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - start_).count());
+    const auto ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start_).count();
+    if (soakMode) {
+      if (std::strcmp(label_, "frame.total") == 0) soakFrames.Add(ms);
+    } else samples[label_].push_back(ms);
     active_ = false;
   }
  private:
@@ -138,7 +162,11 @@ static void WriteStats(std::ostream& output) {
   }
 }
 
+#include "windows-render-soak.h"
+
 int wmain(int argc, wchar_t** argv) {
+  if (argc == 4 && wcscmp(argv[3], L"--soak") == 0)
+    return RunRenderSoak(argv[1], argv[2], 300);
   if (argc != 3 && argc != 4) return 2;
   const bool rasterExperiment = argc == 4 && wcscmp(argv[3], L"--decode-source-once") == 0;
   if (argc == 4 && !rasterExperiment) return 2;
