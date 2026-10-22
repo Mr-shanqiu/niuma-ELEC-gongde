@@ -101,6 +101,24 @@ if(WIN32)
     set_property(TARGET niuma-woodfish-render-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_options(niuma-woodfish-render-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
   endif()
+  foreach(phase IN ITEMS before after)
+    add_executable(niuma-render-profile-${phase}
+      scripts/profile-windows-render-path.cpp
+      third_party/miniz/miniz.c
+      "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")
+    target_include_directories(niuma-render-profile-${phase} PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+    target_compile_features(niuma-render-profile-${phase} PRIVATE cxx_std_17)
+    target_compile_definitions(niuma-render-profile-${phase} PRIVATE
+      UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS
+      NIUMA_PROFILE_APP_SOURCE="${CMAKE_CURRENT_BINARY_DIR}/profile-app-${phase}.cpp"
+      NIUMA_PROFILE_VERSION="${phase}")
+    target_link_libraries(niuma-render-profile-${phase} PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+    if(MSVC)
+      set_property(TARGET niuma-render-profile-${phase} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+      target_compile_options(niuma-render-profile-${phase} PRIVATE /W4 /permissive- /utf-8)
+      target_link_options(niuma-render-profile-${phase} PRIVATE /MANIFEST:NO)
+    endif()
+  endforeach()
 elseif(APPLE)
   enable_language(OBJCXX)
   set(MACOS_RESOURCES

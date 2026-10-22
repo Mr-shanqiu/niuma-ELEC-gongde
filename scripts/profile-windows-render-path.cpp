@@ -1,0 +1,200 @@
+#include <windows.h>
+#include <objidl.h>
+#include <gdiplus.h>
+#include "../src/windows/appearance_pack.h"
+
+#include <algorithm>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace perf {
+bool enabled = false;
+unsigned submitFailures = 0;
+std::map<std::string, std::vector<double>> samples;
+class Scope {
+ public:
+  explicit Scope(const char* label) : label_(label), active_(enabled),
+      start_(std::chrono::steady_clock::now()) {}
+  ~Scope() { Stop(); }
+  void Stop() {
+    if (!active_) return;
+    samples[label_].push_back(std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start_).count());
+    active_ = false;
+  }
+ private:
+  const char* label_;
+  bool active_;
+  std::chrono::steady_clock::time_point start_;
+};
+}
+
+niuma::AppearancePack* gProfileFixturePack = nullptr;
+#define wWinMain NiuMaUnusedApplicationEntry
+#include NIUMA_PROFILE_APP_SOURCE
+#undef wWinMain
+// Reuse the real source PNG loader and JSON reader in this test translation unit.
+#include "../src/windows/appearance_pack.cpp"
+
+static void Check(bool condition, const char* message) {
+  if (!condition) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
+}
+
+static std::string Read(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  Check(input.good(), "fixture file readable");
+  return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+static void LoadFixture(const std::filesystem::path& directory, niuma::AppearancePack& pack) {
+  const auto text = Read(directory / L"manifest.json");
+  niuma::JsonValue root;
+  Check(niuma::JsonParser(text).Parse(&root), "real source manifest parses");
+  pack.id = "render-only-source-fixture";
+  const auto* layers = niuma::Member(root, "layers");
+  Check(layers && layers->kind == niuma::JsonValue::Kind::Array, "source layers");
+  for (const auto& value : layers->array) {
+    niuma::PackLayer layer;
+    const auto& frame = niuma::Member(value, "frame")->array;
+    const auto& anchor = niuma::Member(value, "anchor")->array;
+    Check(frame.size() == 4 && anchor.size() == 2, "fixture geometry");
+    layer.x = static_cast<float>(frame[0].number);
+    layer.y = static_cast<float>(frame[1].number);
+    layer.width = static_cast<float>(frame[2].number);
+    layer.height = static_cast<float>(frame[3].number);
+    layer.anchorX = static_cast<float>(anchor[0].number);
+    layer.anchorY = static_cast<float>(anchor[1].number);
+    layer.imageName = niuma::Member(value, "image")->string;
+    for (const auto& key : niuma::Member(value, "keyframes")->array) {
+      niuma::PackKeyframe point;
+      point.t = static_cast<float>(niuma::Member(key, "t")->number);
+      point.x = static_cast<float>(niuma::Member(key, "x")->number);
+      point.y = static_cast<float>(niuma::Member(key, "y")->number);
+      point.rotation = static_cast<float>(niuma::Member(key, "rotation")->number);
+      point.scale = static_cast<float>(niuma::Member(key, "scale")->number);
+      point.alpha = static_cast<float>(niuma::Member(key, "alpha")->number);
+      layer.keyframes.push_back(point);
+    }
+    const auto png = Read(directory / layer.imageName);
+    Check(niuma::LoadImage(png.data(), png.size(), &layer.image), "real source PNG loader");
+    pack.layers.push_back(std::move(layer));
+  }
+}
+
+static LRESULT CALLBACK FixtureProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+  if (message == kCountMessage) {
+    CountGlobalDelivery(false, lp, wp);
+    return 0;
+  }
+  return DefWindowProcW(window, message, wp, lp);
+}
+
+static void WriteStats(std::ostream& output) {
+  bool first = true;
+  for (auto& [name, values] : perf::samples) {
+    if (!first) output << ',';
+    first = false;
+    std::sort(values.begin(), values.end());
+    double total = 0;
+    for (auto value : values) total += value;
+    output << '"' << name << "\":{\"calls\":" << values.size()
+        << ",\"totalMs\":" << total << ",\"meanMs\":" << total / values.size()
+        << ",\"p95Ms\":" << values[(values.size() - 1) * 95 / 100]
+        << ",\"maxMs\":" << values.back() << '}';
+  }
+}
+
+int wmain(int argc, wchar_t** argv) {
+  if (argc != 3) return 2;
+  const std::filesystem::path root(argv[1]), report(argv[2]);
+  gIsolatedAcceptance = true;
+  gAcceptanceRoot = report.parent_path().wstring();
+  std::ofstream output(report);
+  Check(output.good(), "report output");
+  output << std::fixed << std::setprecision(6);
+  Check(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)), "COM");
+  Gdiplus::GdiplusStartupInput startup;
+  Check(Gdiplus::GdiplusStartup(&gState.gdiplusToken, &startup, nullptr) == Gdiplus::Ok, "GDI+");
+  Check(LoadAllPngResources(), "production PNG resources");
+  WNDCLASSW wc{};
+  wc.lpfnWndProc = FixtureProcedure;
+  wc.hInstance = GetModuleHandleW(nullptr);
+  wc.lpszClassName = L"NiuMaRenderProfileFixture";
+  Check(RegisterClassW(&wc) != 0, "fixture class");
+  gState.window = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      wc.lpszClassName, L"Render profile fixture", WS_POPUP,
+      0, 0, 240, 338, nullptr, nullptr, wc.hInstance, nullptr);
+  Check(gState.window != nullptr, "hidden owned fixture window");
+  output << "{\"version\":\"" << NIUMA_PROFILE_VERSION
+      << "\",\"scope\":\"instrumented production drawing; hidden owned window; no real hook chain\",\"scenes\":[";
+  bool first = true;
+  {
+    niuma::AppearancePack offwork;
+    LoadFixture(root / L"assets/appearance-packs/offwork-button", offwork);
+    for (const bool pack : {false, true}) for (const bool countdown : {false, true}) {
+      gProfileFixturePack = pack ? &offwork : nullptr;
+      gState.selectedScene = MeritScene::Woodfish;
+      gOffwork.enabled = countdown;
+      gOffwork.snapshot.valid = true;
+      gOffwork.snapshot.remainingSeconds = 30659;
+      gState.todayTotal = 12345;
+      for (const int dpi : {96, 192, 288}) for (const bool animated : {false, true}) {
+        gState.dpi = static_cast<UINT>(dpi);
+        gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
+        gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
+        SetWindowPos(gState.window, nullptr, 0, 0, gState.windowWidth, gState.windowHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        gState.striking = animated;
+        gState.strikeStarted = 10000;
+        gState.strikeDurationMs = 240;
+        perf::enabled = false;
+        for (int frame = 0; frame < 5; ++frame) RenderLayeredWindow(10000 + frame * 16);
+        perf::samples.clear();
+        perf::enabled = true;
+        for (int frame = 0; frame < 60; ++frame)
+          RenderLayeredWindow(10000 + (animated ? (frame % 15) * 16 : 0));
+        perf::enabled = false;
+        if (!first) output << ',';
+        first = false;
+        output << "{\"appearance\":\"" << (pack ? "offwork" : "woodfish")
+            << "\",\"countdown\":" << (countdown ? "true" : "false")
+            << ",\"dpi\":" << dpi << ",\"animated\":" << (animated ? "true" : "false")
+            << ",\"stages\":{";
+        WriteStats(output);
+        output << "}}";
+      }
+    }
+    gProfileFixturePack = nullptr;
+  }
+  // Known synthetic messages exercise the actual count handler, not a physical
+  // keyboard or WH_KEYBOARD_LL/CallNextHookEx chain. No raw keys are collected.
+  SYSTEMTIME local{};
+  GetLocalTime(&local);
+  gState.currentDay = DateKey(local);
+  gState.timerRunning = true;
+  const auto totalBefore = gState.total;
+  perf::samples.clear();
+  perf::enabled = true;
+  for (int i = 0; i < 100; ++i) Check(PostMessageW(gState.window, kCountMessage, 0, 0), "post known count message");
+  MSG message{};
+  while (PeekMessageW(&message, gState.window, kCountMessage, kCountMessage, PM_REMOVE))
+    DispatchMessageW(&message);
+  perf::enabled = false;
+  Check(gState.total - totalBefore == 100, "100 known messages counted exactly");
+  Check(perf::submitFailures == 0, "layered submissions succeeded");
+  output << "],\"syntheticCountMessages\":100,\"countDelta\":" << gState.total - totalBefore
+      << ",\"inputStages\":{";
+  WriteStats(output);
+  output << "},\"submitFailures\":0,\"realHooksInstalled\":false,\"userProfileRead\":false,"
+      "\"limitations\":\"offline fixed frames; hidden window submission; does not measure physical input latency or real hook scheduling\"}";
+  DestroyWindow(gState.window);
+  gState.window = nullptr;
+  ReleaseAllPngResources();
+  Gdiplus::GdiplusShutdown(gState.gdiplusToken);
+  CoUninitialize();
+  std::printf("PROFILE=%s\n", NIUMA_PROFILE_VERSION);
+}
