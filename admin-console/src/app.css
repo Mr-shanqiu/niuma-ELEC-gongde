@@ -1135,6 +1135,95 @@ body {
   border-top: none;
 }
 
+/* ---------- 形象写操作 ---------- */
+
+/* 卡片上的单个动作。危险动作和普通动作用描边区分，不用整块红底。 */
+.face-action {
+  font-size: 12px;
+}
+
+.face-action.is-danger.ant-btn {
+  color: var(--danger);
+  border-color: #e9b6aa;
+}
+
+/* 停发区：列表下方一条紧凑区块，说明放在 tooltip 与确认框里。 */
+.safety-zone {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.safety-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.safety-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.safety-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+
+.safety-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.safety-reason {
+  margin-top: 10px;
+}
+
+/* 写操作的失败提示：和读取失败分开，因为它意味着"结果未确认"。 */
+.write-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+.file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px;
+}
+
+.file-row:first-child {
+  border-top: none;
+}
+
+.file-name {
+  min-width: 0;
+  flex: 1 1 260px;
+  overflow-wrap: anywhere;
+}
+
+.file-meta {
+  color: var(--faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Ant Design 细节 ---------- */
 .ant-table-thead > tr > th {
   font-size: 12.5px !important;

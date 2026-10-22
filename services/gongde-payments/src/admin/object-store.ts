@@ -39,6 +39,52 @@ type CosClient = Pick<COS, "getBucket" | "putObject" | "deleteObject"> & {
   ): void;
 };
 
+/**
+ * Publication state: the whole set of published official appearances.
+ *
+ * `revision` versions *this object*, not any appearance's material. Material
+ * revisions come from the pack signer and do not change when something is
+ * published, so they cannot detect a stale publication write.
+ */
+export interface PublicationState {
+  revision: number;
+  publishedAssetIds: string[];
+  firstPublishedAt: Record<string, string>;
+  updatedAt: string | null;
+}
+
+/**
+ * A cross-process mutex around one read-modify-write of the publication object.
+ *
+ * COS `PUT` accepts no `If-Match`, so "compare, then overwrite" cannot be made
+ * atomic by the storage API alone; two writers that both read before either
+ * writes would lose one update. `x-cos-forbid-overwrite` only refuses to create
+ * over an existing key, which every write after the first one does. The state
+ * therefore carries its own revision and the whole cycle runs under a lock all
+ * instances share. An in-process mutex would look identical in a single-process
+ * test and be wrong the moment two instances serve traffic, so it is not used.
+ */
+export type PublicationLock = <T>(operation: () => Promise<T>) => Promise<T>;
+
+/** The write's expected revision was already superseded by another writer. */
+export class PublicationConflict extends Error {
+  constructor(readonly revision: number) {
+    super("publication_revision_conflict");
+  }
+}
+/** Publication state could not be read or written; no partial success. */
+export class PublicationUnavailable extends Error {
+  constructor(readonly reason: string) {
+    super("publication_unavailable");
+  }
+}
+/** The shared lock could not be taken in time; the caller did nothing. */
+export class PublicationBusy extends Error {
+  constructor() {
+    super("publication_busy");
+  }
+}
+
 interface Configuration {
   bucket: string;
   region: string;
@@ -55,6 +101,19 @@ const appearanceCatalogStateKey = `${prefixes.appearance}catalog-state.json`;
 
 function isKind(value: string | null): value is AdminFileKind {
   return value === "appearance" || value === "installer";
+}
+
+/**
+ * COS reports a missing key as an SDK error, not as an empty body.
+ *
+ * Only these codes mean "the object does not exist". Any other failure is a
+ * read problem and must not be mistaken for a first write.
+ */
+function isAbsentObject(error: unknown): boolean {
+  const value = error as { code?: unknown; statusCode?: unknown; error?: { Code?: unknown; code?: unknown } } | null;
+  const code = String(value?.code ?? value?.error?.Code ?? value?.error?.code ?? "");
+  if (code === "NoSuchKey" || code === "NotFound") return true;
+  return Number(value?.statusCode) === 404;
 }
 
 function allowedName(kind: AdminFileKind, name: string): boolean {
@@ -338,56 +397,201 @@ export class AdminObjectStore {
     return (await this.publicationStateStrict(defaultIds)).publishedAssetIds;
   }
 
-  async publicationStateStrict(defaultIds: readonly string[]): Promise<{ publishedAssetIds: string[]; firstPublishedAt: Record<string, string> }> {
-    const result = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
-      this.#cos.getObject({ Bucket: this.configuration.bucket, Region: this.configuration.region,
-        Key: appearanceCatalogStateKey }, (error, data) => error ? reject(error) : resolve(data));
-    });
-    const raw = Buffer.isBuffer(result.Body) ? result.Body.toString("utf8") : String(result.Body ?? "");
-    const parsed: unknown = JSON.parse(raw);
-    const ids = (parsed as { publishedAssetIds?: unknown } | null)?.publishedAssetIds;
-    if (!Array.isArray(ids) || ids.some(item => typeof item !== "string")) throw new Error("appearance_publication_unavailable");
-    const allowed = new Set(defaultIds);
-    const publishedAssetIds = [...new Set((ids as string[]).filter(item => allowed.has(item)))];
-    const metadata = parsed as { firstPublishedAt?: unknown; updatedAt?: unknown };
-    const stored = metadata.firstPublishedAt;
-    const firstPublishedAt: Record<string, string> = Object.fromEntries(
-      stored && typeof stored === "object" && !Array.isArray(stored)
-        ? Object.entries(stored).filter(([id, date]) => allowed.has(id) && typeof date === "string" && Number.isFinite(Date.parse(date)))
-        : []);
-    // The last legacy publication added only wealth-button. Preserve that real
-    // timestamp; do not mark all existing assets as newly published at rollout.
-    if (stored === undefined && publishedAssetIds.includes("official.wealth-button") &&
-      typeof metadata.updatedAt === "string" && Number.isFinite(Date.parse(metadata.updatedAt))) {
-      firstPublishedAt["official.wealth-button"] = metadata.updatedAt;
+  async publicationStateStrict(defaultIds: readonly string[]): Promise<PublicationState> {
+    let state: PublicationState | null;
+    try {
+      state = await this.readPublication();
+    } catch {
+      throw new Error("appearance_publication_unavailable");
     }
-    return { publishedAssetIds, firstPublishedAt };
+    if (!state) throw new Error("appearance_publication_unavailable");
+    const allowed = new Set(defaultIds);
+    // The legacy object had no `firstPublishedAt`; the one real publication it
+    // recorded was wealth-button, timestamped by its `updatedAt`. Keep that fact
+    // instead of backdating every asset to the rollout.
+    const firstPublishedAt = { ...state.firstPublishedAt };
+    if (Object.keys(state.firstPublishedAt).length === 0 && state.updatedAt &&
+      state.publishedAssetIds.includes("official.wealth-button")) {
+      firstPublishedAt["official.wealth-button"] = state.updatedAt;
+    }
+    return {
+      ...state,
+      publishedAssetIds: state.publishedAssetIds.filter((id) => allowed.has(id)),
+      firstPublishedAt: Object.fromEntries(
+        Object.entries(firstPublishedAt).filter(([id, date]) => allowed.has(id) && Number.isFinite(Date.parse(date))))
+    };
   }
 
-  async writePublishedAssetIds(assetIds: readonly string[]): Promise<void> {
-    const previous = await this.publicationStateStrict(assetIds);
-    const now = new Date().toISOString();
-    const firstPublishedAt = { ...previous.firstPublishedAt };
-    for (const id of assetIds) {
-      if (!previous.publishedAssetIds.includes(id) && !Object.prototype.hasOwnProperty.call(firstPublishedAt, id)) firstPublishedAt[id] = now;
+  /**
+   * Read the publication object, or `null` when it has never been written.
+   *
+   * Only a genuine "absent" result is `null`. A network error, a permission
+   * failure or a corrupt body throws, because treating any of those as "no
+   * publication object" would silently republish the default list.
+   */
+  async readPublication(): Promise<PublicationState | null> {
+    let raw: string;
+    try {
+      const result = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => {
+        this.#cos.getObject({ Bucket: this.configuration.bucket, Region: this.configuration.region,
+          Key: appearanceCatalogStateKey }, (error, data) => error ? reject(error) : resolve(data));
+      });
+      raw = Buffer.isBuffer(result.Body) ? result.Body.toString("utf8") : String(result.Body ?? "");
+    } catch (error) {
+      if (isAbsentObject(error)) return null;
+      throw new PublicationUnavailable("publication_read_failed");
     }
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); }
+    catch { throw new PublicationUnavailable("publication_corrupt"); }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new PublicationUnavailable("publication_corrupt");
+    }
+    const value = parsed as Record<string, unknown>;
+    const ids = value.publishedAssetIds;
+    if (!Array.isArray(ids) || ids.some((item) => typeof item !== "string")) {
+      throw new PublicationUnavailable("publication_corrupt");
+    }
+    const revision = value.revision;
+    // An object written before this field existed carries no version. It is
+    // accepted as revision 0 so the first locked write can upgrade it, but a
+    // non-integer revision is corruption, not "old".
+    if (revision !== undefined && (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)) {
+      throw new PublicationUnavailable("publication_corrupt");
+    }
+    const firstPublishedAt: Record<string, string> = {};
+    const stored = value.firstPublishedAt;
+    if (stored !== undefined) {
+      if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+        throw new PublicationUnavailable("publication_corrupt");
+      }
+      for (const [id, date] of Object.entries(stored as Record<string, unknown>)) {
+        if (typeof date !== "string" || !Number.isFinite(Date.parse(date))) {
+          throw new PublicationUnavailable("publication_corrupt");
+        }
+        firstPublishedAt[id] = date;
+      }
+    }
+    return {
+      revision: typeof revision === "number" ? revision : 0,
+      publishedAssetIds: [...new Set(ids as string[])],
+      firstPublishedAt,
+      updatedAt: typeof value.updatedAt === "string" && Number.isFinite(Date.parse(value.updatedAt)) ? value.updatedAt : null
+    };
+  }
+
+  async #writePublication(expectedRevision: number, next: Omit<PublicationState, "revision">): Promise<PublicationState> {
+    const state: PublicationState = { revision: expectedRevision + 1, ...next };
     const body = Buffer.from(JSON.stringify({
       version: 1,
-      publishedAssetIds: [...assetIds],
-      firstPublishedAt,
-      updatedAt: now
+      revision: state.revision,
+      publishedAssetIds: state.publishedAssetIds,
+      firstPublishedAt: state.firstPublishedAt,
+      updatedAt: state.updatedAt
     }));
-    await new Promise<void>((resolve, reject) => {
-      this.#cos.putObject({
-        Bucket: this.configuration.bucket,
-        Region: this.configuration.region,
-        Key: appearanceCatalogStateKey,
-        Body: body,
-        ContentLength: body.length,
-        ContentType: "application/json"
-      }, (error) => error ? reject(error) : resolve());
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.#cos.putObject({
+          Bucket: this.configuration.bucket,
+          Region: this.configuration.region,
+          Key: appearanceCatalogStateKey,
+          Body: body,
+          ContentLength: body.length,
+          ContentType: "application/json"
+        }, (error) => error ? reject(error) : resolve());
+      });
+    } catch {
+      // A failed write is not a success and not a conflict: the caller cannot
+      // claim the new state, and must re-read before trying again.
+      throw new PublicationUnavailable("publication_write_failed");
+    }
+    return state;
+  }
+
+  /**
+   * Publish or un-publish one appearance as one atomic read-modify-write.
+   *
+   * `expectedRevision` is the publication revision the operator saw. A stale
+   * value is a conflict, never a silent overwrite — including when the two
+   * writes target *different* appearances, because both change the same object.
+   *
+   * The revision check happens inside `lock`, and the invariant that makes it
+   * sufficient is: the only writer of this object is this method, and it never
+   * writes without holding the lock. Nothing may re-introduce an unlocked
+   * write, whatever its API looks like.
+   */
+  async setPublished(
+    assetIds: readonly string[],
+    assetId: string,
+    published: boolean,
+    expectedRevision: number,
+    lock: PublicationLock
+  ): Promise<PublicationState> {
+    return lock(async () => {
+      const current = await this.readPublication();
+      const revision = current?.revision ?? 0;
+      if (revision !== expectedRevision) throw new PublicationConflict(revision);
+      // With no object yet, the effective state is the documented read
+      // fallback: the default list is published. Seeding from it keeps the
+      // write consistent with what the operator was just shown; seeding from
+      // an empty set would un-publish everything else as a side effect.
+      const set = new Set(current?.publishedAssetIds ?? assetIds);
+      if (published) set.add(assetId); else set.delete(assetId);
+      const ordered = assetIds.filter((id) => set.has(id));
+      const firstPublishedAt = { ...(current?.firstPublishedAt ?? {}) };
+      const now = new Date().toISOString();
+      if (published && !Object.prototype.hasOwnProperty.call(firstPublishedAt, assetId)) {
+        firstPublishedAt[assetId] = now;
+      }
+      return this.#writePublication(revision, {
+        publishedAssetIds: ordered,
+        firstPublishedAt,
+        updatedAt: now
+      });
     });
   }
+
+  /** Publication state for callers that accept the documented default list. */
+  async publicationState(defaultIds: readonly string[]): Promise<PublicationState> {
+    return (await this.readPublicationFor(defaultIds)) ?? {
+      revision: 0, publishedAssetIds: [...defaultIds], firstPublishedAt: {}, updatedAt: null
+    };
+  }
+
+  /**
+   * Read the publication object for a caller that has a default list.
+   *
+   * Unlike `readPublication`, a corrupt or unreadable object yields `null`
+   * here: the historic purchase and catalogue paths keep their documented
+   * "fall back to the default list" behaviour. Publication writes use
+   * `readPublication`, which fails closed instead.
+   */
+  async readPublicationFor(defaultIds: readonly string[]): Promise<PublicationState | null> {
+    try {
+      const state = await this.readPublication();
+      const allowed = new Set(defaultIds);
+      if (!state) return null;
+      // The legacy object had no `firstPublishedAt`; the one real publication
+      // it recorded was wealth-button, timestamped by its `updatedAt`. Keep that
+      // fact instead of backdating every asset to the rollout.
+      const firstPublishedAt = { ...state.firstPublishedAt };
+      if (Object.keys(state.firstPublishedAt).length === 0 && state.updatedAt &&
+        state.publishedAssetIds.includes("official.wealth-button")) {
+        firstPublishedAt["official.wealth-button"] = state.updatedAt;
+      }
+      return {
+        ...state,
+        firstPublishedAt: Object.fromEntries(
+          Object.entries(firstPublishedAt).filter(([id, date]) =>
+            allowed.has(id) && Number.isFinite(Date.parse(date)))
+        ),
+        publishedAssetIds: state.publishedAssetIds.filter((id) => allowed.has(id))
+      };
+    } catch {
+      return null;
+    }
+  }
+
 
   async recordDownload(name: string, platform: string, downloadedAt: Date): Promise<void> {
     const key = `${prefixes.installer}.download-events/${downloadedAt.getTime()}-${randomBytes(6).toString("hex")}-${name}`;

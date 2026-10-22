@@ -8,6 +8,7 @@ class MemoryCos {
   objects = new Map();
   writes = [];
   failGet = new Set();
+  failPut = false;
 
   getBucket(params, callback) {
     const keys = [...this.objects.keys()].filter((key) => key.startsWith(params.Prefix)).sort();
@@ -26,6 +27,7 @@ class MemoryCos {
   }
 
   putObject(params, callback) {
+    if (this.failPut) return callback(Object.assign(new Error("synthetic_storage_failure"), { statusCode: 500 }));
     this.writes.push(params.Key);
     this.objects.set(params.Key, {
       body: Buffer.from(params.Body),
@@ -43,7 +45,10 @@ class MemoryCos {
   getObject(params, callback) {
     if (this.failGet.has(params.Key)) return callback(new Error("NetworkError"), {});
     const object = this.objects.get(params.Key);
-    if (!object) return callback(new Error("NoSuchKey"), {});
+    // The real SDK reports a missing key with a code and a status, not with a
+    // bare message. "Absent" must be recognised from those, so the double has
+    // to carry them too.
+    if (!object) return callback(Object.assign(new Error("NoSuchKey"), { code: "NoSuchKey", statusCode: 404 }), {});
     callback(null, { Body: Buffer.from(object.body) });
   }
 }
@@ -292,4 +297,88 @@ test("an explicitly empty published list still publishes the pair", async () => 
   const manifest = JSON.parse(cos.objects.get("DOWNLOADS.json").body.toString());
   assert.equal(manifest.files.length, 2);
   assert.equal(manifest.files[0].signature, "unknown");
+});
+
+/* ------------------------------------------------- publication state object */
+
+const STATE = "appearance-packs/catalog-state.json";
+const IDS = ["official.a", "official.b", "official.c"];
+const directLock = (operation) => operation();
+
+test("publication state: absent means null, corruption throws, and they are different", async () => {
+  const { cos, store } = fixture();
+  assert.equal(await store.readPublication(), null, "no object is not an error");
+
+  for (const payload of ["{broken", "[]", "null", '{"publishedAssetIds":[42]}',
+    '{"publishedAssetIds":[],"revision":-1}', '{"publishedAssetIds":[],"revision":1.5}',
+    '{"publishedAssetIds":[],"firstPublishedAt":{"official.a":"today"}}']) {
+    cos.objects.set(STATE, { body: Buffer.from(payload), contentType: "application/json", lastModified: new Date().toISOString() });
+    await assert.rejects(store.readPublication(), (error) => error.message === "publication_unavailable",
+      `${payload} must not read as a usable state`);
+  }
+  cos.objects.delete(STATE);
+});
+
+test("publication state: a failed read is not treated as a first write", async () => {
+  const { cos, store } = fixture();
+  cos.getObject = (_params, callback) => callback(Object.assign(new Error("NetworkError"), { statusCode: 500 }));
+  await assert.rejects(store.readPublication(), /publication_unavailable/);
+  // The lenient reader keeps its documented fallback; the writer's reader must not.
+  assert.equal(await store.readPublicationFor(IDS), null);
+});
+
+test("publication write: the expected revision is required and is advanced by one", async () => {
+  const { store } = fixture();
+  // No object yet: the effective state is the documented fallback, where the
+  // whole default list counts as published. The first write must not silently
+  // un-publish the other two as a side effect of touching one.
+  await store.setPublished(IDS, "official.a", true, 0, directLock);
+  const afterFirst = await store.readPublication();
+  assert.equal(afterFirst.revision, 1);
+  assert.deepEqual(afterFirst.publishedAssetIds, IDS);
+
+  const removed = await store.setPublished(IDS, "official.a", false, 1, directLock);
+  assert.deepEqual(removed.publishedAssetIds, ["official.b", "official.c"]);
+
+  await assert.rejects(store.setPublished(IDS, "official.b", true, 1, directLock),
+    (error) => error.message === "publication_revision_conflict" && error.revision === 2,
+    "a stale revision must conflict and report the current one");
+  assert.equal((await store.readPublication()).revision, 2, "a conflicting write must change nothing");
+});
+
+test("publication write: a failed put is unavailable, never success", async () => {
+  const { cos, store } = fixture();
+  await store.setPublished(IDS, "official.a", true, 0, directLock);
+  cos.failPut = true;
+  await assert.rejects(store.setPublished(IDS, "official.b", true, 1, directLock), /publication_unavailable/);
+  cos.failPut = false;
+  const state = await store.readPublication();
+  assert.equal(state.revision, 1, "the version must not move when the write failed");
+  assert.deepEqual(state.publishedAssetIds, IDS, "the state is exactly what the last successful write left");
+});
+
+test("publication write: unpublishing removes only that id and keeps the rest", async () => {
+  const { store } = fixture();
+  // Start from an explicit empty set, so the assertion is about removal and not
+  // about the fallback that treats the default list as published.
+  await store.setPublished([], "", false, 0, directLock);
+  await store.setPublished(IDS, "official.a", true, 1, directLock);
+  await store.setPublished(IDS, "official.b", true, 2, directLock);
+  const removed = await store.setPublished(IDS, "official.a", false, 3, directLock);
+  assert.deepEqual(removed.publishedAssetIds, ["official.b"]);
+  assert.deepEqual(Object.keys(removed.firstPublishedAt), ["official.a", "official.b"],
+    "firstPublishedAt records history; un-publishing must not erase it");
+});
+
+test("publication write: a legacy object with no revision upgrades from 0", async () => {
+  const { cos, store } = fixture();
+  cos.objects.set(STATE, { body: Buffer.from(JSON.stringify({
+    version: 1, publishedAssetIds: ["official.a"], updatedAt: "2026-10-01T00:00:00.000Z"
+  })), contentType: "application/json", lastModified: new Date().toISOString() });
+  const state = await store.readPublication();
+  assert.equal(state.revision, 0);
+  assert.deepEqual(state.firstPublishedAt, {}, "a legacy object carries no per-asset timestamp");
+  const next = await store.setPublished(IDS, "official.b", true, 0, directLock);
+  assert.equal(next.revision, 1);
+  assert.equal(next.firstPublishedAt["official.b"] !== undefined, true);
 });

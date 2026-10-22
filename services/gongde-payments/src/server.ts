@@ -20,7 +20,8 @@ import { AlipayError } from "./payments/providers/alipay-page/types.js";
 import { toDataURL } from "qrcode";
 import { zipSync } from "fflate";
 import { AdminAuthService, loadAdminAuthConfiguration } from "./admin/auth.js";
-import { AdminObjectStore, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "./admin/object-store.js";
+import { AdminObjectStore, PublicationBusy, PublicationConflict, PublicationUnavailable, loadAdminObjectStoreConfiguration, parseAdminFileIdentity } from "./admin/object-store.js";
+import { createPublicationLock } from "./admin/publication-lock.js";
 import { loadDownloadCoverage, loadInstallerRegistry } from "./downloads/installer-registry.js";
 import type { GongdeEntitlement, GongdeOrder, OrderState } from "./domain/types.js";
 import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH } from "./domain/catalog.js";
@@ -58,6 +59,12 @@ const adminConfiguration = loadAdminAuthConfiguration();
 const adminAuth = adminConfiguration ? new AdminAuthService(adminConfiguration) : null;
 const adminObjectStoreConfiguration = loadAdminObjectStoreConfiguration();
 const adminObjectStore = adminObjectStoreConfiguration ? new AdminObjectStore(adminObjectStoreConfiguration) : null;
+// The publication object is the only place where two administrators can lose
+// each other's write, so its lock exists whenever the object store does.
+const publicationLockHandle = adminObjectStoreConfiguration
+  ? createPublicationLock(mysqlConfiguration)
+  : null;
+const publicationLock = publicationLockHandle?.lock ?? null;
 const privatePackageConfiguration = loadPrivatePackageConfiguration();
 const privatePackageStore = privatePackageConfiguration ? new PrivatePackageStore(privatePackageConfiguration) : null;
 if (packSigner) setImmediate(() => {
@@ -634,7 +641,10 @@ export const server = createServer(async (request, response) => {
       requireAdmin(request);
       if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
       const revisions = packSigner.revisions();
-      const publishedIds = new Set(adminObjectStore ? await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS) : OFFICIAL_ASSET_IDS);
+      const publication = adminObjectStore
+        ? await adminObjectStore.publicationState(OFFICIAL_ASSET_IDS)
+        : { revision: 0, publishedAssetIds: [...OFFICIAL_ASSET_IDS], firstPublishedAt: {}, updatedAt: null };
+      const publishedIds = new Set(publication.publishedAssetIds);
       const numbers = await optionalOfficialNumbers();
       const data = OFFICIAL_ASSET_IDS.map((assetId) => ({
         id: assetId,
@@ -644,25 +654,45 @@ export const server = createServer(async (request, response) => {
         revision: revisions[assetId] ?? null,
         state: !revisions[assetId] ? "MISSING" : publishedIds.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
       }));
-      return json(response, 200, { data, total: data.length });
+      // `publicationRevision` versions the whole published set. Every write must
+      // send it back; it is deliberately not named `revision`, which already
+      // means the material version on each row.
+      return json(response, 200, { data, total: data.length, publicationRevision: publication.revision });
     }
     const adminAppearanceMatch = url.pathname.match(/^\/api\/gongde\/admin\/appearances\/([A-Za-z0-9._-]+)$/u);
     if (request.method === "PATCH" && adminAppearanceMatch) {
       requireAdmin(request);
       if (!packSigner) return json(response, 503, { error: "pack_delivery_not_enabled" });
       if (!adminObjectStore) return json(response, 503, { error: "admin_object_store_not_enabled" });
+      if (!publicationLock) return json(response, 503, { error: "appearance_publication_unavailable" });
       const assetId = adminAppearanceMatch[1];
       if (!OFFICIAL_ASSET_IDS.includes(assetId as typeof OFFICIAL_ASSET_IDS[number])) return json(response, 404, { error: "appearance_not_found" });
       const body = await readJson(request);
       if (typeof body.published !== "boolean") return json(response, 400, { error: "invalid_appearance_state" });
+      if (!Number.isSafeInteger(body.publicationRevision) || (body.publicationRevision as number) < 0) {
+        // Refusing an unversioned write is the point: without it the write would
+        // silently overwrite whatever another session changed in the meantime.
+        return json(response, 400, { error: "appearance_publication_revision_required" });
+      }
       const revisions = packSigner.revisions();
       if (!revisions[assetId]) return json(response, 409, { error: "appearance_resource_missing" });
-      const publishedIds = new Set(await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS));
-      if (body.published) publishedIds.add(assetId); else publishedIds.delete(assetId);
-      const orderedIds = OFFICIAL_ASSET_IDS.filter((id) => publishedIds.has(id));
+      let next;
+      try {
+        next = await adminObjectStore.setPublished(
+          OFFICIAL_ASSET_IDS, assetId, body.published, body.publicationRevision as number, publicationLock
+        );
+      } catch (error) {
+        if (error instanceof PublicationConflict) {
+          return json(response, 409, { error: "appearance_publication_conflict", publicationRevision: error.revision });
+        }
+        if (error instanceof PublicationBusy) return json(response, 409, { error: "appearance_publication_busy" });
+        if (error instanceof PublicationUnavailable) {
+          return json(response, 503, { error: "appearance_publication_unavailable" });
+        }
+        throw error;
+      }
       const numbers = await optionalOfficialNumbers();
-      await adminObjectStore.writePublishedAssetIds(orderedIds);
-      audit(body.published ? "appearance_published" : "appearance_unpublished", { assetId });
+      audit(body.published ? "appearance_published" : "appearance_unpublished", { assetId, revision: next.revision });
       return json(response, 200, { data: {
         id: assetId,
         assetId,
@@ -670,7 +700,7 @@ export const server = createServer(async (request, response) => {
         name: OFFICIAL_ASSET_NAMES_ZH[assetId] ?? assetId,
         revision: revisions[assetId],
         state: body.published ? "PUBLISHED" : "UNPUBLISHED"
-      } });
+      }, publicationRevision: next.revision });
     }
     if (url.pathname === "/api/gongde/admin/files") {
       requireAdmin(request);
@@ -1013,4 +1043,4 @@ server.listen(port, host, () => {
 });
 
 server.on("close", () => {
-  void checkoutRequests.close(); void freeDistributionRuntime.close(); void creatorRuntime.close(); void store.close(); void appearanceNumbers?.close(); });
+  void checkoutRequests.close(); void freeDistributionRuntime.close(); void creatorRuntime.close(); void store.close(); void appearanceNumbers?.close(); void publicationLockHandle?.close(); });

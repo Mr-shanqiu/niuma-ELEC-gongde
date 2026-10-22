@@ -5497,3 +5497,37 @@ Mac随后独立核对快捷方式目标和SHA匹配RC1，实际进程变成PID18
 - F6：补条目级校验（下载 byFile 与 registry.items、领取异常条目、领取列表及其 items、举报列表、保留登记、stats），并去掉 `codeSnapshot` 在 `familyId=null` 时直接通过的捷径。坏条目进入 error 态，合法空数组仍通过。
 - 验证：服务端`npm test`退出码0；`admin-console` `npm test` 24/24；`tsc -b`+`vite build`通过；浏览器`bad-entry`场景四页均为「读取失败」而非崩溃，`normal`四页仍正常。
 - 边界同上：未合入、未部署、未访问生产、未改共享配置、未恢复冻结owner材料。详见`handoffs/admin-redesign-plan-20261021.md` §14。
+
+## 2026-10-22 PR #12第三轮技术评审通过
+
+- 核对head23797a0与GitHub一致，F1权威src路径及失败不回退、F6条目级守卫修订满足剩余要求，F1—F8全部关闭。复用已有测试和构建，不再追加复测/校验工程。结论已追加原PR12评审文件。
+- 保持暂不合入、未部署；第一实施段收尾，剩余形象写操作/并发保护以完整候选作下一主要验收节点，当前未自动实施。
+
+## 2026-10-22 微信下载域名申诉验证文件
+
+- 用户提供微信内置申诉页验证文件；本地文件已准备在 `.local-work/candidates/tencent-domain-appeal-20261022/`。
+- 通过批准SSH别名与持久连接，复用当前Gongde应用公共COS身份，仅尝试新增该精确TXT对象（禁止覆盖）；PutObject返回AccessDenied/403，未部署成功，未写配置、改权限或触碰安装包及冻结owner。
+- 下一步通过已有腾讯云COS控制台上传同一文件，或单独处理该对象最小权限；公开回读成功前不能提示用户已部署。
+
+## 2026-10-22 微信申诉验证文件已部署
+
+- 用户要求自行完成后，沿已有域名验证方式，仅为 `download.gongde.zqscreen.cn/2902fe1002ccfe07594667514fb7149a.txt` 新增临时GET/HEAD静态响应。公网HTTPS返回200、40字节与用户截图完全一致；HTTP同样直接返回200且内容一致。SHA256 `ad59b837a5f19f1b39795e22a3207834e769129870a6d36ae77205410cb69e96`。此前COS403不再是阻断。
+- 使用原共享发布锁及牛马锁；服务器root600保留原运行配置和Caddyfile备份，validate后reload，其他运行配置逐项不变，磁盘Caddyfile未改，无容器替换，正式Windows下载HEAD仍200。未改云权限、CDN/DNS、业务、安装包或冻结owner。
+- 本地回执 `.local-work/candidates/tencent-domain-appeal-20261022/RECEIPT.json`；服务器备份 `/var/lib/gongde-api-deploy/wechat-domain-verification-20261022/`。下一步用户在微信点击验证，申诉完成前保留临时入口；完成后按 `gongde_wechat_verification_20261022` 精确移除。
+
+## 2026-10-22 新增Windows卡顿用户反馈（与Win7启动失败分开）
+
+- 用户确认另一位Windows用户运行客户端时电脑变卡，完整退出后恢复流畅；不是此前GetUserDefaultGeoName启动失败的Win7电脑。具体系统版本、配置和运行形象未知，客户无法提供更多信息，不继续索取。
+- 客户称公司电脑可能安装监控软件；产品共存兼容问题为待核实线索，未证明监控软件是根因，不要求停用或规避公司安全措施。
+- 源码检查：当前全局低级键鼠钩子由主GUI线程注册；动画绘制、本地保存亦在此线程；RenderLayeredWindow每帧创建/销毁DC和DIB，文字路径每帧重建。这些是可检查的性能风险，尚无该客户性能采样或受控复现，不能宣称已定位或修复。
+- 当前用户侧措施为保持客户端退出；未建议反复重装、关闭安全软件或重新运行候选。未改客户端代码、未构建/重签/替换正式包，不触碰CC进行中的管理端改动。后续客户端修订须对监听响应和渲染开销做针对性验证，真实兼容结论限定于实测环境。
+
+## 2026-10-22 PR #12第二实施段：形象写操作与发布状态并发保护（本地候选）
+
+- 基线23797a0，同分支同PR继续；F1–F8沿用第三轮结论未重查。仅本地开发/测试/更新PR：未合入、未部署、未访问生产、未改共享配置、未恢复冻结owner材料、未重签客户端。
+- 并发：COS PUT不支持If-Match，`x-cos-forbid-overwrite`只在对象不存在时拒绝创建且版本控制下失效，故存储层无法做比较并交换。改为MySQL命名锁`gongde:appearance-publication:v1`（生产已在用的GET_LOCK机制，不新建基础设施、不迁移、不改共享存储）覆盖整段读改写，并在发布对象内维护`publicationRevision`做跨请求版本判定；`memory`模式退回进程内链且标注`single-process`，不宣称多实例安全。
+- 四个版本分开：素材revision、publicationRevision、安全停发revision、文件身份。上下架只收publicationRevision，安全停发只收自己的requireCurrentRevision。
+- 管理端接入真实上下架、安全停发/解除、独立文件上传与删除；确认框写明后果与当前版本；409保留原操作信息、停用确认、只给重新读取，不自动重放。
+- 验证：`services/gongde-payments` `npm test`全部通过（含新增appearance publication分组）；真实MySQL 8.4容器上锁用例3/3（互不重叠、异常释放、忙时拒绝）；管理端`npm test`28/28、`tsc -b`+`vite build`通过；合成服务端浏览器走查覆盖成功/取消/失败/冲突/锁忙/连点/读取失败，截图`shot-appear-write-*.png`。
+- 走查修掉四处只有点得出来的缺陷：安全写入读信封、列表形状按数组校验、内联回调导致列表反复重读、重新读取卸载操作者正在操作的区块；另把文件列表读取失败与写入失败的提示分开。
+- 边界：内存COS用例只证服务端判定不证COS原子性；MySQL用例只证锁互斥；未做多实例真机联调；官网11项既存失败不扩大处理。详见`handoffs/admin-redesign-plan-20261021.md` §15。

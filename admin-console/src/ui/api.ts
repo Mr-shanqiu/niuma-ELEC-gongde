@@ -14,7 +14,14 @@ export type ReadState<T> =
   | { status: "error"; message: string; unauthorized: boolean };
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status?: number) {
+  constructor(
+    message: string,
+    readonly status?: number,
+    /** The server's machine code, when it sent one. */
+    readonly code?: string,
+    /** Current version reported by a 409, when the server knows it. */
+    readonly revision?: number
+  ) {
     super(message);
   }
 }
@@ -143,6 +150,20 @@ export async function post<T>(path: string, body: unknown, base = "/api/gongde/a
   return rawJson<T>(`${base}${path}`, { method: "POST", body: JSON.stringify(body) });
 }
 
+/**
+ * PATCH, for writes that carry the version they were built from.
+ *
+ * There is no `patch`-with-fallback: a PATCH that the server did not confirm is
+ * not silently retried as another verb.
+ */
+export async function patch<T>(path: string, body: unknown, base = "/api/gongde/admin"): Promise<T> {
+  return rawJson<T>(`${base}${path}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function remove<T>(path: string, base = "/api/gongde/admin"): Promise<T> {
+  return rawJson<T>(`${base}${path}`, { method: "DELETE" });
+}
+
 export async function requestJson<T>(url: string, init: RequestInit = {}, expect?: Expect): Promise<T> {
   const body = await rawJson<T>(url, init);
   if (expect && !expect(body as unknown as Record<string, unknown>)) {
@@ -165,7 +186,9 @@ async function rawJson<T>(url: string, init: RequestInit = {}): Promise<T> {
   const body = await readBody(response);
   if (!response.ok) {
     if (response.status === 401) onUnauthorized?.();
-    throw new ApiError(errorMessage(body, response.status), response.status);
+    const code = typeof body.error === "string" ? body.error : undefined;
+    const revision = typeof body.publicationRevision === "number" ? body.publicationRevision : undefined;
+    throw new ApiError(errorMessage(body, response.status), response.status, code, revision);
   }
   return body as T;
 }
@@ -173,8 +196,17 @@ async function rawJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 function errorMessage(body: Record<string, unknown>, status: number): string {
   if (typeof body.message === "string" && body.message.length > 0) return body.message;
   if (status === 401) return "管理员会话已过期，请重新登录。";
+  if (typeof body.error === "string") {
+    // A conflict has to say what kind: "another session changed this" and "the
+    // lock is busy" lead to different operator actions, and neither is a retry.
+    if (body.error === "appearance_publication_conflict") return "发布状态已被其他会话修改，请重新读取后再确认。";
+    if (body.error === "appearance_publication_busy") return "另一位管理员正在提交发布状态，请稍后重新读取再操作。";
+    if (body.error === "appearance_publication_unavailable") return "发布状态暂时无法读取或写入，本次操作没有生效。";
+    if (body.error === "appearance_publication_revision_required") return "缺少发布状态版本，已拒绝写入，请重新读取。";
+    if (body.error === "appearance_resource_missing") return "这个形象没有可用素材，不能上架。";
+    return chineseError(body.error);
+  }
   if (status === 409) return "记录已变更，请刷新后重新确认操作和原因。";
-  if (typeof body.error === "string") return chineseError(body.error);
   return "接口暂时不可用，请稍后重试。";
 }
 
@@ -250,6 +282,33 @@ const isRetentionEntry = (entry: unknown): boolean =>
   isObject(entry) && isText(entry.platform) && isText(entry.version) && isText(entry.releaseId) &&
   isText(entry.sha256) && isText(entry.publicDownloadUrl) && every(entry.references, isText);
 
+/**
+ * One official appearance row.
+ *
+ * The page enables a write from `state` and a material `revision`, so a row
+ * missing either is not a row the operator can act on. `MISSING` is the one
+ * state whose `revision` is null; every other state needs a real revision.
+ */
+export const isAppearanceEntry = (entry: unknown): boolean => {
+  if (!isObject(entry)) return false;
+  if (!isText(entry.assetId) || !isText(entry.name) || !isTextOrNull(entry.appearanceNumber)) return false;
+  if (!["PUBLISHED", "UNPUBLISHED", "MISSING"].includes(String(entry.state))) return false;
+  return entry.state === "MISSING" ? entry.revision === null : isText(entry.revision);
+};
+
+/** One official-safety row; `revision` is the safety object's own version. */
+export const isSafetyEntry = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.assetId) && typeof entry.blocked === "boolean" &&
+  isCount(entry.revision) && isTextOrNull(entry.reason) &&
+  isTextOrNull(entry.updatedBy) && isStampOrNull(entry.updatedAt);
+
+/** One uploaded file; the row is deleted by `name` alone. */
+export const isFileEntry = (entry: unknown): boolean =>
+  isObject(entry) && isText(entry.name) && isText(entry.id) &&
+  (entry.kind === "appearance" || entry.kind === "installer") &&
+  isCount(entry.size) && isStampOrNull(entry.lastModified) && isText(entry.url);
+
+
 const isDownloadSummary = (value: unknown): boolean => {
   if (!isObject(value)) return false;
   const summary = value;
@@ -294,7 +353,19 @@ export const shapes = {
   paymentConfig: (body: Record<string, unknown>) =>
     Number.isSafeInteger(body.unitPriceFen) && Number.isSafeInteger(body.maxItems) && typeof body.mode === "string",
   orderDetail: (body: Record<string, unknown>) =>
-    Boolean(body.data) && Array.isArray((body.data as Record<string, unknown>).marketItems)
+    Boolean(body.data) && Array.isArray((body.data as Record<string, unknown>).marketItems),
+  /**
+   * The gallery plus the publication revision every write must echo.
+   *
+   * `publicationRevision` is not the per-row `revision`: it versions the whole
+   * published set, and without it a write cannot tell a fresh form from a stale
+   * one. A response that omits it therefore cannot enable writes.
+   */
+  appearances: (body: Record<string, unknown>) =>
+    Array.isArray(body.data) && every(body.data, isAppearanceEntry) && isCount(body.publicationRevision),
+  fileList: (body: Record<string, unknown>) =>
+    Array.isArray(body.data) && every(body.data, isFileEntry) &&
+    (body.total === undefined || body.total === (body.data as unknown[]).length)
 };
 
 /**
@@ -372,7 +443,7 @@ function chineseError(code: string): string {
     group_benefit_code_unavailable: "群码读取失败。",
     service_unavailable: "服务暂时不可用。",
     request_invalid: "请求参数无效。",
-    revision_conflict: "记录已变更，请刷新后重新确认操作和原因。",
+    revision_conflict: "安全状态已被其他人修改，请重新读取后再确认；本次操作没有生效。",
     not_found: "记录不存在。"
   };
   return known[code] ?? "请求失败。";

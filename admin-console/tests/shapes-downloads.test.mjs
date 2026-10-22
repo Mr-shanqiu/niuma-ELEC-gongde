@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { shapes, v2Shapes } from "../src/ui/api.ts";
+import { ApiError, isFileEntry, isSafetyEntry, shapes, v2Shapes } from "../src/ui/api.ts";
 import { classifyDownloads, historicalRequests } from "../src/ui/downloads.ts";
 
 /**
@@ -323,4 +323,58 @@ test("F6: a 'no code family' snapshot is only accepted when it looks like one", 
   assert.equal(v2Shapes.codeSnapshot({ ...none, status: "ACTIVE" }), false);
   assert.equal(v2Shapes.codeSnapshot({ ...none, code: "GD123456" }), false);
   assert.equal(v2Shapes.codeSnapshot({ ...none, maxItems: undefined }), false);
+});
+
+/* ------------------------------------------- appearance writes (second batch) */
+
+const appearance = (overrides = {}) => ({
+  id: "official.a", assetId: "official.a", appearanceNumber: "100001",
+  name: "招财猫", revision: "a".repeat(64), state: "PUBLISHED", ...overrides
+});
+
+test("F6: the appearances list needs its rows and the publication revision", () => {
+  assert.equal(shapes.appearances({ data: [appearance()], total: 1, publicationRevision: 3 }), true);
+  assert.equal(shapes.appearances({ data: [], total: 0, publicationRevision: 0 }), true, "an empty gallery is legal");
+  // Without the version the page cannot build a fenced write, so it must not
+  // enable one.
+  assert.equal(shapes.appearances({ data: [appearance()], total: 1 }), false);
+  assert.equal(shapes.appearances({ data: [appearance()], total: 1, publicationRevision: "3" }), false);
+  assert.equal(shapes.appearances({ data: [null], total: 1, publicationRevision: 1 }), false);
+  assert.equal(shapes.appearances({ data: [appearance({ state: "SOMETHING" })], total: 1, publicationRevision: 1 }), false);
+  // A published row with no material revision cannot be acted on.
+  assert.equal(shapes.appearances({ data: [appearance({ revision: null })], total: 1, publicationRevision: 1 }), false);
+  // ...but MISSING is exactly the state whose revision is null.
+  assert.equal(shapes.appearances({ data: [appearance({ state: "MISSING", revision: null })], total: 1, publicationRevision: 1 }), true);
+  assert.equal(shapes.appearances({ data: [appearance({ state: "MISSING", revision: "x" })], total: 1, publicationRevision: 1 }), false);
+  assert.equal(shapes.appearances({ data: [appearance({ assetId: undefined })], total: 1, publicationRevision: 1 }), false);
+});
+
+test("F6: a safety row is rejected when its revision is not a real version", () => {
+  const safe = { assetId: "official.a", blocked: false, revision: 0, reason: null, updatedBy: null, updatedAt: null };
+  assert.equal(isSafetyEntry(safe), true);
+  assert.equal(isSafetyEntry({ ...safe, blocked: "false" }), false);
+  assert.equal(isSafetyEntry({ ...safe, revision: "0" }), false);
+  assert.equal(isSafetyEntry({ ...safe, revision: -1 }), false);
+  assert.equal(isSafetyEntry({ ...safe, updatedAt: "yesterday" }), false);
+  assert.equal(isSafetyEntry(null), false);
+});
+
+test("F6: a file row is rejected when the delete key is missing", () => {
+  const file = { id: "appearance:a.nmgpack", name: "a.nmgpack", kind: "appearance",
+    size: 10, lastModified: "2026-10-22T00:00:00.000Z", url: "https://example.invalid/a.nmgpack" };
+  assert.equal(isFileEntry(file), true);
+  assert.equal(isFileEntry({ ...file, name: undefined }), false);
+  assert.equal(isFileEntry({ ...file, kind: "other" }), false);
+  assert.equal(isFileEntry({ ...file, size: "10" }), false);
+  assert.equal(isFileEntry([file]), false);
+});
+
+test("a 409 carries the server's revision so the page can say what changed", () => {
+  // Mirrors what `rawJson` reads from a conflict body; the page never guesses
+  // the new revision from a local counter.
+  const body = { error: "appearance_publication_conflict", publicationRevision: 9 };
+  const error = new ApiError("发布状态已被其他会话修改，请重新读取后再确认。", 409, body.error, body.publicationRevision);
+  assert.equal(error.status, 409);
+  assert.equal(error.code, "appearance_publication_conflict");
+  assert.equal(error.revision, 9);
 });
