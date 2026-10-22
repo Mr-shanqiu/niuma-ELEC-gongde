@@ -122,7 +122,9 @@ static void WriteStats(std::ostream& output) {
 }
 
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 3) return 2;
+  if (argc != 3 && argc != 4) return 2;
+  const bool rasterExperiment = argc == 4 && wcscmp(argv[3], L"--decode-source-once") == 0;
+  if (argc == 4 && !rasterExperiment) return 2;
   const std::filesystem::path root(argv[1]), report(argv[2]);
   gIsolatedAcceptance = true;
   gAcceptanceRoot = report.parent_path().wstring();
@@ -143,11 +145,26 @@ int wmain(int argc, wchar_t** argv) {
       0, 0, 240, 338, nullptr, nullptr, wc.hInstance, nullptr);
   Check(gState.window != nullptr, "hidden owned fixture window");
   output << "{\"version\":\"" << NIUMA_PROFILE_VERSION
-      << "\",\"scope\":\"instrumented production drawing; hidden owned window; no real hook chain\",\"scenes\":[";
+      << "\",\"experimentalDecodedRaster\":" << (rasterExperiment ? "true" : "false")
+      << ",\"scope\":\"instrumented production drawing; hidden owned window; no real hook chain\",\"scenes\":[";
   bool first = true;
   {
     niuma::AppearancePack offwork;
     LoadFixture(root / L"assets/appearance-packs/offwork-button", offwork);
+    if (rasterExperiment) for (auto& layer : offwork.layers) {
+      const auto width = static_cast<INT>(layer.image.image->GetWidth());
+      const auto height = static_cast<INT>(layer.image.image->GetHeight());
+      auto raster = std::make_unique<Gdiplus::Bitmap>(width, height, PixelFormat32bppPARGB);
+      Check(raster->GetLastStatus() == Gdiplus::Ok, "raster allocation");
+      {
+        Gdiplus::Graphics graphics(raster.get());
+        graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+        Check(graphics.DrawImage(layer.image.image.get(), Gdiplus::Rect(0, 0, width, height),
+            0, 0, width, height, Gdiplus::UnitPixel) == Gdiplus::Ok, "decode once");
+      }
+      layer.image.image = std::move(raster);
+      if (layer.image.stream) { layer.image.stream->Release(); layer.image.stream = nullptr; }
+    }
     for (const int mode : {0, 1, 2}) for (const bool countdown : {false, true}) {
       const bool pack = mode != 0;
       if (mode == 2) for (auto& layer : offwork.layers)
