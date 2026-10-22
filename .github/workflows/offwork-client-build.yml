@@ -30,8 +30,14 @@ jobs:
       - name: Compile the client only
         shell: pwsh
         run: |
-          cmake --build build-offwork --config Release --target niuma-merit --parallel 2
+          cmake --build build-offwork --config Release --target niuma-merit niuma-render-cache-test --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Client compilation failed" }
+
+      - name: Check render cache pixels and native resource cleanup
+        shell: pwsh
+        run: |
+          & ./build-offwork/Release/niuma-render-cache-test.exe | Tee-Object build-offwork/render-cache-result.json
+          if ($LASTEXITCODE -ne 0) { throw "Native render cache checks failed" }
 
       - name: Bind the unpublished candidate to its source
         shell: pwsh
@@ -46,6 +52,7 @@ jobs:
             candidateOnly = $true
             clientExecuted = $false
             productTestsRun = $false
+            renderCacheChecksRun = $true
             installerBuilt = $false
             published = $false
           }
@@ -57,6 +64,8 @@ jobs:
           name: offwork-windows-dev-${{ github.sha }}
           path: |
             build-offwork/Release/niuma-merit.exe
+            build-offwork/Release/niuma-render-cache-test.exe
+            build-offwork/render-cache-result.json
             build-offwork/build-info.json
           if-no-files-found: error
           retention-days: 14
