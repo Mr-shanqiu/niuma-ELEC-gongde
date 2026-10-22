@@ -17,6 +17,7 @@
 #include <cstring>
 #include <cwctype>
 #include <map>
+#include <new>
 #include <iterator>
 #include <set>
 #include <utility>
@@ -41,6 +42,68 @@ constexpr size_t kMaximumPngBytes = 32ULL * 1024ULL * 1024ULL;
 constexpr size_t kMaximumFiles = 8;
 constexpr size_t kMaximumLayers = 6;
 constexpr size_t kMaximumKeyframes = 8;
+
+// UI-thread-only decoded rasters for the currently drawn pack. Keep source PNGs
+// for fades: premultiplying them first can change color-matrix rounding.
+struct RenderRasterCache {
+  static constexpr size_t kByteLimit = 32ULL * 1024ULL * 1024ULL;
+  struct Entry {
+    const Gdiplus::Image* source = nullptr;
+    bool attempted = false;
+    std::unique_ptr<Gdiplus::Bitmap> raster;
+  };
+  const AppearancePack* owner = nullptr;
+  size_t count = 0;
+  size_t bytes = 0;
+  std::array<Entry, kMaximumLayers> entries;
+
+  void Clear() {
+    for (auto& entry : entries) entry = Entry{};
+    owner = nullptr;
+    count = bytes = 0;
+  }
+  void Select(const AppearancePack& pack) {
+    bool same = owner == &pack && count == pack.layers.size();
+    if (same) for (size_t i = 0; i < count; ++i)
+      if (entries[i].source != pack.layers[i].image.image.get()) same = false;
+    if (same) return;
+    Clear();
+    if (pack.layers.size() > entries.size()) return;
+    owner = &pack;
+    count = pack.layers.size();
+    for (size_t i = 0; i < count; ++i) entries[i].source = pack.layers[i].image.image.get();
+  }
+  void Invalidate(const Gdiplus::Image* source) {
+    if (!source) return;
+    for (const auto& entry : entries) if (entry.source == source) { Clear(); return; }
+  }
+  Gdiplus::Image* Image(size_t index, Gdiplus::Image* source) {
+    if (!owner || index >= count || !source) return source;
+    auto& entry = entries[index];
+    if (entry.raster) return entry.raster.get();
+    if (entry.attempted) return source;
+    entry.attempted = true;
+    const auto width = source->GetWidth(), height = source->GetHeight();
+    if (!width || !height || width > 2048 || height > 2048) return source;
+    const size_t needed = static_cast<size_t>(width) * height * 4;
+    if (needed > kByteLimit - bytes) return source;
+    std::unique_ptr<Gdiplus::Bitmap> raster;
+    try {
+      raster = std::make_unique<Gdiplus::Bitmap>(width, height, PixelFormat32bppPARGB);
+    } catch (const std::bad_alloc&) { return source; }
+    if (raster->GetLastStatus() != Gdiplus::Ok) return source;
+    {
+      Gdiplus::Graphics graphics(raster.get());
+      if (graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy) != Gdiplus::Ok ||
+          graphics.DrawImage(source, Gdiplus::Rect(0, 0, width, height), 0, 0,
+              width, height, Gdiplus::UnitPixel) != Gdiplus::Ok) return source;
+    }
+    entry.raster = std::move(raster);
+    bytes += needed;
+    return entry.raster.get();
+  }
+};
+RenderRasterCache gRenderRasterCache;
 constexpr unsigned char kPublicX[32] = {
     0x2a, 0xc5, 0xfc, 0x45, 0x26, 0x01, 0xd3, 0x9c, 0xc4, 0xe2, 0x9e,
     0xcf, 0xf9, 0xb6, 0x16, 0x95, 0xe3, 0x1c, 0x78, 0x67, 0x27, 0x41,
@@ -925,6 +988,7 @@ std::wstring FileNameForId(const std::string& id) {
 }  // namespace
 
 PackImage::~PackImage() {
+  if (image) gRenderRasterCache.Invalidate(image.get());
   image.reset();
   if (stream != nullptr) stream->Release();
 }
@@ -936,6 +1000,7 @@ PackImage::PackImage(PackImage&& other) noexcept
 
 PackImage& PackImage::operator=(PackImage&& other) noexcept {
   if (this == &other) return *this;
+  if (image) gRenderRasterCache.Invalidate(image.get());
   image.reset();
   if (stream != nullptr) stream->Release();
   stream = other.stream;
@@ -1297,11 +1362,17 @@ bool RegisterPackFileAssociations(const std::wstring& executable,
   return true;
 }
 
+void ClearAppearanceRenderCache() {
+  gRenderRasterCache.Clear();
+}
+
 void DrawAppearancePack(Gdiplus::Graphics& graphics,
                         const AppearancePack& pack,
                         float progress) {
   const Gdiplus::GraphicsState clipState = graphics.Save();
   graphics.SetClip(Gdiplus::RectF(0.0f, 80.0f, 240.0f, 170.0f));
+  gRenderRasterCache.Select(pack);
+  size_t layerIndex = 0;
   for (const PackLayer& layer : pack.layers) {
     const PackKeyframe keyframe = Interpolate(
         layer.keyframes, std::clamp(progress, 0.0f, 1.0f), layer.smoothInterpolation);
@@ -1314,12 +1385,14 @@ void DrawAppearancePack(Gdiplus::Graphics& graphics,
     graphics.ScaleTransform(keyframe.scale, keyframe.scale * keyframe.scaleY);
     graphics.TranslateTransform(-anchorX, -anchorY);
     const Gdiplus::RectF destination(layer.x, top, layer.width, layer.height);
-    const auto width = static_cast<Gdiplus::REAL>(layer.image.image->GetWidth());
-    const auto height = static_cast<Gdiplus::REAL>(layer.image.image->GetHeight());
+    auto* image = keyframe.alpha == 1.0f
+        ? gRenderRasterCache.Image(layerIndex, layer.image.image.get()) : layer.image.image.get();
+    const auto width = static_cast<Gdiplus::REAL>(image->GetWidth());
+    const auto height = static_cast<Gdiplus::REAL>(image->GetHeight());
     if (keyframe.alpha == 1.0f) {
       // Preserve the PNG's own transparency. An identity color matrix is not
       // needed when no additional layer opacity adjustment is requested.
-      graphics.DrawImage(layer.image.image.get(), destination, 0, 0, width, height,
+      graphics.DrawImage(image, destination, 0, 0, width, height,
                          Gdiplus::UnitPixel);
     } else {
       Gdiplus::ImageAttributes attributes;
@@ -1330,9 +1403,10 @@ void DrawAppearancePack(Gdiplus::Graphics& graphics,
           0, 0, 0, keyframe.alpha, 0,
           0, 0, 0, 0, 1};
       attributes.SetColorMatrix(&matrix);
-      graphics.DrawImage(layer.image.image.get(), destination, 0, 0, width, height,
+      graphics.DrawImage(image, destination, 0, 0, width, height,
                          Gdiplus::UnitPixel, &attributes);
     }
+    ++layerIndex;
     graphics.Restore(state);
   }
   graphics.Restore(clipState);

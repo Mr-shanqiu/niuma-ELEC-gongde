@@ -89,5 +89,6 @@ bool RegisterPackFileAssociations(const std::wstring& executable,
 void DrawAppearancePack(Gdiplus::Graphics& graphics,
                         const AppearancePack& pack,
                         float progress);
+void ClearAppearanceRenderCache();
 
 }  // namespace niuma

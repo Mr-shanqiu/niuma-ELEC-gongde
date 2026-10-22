@@ -1006,6 +1006,7 @@ void ReleasePngResource(PngResource& resource) {
 }
 
 void ReleaseAllPngResources() {
+  niuma::ClearAppearanceRenderCache();
   gWidgetGlyphCache.Clear();
   gLayeredSurface.Reset();
   // The catalog also owns GDI+ images. Release it before GDI+ or COM stops,
@@ -1159,6 +1160,7 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now) {
   if (appearancePack != nullptr) {
     niuma::DrawAppearancePack(graphics, *appearancePack, progress);
   } else {
+    niuma::ClearAppearanceRenderCache();
     DrawSceneArtwork(graphics, gState.selectedScene, strikeAmount);
   }
 

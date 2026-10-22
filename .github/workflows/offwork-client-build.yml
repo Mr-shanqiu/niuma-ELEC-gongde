@@ -38,7 +38,7 @@ jobs:
       - name: Compile original and candidate profilers
         shell: pwsh
         run: |
-          cmake --build build-offwork --config Release --target niuma-render-profile-before niuma-render-profile-after --parallel 2
+          cmake --build build-offwork --config Release --target niuma-merit niuma-render-profile-before niuma-render-profile-after --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Client compilation failed" }
 
       - name: Profile real drawing stages and synthetic count handling
@@ -48,8 +48,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Original profile failed" }
           & ./build-offwork/Release/niuma-render-profile-after.exe $PWD (Join-Path $PWD 'build-offwork/profile-after.json')
           if ($LASTEXITCODE -ne 0) { throw "Candidate profile failed" }
-          & ./build-offwork/Release/niuma-render-profile-after.exe $PWD (Join-Path $PWD 'build-offwork/profile-raster-experiment.json') --decode-source-once
-          if ($LASTEXITCODE -ne 0) { throw "Decode-once experiment failed" }
 
       - name: Compare complete frame pixels before and after
         shell: pwsh
@@ -60,18 +58,14 @@ jobs:
           root = Path('build-offwork')
           before = json.loads((root/'profile-before.json').read_text())
           after = json.loads((root/'profile-after.json').read_text())
-          raster = json.loads((root/'profile-raster-experiment.json').read_text())
           key = lambda row: (row['appearance'], row['countdown'], row['dpi'], row['animated'])
           old = {key(row): row for row in before['scenes']}
           new = {key(row): row for row in after['scenes']}
           assert old.keys() == new.keys()
           mismatches = [k for k in old if old[k]['pixelHashes'] != new[k]['pixelHashes']]
-          experiment = {key(row): row for row in raster['scenes']}
-          raster_mismatches = [k for k in old if old[k]['pixelHashes'] != experiment[k]['pixelHashes']]
           result = {'scenes':len(old), 'frames':sum(len(r['pixelHashes']) for r in old.values()),
                     'mismatches':mismatches, 'physicalInputLatencyMeasured':False}
           (root/'frame-comparison.json').write_text(json.dumps(result,indent=2))
-          (root/'raster-experiment-comparison.json').write_text(json.dumps({'mismatches':raster_mismatches},indent=2))
           print(json.dumps(result))
           assert not mismatches, 'Complete frame pixel mismatch'
           '@ | python -
@@ -89,7 +83,7 @@ jobs:
             sha256 = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             candidateOnly = $true
             artifactKind = 'render-profiler'
-            candidateClientBuildReusedFromRun = '39840193332'
+            candidateClientSha256 = (Get-FileHash build-offwork/Release/niuma-merit.exe -Algorithm SHA256).Hash.ToLowerInvariant()
             clientExecuted = $false
             productTestsRun = $false
             renderCacheChecksRun = 'reused-from-run-39829177500'
@@ -107,12 +101,11 @@ jobs:
           path: |
             build-offwork/Release/niuma-render-profile-before.exe
             build-offwork/Release/niuma-render-profile-after.exe
+            build-offwork/Release/niuma-merit.exe
             build-offwork/profile-before.json
             build-offwork/profile-after.json
-            build-offwork/profile-raster-experiment.json
             build-offwork/render-profile-source.json
             build-offwork/frame-comparison.json
-            build-offwork/raster-experiment-comparison.json
             build-offwork/build-info.json
           if-no-files-found: error
           retention-days: 14

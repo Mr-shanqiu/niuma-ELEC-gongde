@@ -148,6 +148,7 @@ int wmain(int argc, wchar_t** argv) {
       << "\",\"experimentalDecodedRaster\":" << (rasterExperiment ? "true" : "false")
       << ",\"scope\":\"instrumented production drawing; hidden owned window; no real hook chain\",\"scenes\":[";
   bool first = true;
+  std::size_t rasterPeakBytes = 0;
   {
     niuma::AppearancePack offwork;
     LoadFixture(root / L"assets/appearance-packs/offwork-button", offwork);
@@ -196,6 +197,11 @@ int wmain(int argc, wchar_t** argv) {
         for (int frame = 0; frame < 60; ++frame)
           RenderLayeredWindow(10000 + (animated ? (frame % 15) * 16 : 0));
         perf::enabled = false;
+#if defined(NIUMA_PROFILE_AFTER)
+        Check(niuma::gRenderRasterCache.bytes <= niuma::RenderRasterCache::kByteLimit,
+            "decoded cache budget");
+        rasterPeakBytes = std::max(rasterPeakBytes, niuma::gRenderRasterCache.bytes);
+#endif
         if (!first) output << ',';
         first = false;
         output << "{\"appearance\":\"" << (mode == 2 ? "offwork-fade-fixture" : pack ? "offwork" : "woodfish")
@@ -214,7 +220,36 @@ int wmain(int argc, wchar_t** argv) {
       }
     }
     gProfileFixturePack = nullptr;
+#if defined(NIUMA_PROFILE_AFTER)
+    RenderLayeredWindow(10000);
+    Check(niuma::gRenderRasterCache.bytes == 0, "builtin switch releases decoded cache");
+    for (auto& layer : offwork.layers) for (auto& key : layer.keyframes) key.alpha = 1.0f;
+    gProfileFixturePack = &offwork;
+    RenderLayeredWindow(10000);
+    Check(niuma::gRenderRasterCache.bytes > 0, "cache restarts on selected pack");
+    offwork.layers[0].image = niuma::PackImage{};
+    Check(niuma::gRenderRasterCache.bytes == 0, "source replacement invalidates cache");
+    gProfileFixturePack = nullptr;
+#endif
   }
+#if defined(NIUMA_PROFILE_AFTER)
+  Check(niuma::gRenderRasterCache.bytes == 0, "pack destruction clears cache");
+  {
+    niuma::AppearancePack large;
+    for (int i = 0; i < 3; ++i) {
+      niuma::PackLayer layer;
+      layer.image.image = std::make_unique<Gdiplus::Bitmap>(2048, 2048, PixelFormat32bppPARGB);
+      large.layers.push_back(std::move(layer));
+    }
+    niuma::gRenderRasterCache.Select(large);
+    for (std::size_t i = 0; i < large.layers.size(); ++i)
+      niuma::gRenderRasterCache.Image(i, large.layers[i].image.image.get());
+    Check(niuma::gRenderRasterCache.bytes == niuma::RenderRasterCache::kByteLimit,
+        "capacity stops at 32MiB without rejecting uncached layers");
+    Check(!niuma::gRenderRasterCache.entries[2].raster, "over-budget layer falls back");
+  }
+  Check(niuma::gRenderRasterCache.bytes == 0, "large fixture resources released");
+#endif
   // Known synthetic messages exercise the actual count handler, not a physical
   // keyboard or WH_KEYBOARD_LL/CallNextHookEx chain. No raw keys are collected.
   SYSTEMTIME local{};
@@ -234,7 +269,8 @@ int wmain(int argc, wchar_t** argv) {
   output << "],\"syntheticCountMessages\":100,\"countDelta\":" << gState.total - totalBefore
       << ",\"inputStages\":{";
   WriteStats(output);
-  output << "},\"submitFailures\":0,\"realHooksInstalled\":false,\"userProfileRead\":false,"
+  output << "},\"submitFailures\":0,\"decodedCacheObservedPeakBytes\":" << rasterPeakBytes
+      << ",\"realHooksInstalled\":false,\"userProfileRead\":false,"
       "\"limitations\":\"offline fixed frames; hidden window submission; does not measure physical input latency or real hook scheduling\"}";
   DestroyWindow(gState.window);
   gState.window = nullptr;

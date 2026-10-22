@@ -113,6 +113,9 @@ if(WIN32)
       NIUMA_PROFILE_APP_SOURCE="${CMAKE_CURRENT_BINARY_DIR}/profile-app-${phase}.cpp"
       NIUMA_PROFILE_PACK_SOURCE="${CMAKE_CURRENT_BINARY_DIR}/profile-pack-${phase}.cpp"
       NIUMA_PROFILE_VERSION="${phase}")
+    if(phase STREQUAL "after")
+      target_compile_definitions(niuma-render-profile-${phase} PRIVATE NIUMA_PROFILE_AFTER)
+    endif()
     target_link_libraries(niuma-render-profile-${phase} PRIVATE shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
     if(MSVC)
       set_property(TARGET niuma-render-profile-${phase} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
