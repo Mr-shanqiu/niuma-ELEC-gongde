@@ -17,6 +17,7 @@
 #include "appearance_pack.h"
 #include "render_cache.h"
 #include "runtime/input_service.h"
+#include "runtime/storage_service.h"
 #include "app_version.h"
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
@@ -72,6 +73,7 @@ constexpr UINT_PTR kOffworkTimer = 3;
 constexpr UINT_PTR kReminderTimer = 4;
 constexpr UINT_PTR kReminderDismissTimer = 5;
 constexpr UINT_PTR kAcceptanceExitTimer = 6;
+constexpr UINT_PTR kStorageTimer = 7;
 constexpr UINT kOffworkSessionChange = 0x02B1;  // WM_WTSSESSION_CHANGE
 constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
@@ -200,6 +202,7 @@ struct InputAdapter {
   std::map<std::wstring, std::uint64_t> savedDaily;
   std::uint64_t savedTotal = 0;
   std::uint64_t nextCommand = 0, nextLedger = 0;
+  std::uint64_t instanceGeneration = 0;
   std::uint64_t ledgerRequest = 0;
   std::uint64_t handledReminder = 0;
   HWND pendingReminderWindow = nullptr;
@@ -210,6 +213,24 @@ struct InputAdapter {
 };
 InputAdapter gInput;
 
+struct DataStorageAdapter {
+  std::unique_ptr<input_runtime::StorageService> service;
+  std::unique_ptr<input_core::StorageState> model;
+  std::shared_ptr<const input_core::StorageWrite> inFlight;
+  DWORD error = ERROR_SUCCESS;
+  bool mergeFailed = false, timerArmed = false, pumping = false;
+  bool closing = false, stopping = false, readyToDestroy = false;
+  bool closeNoticeShown = false, closeFailurePrompt = false;
+  bool failureNotified = false;
+  bool wasOffworkSuspended = false;
+  UINT_PTR orphanTimer = 0;
+  ULONGLONG timerDue = 0, closeStarted = 0;
+  std::uint64_t sourceEpoch = 0, sourceInstance = 0, nativeEpoch = 0;
+  std::uint64_t mergedVersion = 0, fallbackVersion = 0;
+  bool authoritativeSource = false;
+};
+DataStorageAdapter gDataStorage;
+
 void ConsumeInputSnapshot();
 void StopInputService();
 void RequestInputLedger();
@@ -217,6 +238,12 @@ void CancelPendingReminder();
 bool SendInputCommand(input_runtime::InputCommand command);
 void RefreshCountingStatus();
 void EnsureAnimationTimer();
+void ArmDataStorageTimer();
+void PumpDataStorage(bool force = false);
+bool DataStorageIdle();
+void BeginClientClose(HWND window);
+void ContinueClientClose(HWND window);
+void ShowCountingStatus(HWND owner);
 
 bool KeyboardListenerAvailable() {
   return gInput.authoritative ? gInput.latest.running &&
@@ -499,17 +526,7 @@ std::wstring AppearanceDirectory() {
 }
 
 std::string ReadSelectedPackId() {
-  const std::wstring path = DataPath();
-  if (path.empty()) return {};
-  wchar_t value[128] = {};
-  GetPrivateProfileStringW(L"state", L"selected_pack_id", L"", value,
-                           static_cast<DWORD>(std::size(value)), path.c_str());
-  std::string result;
-  for (const wchar_t character : std::wstring(value)) {
-    if (character > 127) return {};
-    result.push_back(static_cast<char>(character));
-  }
-  return result;
+  return gDataStorage.model ? gDataStorage.model->current().appearance.selectedPackId : std::string{};
 }
 
 niuma::AppearancePack* CurrentAppearancePack() {
@@ -547,51 +564,39 @@ input_core::LocalDate ParseInputDate(const std::wstring& key) {
   return input_core::InputCore::ValidDate(date) ? date : 0;
 }
 
-bool ParseDailyCount(const wchar_t* text, std::uint64_t& total) {
-  if (!text || !*text) return false;
-  total = 0;
-  for (; *text; ++text) {
-    if (*text < L'0' || *text > L'9') return false;
-    const unsigned digit = static_cast<unsigned>(*text - L'0');
-    if (total > (std::numeric_limits<std::uint64_t>::max() - digit) / 10) return false;
-    total = total * 10 + digit;
+bool InitializeDataStorage() {
+  if (gDataStorage.service) return gDataStorage.model != nullptr;
+  try {
+    gDataStorage.service = std::make_unique<input_runtime::StorageService>();
+    const auto loaded = gDataStorage.service->Start({DataPath()});
+    if (!loaded.started) {
+      gDataStorage.error = loaded.error;
+      gDataStorage.service->Stop(0);
+      return false;
+    }
+    gDataStorage.model = std::make_unique<input_core::StorageState>(loaded.initial);
+    return true;
+  } catch (...) {
+    gDataStorage.error = ERROR_NOT_ENOUGH_MEMORY;
+    if (gDataStorage.service) gDataStorage.service->Stop(0);
+    return false;
   }
-  return true;
+}
+
+bool MergeDataUpdate(input_core::StorageUpdate update) {
+  if (update == input_core::StorageUpdate::Changed || update == input_core::StorageUpdate::Unchanged)
+    return true;
+  gDataStorage.mergeFailed = true;
+  gDataStorage.error = update == input_core::StorageUpdate::CapacityExceeded
+      ? ERROR_BUFFER_OVERFLOW : ERROR_INVALID_DATA;
+  return false;
 }
 
 bool LoadInputLedger(input_runtime::InputServiceOptions& options) {
-  const auto path = DataPath();
-  if (path.empty()) return false;
-  HANDLE readable = CreateFileW(path.c_str(), GENERIC_READ,
-      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (readable == INVALID_HANDLE_VALUE) {
-    const DWORD error = GetLastError();
-    if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return false;
-  } else CloseHandle(readable);
+  if (!gDataStorage.model) return false;
+  auto days = gDataStorage.model->current().counts.daily;
   gInput.savedDaily.clear();
-  // GetPrivateProfileSection reports truncation as capacity - 2. Grow to a
-  // bounded size; never silently initialize an incomplete calendar ledger.
-  std::vector<wchar_t> section(4096);
-  for (;;) {
-    const DWORD copied = GetPrivateProfileSectionW(L"daily", section.data(),
-        static_cast<DWORD>(section.size()), path.c_str());
-    if (copied < section.size() - 2) break;
-    if (section.size() >= 4 * 1024 * 1024) return false;
-    section.resize(section.size() * 2);
-  }
-  std::map<input_core::LocalDate, std::uint64_t> days;
-  for (const wchar_t* line = section.data(); *line; line += std::wcslen(line) + 1) {
-    const wchar_t* equal = std::wcschr(line, L'=');
-    if (!equal) continue;
-    const std::wstring key(line, equal);
-    const auto date = ParseInputDate(key);
-    if (!date) continue;  // Preserve unrelated/invalid keys on disk untouched.
-    std::uint64_t total = 0;
-    if (!ParseDailyCount(equal + 1, total)) return false;
-    days[date] = total;
-    gInput.savedDaily[key] = total;
-  }
+  for (const auto& day : days) gInput.savedDaily[InputDateKey(day.first)] = day.second;
   for (const auto& day : gState.pendingDailyTotals) {
     const auto date = ParseInputDate(day.first);
     if (date) days[date] = day.second;
@@ -611,19 +616,15 @@ std::uint64_t ReadDailyTotal(const std::wstring& key) {
   if (key == gState.currentDay) return gState.todayTotal;
   const auto pending = gState.pendingDailyTotals.find(key);
   if (pending != gState.pendingDailyTotals.end()) return pending->second;
+  const auto date = ParseInputDate(key);
   if (gInput.authoritative) {
-    const auto date = ParseInputDate(key);
     for (const auto& day : gInput.daily) if (day.date == date) return day.total;
     return 0;
   }
-  const std::wstring path = DataPath();
-  if (path.empty()) return 0;
-  wchar_t value[64] = {};
-  GetPrivateProfileStringW(L"daily", key.c_str(), L"0", value,
-                           static_cast<DWORD>(std::size(value)), path.c_str());
-  wchar_t* end = nullptr;
-  const unsigned long long result = _wcstoui64(value, &end, 10);
-  return end == value ? 0 : static_cast<std::uint64_t>(result);
+  if (!gDataStorage.model) return 0;
+  const auto& daily = gDataStorage.model->current().counts.daily;
+  const auto found = daily.find(date);
+  return found == daily.end() ? 0 : found->second;
 }
 
 bool EnsureDay(const std::wstring& today) {
@@ -722,99 +723,52 @@ bool IsLaunchAtLoginEnabled() {
 }
 
 void SaveLaunchAtLoginPreference(bool enabled) {
-  const std::wstring path = DataPath();
-  if (path.empty()) {
-    return;
-  }
-  WritePrivateProfileStringW(
-      L"state", L"autostart_configured", L"1", path.c_str());
-  WritePrivateProfileStringW(
-      L"state", L"autostart_enabled", enabled ? L"1" : L"0", path.c_str());
+  if (!gDataStorage.model) return;
+  MergeDataUpdate(gDataStorage.model->UpdateAutostart({true, enabled}, GetTickCount64()));
+  PumpDataStorage();
 }
 
 void ConfigureLaunchAtLogin() {
-  if (gIsolatedAcceptance) return;
-  const std::wstring path = DataPath();
-  if (path.empty()) {
-    return;
-  }
-  const bool configured =
-      GetPrivateProfileIntW(L"state", L"autostart_configured", 0,
-                            path.c_str()) == 1;
-  const bool preferredEnabled =
-      GetPrivateProfileIntW(L"state", L"autostart_enabled", 1,
-                            path.c_str()) == 1;
-  if (!configured) {
-    if (SetLaunchAtLoginEnabled(true)) {
-      SaveLaunchAtLoginPreference(true);
-    }
-  } else if (preferredEnabled) {
-    // Refresh the executable path after the app is moved or updated.
+  if (gIsolatedAcceptance || !gDataStorage.model) return;
+  const auto preference = gDataStorage.model->current().autostart;
+  if (!preference.configured) {
+    if (SetLaunchAtLoginEnabled(true)) SaveLaunchAtLoginPreference(true);
+  } else if (preference.enabled) {
     SetLaunchAtLoginEnabled(true);
   }
 }
 
 long ReadIniLong(const wchar_t* key, long fallback) {
-  const std::wstring path = DataPath();
-  if (path.empty()) {
-    return fallback;
-  }
-  wchar_t value[64] = {};
-  wchar_t fallbackText[64] = {};
-  swprintf_s(fallbackText, L"%ld", fallback);
-  GetPrivateProfileStringW(
-      L"state", key, fallbackText, value, static_cast<DWORD>(std::size(value)),
-      path.c_str());
-  wchar_t* end = nullptr;
-  const long result = wcstol(value, &end, 10);
-  return end == value ? fallback : result;
+  if (!gDataStorage.model) return fallback;
+  const auto& state = gDataStorage.model->current();
+  if (wcscmp(key, L"selected_scene") == 0) return state.appearance.selectedScene;
+  if (wcscmp(key, L"x") == 0 && state.window.present) return state.window.x;
+  if (wcscmp(key, L"y") == 0 && state.window.present) return state.window.y;
+  return fallback;
 }
 
 std::uint64_t ReadIniTotal() {
-  const std::wstring path = DataPath();
-  if (path.empty()) {
-    return 0;
-  }
-  wchar_t value[64] = {};
-  GetPrivateProfileStringW(
-      L"state", L"total", L"0", value, static_cast<DWORD>(std::size(value)),
-      path.c_str());
-  wchar_t* end = nullptr;
-  const unsigned long long result = _wcstoui64(value, &end, 10);
-  return end == value ? 0 : static_cast<std::uint64_t>(result);
+  return gDataStorage.model ? gDataStorage.model->current().counts.total : 0;
 }
 
 void LoadOffworkSettings() {
-  const std::wstring path = DataPath();
-  if (!path.empty()) {
-    gOffwork.enabled = GetPrivateProfileIntW(L"offwork", L"enabled", 0, path.c_str()) == 1;
-    const int hour = static_cast<int>(GetPrivateProfileIntW(L"offwork", L"hour", 18, path.c_str()));
-    const int minute = static_cast<int>(GetPrivateProfileIntW(L"offwork", L"minute", 0, path.c_str()));
-    gOffwork.hour = hour >= 0 && hour < 24 ? hour : 18;
-    gOffwork.minute = minute >= 0 && minute < 60 ? minute : 0;
+  if (gDataStorage.model) {
+    const auto& state = gDataStorage.model->current();
+    gOffwork.enabled = state.offwork.enabled;
+    gOffwork.hour = state.offwork.hour;
+    gOffwork.minute = state.offwork.minute;
+    gOffwork.days.clear();
+    for (const auto& entry : state.offworkDays) {
+      const auto& day = entry.second;
+      gOffwork.days.emplace(InputDateKey(entry.first), OffworkDayRecord{
+          day.present, false, day.seconds, day.targetMinutes, static_cast<std::time_t>(day.updatedAt)});
+    }
   }
   gOffwork.lastFlush = GetTickCount64();
 }
 
 OffworkDayRecord& OffworkDay(const std::wstring& key) {
-  const auto found = gOffwork.days.find(key);
-  if (found != gOffwork.days.end()) return found->second;
-  OffworkDayRecord record;
-  const std::wstring path = DataPath();
-  if (!path.empty()) {
-    wchar_t value[128] = {};
-    GetPrivateProfileStringW(L"offwork_daily", key.c_str(), L"", value,
-        static_cast<DWORD>(std::size(value)), path.c_str());
-    long long updated = 0;
-    if (swscanf_s(value, L"%d,%d,%lld", &record.seconds,
-                  &record.targetMinutes, &updated) == 3 &&
-        record.seconds > 0 && record.seconds <= 172800 &&
-        record.targetMinutes >= 0 && record.targetMinutes < 1440 && updated > 0) {
-      record.present = true;
-      record.updatedAt = static_cast<std::time_t>(updated);
-    }
-  }
-  return gOffwork.days.emplace(key, record).first->second;
+  return gOffwork.days.try_emplace(key).first->second;
 }
 
 void UpdateOffworkDay(const niuma::OffworkSnapshot& snapshot, int seconds,
@@ -829,45 +783,48 @@ void UpdateOffworkDay(const niuma::OffworkSnapshot& snapshot, int seconds,
   record.targetMinutes = snapshot.targetMinutes;
   record.updatedAt = updatedAt;
   record.dirty = true;
+  if (gDataStorage.model) {
+    try {
+      record.dirty = !MergeDataUpdate(gDataStorage.model->UpdateOffworkDay(
+          ParseInputDate(OffworkWide(snapshot.dayKey)),
+          {present, seconds, snapshot.targetMinutes, static_cast<std::int64_t>(updatedAt)}, GetTickCount64()));
+    } catch (...) {
+      gDataStorage.mergeFailed = true;
+      gDataStorage.error = ERROR_NOT_ENOUGH_MEMORY;
+    }
+    ArmDataStorageTimer();
+  }
 }
 
 bool FlushOffwork() {
-  const std::wstring path = DataPath();
-  if (path.empty()) return false;
-  bool success = true;
-  bool wrote = false;
-  if (gOffwork.settingsDirty) {
-    const bool enabledSaved = WritePrivateProfileStringW(L"offwork", L"enabled",
-        gOffwork.enabled ? L"1" : L"0", path.c_str()) != FALSE;
-    const bool hourSaved = WritePrivateProfileStringW(L"offwork", L"hour",
-        std::to_wstring(gOffwork.hour).c_str(), path.c_str()) != FALSE;
-    const bool minuteSaved = WritePrivateProfileStringW(L"offwork", L"minute",
-        std::to_wstring(gOffwork.minute).c_str(), path.c_str()) != FALSE;
-    success = enabledSaved && hourSaved && minuteSaved;
-    gOffwork.settingsDirty = !success;
-    wrote = true;
+  if (!gDataStorage.model) return false;
+  bool accepted = true;
+  const auto now = GetTickCount64();
+  try {
+    if (gOffwork.settingsDirty) {
+      const bool merged = MergeDataUpdate(gDataStorage.model->UpdateOffworkSettings(
+          {gOffwork.enabled, gOffwork.hour, gOffwork.minute}, now));
+      gOffwork.settingsDirty = !merged;
+      accepted = merged;
+    }
+    for (auto& entry : gOffwork.days) {
+      auto& record = entry.second;
+      if (!record.dirty) continue;
+      const bool merged = MergeDataUpdate(gDataStorage.model->UpdateOffworkDay(ParseInputDate(entry.first),
+          {record.present, record.seconds, record.targetMinutes, static_cast<std::int64_t>(record.updatedAt)}, now));
+      record.dirty = !merged;
+      accepted = merged && accepted;
+    }
+  } catch (...) {
+    gDataStorage.mergeFailed = true;
+    gDataStorage.error = ERROR_NOT_ENOUGH_MEMORY;
+    accepted = false;
   }
-  for (auto& entry : gOffwork.days) {
-    auto& record = entry.second;
-    if (!record.dirty) continue;
-    // Version-one daily value: elapsed seconds, target minute, actual sample time.
-    const std::wstring value = std::to_wstring(record.seconds) + L"," +
-        std::to_wstring(record.targetMinutes) + L"," +
-        std::to_wstring(static_cast<long long>(record.updatedAt));
-    const bool saved = WritePrivateProfileStringW(L"offwork_daily", entry.first.c_str(),
-        record.present ? value.c_str() : nullptr, path.c_str()) != FALSE;
-    record.dirty = !saved;
-    success = saved && success;
-    wrote = true;
-  }
-  if (wrote) {
-    // Cache invalidation can return zero even after successful profile writes.
-    // Only the individual writes above determine failure and retry state.
-    WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
-  }
-  // Failed storage is retried at the next interval or lifecycle event, not 1 Hz.
-  gOffwork.lastFlush = GetTickCount64();
-  return success;
+  gOffwork.lastFlush = now;
+  // Accepted means merged into the retained latest model, not already durable.
+  // Only the worker's completion can acknowledge its versions.
+  PumpDataStorage();
+  return accepted;
 }
 
 bool OffworkAwakeTime(ULONGLONG& value) {
@@ -1140,65 +1097,153 @@ void UnregisterOffworkSessionNotifications(HWND window) {
   gOffwork.sessionLibrary = nullptr;
 }
 
-// Keep every unflushed date until all count writes succeed. A failed write
-// must not discard an old day's value when the local date changes again.
-bool SaveCountState(const std::wstring& path) {
-  if (path.empty() || gInput.loadFailed) return false;
+bool SaveCountState(const std::wstring&) {
+  if (!gDataStorage.model || gInput.loadFailed) return false;
+  const auto now = GetTickCount64();
+  input_core::LedgerSnapshotResult ledger;
+  ledger.header.status = input_core::LedgerResultStatus::Complete;
   if (gInput.authoritative) {
-    bool saved = true;
-    if (gInput.savedTotal != gInput.ledger.total) {
-      saved = WritePrivateProfileStringW(L"state", L"total",
-          std::to_wstring(gInput.ledger.total).c_str(), path.c_str()) != FALSE;
+    if (!gInput.ledger.ready) { RequestInputLedger(); return false; }
+    const bool newSource = !gDataStorage.authoritativeSource ||
+        gDataStorage.sourceInstance != gInput.instanceGeneration ||
+        gDataStorage.nativeEpoch != gInput.ledger.epoch;
+    if (newSource) {
+      if (gDataStorage.sourceEpoch == std::numeric_limits<std::uint64_t>::max()) return false;
+      ++gDataStorage.sourceEpoch;
+      gDataStorage.sourceInstance = gInput.instanceGeneration;
+      gDataStorage.nativeEpoch = gInput.ledger.epoch;
+      gDataStorage.authoritativeSource = true;
+      gDataStorage.mergedVersion = 0;
     }
-    for (const auto& day : gInput.daily) {
-      const auto key = InputDateKey(day.date);
-      const auto previous = gInput.savedDaily.find(key);
-      if (previous != gInput.savedDaily.end() && previous->second == day.total) continue;
-      const bool written = WritePrivateProfileStringW(L"daily", key.c_str(),
-          std::to_wstring(day.total).c_str(), path.c_str()) != FALSE;
-      saved = written && saved;
+    if (gDataStorage.mergedVersion != gInput.ledger.version) {
+      ledger.header.input = gInput.ledger;
+      // A restarted InputService begins at epoch 1. Preserve monotonic source
+      // identity for StorageState across complete service replacements too.
+      ledger.header.input.epoch = gDataStorage.sourceEpoch;
+      ledger.daily = gInput.daily;
+      ledger.header.dailyCount = ledger.daily.size();
+      if (!MergeDataUpdate(gDataStorage.model->UpdateCounts(ledger, now))) {
+        RequestInputLedger();
+        return false;
+      }
+      gDataStorage.mergedVersion = gInput.ledger.version;
     }
-    if (saved) {
-      gInput.savedTotal = gInput.ledger.total;
-      for (const auto& day : gInput.daily) gInput.savedDaily[InputDateKey(day.date)] = day.total;
-    }
-    const bool caughtUp = gInput.ledger.countedOperations ==
-            gInput.latest.input.countedOperations &&
-        gInput.ledger.total == gInput.latest.input.total &&
-        gInput.ledger.date == gInput.latest.input.date;
+    const bool caughtUp = gInput.finalCollected ||
+        (gInput.ledger.countedOperations == gInput.latest.input.countedOperations &&
+         gInput.ledger.total == gInput.latest.input.total &&
+         gInput.ledger.today == gInput.latest.input.today &&
+         gInput.ledger.date == gInput.latest.input.date);
     if (!caughtUp) RequestInputLedger();
-    return saved && caughtUp;
+    return caughtUp;
   }
-  if (!gState.currentDay.empty())
-    gState.pendingDailyTotals[gState.currentDay] = gState.todayTotal;
-  bool saved = WritePrivateProfileStringW(L"state", L"total",
-      std::to_wstring(gState.total).c_str(), path.c_str()) != FALSE;
-  for (const auto& day : gState.pendingDailyTotals) {
-    const bool daySaved = WritePrivateProfileStringW(L"daily", day.first.c_str(),
-        std::to_wstring(day.second).c_str(), path.c_str()) != FALSE;
-    saved = daySaved && saved;
+  const auto date = ParseInputDate(gState.currentDay);
+  if (!date) return true;  // Startup has not selected a local day yet.
+  auto days = gDataStorage.model->current().counts.daily;
+  for (const auto& entry : gState.pendingDailyTotals) {
+    const auto day = ParseInputDate(entry.first);
+    if (day) days[day] = entry.second;
   }
-  if (saved) gState.pendingDailyTotals.clear();
-  return saved;
+  days[date] = gState.todayTotal;
+  if (!gDataStorage.sourceEpoch) ++gDataStorage.sourceEpoch;
+  ledger.header.input.ready = true;
+  ledger.header.input.epoch = gDataStorage.sourceEpoch;
+  ledger.header.input.version = ++gDataStorage.fallbackVersion;
+  ledger.header.input.total = gState.total;
+  ledger.header.input.today = gState.todayTotal;
+  ledger.header.input.date = date;
+  ledger.header.input.lastInputMs = gState.lastInputTime;
+  for (const auto& day : days) ledger.daily.push_back({day.first, day.second});
+  ledger.header.dailyCount = ledger.daily.size();
+  if (!MergeDataUpdate(gDataStorage.model->UpdateCounts(ledger, now))) return false;
+  gState.pendingDailyTotals.clear();
+  return true;
+}
+
+void CaptureDataState() {
+  if (!gDataStorage.model || gDataStorage.stopping) return;
+  gDataStorage.mergeFailed = false;
+  const auto now = GetTickCount64();
+  bool accepted = SaveCountState({});
+  RECT rect{};
+  if (gState.window && GetWindowRect(gState.window, &rect))
+    accepted = MergeDataUpdate(gDataStorage.model->UpdateWindow({true, rect.left, rect.top}, now)) && accepted;
+  accepted = MergeDataUpdate(gDataStorage.model->UpdateAppearance(
+      {static_cast<int>(gState.selectedScene), gState.selectedPackId}, now)) && accepted;
+  gState.dirty = !accepted;
+}
+
+void ApplyDataStorageResult(const input_runtime::StorageFileResult& result) {
+  if (!gDataStorage.model || !gDataStorage.inFlight || gDataStorage.inFlight->id != result.id) return;
+  if (!gDataStorage.model->CompleteWrite(result.id, result.success, GetTickCount64())) return;
+  gDataStorage.inFlight.reset();
+  gDataStorage.error = result.success ? ERROR_SUCCESS : result.error;
+  if (result.success) gDataStorage.failureNotified = false;
+  else if (!gDataStorage.closing && !gDataStorage.failureNotified && gState.window) {
+    gDataStorage.failureNotified = true;
+    ShowCountingStatus(gState.window);
+  }
+  RefreshCountingStatus();
+}
+
+void ArmDataStorageTimer() {
+  if (!gState.window || !gDataStorage.model || gDataStorage.readyToDestroy) return;
+  const auto now = GetTickCount64();
+  auto due = gDataStorage.model->NextWriteDue();
+  if (gDataStorage.closing || gDataStorage.stopping || gDataStorage.model->in_flight())
+    due = std::min(due, now + 100);
+  if (gState.dirty || gOffwork.settingsDirty || gDataStorage.mergeFailed)
+    due = std::min(due, now + 500);
+  if (due == std::numeric_limits<std::uint64_t>::max()) {
+    if (gDataStorage.timerArmed) KillTimer(gState.window, kStorageTimer);
+    gDataStorage.timerArmed = false;
+    return;
+  }
+  due = std::max(due, now + 1);
+  if (gDataStorage.timerArmed && gDataStorage.timerDue <= due) return;
+  const auto delay = static_cast<UINT>(std::min<ULONGLONG>(due - now, 30000));
+  gDataStorage.timerArmed = SetTimer(gState.window, kStorageTimer, std::max<UINT>(1, delay), nullptr) != 0;
+  gDataStorage.timerDue = due;
+  if (!gDataStorage.timerArmed) gDataStorage.error = ERROR_NOT_ENOUGH_MEMORY;
+}
+
+void PumpDataStorage(bool force) {
+  if (!gDataStorage.model || !gDataStorage.service || gDataStorage.pumping || gDataStorage.stopping) return;
+  gDataStorage.pumping = true;
+  try {
+    input_runtime::StorageFileResult result;
+    if (gDataStorage.service->TryConsumeResult(result)) ApplyDataStorageResult(result);
+    if (gOffwork.settingsDirty || std::any_of(gOffwork.days.begin(), gOffwork.days.end(),
+        [](const auto& day) { return day.second.dirty; })) FlushOffwork();
+    if (gState.dirty || force) CaptureDataState();
+    auto write = gDataStorage.model->BeginWrite(GetTickCount64(), force);
+    if (write) {
+      const auto submitted = gDataStorage.service->TrySubmit(write);
+      if (submitted == input_runtime::StorageSubmit::Accepted) gDataStorage.inFlight = std::move(write);
+      else {
+        // The request was never accepted. This is distinct from timing out an
+        // accepted writer, which must stay in flight until its real completion.
+        gDataStorage.model->CompleteWrite(write->id, false, GetTickCount64());
+        gDataStorage.error = ERROR_INVALID_STATE;
+      }
+    }
+  } catch (...) {
+    gDataStorage.mergeFailed = true;
+    gDataStorage.error = ERROR_NOT_ENOUGH_MEMORY;
+  }
+  gDataStorage.pumping = false;
+  ArmDataStorageTimer();
+}
+
+bool DataStorageIdle() {
+  if (!gDataStorage.model) return false;
+  return !gState.dirty && !gDataStorage.model->dirty() && !gDataStorage.model->in_flight() &&
+      !gDataStorage.mergeFailed && !gOffwork.settingsDirty &&
+      std::none_of(gOffwork.days.begin(), gOffwork.days.end(), [](const auto& day) { return day.second.dirty; });
 }
 
 void SaveState() {
-  const std::wstring path = DataPath();
-  bool saved = SaveCountState(path);
-  if (path.empty()) return;
-  auto write = [&](const wchar_t* key, const std::wstring& value) {
-    const bool written = WritePrivateProfileStringW(
-        L"state", key, value.c_str(), path.c_str()) != FALSE;
-    saved = written && saved;
-  };
-  RECT rect = {};
-  if (gState.window && GetWindowRect(gState.window, &rect)) {
-    write(L"x", std::to_wstring(rect.left));
-    write(L"y", std::to_wstring(rect.top));
-  }
-  write(L"selected_scene", std::to_wstring(static_cast<int>(gState.selectedScene)));
-  write(L"selected_pack_id", std::wstring(gState.selectedPackId.begin(), gState.selectedPackId.end()));
-  gState.dirty = !saved;
+  gState.dirty = true;
+  PumpDataStorage();
 }
 
 bool LoadPngResource(int resourceId, PngResource& output) {
@@ -1546,7 +1591,7 @@ void EnsureAnimationTimer() {
 }
 
 void CountOneOperation() {
-  if (gInput.authoritative || gInput.loadFailed) return;
+  if (gInput.authoritative || gInput.loadFailed || gDataStorage.closing) return;
   if (EnsureCurrentDay()) {
     RenderLayeredWindow(GetTickCount64());
   }
@@ -1589,6 +1634,7 @@ void CountOneOperation() {
 
   const bool wasRunning = gState.timerRunning;
   EnsureAnimationTimer();
+  ArmDataStorageTimer();
   if (!wasRunning) {
     RenderLayeredWindow(now);
   }
@@ -2066,7 +2112,8 @@ void ApplyInputView(const input_runtime::InputServiceSnapshot& snapshot) {
   if (gState.window && (countsChanged || previousDate != gState.currentDay ||
       previousStrike != gState.striking || previousStart != gState.strikeStarted)) {
     const bool wasRunning = gState.timerRunning;
-    if (gState.striking || gState.dirty) EnsureAnimationTimer();
+    if (gState.striking) EnsureAnimationTimer();
+    ArmDataStorageTimer();
     if (!wasRunning || !gState.striking) RenderLayeredWindow(now);
     if (gCalendar.window) InvalidateRect(gCalendar.window, nullptr, FALSE);
   }
@@ -2095,6 +2142,8 @@ void StopInputService() {
   }
   gInput.ledgerRequest = 0;
   gInput.finalCollected = true;
+  gState.dirty = true;
+  ArmDataStorageTimer();
 }
 
 void ConsumeInputSnapshot() {
@@ -2108,7 +2157,7 @@ void ConsumeInputSnapshot() {
     if (!snapshot.running) {
       StopInputService();
       gState.dirty = true;
-      EnsureAnimationTimer();
+      ArmDataStorageTimer();
       RefreshCountingStatus();
       return;
     }
@@ -2117,11 +2166,15 @@ void ConsumeInputSnapshot() {
   try {
     if (gInput.service->TryConsumeLedger(ledger)) {
       gInput.ledgerRequest = 0;
-      if (ledger.header.status == input_core::LedgerResultStatus::Complete) {
+      if (ledger.header.status == input_core::LedgerResultStatus::Complete &&
+          ledger.header.input.epoch == gInput.latest.input.epoch) {
         gInput.ledger = ledger.header.input;
         gInput.daily.assign(ledger.daily.begin(), ledger.daily.end());
+        gState.dirty = true;
+        PumpDataStorage();
         if (gCalendar.window) InvalidateRect(gCalendar.window, nullptr, FALSE);
-      } else if (ledger.header.status == input_core::LedgerResultStatus::EpochMismatch) {
+      } else if (ledger.header.status == input_core::LedgerResultStatus::EpochMismatch ||
+                 ledger.header.status == input_core::LedgerResultStatus::Complete) {
         RequestInputLedger();
       } else {
         gCountingCheck.deliveryFault = true;
@@ -2170,6 +2223,7 @@ void ConsumeInputSnapshot() {
 }
 
 void RestartGlobalListeners() {
+  if (gDataStorage.closing) return;
   CancelPendingReminder();
   ++gCountingCheck.listenerGeneration;
   gCountingCheck.observedCount = false;
@@ -2206,6 +2260,7 @@ void RestartGlobalListeners() {
     const auto capacity = std::min(input_core::InputCore::kMaximumDayCapacity,
         std::max(input_core::InputCore::kDefaultDayCapacity, options.daily.size() + 366));
     gInput.daily.reserve(capacity);
+    ++gInput.instanceGeneration;
     gInput.service = std::make_unique<input_runtime::InputService>(capacity);
     gInput.finalCollected = false;
     const auto started = gInput.service->Start(options);
@@ -2245,6 +2300,13 @@ void RestartGlobalListeners() {
 }
 
 std::wstring CountingStatusTitle() {
+  if (gDataStorage.closing)
+    return UiText(L"正在保存最后的记录；保存确认后自动退出。请保持程序打开。",
+                  L"Saving the final records. The app will exit after confirmation; keep it open.");
+  if (gDataStorage.error || gDataStorage.mergeFailed ||
+      (gDataStorage.model && gDataStorage.model->save_failed()))
+    return UiText(L"本地保存尚未确认；记录仍保留在内存中，程序会重试。",
+                  L"Local saving is not confirmed. Records remain in memory while the app retries.");
   if (gInput.loadFailed)
     return UiText(L"计数暂停：完整日历记录未读取，请检查本地存储后重试。",
                   L"Counting paused: the complete daily ledger could not be read. Check local storage and retry.");
@@ -2332,7 +2394,8 @@ void RefreshCountingStatus() {
       L"。句柄存在不保证仍在收到输入，请以实际自检为准。\r\n\r\nWindows 安全桌面、会话切换或监听超时可能影响监听。可点“重试监听”，不需要开启 macOS 权限，也不要求管理员提权或关闭安全保护。\r\n\r\n自检仅在内存中保留事件次数与相对时间；不读取或保存具体键值、内容、坐标、应用或窗口信息。不联网。",
       L". A handle alone does not prove input is still arriving; use the check.\r\n\r\nWindows secure desktops, session changes or listener timeouts can affect input. Retry the listener; no macOS permissions, elevation or disabling security is required.\r\n\r\nOnly event counts and relative times are kept in memory, never key values, contents, coordinates, apps or window information. No networking.");
   SetDlgItemTextW(gCountingCheck.window, kStatusText, text.c_str());
-  EnableWindow(GetDlgItem(gCountingCheck.window, kStatusStart), !gCountingCheck.active);
+  EnableWindow(GetDlgItem(gCountingCheck.window, kStatusRetry), !gDataStorage.closing);
+  EnableWindow(GetDlgItem(gCountingCheck.window, kStatusStart), !gCountingCheck.active && !gDataStorage.closing);
 }
 
 void LayoutCountingStatus(HWND window) {
@@ -3041,24 +3104,14 @@ void DrawCalendarText(Gdiplus::Graphics& graphics, const std::wstring& text,
 void ReloadCalendarRange() {
   SYSTEMTIME now{}; GetLocalTime(&now);
   gCalendar.range = niuma::CalendarMonthRange(now.wYear, now.wMonth);
-  // Enumerate recorded keys once on opening/month rollover, never on every count.
-  const std::wstring path = DataPath();
-  if (!path.empty()) {
-    for (const wchar_t* section : {L"daily", L"offwork_daily"}) {
-      std::vector<wchar_t> names(1024);
-      for (;;) {
-        const DWORD copied = GetPrivateProfileStringW(section, nullptr, L"", names.data(),
-            static_cast<DWORD>(names.size()), path.c_str());
-        if (copied < names.size() - 2) break;
-        if (names.size() > MAXDWORD / 2) return;
-        names.resize(names.size() * 2);
-      }
-      for (const wchar_t* key = names.data(); *key; key += std::wcslen(key) + 1) {
-        const bool recorded = wcscmp(section, L"daily") == 0
-            ? ReadDailyTotal(key) > 0 : OffworkDay(key).present;
-        if (recorded) gCalendar.range.IncludeRecordedDay(std::wstring_view(key));
-      }
-    }
+  // All valid historical keys were loaded by the storage worker at startup.
+  if (gDataStorage.model) {
+    for (const auto& entry : gDataStorage.model->current().counts.daily)
+      if (entry.second > 0) gCalendar.range.IncludeRecordedDay(InputDateKey(entry.first));
+  }
+  if (gInput.authoritative) {
+    for (const auto& entry : gInput.daily)
+      if (entry.total > 0) gCalendar.range.IncludeRecordedDay(InputDateKey(entry.date));
   }
   for (const auto& entry : gState.pendingDailyTotals)
     if (entry.second > 0) gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
@@ -3693,17 +3746,11 @@ void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
 
 bool ShowPrivacyNoticeIfNeeded(HWND owner) {
   if (!IsMainWindowAlive(owner)) return false;
-  const std::wstring path = DataPath();
-  if (!path.empty() &&
-      GetPrivateProfileIntW(L"state", L"basic_guide_shown", 0, path.c_str()) == 1) {
-    return true;
-  }
-
+  if (gDataStorage.model && gDataStorage.model->current().guide.basicGuideShown) return true;
   if (!ShowPrivacyNotice(owner) || !IsMainWindowAlive(owner)) return false;
-  if (!path.empty()) {
-    WritePrivateProfileStringW(
-        L"state", L"privacy_shown", L"1", path.c_str());
-    WritePrivateProfileStringW(L"state", L"basic_guide_shown", L"1", path.c_str());
+  if (gDataStorage.model) {
+    MergeDataUpdate(gDataStorage.model->UpdateGuide({true, true}, GetTickCount64()));
+    PumpDataStorage();
   }
   return true;
 }
@@ -3968,6 +4015,7 @@ void ImportOfficialMessages(HWND owner, const std::wstring& filename) {
 }
 
 void ShowContextMenu(HWND window, POINT screenPoint) {
+  if (gDataStorage.closing) { ShowCountingStatus(window); return; }
   HMENU menu = CreatePopupMenu();
   if (menu == nullptr) {
     return;
@@ -4013,8 +4061,87 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   } else if (command == static_cast<int>(kMenuOffwork)) {
     ShowOffworkSettings(window);
   } else if (command == static_cast<int>(kMenuQuit)) {
-    DestroyWindow(window);
+    PostMessageW(window, WM_CLOSE, 0, 0);
   }
+}
+
+void CancelClientClose(HWND window) {
+  gDataStorage.closing = false;
+  gDataStorage.closeNoticeShown = false;
+  gDataStorage.closeFailurePrompt = false;
+  ShutdownBlockReasonDestroy(window);
+  gOffwork.suspended = gDataStorage.wasOffworkSuspended;
+  gOffwork.baselineValid = false;
+  SetTimer(window, kDayTimer, 30000, nullptr);
+  SetTimer(window, kReminderTimer, 1000, nullptr);
+  SyncOffworkTimer();
+  if (!gIsolatedAcceptance) RestartGlobalListeners();
+  ArmDataStorageTimer();
+  RefreshCountingStatus();
+}
+
+void ContinueClientClose(HWND window) {
+  if (!gDataStorage.closing || gDataStorage.readyToDestroy || gDataStorage.closeFailurePrompt) return;
+  if (gDataStorage.model && gDataStorage.service && !gDataStorage.stopping) {
+    PumpDataStorage();
+    if ((gDataStorage.model->save_failed() || gDataStorage.mergeFailed) && !gDataStorage.model->in_flight()) {
+      gDataStorage.closeFailurePrompt = true;
+      const int response = niuma::ui::Message(window,
+          UiText(L"最后的功德和设置尚未保存。选择“重试”继续保存并退出；选择“取消”返回程序，记录会继续保留在内存中。",
+                 L"The final counts and settings have not been saved. Retry to save and exit, or Cancel to keep the app running with the records retained in memory."),
+          WindowTitle(), MB_RETRYCANCEL | MB_ICONWARNING);
+      gDataStorage.closeFailurePrompt = false;
+      if (response != IDRETRY && window && IsWindow(window)) { CancelClientClose(window); return; }
+      PumpDataStorage(true);
+    }
+    if (!DataStorageIdle()) {
+      if (!gDataStorage.model->save_failed() && !gDataStorage.model->in_flight()) PumpDataStorage(true);
+      if (!gDataStorage.closeNoticeShown && GetTickCount64() - gDataStorage.closeStarted >= 5000) {
+        gDataStorage.closeNoticeShown = true;
+        ShowCountingStatus(window);
+      }
+      ArmDataStorageTimer();
+      return;
+    }
+    gDataStorage.stopping = true;
+  }
+  if (gDataStorage.service) {
+    const auto stop = gDataStorage.service->Stop(0);
+    if (stop.hasResult) ApplyDataStorageResult(stop.result);
+    if (!stop.stopped) { ArmDataStorageTimer(); return; }
+  }
+  gDataStorage.readyToDestroy = true;
+  if (gDataStorage.orphanTimer) {
+    KillTimer(nullptr, gDataStorage.orphanTimer); gDataStorage.orphanTimer = 0;
+  }
+  if (window && IsWindow(window)) {
+    ShutdownBlockReasonDestroy(window);
+    DestroyWindow(window);
+  } else PostQuitMessage(0);
+}
+
+void BeginClientClose(HWND window) {
+  if (gDataStorage.closing) { ContinueClientClose(window); return; }
+  gDataStorage.closing = true;
+  gDataStorage.closeStarted = GetTickCount64();
+  gDataStorage.wasOffworkSuspended = gOffwork.suspended;
+  gImportReady = false;
+  // Collect the final complete ledger while both owners and the notification
+  // HWND still exist. No more inputs may race the last saved snapshot.
+  StopInputService();
+  RefreshOffwork(true, true);
+  gOffwork.suspended = true;
+  KillTimer(window, kOffworkTimer); gOffwork.timerRunning = false;
+  KillTimer(window, kDayTimer); KillTimer(window, kReminderTimer);
+  KillTimer(window, kAnimationTimer); gState.timerRunning = false; gState.striking = false;
+  if (gReminderWindow) DestroyWindow(gReminderWindow);
+  SaveState();
+  PumpDataStorage(true);
+  ContinueClientClose(window);
+}
+
+void CALLBACK OrphanStorageTimer(HWND, UINT, UINT_PTR, DWORD) {
+  ContinueClientClose(nullptr);
 }
 
 LRESULT CALLBACK WindowProcedure(
@@ -4067,13 +4194,21 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_TIMER: {
+      if (wParam == kStorageTimer) {
+        KillTimer(window, kStorageTimer); gDataStorage.timerArmed = false;
+        ConsumeInputSnapshot();
+        PumpDataStorage();
+        if (gDataStorage.closing) ContinueClientClose(window);
+        return 0;
+      }
       if (wParam == kAcceptanceExitTimer && gReminderPreviewAcceptance) {
         KillTimer(window, kAcceptanceExitTimer);
-        DestroyWindow(window);
+        BeginClientClose(window);
         return 0;
       }
       if (wParam == kReminderTimer) {
         ConsumeInputSnapshot();  // Also recovers a failed coalesced PostMessage.
+        PumpDataStorage();  // Recover a failed storage timer without synchronous IO.
         const ULONGLONG now = GetTickCount64();
         const auto nowUtc = static_cast<std::int64_t>(std::time(nullptr));
         const auto clockTransition = gState.reminderClockGuard.Observe(nowUtc, now);
@@ -4135,12 +4270,7 @@ LRESULT CALLBACK WindowProcedure(
       if (needsRender) {
         RenderLayeredWindow(now);
       }
-      if (gState.dirty && (gState.lastInputTime == 0 ||
-          now - gState.lastInputTime >= 500) && now - gState.lastSaveAttempt >= 1000) {
-        gState.lastSaveAttempt = now;
-        SaveState();
-      }
-      if (!gState.striking && !gState.dirty) {
+      if (!gState.striking) {
         KillTimer(window, kAnimationTimer);
         gState.timerRunning = false;
       }
@@ -4169,6 +4299,10 @@ LRESULT CALLBACK WindowProcedure(
       ClampWindowToWorkArea();
       RenderLayeredWindow(GetTickCount64());
       if (gReminderWindow != nullptr) PositionReminderWindow(gReminderWindow);
+      return 0;
+
+    case WM_EXITSIZEMOVE:
+      SaveState();
       return 0;
 
     case WM_MOVE:
@@ -4260,37 +4394,48 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
     }
 
+    case WM_CLOSE:
+      BeginClientClose(window);
+      return 0;
+
     case WM_QUERYENDSESSION:
-      RefreshOffwork(true, true);
-      return TRUE;
+      ShutdownBlockReasonCreate(window,
+          UiText(L"正在保存最后的功德记录，请稍候。", L"Saving final merit records. Please wait."));
+      BeginClientClose(window);
+      // Do not claim a completed shutdown while an accepted writer still owns
+      // the file. Windows may offer its own force-close override to the user.
+      return gDataStorage.readyToDestroy ? TRUE : FALSE;
 
     case WM_ENDSESSION:
-      if (wParam != 0) {
-        StopInputService();
-        RefreshOffwork(true, true);
-        SaveState();
-      }
+      if (wParam != 0) BeginClientClose(window);
       return 0;
 
     case WM_DESTROY:
-      // Join before invalidating the notification HWND or saving the ledger.
+      // Known exit routes arrive only after the latest file write and worker
+      // stop are confirmed. Unexpected destruction uses a thread timer to keep
+      // the owner alive; it never abandons an accepted file operation.
       StopInputService();
+      if (!gDataStorage.readyToDestroy) {
+        gDataStorage.closing = true;
+        gDataStorage.closeStarted = GetTickCount64();
+        RefreshOffwork(true, true);
+        SaveState(); PumpDataStorage(true);
+      }
       if (gReminderWindow) DestroyWindow(gReminderWindow);
-      RefreshOffwork(true, true);
       KillTimer(window, kOffworkTimer);
       gOffwork.timerRunning = false;
       UnregisterOffworkSessionNotifications(window);
       if (gOffwork.dialog) EndDialog(gOffwork.dialog, IDCANCEL);
       if (gCountingCheck.window) DestroyWindow(gCountingCheck.window);
-      KillTimer(window, kDayTimer);
-      KillTimer(window, kReminderTimer);
-      if (gState.timerRunning) {
-        KillTimer(window, kAnimationTimer);
-        gState.timerRunning = false;
-      }
-      SaveState();
+      KillTimer(window, kDayTimer); KillTimer(window, kReminderTimer);
+      KillTimer(window, kStorageTimer); gDataStorage.timerArmed = false;
+      KillTimer(window, kAnimationTimer); gState.timerRunning = false;
       gState.window = nullptr;
-      PostQuitMessage(0);
+      if (gDataStorage.readyToDestroy || !gDataStorage.service) PostQuitMessage(0);
+      else {
+        gDataStorage.orphanTimer = SetTimer(nullptr, 0, 100, OrphanStorageTimer);
+        if (!gDataStorage.orphanTimer) PostQuitMessage(0);  // Final owner drain below handles this path.
+      }
       return 0;
 
     default:
@@ -4439,6 +4584,17 @@ int WINAPI wWinMain(
   reminderClass.lpszClassName = kReminderClass;
   RegisterClassExW(&reminderClass);
 
+  if (!InitializeDataStorage()) {
+    niuma::ui::Message(nullptr,
+        UiText(L"本地功德记录未能完整读取，程序已停止启动，原文件没有被覆盖。请检查文件访问权限后重试。",
+               L"Local records could not be fully loaded. Startup stopped and the original file was not overwritten. Check file access and retry."),
+        WindowTitle(), MB_OK | MB_ICONERROR);
+    ReleaseAllPngResources();
+    Gdiplus::GdiplusShutdown(gState.gdiplusToken);
+    ReleaseMutex(gState.mutex); CloseHandle(gState.mutex);
+    if (SUCCEEDED(comResult)) CoUninitialize();
+    return 1;
+  }
   gState.dpi = SystemDpi();
   LoadOffworkSettings();
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
@@ -4515,6 +4671,7 @@ int WINAPI wWinMain(
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
   SetTimer(window, kDayTimer, 30000, nullptr);
   SetTimer(window, kReminderTimer, 1000, nullptr);
+  ArmDataStorageTimer();
   if (!gIsolatedAcceptance) RegisterOffworkSessionNotifications(window);
   if (!SyncOffworkTimer()) {
     niuma::ui::Message(window, UiText(L"无法启动下班倒计时逐秒刷新，请在设置中关闭后重新开启。",
@@ -4537,7 +4694,7 @@ int WINAPI wWinMain(
   }
   if (!gIsolatedAcceptance &&
       !PrepareClientStartup(window, pendingImportFile) && IsMainWindowAlive(window)) {
-    DestroyWindow(window);
+    PostMessageW(window, WM_CLOSE, 0, 0);
   }
   gImportReady = IsMainWindowAlive(window);
   if (gImportReady && !gPendingImports.empty()) PostMessageW(window, kImportQueuedMessage, 0, 0);
@@ -4570,8 +4727,27 @@ int WINAPI wWinMain(
     }
   }
 
+  if (!gDataStorage.readyToDestroy && gDataStorage.service) {
+    if (gState.window) BeginClientClose(gState.window);
+    else {
+      gDataStorage.closing = true;
+      gDataStorage.closeStarted = GetTickCount64();
+      StopInputService(); SaveState(); PumpDataStorage(true);
+    }
+    // WM_QUIT/error can arrive independently of WM_CLOSE. Retain both owners
+    // until their real completion, while continuing to dispatch UI messages.
+    while (!gDataStorage.readyToDestroy) {
+      ContinueClientClose(gState.window);
+      if (gDataStorage.readyToDestroy) break;
+      MsgWaitForMultipleObjectsEx(0, nullptr, 100, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+      MSG pending{};
+      while (PeekMessageW(&pending, nullptr, 0, 0, PM_REMOVE)) {
+        if (pending.message == WM_QUIT) continue;
+        TranslateMessage(&pending); DispatchMessageW(&pending);
+      }
+    }
+  }
   StopInputService();
-  if (gState.window != nullptr) SaveState();
   if (gState.keyboardHook != nullptr) {
     UnhookWindowsHookEx(gState.keyboardHook);
   }

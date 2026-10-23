@@ -28,12 +28,19 @@ LRESULT CALLBACK FixtureProcedure(HWND window, UINT message, WPARAM wp, LPARAM l
   return WindowProcedure(window, message, wp, lp);
 }
 
-std::uint64_t ProfileCount(const std::wstring& section, const std::wstring& key) {
+std::uint64_t ProfileCount(const std::filesystem::path& path,
+                           const std::wstring& section, const std::wstring& key) {
   wchar_t text[64]{};
   GetPrivateProfileStringW(section.c_str(), key.c_str(), L"missing", text,
-      static_cast<DWORD>(std::size(text)), DataPath().c_str());
+      static_cast<DWORD>(std::size(text)), path.c_str());
+  CHECK(text[0] != L'\0');
   std::uint64_t value = 0;
-  CHECK(ParseDailyCount(text, value));
+  for (const wchar_t* character = text; *character; ++character) {
+    CHECK(*character >= L'0' && *character <= L'9');
+    const auto digit = static_cast<unsigned>(*character - L'0');
+    CHECK(value <= (std::numeric_limits<std::uint64_t>::max() - digit) / 10);
+    value = value * 10 + digit;
+  }
   return value;
 }
 
@@ -42,9 +49,11 @@ struct Fixture {
   std::filesystem::path directory;
   std::map<std::wstring, std::uint64_t> expectedDays;
   std::wstring today;
+  unsigned verification = 0;
 
   Fixture(const std::filesystem::path& parent, const wchar_t* name) {
     gInput = InputAdapter{};
+    gDataStorage = DataStorageAdapter{};
     gState = AppState{};
     gCountingCheck = CountingCheck{};
     gOffwork = OffworkState{};
@@ -57,8 +66,8 @@ struct Fixture {
     CHECK(CreateDirectoryW(directory.c_str(), nullptr) != FALSE);
     gAcceptanceRoot = directory.wstring();
     today = InputDateKey(input_runtime::InputService::CaptureLocalDate());
-    // More than the initial 4096-character section buffer: all historical
-    // rows must survive both adapter initialization and its final save.
+    // Larger than the old 4096-character profile buffer: every historical
+    // row must survive the complete preload and the final atomic save.
     for (unsigned year = 1980; year < 2024; ++year) {
       for (unsigned month = 1; month <= 12; ++month) {
         const auto date = year * 10000 + month * 100 + 1;
@@ -78,6 +87,10 @@ struct Fixture {
     CHECK(WritePrivateProfileStringW(L"state", L"total", L"1000", DataPath().c_str()));
     CHECK(WritePrivateProfileStringW(L"state", L"unrelated", L"keep", DataPath().c_str()));
     CHECK(WritePrivateProfileStringW(L"offwork_daily", L"2024-01-02", L"kept", DataPath().c_str()));
+    // Flush/close the fixture writer before the service becomes the sole writer.
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, DataPath().c_str());
+    CHECK(InitializeDataStorage());
+    LoadOffworkSettings();
     gState.total = ReadIniTotal();
     CHECK(EnsureCurrentDay());
     CHECK(gState.todayTotal == 10);
@@ -94,9 +107,30 @@ struct Fixture {
     // Also safe on a failed CHECK: join hooks while the owned HWND still exists.
     StopInputService();
     gCountingCheck.window = nullptr;
+    gDataStorage.pumping = false;
     if (gReminderWindow) DestroyWindow(gReminderWindow);
-    if (window && IsWindow(window)) DestroyWindow(window);
+    if (std::uncaught_exceptions() != 0) {
+      // A failed assertion must exit as failure, not open a human retry dialog.
+      // This fixture owns every byte; join its writer before releasing its HWND.
+      if (gDataStorage.service && !gDataStorage.service->Stop(5000).stopped)
+        std::terminate();
+      gDataStorage.readyToDestroy = true;
+      if (window && IsWindow(window)) DestroyWindow(window);
+      gInput.service.reset();
+      gDataStorage.service.reset();
+      return;
+    }
+    if (window && IsWindow(window)) {
+      BeginClientClose(window);
+      const auto deadline = GetTickCount64() + 10000;
+      while (IsWindow(window) && GetTickCount64() < deadline) Pump();
+      if (IsWindow(window)) {
+        std::cerr << "FAILED isolated client close did not complete\n";
+        std::terminate();
+      }
+    }
     gInput.service.reset();
+    gDataStorage.service.reset();
     MSG message{};
     while (PeekMessageW(&message, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) {}
   }
@@ -108,6 +142,7 @@ struct Fixture {
       TranslateMessage(&message);
       DispatchMessageW(&message);
     }
+    PumpDataStorage();
     MsgWaitForMultipleObjectsEx(0, nullptr, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
   }
   template <typename Predicate>
@@ -122,7 +157,7 @@ struct Fixture {
 
   void Start(bool noMouse = false, bool reminder = false) {
     input_runtime::InputServiceOptions options;
-    // The real loader handles growth, every historical date and INI parsing.
+    // The real preload/model adapter retains every historical date.
     CHECK(LoadInputLedger(options));
     CHECK(options.daily.size() == expectedDays.size());
     CHECK(options.total == 1000 && options.date == ParseInputDate(today));
@@ -146,6 +181,7 @@ struct Fixture {
     CHECK(started.started && started.keyboardError == ERROR_SUCCESS);
     CHECK(noMouse ? started.mouseError == ERROR_ACCESS_DENIED : started.mouseError == ERROR_SUCCESS);
     gInput.authoritative = true;
+    ++gInput.instanceGeneration;
     gInput.reminderConsumed = options.reminderSegmentConsumed;
     gInput.handledReminder = reminder ? 1 : 0;
     gState.pendingDailyTotals.clear();
@@ -174,15 +210,27 @@ struct Fixture {
     Await([&] { return !gInput.ledgerRequest && gInput.ledger.total == total; });
   }
 
+  void DrainStorage() {
+    Await([&] {
+      ConsumeInputSnapshot();
+      PumpDataStorage(true);
+      return DataStorageIdle();
+    });
+  }
+
   void CheckStored(std::uint64_t total, std::uint64_t todayTotal) {
-    CHECK(ProfileCount(L"state", L"total") == total);
-    CHECK(ProfileCount(L"daily", today) == todayTotal);
+    // Read a fresh snapshot path with the legacy profile API. A reader cache
+    // cannot hide a missed replacement of the live data.ini.
+    const auto snapshot = directory / (L"verify-" + std::to_wstring(++verification) + L".ini");
+    CHECK(CopyFileW(DataPath().c_str(), snapshot.c_str(), TRUE));
+    CHECK(ProfileCount(snapshot, L"state", L"total") == total);
+    CHECK(ProfileCount(snapshot, L"daily", today) == todayTotal);
     for (const auto& day : expectedDays)
-      if (day.first != today) CHECK(ProfileCount(L"daily", day.first) == day.second);
+      if (day.first != today) CHECK(ProfileCount(snapshot, L"daily", day.first) == day.second);
     wchar_t kept[32]{};
-    GetPrivateProfileStringW(L"state", L"unrelated", L"", kept, 32, DataPath().c_str());
+    GetPrivateProfileStringW(L"state", L"unrelated", L"", kept, 32, snapshot.c_str());
     CHECK(std::wstring(kept) == L"keep");
-    GetPrivateProfileStringW(L"offwork_daily", L"2024-01-02", L"", kept, 32, DataPath().c_str());
+    GetPrivateProfileStringW(L"offwork_daily", L"2024-01-02", L"", kept, 32, snapshot.c_str());
     CHECK(std::wstring(kept) == L"kept");
   }
 
@@ -212,43 +260,58 @@ void FullLedgerAndFinalSave(const std::filesystem::path& root) {
   fixture.Await([] { return gState.total == 1003; });
   CHECK(gState.todayTotal == 13 && gCountingCheck.observedCount);
   fixture.LedgerAt(1003);
-  CHECK(!SaveCountState((fixture.directory / L"missing" / L"data.ini").wstring()));
-  CHECK(gInput.ledger.total == 1003 && gInput.daily.size() == fixture.expectedDays.size());
   SaveState();
+  fixture.DrainStorage();
   CHECK(!gState.dirty);
   fixture.CheckStored(1003, 13);
 
+  // Block replacement only inside this owned fixture. No writer is in flight.
+  const auto kept = fixture.directory / L"before-failed-save.ini";
+  CHECK(MoveFileW(DataPath().c_str(), kept.c_str()));
+  CHECK(CreateDirectoryW(DataPath().c_str(), nullptr));
+  gState.selectedPackId = "fixture-save-retry";
+  SaveState();
+  PumpDataStorage(true);
+  fixture.Await([] { return gDataStorage.model->save_failed() &&
+      !gDataStorage.model->in_flight(); });
+  CHECK(gDataStorage.model->dirty() && !DataStorageIdle());
+  CHECK(gDataStorage.model->current().counts.total == 1003 &&
+      gInput.daily.size() == fixture.expectedDays.size());
+  CHECK(RemoveDirectoryW(DataPath().c_str()));
+  CHECK(MoveFileW(kept.c_str(), DataPath().c_str()));
+  gState.selectedPackId.clear();
+  SaveState();
+  fixture.DrainStorage();
+  fixture.CheckStored(1003, 13);
+
+  // Hold the storage consumer while input advances. UI total/today must never
+  // get paired with the older full ledger by the real SaveState adapter.
+  gDataStorage.pumping = true;
   fixture.Keys(2);
   fixture.Await([] { return gState.total == 1005; });
   CHECK(gInput.ledger.total == 1003);
-  SaveState();  // A newer UI view cannot be paired with the older daily ledger.
-  CHECK(gState.dirty);
-  fixture.CheckStored(1003, 13);
-  fixture.LedgerAt(1005);
+  gDataStorage.pumping = false;
   SaveState();
-  CHECK(!gState.dirty);
+  CHECK(gState.dirty);
+  CHECK(gDataStorage.model->current().counts.total == 1003 &&
+      gDataStorage.model->current().counts.daily.at(ParseInputDate(fixture.today)) == 13);
+  fixture.LedgerAt(1005);
+  fixture.DrainStorage();
   fixture.CheckStored(1005, 15);
 
+  gDataStorage.pumping = true;
   fixture.Keys(2);
   fixture.Await([] { return gState.total == 1007; });
   CHECK(gInput.ledger.total == 1005);
+  gDataStorage.pumping = false;
   StopInputService();
   CHECK(gInput.finalCollected && !gInput.latest.running);
   CHECK(gInput.ledger.total == 1007 && gState.total == 1007);
   SaveState();
+  fixture.DrainStorage();
   CHECK(!gState.dirty);
   fixture.CheckStored(1007, 17);
-  // Read with the existing INI accessors after disabling the in-memory view.
-  gInput.authoritative = false;
-  gState.currentDay.clear();
-  gState.pendingDailyTotals.clear();
-  CHECK(ReadIniTotal() == 1007 && ReadDailyTotal(fixture.today) == 17);
-  for (const auto& day : fixture.expectedDays)
-    if (day.first != fixture.today) CHECK(ReadDailyTotal(day.first) == day.second);
-  // Restore the final authoritative snapshot for the fixture's ordinary exit.
-  gInput.authoritative = true;
-  ApplyInputView(gInput.latest);
-  std::cout << "PASS full historical ledger, version-consistent save, failed-write retry and final save\n";
+  std::cout << "PASS full historical ledger, version-consistent save, real failed-write retry and final save\n";
 }
 
 void FallbackRestartAndSelfCheck(const std::filesystem::path& root) {
@@ -286,6 +349,7 @@ void FallbackRestartAndSelfCheck(const std::filesystem::path& root) {
   gCountingCheck.window = nullptr;
   StopInputService();
   SaveState();
+  fixture.DrainStorage();
   fixture.CheckStored(1005, 15);
   std::cout << "PASS real fallback, listener retry and owner-aggregated self-check\n";
 }
@@ -325,6 +389,10 @@ void ReminderDiscardedAfterEpochChange(const std::filesystem::path& root) {
     Sleep(1);
   } while (owner.input.epoch == oldEpoch || !owner.input.epoch);
   CHECK(!IsWindowVisible(hidden) && !gReminderWindow);
+  // ReadLatest above was the one consumer of this publication. Hand that
+  // complete view to the real adapter, exactly as ConsumeInputSnapshot does;
+  // a second ReadLatest legitimately reports no NEW publication.
+  ApplyInputView(owner);
   ConsumeInputSnapshot();
   CHECK(!gInput.pendingReminderWindow && !gReminderWindow && !IsWindow(hidden));
   CHECK(gInput.latest.input.epoch == oldEpoch + 1);
@@ -362,6 +430,7 @@ int wmain(int argc, wchar_t** argv) {
     receipt << "{\"status\":\"passed\",\"groups\":4,"
         "\"fullLedgerRows\":529,\"realAdapterPaths\":true,"
         "\"taggedInputOnly\":true,\"diagnosticServiceInstallation\":true,"
+        "\"asyncStorageAdapter\":true,\"normalCloseJoinedOwners\":true,"
         "\"realUserProfile\":false,\"installedAppStarted\":false,"
         "\"humanAcceptance\":false,\"performanceClaim\":false}\n";
     receipt.close();
