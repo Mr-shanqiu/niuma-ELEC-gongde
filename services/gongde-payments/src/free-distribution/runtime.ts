@@ -36,7 +36,8 @@ type CatalogItem = { number: string; title: string; description: string; authorP
   preview?: Record<string, unknown>; firstPublishedAt: string | null; catalogRevision: string;
   deliveryBytesUpperBound: number; canClaim: boolean; snapshot: Snapshot; popularity: number };
 interface Installer { platform: "windows" | "macos"; format: string; releaseId: string; version: string;
-  bytes: number; sha256: string; publicDownloadUrl: string; perpetualCompatible: boolean; }
+  bytes: number; sha256: string; publicDownloadUrl: string; perpetualCompatible: boolean;
+  systemRequirements?: string; }
 export interface DistributionDependencies {
   database: GongdeMySqlConfiguration | null; signer: AppearancePackSigner | null; packages: PrivatePackageStore | null;
   creators: CreatorRuntime; numbers: AppearanceNumberRepository | null;

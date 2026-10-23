@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -140,6 +140,28 @@ test("download counting and report", { timeout: 20000 }, async (t) => {
   /* ---- the redirect target is never taken from the request ---- */
   const traversal = await get("/api/gongde/downloads/..%2F..%2Fetc%2Fpasswd");
   assert.equal(traversal.status, 404);
+
+  /* ---- the published list is the shipped registry file, entry for entry ---- */
+  // The site renders `systemRequirements` when an entry carries one, so the
+  // public list must be the registry with nothing dropped and nothing added.
+  // Checked without the override, the way production reads it.
+  delete process.env.GONGDE_FREE_INSTALLERS_FILE;
+  try {
+    const body = await (await get("/api/gongde/v2/installers")).json();
+    const shipped = JSON.parse(await readFile(
+      new URL("../src/free-distribution/installers.json", import.meta.url), "utf8"));
+    assert.deepEqual(body.data.items, shipped.items,
+      "the public installer list must equal the registry file, optional note included");
+    const annotated = shipped.items.filter((item) => "systemRequirements" in item);
+    const plain = shipped.items.filter((item) => !("systemRequirements" in item));
+    // The comparison only proves both directions while the file has both kinds.
+    assert.ok(annotated.length > 0 && plain.length > 0,
+      "the shipped registry must keep entries with and without a note");
+    assert.ok(annotated.every((item) => typeof item.systemRequirements === "string"),
+      "notes must be strings in the shipped registry");
+  } finally {
+    process.env.GONGDE_FREE_INSTALLERS_FILE = registryFile;
+  }
 
   /* ---- seed events on both sides of the counting start and of a day boundary ---- */
   cos.objects.clear();
