@@ -111,18 +111,40 @@ struct InputService::Impl {
     const HINSTANCE module = GetModuleHandleW(nullptr);
     keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, Keyboard, module, 0);
     view.keyboardError = keyboard ? ERROR_SUCCESS : GetLastError();
-    mouse = SetWindowsHookExW(WH_MOUSE_LL, Mouse, module, 0);
-    view.mouseError = mouse ? ERROR_SUCCESS : GetLastError();
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+    if (options.diagnostic.forceMouseUnavailable) {
+      mouse = nullptr;
+      view.mouseError = ERROR_ACCESS_DENIED;
+    } else
+#endif
+    {
+      mouse = SetWindowsHookExW(WH_MOUSE_LL, Mouse, module, 0);
+      view.mouseError = mouse ? ERROR_SUCCESS : GetLastError();
+    }
     core.SetListenerHealth(keyboard != nullptr, mouse != nullptr);
     accepting = keyboard != nullptr || mouse != nullptr;
   }
 
   ObserveResult Observe(InputKind kind, bool injected, ULONGLONG now,
-                        client::core::LocalDate date) noexcept {
+                        client::core::LocalDate date, bool global = true) noexcept {
+    auto& check = view.selfCheck;
+    const bool observing = global && kind != InputKind::KeyUp && check.active &&
+        now >= check.startsMs && now < check.endsMs;
+    const bool expected = kind != InputKind::Scroll || core.StartsScrollGesture(now);
     // Finish an elapsed action before considering this input; no historical
     // frame or UI message needs to be replayed for the core to make progress.
     core.AdvanceAnimation(now);
     const auto result = core.Observe(InputEvent{kind, injected, now, date});
+    if (global && result == ObserveResult::Counted) view.observedGlobalCount = true;
+    if (observing) {
+      if (kind == InputKind::KeyDown) ++check.keys;
+      else if (kind == InputKind::Click) ++check.clicks;
+      else ++check.scrolls;
+      ++check.handled;
+      if (expected) ++check.expected;
+      if (result == ObserveResult::Counted) ++check.counted;
+      check.lastRelativeMs = now - check.startsMs;
+    }
     Publish(now);
     return result;
   }
@@ -166,7 +188,15 @@ struct InputService::Impl {
     Impl* self = owner;
     if (self && self->accepting && code == HC_ACTION && data) {
 #if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
-      if (self->options.diagnostic.tagMask) return CallNextHookEx(nullptr, code, message, data);
+      const auto& diagnostic = self->options.diagnostic;
+      if (diagnostic.tagMask) {
+        const auto* tagged = reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
+        const unsigned sequence = static_cast<unsigned>(tagged->dwExtraInfo & 0xffff);
+        if (!diagnostic.allowTaggedMouse ||
+            (tagged->dwExtraInfo & diagnostic.tagMask) != diagnostic.tagValue ||
+            sequence == 0 || sequence > diagnostic.maximumSequence)
+          return CallNextHookEx(nullptr, code, message, data);
+      }
 #endif
       InputKind kind;
       switch (message) {
@@ -188,14 +218,59 @@ struct InputService::Impl {
   void Apply(const InputCommand& command, ULONGLONG now) noexcept {
     view.lastCommandId = command.id;
     view.commandError = ERROR_SUCCESS;
+    if (command.kind == InputCommandKind::ConfirmReminder) {
+      auto& result = view.reminderConfirmation;
+      if (!command.id) {
+        view.commandError = ERROR_INVALID_PARAMETER;
+        Publish(now);
+        return;
+      }
+      // Repeated or late commands cannot replace a newer retained result.
+      if (command.id && command.id <= result.commandId) {
+        if (command.id != result.commandId || command.expectedEpoch != result.epoch ||
+            command.opportunityId != result.opportunityId)
+          view.commandError = ERROR_REVISION_MISMATCH;
+        else
+          view.commandError = result.error;
+        Publish(now);
+        return;
+      }
+      result = {};
+      result.commandId = command.id;
+      result.epoch = command.expectedEpoch;
+      result.opportunityId = command.opportunityId;
+      const bool matches = command.id && command.expectedEpoch && command.opportunityId &&
+          command.expectedEpoch == core.snapshot().epoch &&
+          command.expectedEpoch == view.pendingReminderEpoch &&
+          command.opportunityId == view.pendingReminderId &&
+          view.pendingReminder != Trigger::None;
+      const bool available = keyboard && mouse && !clockGuard &&
+          !core.snapshot().reminderSuspended && core.snapshot().reminderSegmentConsumed;
+      result.confirmed = matches && available;
+      result.error = result.confirmed ? ERROR_SUCCESS : ERROR_REVISION_MISMATCH;
+      view.commandError = result.error;
+      if (result.confirmed) ClearOpportunity();
+      Publish(now);
+      return;
+    }
     if (command.expectedEpoch && command.expectedEpoch != core.snapshot().epoch) {
       view.commandError = ERROR_REVISION_MISMATCH;
+      if (command.kind == InputCommandKind::BeginSelfCheck) {
+        view.selfCheck = {};
+        view.selfCheck.generation = command.selfCheckGeneration;
+        view.selfCheck.epoch = command.expectedEpoch;
+        view.selfCheck.cancelled = true;
+        view.selfCheck.error = view.commandError;
+      }
       Publish(now);
       return;
     }
     switch (command.kind) {
       case InputCommandKind::RestartListeners:
         ClearOpportunity();
+        view.observedGlobalCount = false;
+        view.selfCheck.active = false;
+        view.selfCheck.cancelled = view.selfCheck.generation != 0;
         if (!Uninstall()) {
           view.commandError = final.cleanupError;
           // The owning thread exits, letting Windows finish removing any
@@ -241,6 +316,35 @@ struct InputService::Impl {
         else
           ClearOpportunity();
         break;
+      case InputCommandKind::LocalFallbackClick:
+        if (!command.expectedEpoch || command.capturedMs > now ||
+            !InputCore::ValidDate(command.capturedDate))
+          view.commandError = ERROR_INVALID_PARAMETER;
+        else if (!mouse) {
+          // The UI captured the accounting date. Animation uses dispatch time
+          // so an asynchronously delivered click cannot regress the hook clock.
+          // injected=true excludes this local fallback from reminder activity.
+          Observe(InputKind::Click, true, now, command.capturedDate, false);
+        }
+        break;
+      case InputCommandKind::BeginSelfCheck: {
+        auto& check = view.selfCheck;
+        check = {};
+        check.generation = command.selfCheckGeneration;
+        check.epoch = command.expectedEpoch;
+        if (!command.expectedEpoch || !command.selfCheckGeneration || command.capturedMs > now ||
+            command.capturedMs > std::numeric_limits<ULONGLONG>::max() - 12000) {
+          check.error = ERROR_INVALID_PARAMETER;
+        } else {
+          check.startsMs = command.capturedMs + 2000;
+          check.endsMs = check.startsMs + 10000;
+          check.error = now >= check.startsMs ? ERROR_TIMEOUT : ERROR_SUCCESS;
+        }
+        check.active = check.error == ERROR_SUCCESS;
+        check.cancelled = !check.active;
+        view.commandError = check.error;
+        break;
+      }
       default: view.commandError = ERROR_INVALID_PARAMETER; break;
     }
     Publish(now);
@@ -258,6 +362,10 @@ struct InputService::Impl {
       if (shutdownRequested) return;
     }
     now = GetTickCount64();
+    if (view.selfCheck.active && now >= view.selfCheck.endsMs) {
+      view.selfCheck.active = false;
+      Publish(now);
+    }
     const auto oldVersion = core.snapshot().version;
     core.AdvanceAnimation(now);
     if (now >= nextReminder) {
@@ -285,6 +393,7 @@ struct InputService::Impl {
     const auto& state = core.snapshot();
     if (state.striking)
       due = std::min(due, state.strikeStartedMs + static_cast<ULONGLONG>(state.strikeDurationMs));
+    if (view.selfCheck.active) due = std::min(due, view.selfCheck.endsMs);
     if (notifyDirty && options.notificationWindow) due = std::min(due, nextNotify);
     return due <= now ? 0 : static_cast<DWORD>(std::min<ULONGLONG>(due - now, 1000));
   }
@@ -294,6 +403,16 @@ struct InputService::Impl {
     MSG message{};
     PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
     Install();
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+    // Isolated contract-test admission only; production builds cannot seed an
+    // opportunity or bypass the activity sampler and durable UI reservation.
+    if (options.diagnostic.seedReminderOpportunity) {
+      core.RestoreReminderSegmentConsumed(true);
+      view.pendingReminder = Trigger::LongBusy;
+      view.pendingReminderId = ++nextOpportunityId;
+      view.pendingReminderEpoch = core.snapshot().epoch;
+    }
+#endif
     live.store(true, std::memory_order_release);
     view.running = true;
     const auto now = GetTickCount64();
@@ -327,6 +446,10 @@ struct InputService::Impl {
     }
     Uninstall();
     ledger.Close(core.snapshot());
+    if (view.selfCheck.active) {
+      view.selfCheck.active = false;
+      view.selfCheck.cancelled = GetTickCount64() < view.selfCheck.endsMs;
+    }
     view.running = false;
     ClearOpportunity();
     // No loop remains to retry a throttled terminal notification. Preserve the

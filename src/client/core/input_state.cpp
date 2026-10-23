@@ -205,13 +205,17 @@ ObserveResult InputCore::Observe(const InputEvent& event) noexcept {
   }
   if (event.kind == InputKind::KeyUp) return ObserveResult::Ignored;
   if (event.kind == InputKind::Scroll) {
-    const bool startsGesture = !hasScrollTime_ ||
-        event.monotonicMs - view_.lastScrollMs > kScrollGestureGapMs;
+    const bool startsGesture = StartsScrollGesture(event.monotonicMs);
     hasScrollTime_ = true;
     view_.lastScrollMs = event.monotonicMs;
     if (!startsGesture) return ObserveResult::Ignored;
   }
   return Count(event.monotonicMs, event.date);
+}
+
+bool InputCore::StartsScrollGesture(std::uint64_t monotonicMs) const noexcept {
+  return !hasScrollTime_ || (monotonicMs >= view_.lastScrollMs &&
+      monotonicMs - view_.lastScrollMs > kScrollGestureGapMs);
 }
 
 void InputCore::AdvanceAnimation(std::uint64_t monotonicMs) noexcept {

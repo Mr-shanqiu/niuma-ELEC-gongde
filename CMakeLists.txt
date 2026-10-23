@@ -70,8 +70,14 @@ if(WIN32)
   target_link_libraries(niuma-input-service-probe PRIVATE niuma-input-core Threads::Threads user32)
   target_compile_definitions(niuma-input-service-probe PRIVATE
     NIUMA_INPUT_SERVICE_DIAGNOSTICS UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+  add_executable(niuma-input-contract-test
+    scripts/test-windows-input-service-contract.cpp
+    src/windows/runtime/input_service.cpp)
+  target_link_libraries(niuma-input-contract-test PRIVATE niuma-input-core Threads::Threads user32)
+  target_compile_definitions(niuma-input-contract-test PRIVATE
+    NIUMA_INPUT_SERVICE_DIAGNOSTICS UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
   if(MSVC)
-    foreach(input_target niuma-windows-input niuma-input-service-probe)
+    foreach(input_target niuma-windows-input niuma-input-service-probe niuma-input-contract-test)
       target_compile_options(${input_target} PRIVATE /W4 /permissive- /utf-8)
       set_property(TARGET ${input_target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endforeach()

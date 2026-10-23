@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-check]
 
 permissions:
   contents: read
@@ -20,6 +20,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-runtime-contract:
+    if: ${{ inputs.mode == 'runtime-contract' }}
+    runs-on: windows-2022
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build new owner-side fallback, self-check and reminder confirmation contract
+        shell: pwsh
+        run: |
+          cmake -S . -B build-contract -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Contract configuration failed" }
+          cmake --build build-contract --config Release --target niuma-input-contract-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Contract compilation failed" }
+      - name: Test only new service contracts with tagged input in owned windows
+        shell: pwsh
+        run: |
+          & ./build-contract/Release/niuma-input-contract-test.exe | Tee-Object build-contract/input-contract.txt
+          if ($LASTEXITCODE -ne 0) { throw "New input contract failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-input-contract-${{ github.sha }}
+          path: build-contract/input-contract.txt
+          if-no-files-found: warn
+          retention-days: 14
+
   windows-runtime-p0:
     if: ${{ inputs.mode == 'runtime-p0' || inputs.mode == 'runtime-check' }}
     runs-on: windows-2022

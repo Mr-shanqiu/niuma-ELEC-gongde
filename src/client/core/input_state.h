@@ -106,6 +106,9 @@ class InputCore {
   std::size_t daily_size() const noexcept { return dayCount_; }
   std::size_t daily_capacity() const noexcept { return dayCapacity_; }
   bool GetDailyTotal(LocalDate date, std::uint64_t& value) const noexcept;
+  // Owner-only diagnostic expectation; uses the same gesture boundary as
+  // Observe, including a valid first pulse captured at monotonic time zero.
+  bool StartsScrollGesture(std::uint64_t monotonicMs) const noexcept;
   // Returns required size. If capacity is insufficient, writes nothing.
   // Output order is unspecified. Only call on the owner, outside callbacks.
   std::size_t CopyDailyTotals(DailyTotal* output, std::size_t capacity) const noexcept;

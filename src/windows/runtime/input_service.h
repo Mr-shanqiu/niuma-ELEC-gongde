@@ -20,6 +20,9 @@ struct InputDiagnosticOptions {
   unsigned maximumSequence = 0;
   void* context = nullptr;
   void (*onCountedKey)(void*, unsigned, LONGLONG, LONGLONG) noexcept = nullptr;
+  bool forceMouseUnavailable = false;
+  bool allowTaggedMouse = false;
+  bool seedReminderOpportunity = false;
 };
 #endif
 
@@ -50,6 +53,9 @@ enum class InputCommandKind : std::uint8_t {
   SetClockGuard,
   RestoreReminderSegmentConsumed,
   ClearReminderOpportunity,
+  LocalFallbackClick,
+  BeginSelfCheck,
+  ConfirmReminder,
 };
 
 // One UI/control producer. A full bounded mailbox returns false; the caller
@@ -60,9 +66,30 @@ struct InputCommand {
   std::uint64_t expectedEpoch = 0;  // 0 for lifecycle commands; otherwise checked.
   std::uint64_t opportunityId = 0;
   std::uint64_t inactiveDurationMs = 0;
+  std::uint64_t capturedMs = 0;
+  client::core::LocalDate capturedDate = 0;
+  std::uint64_t selfCheckGeneration = 0;
   bool enabled = false;
   bool pairedSignal = false;
   bool durationTrusted = false;
+};
+
+struct InputSelfCheck {
+  std::uint64_t generation = 0, epoch = 0;
+  std::uint64_t startsMs = 0, endsMs = 0;
+  std::uint64_t keys = 0, clicks = 0, scrolls = 0;
+  std::uint64_t handled = 0, expected = 0, counted = 0, lastRelativeMs = 0;
+  DWORD error = ERROR_SUCCESS;
+  bool active = false, cancelled = false;
+};
+
+// Retained independently of lastCommandId. UI keeps only one unacknowledged
+// confirmation; after a durable reminder reservation, it checks this tuple AND
+// the currently observed input epoch before showing the already prepared popup.
+struct ReminderConfirmation {
+  std::uint64_t commandId = 0, epoch = 0, opportunityId = 0;
+  DWORD error = ERROR_SUCCESS;
+  bool confirmed = false;
 };
 
 struct InputServiceSnapshot {
@@ -76,6 +103,9 @@ struct InputServiceSnapshot {
   DWORD mouseError = ERROR_SUCCESS;
   DWORD notificationError = ERROR_SUCCESS;
   DWORD commandError = ERROR_SUCCESS;
+  InputSelfCheck selfCheck;
+  ReminderConfirmation reminderConfirmation;
+  bool observedGlobalCount = false;
   bool running = false;
 };
 
@@ -117,10 +147,10 @@ class InputService {
   std::unique_ptr<Impl> impl_;
 };
 
-// A pendingReminder is only a reservation request. This P1 service neither
-// commits reminder storage nor authorizes a popup. The later UI/storage adapter
-// must preserve reserve/consume semantics, validate epoch/id on the async
-// confirmation, and only then show a reminder. No product persistence is used
-// by this service or its probe.
+// A pendingReminder is only a reservation request. The UI/storage adapter must
+// first durably consume/reserve using ReminderStore; only then may it send
+// ConfirmReminder. The returned confirmation validates the still-current
+// opportunity and listener state, not disk durability. On failure do not replay
+// the reservation or show the popup. No product persistence runs in this service.
 
 }  // namespace niuma::windows::runtime
