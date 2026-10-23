@@ -153,9 +153,9 @@ inline LRESULT CALLBACK SurfaceProcedure(HWND window, UINT message, WPARAM wPara
     HDC dc = reinterpret_cast<HDC>(wParam); SetTextColor(dc, kInk); SetBkColor(dc, RGB(255, 255, 255));
     return reinterpret_cast<LRESULT>(WhiteBrush());
   }
-  if (message == WM_ERASEBKGND) {
-    RECT rect{}; GetClientRect(window, &rect); FillRect(reinterpret_cast<HDC>(wParam), &rect, CanvasBrush()); return 1;
-  }
+  // Let a buffered page suppress erasure in its own window procedure. Clearing
+  // here used to expose an empty canvas before the page's completed frame.
+  // Native dialogs still erase through DefDlgProc and WM_CTLCOLORDLG above.
   if (message == WM_NCDESTROY) {
     if (HFONT font = reinterpret_cast<HFONT>(RemovePropW(window, L"NiuMaUiFont"))) DeleteObject(font);
     RemoveWindowSubclass(window, SurfaceProcedure, 60);
@@ -167,6 +167,8 @@ inline void Apply(HWND window) {
   HFONT font = reinterpret_cast<HFONT>(GetPropW(window, L"NiuMaUiFont"));
   if (!font) {
     font = Font(Dpi(window)); SetPropW(window, L"NiuMaUiFont", font);
+    // A parent background repaint must not blank its native child controls.
+    SetWindowLongPtrW(window, GWL_STYLE, GetWindowLongPtrW(window, GWL_STYLE) | WS_CLIPCHILDREN);
     SetWindowSubclass(window, SurfaceProcedure, 60, 0); WindowChrome(window);
   }
   EnumChildWindows(window, [](HWND child, LPARAM data) -> BOOL {
@@ -252,9 +254,18 @@ inline LRESULT CALLBACK MenuChromeHook(int code, WPARAM wParam, LPARAM lParam) {
   return CallNextHookEx(nullptr, code, wParam, lParam);
 }
 inline int TrackMenu(HMENU menu, UINT flags, POINT point, HWND owner) {
+  const HWND previous = GetForegroundWindow();
+  // A no-activate desktop widget is normally not the foreground window.
+  // Native popup menus need a foreground owner to dismiss on outside clicks.
+  SetForegroundWindow(owner);
   HHOOK hook = SetWindowsHookExW(WH_CALLWNDPROC, MenuChromeHook, nullptr, GetCurrentThreadId());
   const int result = TrackPopupMenu(menu, flags, point.x, point.y, 0, owner, nullptr);
   if (hook) UnhookWindowsHookEx(hook);
+  PostMessageW(owner, WM_NULL, 0, 0);
+  // Escape/cancel should return focus; an outside click may already have
+  // activated another window, in which case leave that user choice intact.
+  if (previous && previous != owner && IsWindow(previous) && GetForegroundWindow() == owner)
+    SetForegroundWindow(previous);
   return result;
 }
 struct MenuItem { const wchar_t* text; const wchar_t* icon; bool checked; bool dividerBefore; };

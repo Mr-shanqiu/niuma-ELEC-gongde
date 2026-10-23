@@ -3551,7 +3551,9 @@ INT_PTR CALLBACK AboutDialogProcedure(HWND window, UINT message,
             / state->douyin.image->GetHeight())));
       }
       niuma::ui::Apply(window);
-      niuma::ui::Card(window, UiText(L"关于牛马电子功德", L"About NiuMa Merit"), UiText(L"关闭", L"Close"));
+      niuma::ui::Card(window, IsRuntimeCandidate()
+          ? UiText(L"关于牛马电子功德 · 独立测试", L"About NiuMa Merit · Development Test")
+          : UiText(L"关于牛马电子功德", L"About NiuMa Merit"), UiText(L"关闭", L"Close"));
       const HWND textControl = GetDlgItem(window, 3001);
       state->font = reinterpret_cast<HFONT>(
           SendMessageW(textControl, WM_GETFONT, 0, 0));
