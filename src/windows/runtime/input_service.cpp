@@ -329,6 +329,9 @@ struct InputService::Impl {
     ledger.Close(core.snapshot());
     view.running = false;
     ClearOpportunity();
+    // No loop remains to retry a throttled terminal notification. Preserve the
+    // one-pending-wake protocol but attempt this final publication immediately.
+    nextNotify = 0;
     Publish(GetTickCount64());
     final.snapshot = view;
     const auto count = core.CopyDailyTotals(final.daily.data(), final.daily.size());
