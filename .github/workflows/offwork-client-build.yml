@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-metrics, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -55,7 +55,7 @@ jobs:
           retention-days: 14
 
   windows-runtime-build:
-    if: ${{ inputs.mode == 'runtime-build' }}
+    if: ${{ inputs.mode == 'runtime-build' || inputs.mode == 'runtime-about' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -67,6 +67,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Candidate configuration failed" }
           cmake --build build-candidate --config Release --target niuma-runtime-candidate --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Candidate compilation failed" }
+          if ('${{ inputs.mode }}' -eq 'runtime-about') {
+            cmake --build build-candidate --config Release --target niuma-about-preview --parallel 2
+            if ($LASTEXITCODE -ne 0) { throw "About preview compilation failed" }
+            New-Item -ItemType Directory -Path build-candidate/evidence | Out-Null
+            & ./build-candidate/Release/niuma-about-preview.exe (Join-Path $PWD 'build-candidate/evidence')
+            if ($LASTEXITCODE -ne 0) { throw "About page preview failed" }
+          }
       - name: Bind the executable and updated static resource
         shell: python
         run: |
@@ -87,6 +94,7 @@ jobs:
           path: |
             build-candidate/Release/niuma-runtime-candidate.exe
             build-candidate/BUILD_BINDING.json
+            build-candidate/evidence/**
           if-no-files-found: error
           retention-days: 14
 
