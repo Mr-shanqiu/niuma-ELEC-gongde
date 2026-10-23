@@ -170,6 +170,7 @@ struct Fixture {
     options.diagnostic.maximumSequence = 64;
     options.diagnostic.forceMouseUnavailable = noMouse;
     options.diagnostic.seedReminderOpportunity = reminder;
+    gInput.diagnostic = options.diagnostic;
     // Only installation differs from the production startup wrapper: its
     // diagnostic admission excludes physical user input and may force no mouse.
     gInput.daily = options.daily;
@@ -283,6 +284,11 @@ void FullLedgerAndFinalSave(const std::filesystem::path& root) {
   SaveState();
   fixture.DrainStorage();
   fixture.CheckStored(1003, 13);
+  // The real save-failure UI opens its owned status window once. Close that
+  // window and reclaim our fixture before sending any diagnostic keystrokes.
+  if (gCountingCheck.window) DestroyWindow(gCountingCheck.window);
+  SetForegroundWindow(fixture.window);
+  fixture.Await([&] { return GetForegroundWindow() == fixture.window; });
 
   // Hold the storage consumer while input advances. UI total/today must never
   // get paired with the older full ledger by the real SaveState adapter.
@@ -403,6 +409,76 @@ void ReminderDiscardedAfterEpochChange(const std::filesystem::path& root) {
   CHECK(recent.size() == 1);  // Cancellation did not undo/replay its reservation.
   std::cout << "PASS stale epoch destroys hidden reminder without replay\n";
 }
+
+void SessionQueryCancellation(const std::filesystem::path& root) {
+  {
+    Fixture fixture(root, L"session-query");
+    fixture.Start();
+    fixture.Keys(1);
+    fixture.Await([] { return gState.total == 1001; });
+    auto* const writer = gDataStorage.service.get();
+    // These messages go only to our owned fixture HWND, never to the OS.
+    CHECK(WindowProcedure(fixture.window, WM_QUERYENDSESSION, 0, 0) == TRUE);
+    CHECK(IsWindow(fixture.window) && gDataStorage.sessionQueryPending &&
+        gDataStorage.closing && !gDataStorage.stopping && !gDataStorage.readyToDestroy);
+    CHECK(gDataStorage.service.get() == writer && writer->running());
+    CHECK(!gInput.service->running() && DataStorageIdle() && !gImportReady);
+    fixture.CheckStored(1001, 11);
+    WindowProcedure(fixture.window, WM_ENDSESSION, FALSE, 0);
+    CHECK(IsWindow(fixture.window) && !gDataStorage.closing &&
+        !gDataStorage.sessionQueryPending && gImportReady);
+    CHECK(gInput.service->running() && writer->running());
+    fixture.Keys(2);
+    fixture.Await([] { return gState.total == 1003; });
+    fixture.DrainStorage();
+    fixture.CheckStored(1003, 13);
+
+    // Retain an accepted write without consuming its completion. QUERY must
+    // time out, keep that exact request owned, and resume rather than exit.
+    gState.selectedPackId = "session-pending-write";
+    gState.dirty = true;
+    PumpDataStorage(true);
+    CHECK(gDataStorage.inFlight && gDataStorage.model->in_flight());
+    const auto acceptedId = gDataStorage.inFlight->id;
+    gDataStorage.pumping = true;
+    const auto queryStarted = GetTickCount64();
+    CHECK(WindowProcedure(fixture.window, WM_QUERYENDSESSION, 0, 0) == FALSE);
+    CHECK(GetTickCount64() - queryStarted < 4000);
+    CHECK(IsWindow(fixture.window) && !gDataStorage.closing &&
+        !gDataStorage.sessionQueryPending && !gDataStorage.stopping && gImportReady);
+    CHECK(gDataStorage.service.get() == writer && writer->running() &&
+        gDataStorage.inFlight && gDataStorage.inFlight->id == acceptedId &&
+        gDataStorage.model->in_flight() && gInput.service->running());
+    // Windows may still send END(FALSE) after our own timeout veto.
+    WindowProcedure(fixture.window, WM_ENDSESSION, FALSE, 0);
+    CHECK(!gDataStorage.closing && gInput.service->running());
+    gDataStorage.pumping = false;
+    fixture.Keys(1);
+    fixture.Await([] { return gState.total == 1004; });
+    fixture.DrainStorage();
+    fixture.CheckStored(1004, 14);
+
+    CHECK(WindowProcedure(fixture.window, WM_QUERYENDSESSION, 0, 0) == TRUE);
+    CHECK(IsWindow(fixture.window) && writer->running());
+    WindowProcedure(fixture.window, WM_ENDSESSION, TRUE, 0);
+    fixture.Await([&] { return !IsWindow(fixture.window); });
+    CHECK(gDataStorage.readyToDestroy && !writer->running());
+    fixture.CheckStored(1004, 14);
+  }
+  {
+    Fixture fixture(root, L"explicit-close");
+    fixture.Start();
+    gDataStorage.pumping = true;
+    WindowProcedure(fixture.window, WM_CLOSE, 0, 0);
+    CHECK(gDataStorage.closing && !gDataStorage.sessionQueryPending);
+    WindowProcedure(fixture.window, WM_ENDSESSION, FALSE, 0);
+    CHECK(gDataStorage.closing && !gDataStorage.sessionQueryPending);
+    gDataStorage.pumping = false;
+    fixture.Await([&] { return !IsWindow(fixture.window); });
+    CHECK(gDataStorage.readyToDestroy);
+  }
+  std::cout << "PASS system query cancel/timeout resumes counting and saving; accepted write retained; only confirmed end destroys HWND\n";
+}
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -425,12 +501,14 @@ int wmain(int argc, wchar_t** argv) {
     FallbackRestartAndSelfCheck(root);
     ReminderShownOnlyAfterConfirmation(root);
     ReminderDiscardedAfterEpochChange(root);
+    SessionQueryCancellation(root);
     std::ofstream receipt(root / L"RUNTIME_APP_RESULT.json");
     CHECK(receipt.good());
-    receipt << "{\"status\":\"passed\",\"groups\":4,"
+    receipt << "{\"status\":\"passed\",\"groups\":5,"
         "\"fullLedgerRows\":529,\"realAdapterPaths\":true,"
         "\"taggedInputOnly\":true,\"diagnosticServiceInstallation\":true,"
         "\"asyncStorageAdapter\":true,\"normalCloseJoinedOwners\":true,"
+        "\"syntheticShutdownCancellation\":true,\"actualSystemShutdown\":false,"
         "\"realUserProfile\":false,\"installedAppStarted\":false,"
         "\"humanAcceptance\":false,\"performanceClaim\":false}\n";
     receipt.close();

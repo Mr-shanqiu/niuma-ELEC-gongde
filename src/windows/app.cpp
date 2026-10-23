@@ -210,6 +210,9 @@ struct InputAdapter {
   ULONGLONG previewUntil = 0;
   bool authoritative = false, loadFailed = false, finalCollected = false;
   bool reminderConsumed = false, controlFault = false;
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+  input_runtime::InputDiagnosticOptions diagnostic;
+#endif
 };
 InputAdapter gInput;
 
@@ -220,6 +223,7 @@ struct DataStorageAdapter {
   DWORD error = ERROR_SUCCESS;
   bool mergeFailed = false, timerArmed = false, pumping = false;
   bool closing = false, stopping = false, readyToDestroy = false;
+  bool sessionQueryPending = false, sessionResumeInput = false;
   bool closeNoticeShown = false, closeFailurePrompt = false;
   bool failureNotified = false;
   bool wasOffworkSuspended = false;
@@ -2257,6 +2261,10 @@ void RestartGlobalListeners() {
     }
     options.notificationWindow = gState.window;
     options.notificationMessage = kInputSnapshotMessage;
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+    options.diagnostic = gInput.diagnostic;
+    options.diagnostic.seedReminderOpportunity = false;
+#endif
     const auto capacity = std::min(input_core::InputCore::kMaximumDayCapacity,
         std::max(input_core::InputCore::kDefaultDayCapacity, options.daily.size() + 366));
     gInput.daily.reserve(capacity);
@@ -4066,6 +4074,10 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
 }
 
 void CancelClientClose(HWND window) {
+  const bool resumeInput = !gIsolatedAcceptance ||
+      (gDataStorage.sessionQueryPending && gDataStorage.sessionResumeInput);
+  gDataStorage.sessionQueryPending = false;
+  gDataStorage.sessionResumeInput = false;
   gDataStorage.closing = false;
   gDataStorage.closeNoticeShown = false;
   gDataStorage.closeFailurePrompt = false;
@@ -4075,13 +4087,16 @@ void CancelClientClose(HWND window) {
   SetTimer(window, kDayTimer, 30000, nullptr);
   SetTimer(window, kReminderTimer, 1000, nullptr);
   SyncOffworkTimer();
-  if (!gIsolatedAcceptance) RestartGlobalListeners();
+  if (resumeInput) RestartGlobalListeners();
+  gImportReady = window && IsWindow(window);
+  if (gImportReady && !gPendingImports.empty()) PostMessageW(window, kImportQueuedMessage, 0, 0);
   ArmDataStorageTimer();
   RefreshCountingStatus();
 }
 
 void ContinueClientClose(HWND window) {
-  if (!gDataStorage.closing || gDataStorage.readyToDestroy || gDataStorage.closeFailurePrompt) return;
+  if (!gDataStorage.closing || gDataStorage.readyToDestroy || gDataStorage.closeFailurePrompt ||
+      gDataStorage.sessionQueryPending) return;
   if (gDataStorage.model && gDataStorage.service && !gDataStorage.stopping) {
     PumpDataStorage();
     if ((gDataStorage.model->save_failed() || gDataStorage.mergeFailed) && !gDataStorage.model->in_flight()) {
@@ -4120,8 +4135,8 @@ void ContinueClientClose(HWND window) {
   } else PostQuitMessage(0);
 }
 
-void BeginClientClose(HWND window) {
-  if (gDataStorage.closing) { ContinueClientClose(window); return; }
+void PrepareClientClose(HWND window) {
+  if (gDataStorage.closing) return;
   gDataStorage.closing = true;
   gDataStorage.closeStarted = GetTickCount64();
   gDataStorage.wasOffworkSuspended = gOffwork.suspended;
@@ -4137,7 +4152,53 @@ void BeginClientClose(HWND window) {
   if (gReminderWindow) DestroyWindow(gReminderWindow);
   SaveState();
   PumpDataStorage(true);
+}
+
+void BeginClientClose(HWND window) {
+  // A user's explicit exit supersedes a pending system query. A later
+  // WM_ENDSESSION(FALSE) must not cancel that independently requested exit.
+  gDataStorage.sessionQueryPending = false;
+  gDataStorage.sessionResumeInput = false;
+  PrepareClientClose(window);
   ContinueClientClose(window);
+}
+
+bool PrepareSessionEnd(HWND window) {
+  if (gDataStorage.readyToDestroy) return true;
+  if (!gDataStorage.closing) {
+    gDataStorage.sessionQueryPending = true;
+    gDataStorage.sessionResumeInput = gInput.service && gInput.service->running();
+    PrepareClientClose(window);
+  }
+  ShutdownBlockReasonCreate(window,
+      UiText(L"正在保存最后的功德记录，请稍候。", L"Saving final merit records. Please wait."));
+  // QUERY is preparation, not permission to destroy the window or stop its
+  // writer. A normal local flush gets a short bounded opportunity to finish;
+  // cancellation/timeout leaves accepted writes owned by the live service.
+  const auto deadline = GetTickCount64() + 2000;
+  while (IsWindow(window) && gDataStorage.closing && !DataStorageIdle() &&
+      GetTickCount64() < deadline) {
+    PumpDataStorage(true);
+    if (DataStorageIdle()) break;
+    if (gDataStorage.model && gDataStorage.model->save_failed() &&
+        !gDataStorage.model->in_flight()) break;
+    MSG message{};
+    for (unsigned count = 0; count < 32 &&
+        PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++count) {
+      if (message.message == WM_QUIT) {
+        PostQuitMessage(static_cast<int>(message.wParam));
+        break;
+      }
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+    if (gDataStorage.closing && !DataStorageIdle())
+      MsgWaitForMultipleObjectsEx(0, nullptr, 10, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+  }
+  const bool ready = gDataStorage.readyToDestroy ||
+      (gDataStorage.closing && DataStorageIdle());
+  if (!ready && gDataStorage.sessionQueryPending) CancelClientClose(window);
+  return ready;
 }
 
 void CALLBACK OrphanStorageTimer(HWND, UINT, UINT_PTR, DWORD) {
@@ -4399,15 +4460,11 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_QUERYENDSESSION:
-      ShutdownBlockReasonCreate(window,
-          UiText(L"正在保存最后的功德记录，请稍候。", L"Saving final merit records. Please wait."));
-      BeginClientClose(window);
-      // Do not claim a completed shutdown while an accepted writer still owns
-      // the file. Windows may offer its own force-close override to the user.
-      return gDataStorage.readyToDestroy ? TRUE : FALSE;
+      return PrepareSessionEnd(window) ? TRUE : FALSE;
 
     case WM_ENDSESSION:
       if (wParam != 0) BeginClientClose(window);
+      else if (gDataStorage.sessionQueryPending) CancelClientClose(window);
       return 0;
 
     case WM_DESTROY:
