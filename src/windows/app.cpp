@@ -18,6 +18,7 @@
 #include "render_cache.h"
 #include "runtime/input_service.h"
 #include "runtime/storage_service.h"
+#include "runtime/appearance_service.h"
 #include "app_version.h"
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
@@ -39,6 +40,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <iterator>
 #include <string>
 #include <unordered_set>
@@ -79,6 +81,7 @@ constexpr wchar_t kRunValue[] = L"NiuMaMerit";
 constexpr UINT kCountMessage = WM_APP + 1;
 constexpr UINT kScrollMessage = WM_APP + 2;
 constexpr UINT kInputSnapshotMessage = WM_APP + 70;
+constexpr UINT kAppearanceReadyMessage = WM_APP + 71;
 constexpr UINT kImportQueuedMessage = WM_APP + 32;
 constexpr ULONG_PTR kPackFileCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
@@ -88,6 +91,7 @@ constexpr UINT_PTR kReminderTimer = 4;
 constexpr UINT_PTR kReminderDismissTimer = 5;
 constexpr UINT_PTR kAcceptanceExitTimer = 6;
 constexpr UINT_PTR kStorageTimer = 7;
+constexpr UINT_PTR kAppearanceTimer = 8;
 constexpr UINT kOffworkSessionChange = 0x02B1;  // WM_WTSSESSION_CHANGE
 constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
@@ -271,6 +275,11 @@ bool DataStorageIdle();
 void BeginClientClose(HWND window);
 void ContinueClientClose(HWND window);
 void ShowCountingStatus(HWND owner);
+void PumpAppearanceResources();
+void QueueVisibleThumbnails();
+void CancelAppearanceRequests();
+bool StopAppearanceResources();
+bool RequestCurrentAppearance(const std::string& id, bool preview = true, bool force = false);
 
 bool KeyboardListenerAvailable() {
   return gInput.authoritative ? gInput.latest.running &&
@@ -354,6 +363,20 @@ PngResource gSeaLionFlipper;
 PngResource gHamsterHabitat;
 PngResource gHamsterActor;
 niuma::AppearanceCatalog gAppearanceCatalog;
+
+struct AppearanceAdapter {
+  std::unique_ptr<input_runtime::AppearanceService> service;
+  std::unique_ptr<niuma::AppearancePack> current;
+  niuma::AppearanceThumbnailCache thumbnails;
+  std::unique_ptr<Gdiplus::Bitmap> builtinThumbnail;
+  std::optional<input_runtime::AppearanceLoadRequest> currentRequest, thumbnailRequest;
+  std::vector<niuma::AppearanceResourceRequest> failedThumbnails;
+  std::uint64_t nextRequest = 0, generation = 1;
+  float currentDensity = 0;
+  bool currentPreview = false, timerArmed = false, stopping = false;
+  std::wstring error;
+};
+AppearanceAdapter gAppearance;
 
 struct PickerState {
   HWND window = nullptr;
@@ -723,9 +746,7 @@ niuma::AppearancePack* CurrentAppearancePack() {
     gState.selectedScene = MeritScene::Woodfish;
     gState.dirty = true;
   }
-  return gState.selectedPackId.empty()
-      ? nullptr
-      : gAppearanceCatalog.Find(gState.selectedPackId);
+  return gAppearance.current.get();
 }
 
 std::wstring DateKey(const SYSTEMTIME& date) {
@@ -1494,6 +1515,12 @@ void ReleasePngResource(PngResource& resource) {
 }
 
 void ReleaseAllPngResources() {
+  // Normal exit has already joined the worker. No GDI+ object may outlive
+  // GdiplusShutdown, including the detached current pack and picker cache.
+  gAppearance.current.reset();
+  gAppearance.thumbnails.Clear();
+  gAppearance.builtinThumbnail.reset();
+  gAppearance.service.reset();
   niuma::ClearAppearanceRenderCache();
   gWidgetGlyphCache.Clear();
   gLayeredSurface.Reset();
@@ -1652,7 +1679,6 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now,
   if (appearancePack != nullptr) {
     niuma::DrawAppearancePack(graphics, *appearancePack, progress);
   } else {
-    niuma::ClearAppearanceRenderCache();
     DrawSceneArtwork(graphics, gState.selectedScene, strikeAmount);
   }
 
@@ -1772,6 +1798,235 @@ void RenderLayeredWindow(ULONGLONG now) {
       RGB(0, 0, 0), &blend, ULW_ALPHA);
 
   ReleaseDC(nullptr, screen);
+}
+
+bool SameAppearanceSource(const niuma::AppearanceResourceRequest& left,
+                          const niuma::AppearanceResourceRequest& right) {
+  return left.id == right.id && left.sourcePath == right.sourcePath &&
+      left.contentFingerprint == right.contentFingerprint;
+}
+
+bool CatalogStillMatches(const niuma::AppearanceResourceRequest& source) {
+  const auto* metadata = gAppearanceCatalog.Find(source.id);
+  return metadata && metadata->sourcePath == source.sourcePath &&
+      metadata->contentFingerprint == source.contentFingerprint;
+}
+
+void ArmAppearanceTimer() {
+  if (!gState.window || !gAppearance.service) return;
+  const auto state = gAppearance.service->Snapshot();
+  const bool work = state.activeId || state.pendingId || state.readyId ||
+      (gAppearance.stopping && !state.stopped);
+  if (!work) {
+    if (gAppearance.timerArmed) KillTimer(gState.window, kAppearanceTimer);
+    gAppearance.timerArmed = false;
+  } else if (!gAppearance.timerArmed) {
+    gAppearance.timerArmed = SetTimer(gState.window, kAppearanceTimer, 100, nullptr) != 0;
+  }
+}
+
+void ReportAppearanceFailure(const std::wstring& detail) {
+  gAppearance.error = detail.empty()
+      ? UiText(L"形象未能准备完成，原有形象保持不变。请重新选择或导入原包。",
+               L"The appearance could not be prepared. The previous appearance is unchanged; select it again or import the original pack.")
+      : detail;
+  if (gState.window && (!gIsolatedAcceptance || IsRuntimeCandidate()))
+    niuma::ui::Message(gState.window, gAppearance.error.c_str(),
+        UiText(L"形象未切换", L"Appearance Unchanged"), MB_OK | MB_ICONWARNING);
+}
+
+bool InitializeAppearanceResources() {
+  if (gAppearance.service) return !gAppearance.stopping;
+  gAppearance.service = std::make_unique<input_runtime::AppearanceService>();
+  const auto started = gAppearance.service->Start({gState.window, kAppearanceReadyMessage});
+  if (started.started) return true;
+  gAppearance.service.reset();
+  ReportAppearanceFailure(UiText(L"后台形象准备未能启动，内置木鱼仍可使用。请关闭后重新打开程序。",
+      L"Background appearance preparation could not start. The built-in woodfish remains available; restart the app to retry."));
+  return false;
+}
+
+void CancelAppearanceRequests() {
+  ++gAppearance.generation;
+  gAppearance.currentRequest.reset();
+  gAppearance.thumbnailRequest.reset();
+  gAppearance.failedThumbnails.clear();
+  gAppearance.currentPreview = false;
+}
+
+void StartAppearancePreview(bool preview) {
+  if (preview) {
+    gState.striking = true;
+    gState.strikeStarted = GetTickCount64();
+    gState.strikeDurationMs = 800;
+    gInput.previewUntil = gState.strikeStarted + 800;
+    EnsureAnimationTimer();
+  }
+  gArtworkValid = false;
+  RenderLayeredWindow(GetTickCount64());
+}
+
+bool RequestCurrentAppearance(const std::string& id, bool preview, bool force) {
+  if (gDataStorage.closing || gAppearance.stopping) return false;
+  if (id.empty()) {
+    CancelAppearanceRequests();
+    gAppearance.current.reset();
+    gAppearance.currentDensity = 0;
+    gState.selectedPackId.clear();
+    gState.selectedScene = MeritScene::Woodfish;
+    gAppearance.error.clear();
+    SaveState();
+    StartAppearancePreview(preview);
+    QueueVisibleThumbnails();
+    return true;
+  }
+  const auto* metadata = gAppearanceCatalog.Find(id);
+  if (!metadata) {
+    ReportAppearanceFailure(UiText(L"所选形象已不在本地目录中，当前形象保持不变。请重新导入原包。",
+        L"The selected appearance is no longer in the local catalog. The current appearance is unchanged; import the original pack again."));
+    return false;
+  }
+  const float density = static_cast<float>(gState.windowWidth) / kDesignWidth;
+  if (!force && gAppearance.current && gAppearance.current->id == id &&
+      gAppearance.current->contentFingerprint == metadata->contentFingerprint &&
+      gAppearance.currentDensity == density) {
+    CancelAppearanceRequests();
+    StartAppearancePreview(preview);
+    QueueVisibleThumbnails();
+    return true;
+  }
+  if (!InitializeAppearanceResources()) return false;
+  input_runtime::AppearanceLoadRequest request;
+  request.id = ++gAppearance.nextRequest;
+  request.generation = gAppearance.generation + 1;
+  request.kind = input_runtime::AppearanceLoadKind::Current;
+  request.source = niuma::RequestAppearanceResources(*metadata);
+  request.animationOptions.pixelDensity = density;
+  const auto submitted = gAppearance.service->TrySubmit(request);
+  if (!submitted.accepted()) {
+    ReportAppearanceFailure(UiText(L"形象准备请求未被接纳，当前形象保持不变。请稍后再试。",
+        L"The appearance request was not accepted. The current appearance is unchanged; retry shortly."));
+    return false;
+  }
+  CancelAppearanceRequests();
+  gAppearance.currentRequest = std::move(request);
+  gAppearance.currentPreview = preview;
+  gAppearance.error.clear();
+  ArmAppearanceTimer();
+  if (gPicker.window) InvalidateRect(gPicker.window, nullptr, FALSE);
+  return true;
+}
+
+bool ThumbnailFailed(const niuma::AppearanceResourceRequest& source) {
+  return std::any_of(gAppearance.failedThumbnails.begin(), gAppearance.failedThumbnails.end(),
+      [&](const auto& failed) { return SameAppearanceSource(failed, source); });
+}
+
+void RememberThumbnailFailure(const niuma::AppearanceResourceRequest& source) {
+  if (gAppearance.failedThumbnails.size() < 64 && !ThumbnailFailed(source))
+    gAppearance.failedThumbnails.push_back(source);
+}
+
+void QueueVisibleThumbnails() {
+  if (!gPicker.window || !IsWindow(gPicker.window) || gDataStorage.closing ||
+      gAppearance.stopping || gAppearance.currentRequest || gAppearance.thumbnailRequest ||
+      gAppearance.failedThumbnails.size() >= 64 || !gAppearance.service) return;
+  const int first = std::max(1, gPicker.scrollRow * 2);
+  const int last = std::min(static_cast<int>(gAppearanceCatalog.packs().size()) + 1,
+      gPicker.scrollRow * 2 + 8);  // At most eight visible cards; cache holds twelve.
+  for (int index = first; index < last; ++index) {
+    const auto source = niuma::RequestAppearanceResources(*gAppearanceCatalog.packs()[index - 1]);
+    if (gAppearance.thumbnails.Find(source) || ThumbnailFailed(source)) continue;
+    input_runtime::AppearanceLoadRequest request;
+    request.id = ++gAppearance.nextRequest;
+    request.generation = gAppearance.generation;
+    request.kind = input_runtime::AppearanceLoadKind::Thumbnail;
+    request.source = source;
+    const auto submitted = gAppearance.service->TrySubmit(request);
+    if (submitted.accepted()) {
+      gAppearance.thumbnailRequest = std::move(request);
+      ArmAppearanceTimer();
+    }
+    return;
+  }
+}
+
+void ApplyAppearanceLoadResult(input_runtime::AppearanceLoadResult result) {
+  if (gDataStorage.closing || gAppearance.stopping || !result.request) return;
+  if (gAppearance.currentRequest && result.Matches(*gAppearance.currentRequest) &&
+      result.request->generation == gAppearance.generation) {
+    const bool preview = gAppearance.currentPreview;
+    gAppearance.currentRequest.reset();
+    gAppearance.currentPreview = false;
+    if (!result.ready() || !CatalogStillMatches(result.request->source)) {
+      if (gPicker.window) InvalidateRect(gPicker.window, nullptr, FALSE);
+      ReportAppearanceFailure(result.detail);
+      return;
+    }
+    gAppearance.current = std::move(result.animation);
+    gAppearance.currentDensity = result.request->animationOptions.pixelDensity;
+    gState.selectedPackId = gAppearance.current->id;
+    gState.selectedScene = MeritScene::Woodfish;
+    gAppearance.error.clear();
+    SaveState();  // A requested id is never persisted before preparation succeeds.
+    StartAppearancePreview(preview);
+  } else if (gAppearance.thumbnailRequest && result.Matches(*gAppearance.thumbnailRequest) &&
+      result.request->generation == gAppearance.generation) {
+    gAppearance.thumbnailRequest.reset();
+    if (!result.ready() || !CatalogStillMatches(result.request->source) ||
+        !gAppearance.thumbnails.Put(std::move(result.thumbnail)))
+      RememberThumbnailFailure(result.request->source);
+  }
+  if (gPicker.window) InvalidateRect(gPicker.window, nullptr, FALSE);
+}
+
+void PumpAppearanceResources() {
+  if (!gAppearance.service) return;
+  input_runtime::AppearanceLoadResult result;
+  while (gAppearance.service->TryConsumeResult(result))
+    ApplyAppearanceLoadResult(std::move(result));
+  QueueVisibleThumbnails();
+  ArmAppearanceTimer();
+}
+
+bool StopAppearanceResources() {
+  if (!gAppearance.service) return true;
+  if (!gAppearance.stopping) {
+    gAppearance.stopping = true;
+    CancelAppearanceRequests();
+  }
+  const auto stopped = gAppearance.service->Stop(0);
+  input_runtime::AppearanceLoadResult discarded;
+  while (gAppearance.service->TryConsumeResult(discarded)) discarded = {};
+  ArmAppearanceTimer();
+  return stopped.stopped;
+}
+
+void AppearanceCatalogChanged() {
+  const std::string desired = gAppearance.currentRequest
+      ? gAppearance.currentRequest->source.id : gState.selectedPackId;
+  const bool preview = gAppearance.currentRequest && gAppearance.currentPreview;
+  CancelAppearanceRequests();
+  gAppearance.thumbnails.Clear();
+  if (!desired.empty()) {
+    const auto* metadata = gAppearanceCatalog.Find(desired);
+    if (metadata && (!gAppearance.current || gAppearance.current->id != desired ||
+        gAppearance.current->contentFingerprint != metadata->contentFingerprint))
+      RequestCurrentAppearance(desired, preview);
+  }
+  QueueVisibleThumbnails();
+}
+
+void PrepareBuiltinThumbnail() {
+  if (gAppearance.builtinThumbnail || !gFish.image || !gMallet.image) return;
+  auto thumbnail = std::make_unique<Gdiplus::Bitmap>(240, 250, PixelFormat32bppARGB);
+  if (thumbnail->GetLastStatus() != Gdiplus::Ok) return;
+  Gdiplus::Graphics graphics(thumbnail.get());
+  graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
+  graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+  graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+  DrawSceneArtwork(graphics, MeritScene::Woodfish, 0.0f);
+  gAppearance.builtinThumbnail = std::move(thumbnail);
 }
 
 void EnsureAnimationTimer() {
@@ -3548,33 +3803,46 @@ void DrawAppearancePicker(HDC dc, HDC updateDc, const RECT& client) {
     graphics.FillPath(&background, &cardPath);
     graphics.DrawPath(&border, &cardPath);
 
-    Gdiplus::Bitmap thumbnail(240, 250, PixelFormat32bppARGB);
-    Gdiplus::Graphics thumbnailGraphics(&thumbnail);
-    thumbnailGraphics.Clear(Gdiplus::Color(0, 0, 0, 0));
-    thumbnailGraphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-    thumbnailGraphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-    if (index == 0) {
-      DrawSceneArtwork(thumbnailGraphics, MeritScene::Woodfish, 0.0f);
-    } else {
-      niuma::DrawAppearancePack(
-          thumbnailGraphics,
-          *gAppearanceCatalog.packs()[static_cast<size_t>(index - 1)], 0.0f);
+    Gdiplus::Image* thumbnail = gAppearance.builtinThumbnail.get();
+    bool failed = false;
+    if (index != 0) {
+      const auto source = niuma::RequestAppearanceResources(
+          *gAppearanceCatalog.packs()[static_cast<size_t>(index - 1)]);
+      const auto* cached = gAppearance.thumbnails.Find(source);
+      thumbnail = cached ? cached->image.image.get() : nullptr;
+      failed = ThumbnailFailed(source);
     }
     // Fit the original canvas inside the preview area without stretching it.
     const float previewWidth = static_cast<float>(ScaleDip(116, dpi));
     const float previewHeight = static_cast<float>(ScaleDip(76, dpi));
-    const float previewScale = std::min(previewWidth / thumbnail.GetWidth(),
-                                        previewHeight / thumbnail.GetHeight());
-    const float imageWidth = thumbnail.GetWidth() * previewScale;
-    const float imageHeight = thumbnail.GetHeight() * previewScale;
-    graphics.DrawImage(&thumbnail, Gdiplus::RectF(
-        static_cast<float>(card.left + ScaleDip(20, dpi)) + (previewWidth - imageWidth) / 2,
-        static_cast<float>(card.top + ScaleDip(22, dpi)) + (previewHeight - imageHeight) / 2,
-        imageWidth, imageHeight));
+    if (thumbnail) {
+      const float previewScale = std::min(previewWidth / thumbnail->GetWidth(),
+                                          previewHeight / thumbnail->GetHeight());
+      const float imageWidth = thumbnail->GetWidth() * previewScale;
+      const float imageHeight = thumbnail->GetHeight() * previewScale;
+      graphics.DrawImage(thumbnail, Gdiplus::RectF(
+          static_cast<float>(card.left + ScaleDip(20, dpi)) + (previewWidth - imageWidth) / 2,
+          static_cast<float>(card.top + ScaleDip(22, dpi)) + (previewHeight - imageHeight) / 2,
+          imageWidth, imageHeight));
+    } else {
+      Gdiplus::Font font(L"Microsoft YaHei UI", static_cast<float>(ScaleDip(12, dpi)),
+          Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+      Gdiplus::SolidBrush ink(Gdiplus::Color(255, 105, 110, 118));
+      Gdiplus::StringFormat format;
+      format.SetAlignment(Gdiplus::StringAlignmentCenter);
+      format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+      graphics.DrawString(failed ? UiText(L"预览不可用", L"Preview unavailable") :
+          UiText(L"准备预览中", L"Preparing preview"), -1, &font,
+          Gdiplus::RectF(static_cast<float>(card.left + ScaleDip(10, dpi)),
+              static_cast<float>(card.top + ScaleDip(22, dpi)),
+              static_cast<float>(ScaleDip(136, dpi)), previewHeight), &format, &ink);
+    }
     std::wstring badge;
     if (index == CurrentPickerIndex()) badge = UiText(L"当前", L"Current");
     if (index > 0) {
       const auto& id = gAppearanceCatalog.packs()[static_cast<size_t>(index - 1)]->id;
+      if (gAppearance.currentRequest && gAppearance.currentRequest->source.id == id)
+        badge = UiText(L"准备中", L"Preparing");
       if (std::find(gNewlyImportedIds.begin(), gNewlyImportedIds.end(), id) != gNewlyImportedIds.end()) {
         if (!badge.empty()) badge += L" / ";
         badge += UiText(L"本次新增", L"New");
@@ -3671,6 +3939,7 @@ LRESULT CALLBACK PickerWindowProcedure(
     }
     case WM_PAINT:
       PaintAppearancePicker(window);
+      QueueVisibleThumbnails();
       return 0;
     case WM_LBUTTONUP: {
       const POINT point = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
@@ -3703,6 +3972,7 @@ LRESULT CALLBACK PickerWindowProcedure(
         const UINT dpi = gState.dpi == 0 ? 96 : gState.dpi;
         const RECT grid = {0, 0, ScaleDip(360, dpi), ScaleDip(442, dpi)};
         InvalidateRect(window, &grid, FALSE);
+        QueueVisibleThumbnails();
       }
       return 0;
     }
@@ -3731,13 +4001,8 @@ LRESULT CALLBACK PickerWindowProcedure(
           niuma::ui::Message(window, error.c_str(), WindowTitle(), MB_OK | MB_ICONERROR);
           return 0;
         }
-        if (gState.selectedPackId == id) {
-          gState.selectedPackId.clear();
-          gState.selectedScene = MeritScene::Woodfish;
-          gState.dirty = true;
-          SaveState();
-          RenderLayeredWindow(GetTickCount64());
-        }
+        if (gState.selectedPackId == id) RequestCurrentAppearance({}, false);
+        AppearanceCatalogChanged();
         gPicker.pendingIndex = std::min(
             gPicker.pendingIndex, std::max(0, PickerItemCount() - 1));
         InvalidateRect(window, nullptr, FALSE);
@@ -3766,6 +4031,13 @@ void ShowAppearancePicker(HWND owner) {
     SetForegroundWindow(gPicker.window);
     return;
   }
+  std::wstring catalogError;
+  gAppearanceCatalog.ReloadMetadata(AppearanceDirectory(), &catalogError);
+  AppearanceCatalogChanged();
+  if (!catalogError.empty()) ReportAppearanceFailure(catalogError);
+  gPicker.pendingIndex = CurrentPickerIndex();
+  PrepareBuiltinThumbnail();
+  if (!gAppearanceCatalog.packs().empty()) InitializeAppearanceResources();
   gPicker.scrollRow = std::max(0, gPicker.pendingIndex / 2 - 2);
   for (size_t i = 0; i < gAppearanceCatalog.packs().size(); ++i) {
     if (std::find(gLastImportedIds.begin(), gLastImportedIds.end(),
@@ -3801,6 +4073,7 @@ void ShowAppearancePicker(HWND owner) {
   niuma::ui::Apply(gPicker.window);
   EnableWindow(owner, FALSE);
   ShowWindow(gPicker.window, SW_SHOW);
+  QueueVisibleThumbnails();
   MSG message = {};
   while (IsWindow(gPicker.window)) {
     const BOOL result = GetMessageW(&message, nullptr, 0, 0);
@@ -3818,21 +4091,12 @@ void ShowAppearancePicker(HWND owner) {
   gPicker.window = nullptr;
   if (gPicker.confirmed) {
     if (gPicker.pendingIndex == 0) {
-      gState.selectedScene = MeritScene::Woodfish;
-      gState.selectedPackId.clear();
+      RequestCurrentAppearance({});
     } else {
       const size_t packIndex = static_cast<size_t>(gPicker.pendingIndex - 1);
       if (packIndex >= gAppearanceCatalog.packs().size()) return;
-      gState.selectedPackId = gAppearanceCatalog.packs()[packIndex]->id;
+      RequestCurrentAppearance(gAppearanceCatalog.packs()[packIndex]->id);
     }
-    gState.dirty = true;
-    gState.striking = true;
-    gState.strikeStarted = GetTickCount64();
-    gState.strikeDurationMs = 800;
-    gInput.previewUntil = gState.strikeStarted + 800;
-    SaveState();
-    EnsureAnimationTimer();
-    RenderLayeredWindow(gState.strikeStarted);
   }
 }
 
@@ -3902,20 +4166,18 @@ void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
       details += UiText(L"本次新增", L"New in this import");
     }
   }
-  const bool singleEnabled = !batch && installed && gLastImportedIds.size() == 1;
-  if (singleEnabled) {
-    gState.selectedPackId = gLastImportedIds.front();
-    gState.dirty = true;
-    SaveState();
-  }
+  AppearanceCatalogChanged();
+  const bool singleRequested = !batch && installed && gLastImportedIds.size() == 1;
+  const bool singleAccepted = singleRequested && RequestCurrentAppearance(gLastImportedIds.front(), false);
   // Refresh the current pack without implicitly selecting the last batch member.
   RenderLayeredWindow(GetTickCount64());
   if (gPicker.window && IsWindow(gPicker.window)) {
     gPicker.pendingIndex = CurrentPickerIndex();
     InvalidateRect(gPicker.window, nullptr, FALSE);
   }
-  std::wstring message = singleEnabled
-      ? UiText(L"导入完成，已启用此形象。", L"Imported and enabled.")
+  std::wstring message = singleAccepted
+      ? UiText(L"导入完成，正在准备形象；准备成功后自动启用，失败时保留当前形象。",
+               L"Imported. The appearance is being prepared and will be enabled when ready; a preparation failure keeps the current appearance.")
       : UiText(L"当前形象未改变。只有确认选择后才会切换。", L"Current appearance unchanged. Confirm a selection to switch.");
   message += UiText(L"\n本次可用形象：", L"\nPacks available from this import: ") +
       std::to_wstring(gLastImportedIds.size()) + details;
@@ -3926,14 +4188,14 @@ void ImportAppearancePack(HWND owner, const std::wstring& sourcePath,
                      L"\nOther valid packs, counts and calendar are unchanged. Select the original file or download it again.");
   }
   const bool canChoose = !gLastImportedIds.empty();
-  if (canChoose && !singleEnabled)
+  if (canChoose && !singleRequested)
     message += UiText(L"\n\n现在打开形象列表选择吗？", L"\n\nOpen the appearance list to choose now?");
   if (showSuccess || !installed || !error.empty()) {
     const int response = niuma::ui::Message(owner, message.c_str(),
         !installed ? (canChoose ? UiText(L"部分形象已导入", L"Some Packs Imported")
                                : UiText(L"未能导入形象", L"No Packs Imported"))
                    : WindowTitle(),
-        (canChoose && !singleEnabled ? MB_YESNO : MB_OK) |
+        (canChoose && !singleRequested ? MB_YESNO : MB_OK) |
         (!installed || !error.empty() ? MB_ICONWARNING : MB_ICONINFORMATION));
     if (response == IDYES && IsMainWindowAlive(owner)) ShowAppearancePicker(owner);
   }
@@ -4285,6 +4547,7 @@ void CancelClientClose(HWND window) {
   gImportReady = window && IsWindow(window);
   if (gImportReady && !gPendingImports.empty()) PostMessageW(window, kImportQueuedMessage, 0, 0);
   ArmDataStorageTimer();
+  PumpAppearanceResources();
   RefreshCountingStatus();
 }
 
@@ -4319,6 +4582,7 @@ void ContinueClientClose(HWND window) {
     if (stop.hasResult) ApplyDataStorageResult(stop.result);
     if (!stop.stopped) { ArmDataStorageTimer(); return; }
   }
+  if (!StopAppearanceResources()) { ArmDataStorageTimer(); return; }
   gDataStorage.readyToDestroy = true;
   if (gDataStorage.orphanTimer) {
     KillTimer(nullptr, gDataStorage.orphanTimer); gDataStorage.orphanTimer = 0;
@@ -4335,6 +4599,9 @@ void PrepareClientClose(HWND window) {
   gDataStorage.closeStarted = GetTickCount64();
   gDataStorage.wasOffworkSuspended = gOffwork.suspended;
   gImportReady = false;
+  // Pending selection is not a committed appearance. Retain the old prepared
+  // pack during a cancellable system query and ignore its superseded result.
+  CancelAppearanceRequests();
   // Collect the final complete ledger while both owners and the notification
   // HWND still exist. No more inputs may race the last saved snapshot.
   StopInputService();
@@ -4416,6 +4683,11 @@ LRESULT CALLBACK WindowProcedure(
       ConsumeInputSnapshot();
       return 0;
 
+    case kAppearanceReadyMessage:
+      PumpAppearanceResources();
+      if (gDataStorage.closing) ContinueClientClose(window);
+      return 0;
+
     case kCountMessage:
       CountGlobalDelivery(false, lParam, wParam);
       return 0;
@@ -4449,6 +4721,12 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_TIMER: {
+      if (wParam == kAppearanceTimer) {
+        KillTimer(window, kAppearanceTimer); gAppearance.timerArmed = false;
+        PumpAppearanceResources();
+        if (gDataStorage.closing) ContinueClientClose(window);
+        return 0;
+      }
       if (wParam == kStorageTimer) {
         KillTimer(window, kStorageTimer); gDataStorage.timerArmed = false;
         ConsumeInputSnapshot();
@@ -4543,6 +4821,9 @@ LRESULT CALLBACK WindowProcedure(
           gState.windowWidth, gState.windowHeight,
           SWP_NOZORDER | SWP_NOACTIVATE);
       ClampWindowToWorkArea();
+      const std::string requested = gAppearance.currentRequest
+          ? gAppearance.currentRequest->source.id : gState.selectedPackId;
+      if (!requested.empty()) RequestCurrentAppearance(requested, false, true);
       RenderLayeredWindow(GetTickCount64());
       if (gReminderWindow != nullptr) PositionReminderWindow(gReminderWindow);
       return 0;
@@ -4680,6 +4961,7 @@ LRESULT CALLBACK WindowProcedure(
       if (gCountingCheck.window) DestroyWindow(gCountingCheck.window);
       KillTimer(window, kDayTimer); KillTimer(window, kReminderTimer);
       KillTimer(window, kStorageTimer); gDataStorage.timerArmed = false;
+      KillTimer(window, kAppearanceTimer); gAppearance.timerArmed = false;
       KillTimer(window, kAnimationTimer); gState.timerRunning = false;
       gState.window = nullptr;
       if (gDataStorage.readyToDestroy || !gDataStorage.service) PostQuitMessage(0);
@@ -4785,7 +5067,7 @@ int WINAPI wWinMain(
   }
 
   std::wstring catalogError;
-  const bool catalogLoaded = gAppearanceCatalog.Reload(AppearanceDirectory(), &catalogError);
+  const bool catalogLoaded = gAppearanceCatalog.ReloadMetadata(AppearanceDirectory(), &catalogError);
   if (!catalogLoaded || !catalogError.empty()) {
     niuma::ui::Message(nullptr, catalogError.c_str(), WindowTitle(), MB_OK | MB_ICONWARNING);
   }
@@ -4909,6 +5191,7 @@ int WINAPI wWinMain(
   // that actually hosts the window, which can differ from the system DPI.
   ApplyWindowDpi(window);
   ClampWindowToWorkArea();
+  if (!gState.selectedPackId.empty()) RequestCurrentAppearance(gState.selectedPackId, false);
   RefreshOffwork(false, true);
   const std::wstring dataPath = DataPath();
   if (!dataPath.empty()) {

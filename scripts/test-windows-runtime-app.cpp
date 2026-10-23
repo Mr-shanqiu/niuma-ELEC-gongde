@@ -54,6 +54,9 @@ struct Fixture {
   Fixture(const std::filesystem::path& parent, const wchar_t* name) {
     gInput = InputAdapter{};
     gDataStorage = DataStorageAdapter{};
+    gAppearance = AppearanceAdapter{};
+    gAppearanceCatalog = niuma::AppearanceCatalog{};
+    gPicker = PickerState{};
     gState = AppState{};
     gCountingCheck = CountingCheck{};
     gOffwork = OffworkState{};
@@ -114,10 +117,13 @@ struct Fixture {
       // This fixture owns every byte; join its writer before releasing its HWND.
       if (gDataStorage.service && !gDataStorage.service->Stop(5000).stopped)
         std::terminate();
+      if (gAppearance.service && !gAppearance.service->Stop(5000).stopped)
+        std::terminate();
       gDataStorage.readyToDestroy = true;
       if (window && IsWindow(window)) DestroyWindow(window);
       gInput.service.reset();
       gDataStorage.service.reset();
+      gAppearance = AppearanceAdapter{};
       return;
     }
     if (window && IsWindow(window)) {
@@ -131,6 +137,8 @@ struct Fixture {
     }
     gInput.service.reset();
     gDataStorage.service.reset();
+    gAppearance = AppearanceAdapter{};
+    gPicker = PickerState{};
     MSG message{};
     while (PeekMessageW(&message, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) {}
   }
@@ -143,6 +151,7 @@ struct Fixture {
       DispatchMessageW(&message);
     }
     PumpDataStorage();
+    PumpAppearanceResources();
     MsgWaitForMultipleObjectsEx(0, nullptr, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
   }
   template <typename Predicate>
@@ -480,6 +489,141 @@ void SessionQueryCancellation(const std::filesystem::path& root) {
   std::cout << "PASS system query cancel/timeout resumes counting and saving; accepted write retained; only confirmed end destroys HWND\n";
 }
 
+void AppearanceAdapterBoundaries(const std::filesystem::path& root) {
+  struct GdiSession {
+    ULONG_PTR token = 0;
+    GdiSession() {
+      Gdiplus::GdiplusStartupInput input;
+      CHECK(Gdiplus::GdiplusStartup(&token, &input, nullptr) == Gdiplus::Ok);
+    }
+    ~GdiSession() { Gdiplus::GdiplusShutdown(token); }
+  } graphics;
+  Fixture fixture(root, L"appearance-adapter");
+  // Adapter-only prepared-result fixtures. Actual PNG preparation and pixel
+  // equality are covered by the separate, already-passed resource tests.
+  auto& metadata = const_cast<std::vector<std::unique_ptr<niuma::AppearancePack>>&>(
+      gAppearanceCatalog.packs());
+  for (unsigned index = 0; index < 10; ++index) {
+    auto pack = std::make_unique<niuma::AppearancePack>();
+    pack->id = "fixture." + std::to_string(index);
+    pack->sourcePath = (fixture.directory / (std::to_wstring(index) + L".niuma")).wstring();
+    pack->contentFingerprint = std::string(63, 'a') + "0123456789"[index];
+    metadata.push_back(std::move(pack));
+  }
+  const auto source = [&](unsigned index) { return niuma::RequestAppearanceResources(*metadata[index]); };
+  const auto request = [&](unsigned index, input_runtime::AppearanceLoadKind kind) {
+    input_runtime::AppearanceLoadRequest item;
+    item.id = ++gAppearance.nextRequest;
+    item.generation = gAppearance.generation;
+    item.kind = kind;
+    item.source = source(index);
+    item.animationOptions.pixelDensity = 1.0f;
+    return item;
+  };
+  const auto ready = [](const input_runtime::AppearanceLoadRequest& item) {
+    input_runtime::AppearanceLoadResult result;
+    result.request = std::make_shared<const input_runtime::AppearanceLoadRequest>(item);
+    result.status = niuma::AppearancePreparationStatus::Ready;
+    if (item.kind == input_runtime::AppearanceLoadKind::Current) {
+      result.animation = std::make_unique<niuma::AppearancePack>();
+      result.animation->id = item.source.id;
+      result.animation->sourcePath = item.source.sourcePath;
+      result.animation->contentFingerprint = item.source.contentFingerprint;
+    } else {
+      result.thumbnail = std::make_unique<niuma::AppearanceThumbnail>();
+      result.thumbnail->source = item.source;
+      result.thumbnail->image.image = std::make_unique<Gdiplus::Bitmap>(240, 250, PixelFormat32bppARGB);
+    }
+    return result;
+  };
+  auto initial = ready(request(0, input_runtime::AppearanceLoadKind::Current));
+  gAppearance.current = std::move(initial.animation);
+  gState.selectedPackId = metadata[0]->id;
+  SaveState(); fixture.DrainStorage();
+  const auto original = CurrentAppearancePack();
+  const auto unchanged = [&] {
+    CHECK(CurrentAppearancePack() == original && gState.selectedPackId == metadata[0]->id);
+    CHECK(gDataStorage.model->current().appearance.selectedPackId == metadata[0]->id);
+  };
+
+  auto wanted = request(1, input_runtime::AppearanceLoadKind::Current);
+  gAppearance.currentRequest = wanted;
+  auto stale = wanted; ++stale.generation;
+  ApplyAppearanceLoadResult(ready(stale));
+  unchanged(); CHECK(gAppearance.currentRequest);
+  auto wrongDensity = wanted; wrongDensity.animationOptions.pixelDensity = 2;
+  ApplyAppearanceLoadResult(ready(wrongDensity));
+  unchanged(); CHECK(gAppearance.currentRequest);
+  auto failed = ready(wanted);
+  failed.animation.reset();
+  failed.status = niuma::AppearancePreparationStatus::BudgetExceeded;
+  failed.error = ERROR_NOT_ENOUGH_MEMORY;
+  failed.detail = L"fixture budget exceeded";
+  ApplyAppearanceLoadResult(std::move(failed));
+  unchanged(); CHECK(!gAppearance.currentRequest && !gAppearance.error.empty());
+
+  wanted = request(1, input_runtime::AppearanceLoadKind::Current);
+  gAppearance.currentRequest = wanted;
+  metadata[1]->contentFingerprint = std::string(64, 'b');
+  ApplyAppearanceLoadResult(ready(wanted));
+  unchanged(); CHECK(!gAppearance.currentRequest);
+  wanted = request(1, input_runtime::AppearanceLoadKind::Current);
+  gAppearance.currentRequest = wanted;
+  ApplyAppearanceLoadResult(ready(wanted));
+  CHECK(CurrentAppearancePack() && CurrentAppearancePack()->id == metadata[1]->id);
+  CHECK(gState.selectedPackId == metadata[1]->id && !gAppearance.currentRequest);
+  fixture.DrainStorage();
+  CHECK(gDataStorage.model->current().appearance.selectedPackId == metadata[1]->id);
+
+  // Cache rejection must be remembered; it must not turn paint notifications
+  // into repeated preparation of the same thumbnail.
+  gAppearance.thumbnails = niuma::AppearanceThumbnailCache(1, 1);
+  auto thumbnail = request(0, input_runtime::AppearanceLoadKind::Thumbnail);
+  gAppearance.thumbnailRequest = thumbnail;
+  ApplyAppearanceLoadResult(ready(thumbnail));
+  CHECK(!gAppearance.thumbnailRequest && ThumbnailFailed(source(0)) &&
+      gAppearance.thumbnails.size() == 0);
+  gAppearance.thumbnails = niuma::AppearanceThumbnailCache{};
+  thumbnail = request(1, input_runtime::AppearanceLoadKind::Thumbnail);
+  gAppearance.thumbnailRequest = thumbnail;
+  ApplyAppearanceLoadResult(ready(thumbnail));
+  CHECK(gAppearance.thumbnails.Find(source(1)) && gAppearance.thumbnails.size() == 1);
+
+  // The real worker handles missing private fixture files. No global hooks
+  // start, and no test success result is substituted for this error path.
+  CHECK(InitializeAppearanceResources());
+  auto* const loader = gAppearance.service.get();
+  CHECK(RequestCurrentAppearance(metadata[0]->id, false, true));
+  CHECK(gState.selectedPackId == metadata[1]->id);
+  fixture.Await([] { return !gAppearance.currentRequest && !gAppearance.error.empty(); });
+  CHECK(CurrentAppearancePack()->id == metadata[1]->id &&
+      gDataStorage.model->current().appearance.selectedPackId == metadata[1]->id);
+  gPicker.window = fixture.window;
+  gPicker.scrollRow = 0;
+  QueueVisibleThumbnails();
+  fixture.Await([&] {
+    const auto state = loader->Snapshot();
+    return !gAppearance.thumbnailRequest && !state.activeId && !state.pendingId && !state.readyId;
+  });
+  CHECK(gAppearance.failedThumbnails.size() == 6 && gAppearance.thumbnails.size() == 1);
+  const auto completed = loader->Snapshot().completed;
+  for (unsigned count = 0; count < 16; ++count) PumpAppearanceResources();
+  CHECK(loader->Snapshot().completed == completed && !gAppearance.thumbnailRequest);
+  gPicker.window = nullptr;
+
+  // A cancelled shutdown keeps the loader alive. Explicit close waits for its
+  // real stopped acknowledgement before destroying the notification HWND.
+  CHECK(WindowProcedure(fixture.window, WM_QUERYENDSESSION, 0, 0) == TRUE);
+  CHECK(loader->Snapshot().running && IsWindow(fixture.window));
+  WindowProcedure(fixture.window, WM_ENDSESSION, FALSE, 0);
+  CHECK(loader->Snapshot().running && !gAppearance.stopping && IsWindow(fixture.window));
+  CHECK(!gInput.service);  // This group never installs global hooks.
+  WindowProcedure(fixture.window, WM_CLOSE, 0, 0);
+  fixture.Await([&] { return !IsWindow(fixture.window); });
+  CHECK(loader->Snapshot().stopped && gDataStorage.readyToDestroy);
+  std::cout << "PASS app resource adapter: stale/error/DPI/fingerprint gates, commit after ready, thumbnail failure bound, real loader error and exit ownership\n";
+}
+
 #if defined(NIUMA_RUNTIME_CANDIDATE)
 void RuntimeCandidateIsolation(const std::filesystem::path& evidence) {
   CHECK(!gInput.service && !gDataStorage.service);
@@ -572,7 +716,8 @@ void RuntimeCandidateIsolation(const std::filesystem::path& evidence) {
 int wmain(int argc, wchar_t** argv) {
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
   try {
-    CHECK(argc == 2);
+    CHECK(argc == 2 || (argc == 3 && wcscmp(argv[2], L"--appearance-only") == 0));
+    const bool appearanceOnly = argc == 3;
     const auto parent = std::filesystem::absolute(argv[1]);
     CHECK(std::filesystem::is_directory(parent));
     const auto root = parent / (L"niuma-runtime-app-" + std::to_wstring(GetCurrentProcessId()));
@@ -585,27 +730,33 @@ int wmain(int argc, wchar_t** argv) {
     cls.lpfnWndProc = ReminderWindowProcedure;
     cls.lpszClassName = kReminderClass;
     CHECK(RegisterClassW(&cls));
-    FullLedgerAndFinalSave(root);
-    FallbackRestartAndSelfCheck(root);
-    ReminderShownOnlyAfterConfirmation(root);
-    ReminderDiscardedAfterEpochChange(root);
-    SessionQueryCancellation(root);
+    if (!appearanceOnly) {
+      FullLedgerAndFinalSave(root);
+      FallbackRestartAndSelfCheck(root);
+      ReminderShownOnlyAfterConfirmation(root);
+      ReminderDiscardedAfterEpochChange(root);
+      SessionQueryCancellation(root);
 #if defined(NIUMA_RUNTIME_CANDIDATE)
-    RuntimeCandidateIsolation(root);
+      RuntimeCandidateIsolation(root);
 #endif
+    }
+    AppearanceAdapterBoundaries(root);
     std::ofstream receipt(root / L"RUNTIME_APP_RESULT.json");
     CHECK(receipt.good());
     receipt << "{\"status\":\"passed\",\"groups\":"
 #if defined(NIUMA_RUNTIME_CANDIDATE)
-        << 6 << ",\"candidatePathIsolation\":true,"
+        << (appearanceOnly ? 1 : 7) << ",\"candidatePathIsolation\":" << (!appearanceOnly ? "true" : "false") << ","
 #else
-        << 5 << ","
+        << (appearanceOnly ? 1 : 6) << ","
 #endif
+        << "\"scope\":\"" << (appearanceOnly ? "appearance-only" : "full-adapter") << "\","
+        << "\"fullLedgerRows\":529,\"realAdapterPaths\":true,"
+        << "\"inputChecksRun\":" << (appearanceOnly ? "false" : "true") << ","
+        << "\"diagnosticServiceInstallation\":" << (appearanceOnly ? "false" : "true") << ","
         <<
-        "\"fullLedgerRows\":529,\"realAdapterPaths\":true,"
-        "\"taggedInputOnly\":true,\"diagnosticServiceInstallation\":true,"
         "\"asyncStorageAdapter\":true,\"normalCloseJoinedOwners\":true,"
         "\"syntheticShutdownCancellation\":true,\"actualSystemShutdown\":false,"
+        "\"appearanceAdapter\":true,\"preparedSuccessFixtures\":true,\"realMissingFileLoader\":true,"
         "\"realUserProfile\":false,\"installedAppStarted\":false,"
         "\"humanAcceptance\":false,\"performanceClaim\":false}\n";
     receipt.close();
