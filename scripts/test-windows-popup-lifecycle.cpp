@@ -1,6 +1,7 @@
 // Native popup regression tests. Only this test's windows and helper receive input.
 #include <windows.h>
 #include <windowsx.h>
+#include <objidl.h>
 #include <gdiplus.h>
 #include <algorithm>
 #include <iterator>
