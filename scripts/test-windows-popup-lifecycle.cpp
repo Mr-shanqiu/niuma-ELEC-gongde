@@ -39,9 +39,28 @@ void Surface() {
   CHECK(SendMessageW(window,WM_ERASEBKGND,reinterpret_cast<WPARAM>(dc),0)==1);
   CHECK(eraseCalls==before+1 && GetPixel(dc,8,8)==sentinel);
   CHECK(GetWindowLongPtrW(window,GWL_STYLE)&WS_CLIPCHILDREN);
+  niuma::ui::PaintBuffered(dc,bounds,[&](HDC frame) {
+    FillRect(frame,&bounds,niuma::ui::WhiteBrush()); GdiFlush();
+    CHECK(GetPixel(dc,8,8)==sentinel); // No cleared intermediate frame is visible.
+  });
+  CHECK(GetPixel(dc,8,8)==RGB(255,255,255));
+  HDC reference=CreateCompatibleDC(dc);CHECK(reference);
+  HBITMAP referenceBitmap=CreateCompatibleBitmap(dc,80,80);CHECK(referenceBitmap);
+  HGDIOBJ referenceOld=SelectObject(reference,referenceBitmap);CHECK(referenceOld && referenceOld!=HGDI_ERROR);
+  FillRect(reference,&bounds,niuma::ui::WhiteBrush());
+  niuma::ui::MenuItem row{L"Item",L"\xE77B",false,false};
+  DRAWITEMSTRUCT item{};item.CtlType=ODT_MENU;item.itemState=ODS_SELECTED;
+  item.itemData=reinterpret_cast<ULONG_PTR>(&row);item.rcItem={0,20,80,60};item.hDC=reference;
+  CHECK(niuma::ui::DrawMenuFrame(&item,96));item.hDC=dc;
+  CHECK(niuma::ui::DrawMenu(&item,96));GdiFlush();
+  for(int y=0;y<80;++y)for(int x=0;x<80;++x) CHECK(GetPixel(dc,x,y)==GetPixel(reference,x,y));
+  const DWORD gdi=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS);
+  for(unsigned i=0;i<100;++i) CHECK(niuma::ui::DrawMenu(&item,96));
+  CHECK(GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS)==gdi);
+  SelectObject(reference,referenceOld);DeleteObject(referenceBitmap);DeleteDC(reference);
   SelectObject(dc,old); DeleteObject(bitmap); DeleteDC(dc); DestroyWindow(window);
   MSG pending{}; while(PeekMessageW(&pending,nullptr,WM_QUIT,WM_QUIT,PM_REMOVE)) {}
-  std::cout<<"PASS buffered page controls background erasure; parent clips child controls\n";
+  std::cout<<"PASS buffered page erasure, atomic button/menu paint, offset menu pixels and bounded GDI lifetime\n";
 }
 struct Target {
   PROCESS_INFORMATION process{};
@@ -86,13 +105,23 @@ void Menus() {
   CHECK(owner);
   entered=CreateEventW(nullptr,TRUE,FALSE,nullptr); CHECK(entered);
   HANDLE finished=CreateEventW(nullptr,TRUE,FALSE,nullptr); CHECK(finished);
+  const DWORD ownerThread=GetCurrentThreadId();
   for(unsigned mode=0;mode<3;++mode) {
     CHECK(SetForegroundWindow(target.window) && GetForegroundWindow()==target.window);
     ResetEvent(entered);ResetEvent(finished);
     HMENU menu=CreatePopupMenu();CHECK(menu); AppendMenuW(menu,MF_STRING,42,L"Owned test action");
     std::atomic<bool> rescued{false},inputFailed{false};
     std::thread input([&] {
-      if(WaitForSingleObject(entered,5000)!=WAIT_OBJECT_0) { rescued=true;PostMessageW(owner,WM_CANCELMODE,0,0);return; }
+      // TPM_NONOTIFY may suppress owner notifications. Observe the native menu
+      // loop itself rather than depending on WM_ENTERMENULOOP delivery.
+      bool ready=false;const auto deadline=GetTickCount64()+3000;
+      while(GetTickCount64()<deadline) {
+        GUITHREADINFO info{};info.cbSize=sizeof(info);
+        if(WaitForSingleObject(entered,0)==WAIT_OBJECT_0 ||
+            (GetGUIThreadInfo(ownerThread,&info) && (info.flags&(GUI_INMENUMODE|GUI_POPUPMENUMODE)))) {ready=true;break;}
+        Sleep(5);
+      }
+      if(!ready) { rescued=true;PostMessageW(owner,WM_CANCELMODE,0,0);return; }
       Sleep(80);
       try {
         if(mode==0) {
@@ -108,6 +137,7 @@ void Menus() {
     });
     const int command=niuma::ui::TrackMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON|TPM_NONOTIFY,{50,50},owner);
     SetEvent(finished);input.join();DestroyMenu(menu);
+    std::cout<<"MENU mode="<<mode<<" command="<<command<<" rescued="<<rescued<<" inputFailed="<<inputFailed<<"\n";
     CHECK(!rescued && !inputFailed && command==(mode==2?42:0));
     if(mode==1) CHECK(GetForegroundWindow()==target.window);
     MSG message{};

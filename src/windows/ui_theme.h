@@ -63,7 +63,26 @@ inline void WindowChrome(HWND window) {
     set(window, 34, &border, sizeof(border));
   }
 }
-inline void PaintButton(HWND window, HDC dc) {
+template<class Painter>
+inline void PaintBuffered(HDC destination, const RECT& bounds, Painter draw) {
+  const int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+  if (!destination || width <= 0 || height <= 0) return;
+  HDC memory = CreateCompatibleDC(destination);
+  HBITMAP bitmap = memory ? CreateCompatibleBitmap(destination, width, height) : nullptr;
+  HGDIOBJ previous = bitmap ? SelectObject(memory, bitmap) : nullptr;
+  if (previous && previous != HGDI_ERROR) {
+    SetViewportOrgEx(memory, -bounds.left, -bounds.top, nullptr);
+    draw(memory);
+    BitBlt(destination, bounds.left, bounds.top, width, height,
+        memory, bounds.left, bounds.top, SRCCOPY);
+    SelectObject(memory, previous);
+  } else {
+    draw(destination);
+  }
+  if (bitmap) DeleteObject(bitmap);
+  if (memory) DeleteDC(memory);
+}
+inline void DrawButton(HWND window, HDC dc) {
   RECT rect{}; GetClientRect(window, &rect);
   FillRect(dc, &rect, CanvasBrush());
   const UINT dpi = Dpi(window);
@@ -115,6 +134,10 @@ inline void PaintButton(HWND window, HDC dc) {
   if ((state & BST_FOCUS) && !(SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS)) {
     RECT focus = rect; InflateRect(&focus, -Dip(4, dpi), -Dip(4, dpi)); DrawFocusRect(dc, &focus);
   }
+}
+inline void PaintButton(HWND window, HDC dc) {
+  RECT bounds{}; GetClientRect(window, &bounds);
+  PaintBuffered(dc, bounds, [&](HDC frame) { DrawButton(window, frame); });
 }
 inline LRESULT CALLBACK ButtonProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
                                         UINT_PTR, DWORD_PTR) {
@@ -243,11 +266,24 @@ inline LRESULT CALLBACK MenuChromeHook(int code, WPARAM wParam, LPARAM lParam) {
   static thread_local bool applying = false;
   if (code >= 0 && !applying) {
     const auto* event = reinterpret_cast<const CWPSTRUCT*>(lParam);
+    if (event->message == WM_NCDESTROY) RemovePropW(event->hwnd, L"NiuMaMenuChromeSize");
     if (event->message == WM_WINDOWPOSCHANGED || event->message == WM_SHOWWINDOW) {
       wchar_t name[32]{}; GetClassNameW(event->hwnd, name, 32);
       if (wcscmp(name, L"#32768") == 0) {
-        applying = true; WindowChrome(event->hwnd);
-        ClipRoundedWindow(event->hwnd, Dip(14, Dpi(event->hwnd))); applying = false;
+        RECT bounds{}; GetWindowRect(event->hwnd, &bounds);
+        const UINT dpi = Dpi(event->hwnd);
+        const auto key = static_cast<UINT_PTR>(std::max(0L, bounds.right - bounds.left) & 0xffff) |
+            (static_cast<UINT_PTR>(std::max(0L, bounds.bottom - bounds.top) & 0xffff) << 16) |
+            (static_cast<UINT_PTR>(dpi) << 32);
+        // Reapplying the same region on hover/owner updates invalidates a
+        // whole menu whose size has not changed.
+        if (reinterpret_cast<UINT_PTR>(GetPropW(event->hwnd, L"NiuMaMenuChromeSize")) != key) {
+          applying = true;
+          SetPropW(event->hwnd, L"NiuMaMenuChromeSize", reinterpret_cast<HANDLE>(key));
+          WindowChrome(event->hwnd);
+          ClipRoundedWindow(event->hwnd, Dip(14, dpi));
+          applying = false;
+        }
       }
     }
   }
@@ -273,7 +309,7 @@ inline bool MeasureMenu(MEASUREITEMSTRUCT* item, UINT dpi) {
   if (!item || item->CtlType != ODT_MENU || !item->itemData) return false;
   item->itemWidth = Dip(248, dpi); item->itemHeight = Dip(40, dpi); return true;
 }
-inline bool DrawMenu(DRAWITEMSTRUCT* item, UINT dpi) {
+inline bool DrawMenuFrame(DRAWITEMSTRUCT* item, UINT dpi) {
   if (!item || item->CtlType != ODT_MENU || !item->itemData) return false;
   const auto& data = *reinterpret_cast<const MenuItem*>(item->itemData);
   RECT r = item->rcItem; FillRect(item->hDC, &r, WhiteBrush());
@@ -295,6 +331,14 @@ inline bool DrawMenu(DRAWITEMSTRUCT* item, UINT dpi) {
   if (data.checked) { RECT check = r; check.left = check.right - Dip(28, dpi);
     DrawTextW(item->hDC, L"\x2713", -1, &check, DT_CENTER | DT_VCENTER | DT_SINGLELINE); }
   SelectObject(item->hDC, old); DeleteObject(icon); DeleteObject(font); return true;
+}
+inline bool DrawMenu(DRAWITEMSTRUCT* item, UINT dpi) {
+  if (!item || item->CtlType != ODT_MENU || !item->itemData) return false;
+  PaintBuffered(item->hDC, item->rcItem, [&](HDC frame) {
+    auto buffered = *item; buffered.hDC = frame;
+    DrawMenuFrame(&buffered, dpi);
+  });
+  return true;
 }
 inline int Message(HWND owner, const wchar_t* text, const wchar_t* title, UINT flags) {
   const UINT type = flags & MB_TYPEMASK;
