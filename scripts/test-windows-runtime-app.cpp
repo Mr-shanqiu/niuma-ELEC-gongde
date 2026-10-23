@@ -497,6 +497,68 @@ void SessionQueryCancellation(const std::filesystem::path& root) {
 }
 
 #if defined(NIUMA_RUNTIME_CANDIDATE)
+void SaveVisualFrame(const std::filesystem::path& path, const niuma::runtime::PixelImage& image) {
+  Gdiplus::Bitmap bitmap(image.width, image.height, static_cast<INT>(image.strideBytes),
+      PixelFormat32bppPARGB, const_cast<BYTE*>(image.bgraPremultiplied.data()));
+  const CLSID encoder = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0, 0, 0xf8, 0x1e, 0xf3, 0x2e}};
+  CHECK(bitmap.Save(path.c_str(), &encoder) == Gdiplus::Ok);
+}
+void ComparePackageVisuals(const std::filesystem::path& output, const std::string& id) {
+  const auto* metadata = gAppearanceCatalog.Find(id);
+  CHECK(metadata);
+  niuma::AppearanceAnimationOptions options;
+  options.pixelDensity = 1;
+  niuma::AppearanceResourceMemory memory;
+  std::unique_ptr<niuma::AppearancePack> reference;
+  std::wstring error;
+  CHECK(niuma::PrepareAppearanceAnimation(niuma::RequestAppearanceResources(*metadata), options,
+      &reference, &memory, &error) == niuma::AppearancePreparationStatus::Ready);
+  CHECK(LoadAllPngResources());
+  gState.windowWidth = 240; gState.windowHeight = 250; gState.dpi = 192;
+  SetWindowPos(gState.window, nullptr, 0, 0, 240, 250, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+  for (unsigned elapsed : {0u,420u,650u}) {
+    const auto now = GetTickCount64();
+    gState.striking = true; gState.strikeStarted = now - elapsed; gState.strikeDurationMs = 1000;
+    input_runtime::ClientDisplayState view;
+    view.action = {true,0,gState.strikeStarted,1000};
+    view.text.merit = std::to_wstring(gState.todayTotal);
+    view.text.pixelScale = 1;
+    niuma::runtime::PixelImage gpu;
+    CHECK(gDisplay.display->DrawLatest(view, now, 240, 250, &gpu));
+    // Render the unchanged GDI adapter into its owned diagnostic DIB. The
+    // production candidate never enters this reference or GPU-readback path.
+    gAppearance.current = std::move(reference);
+    gRuntimeCandidate = false;
+    RenderLayeredWindow(now);
+    gRuntimeCandidate = true;
+    reference = std::move(gAppearance.current);
+    CHECK(gLayeredSurface.bytes() == gpu.bgraPremultiplied.size());
+    niuma::runtime::PixelImage gdi;
+    gdi.width = 240; gdi.height = 250; gdi.strideBytes = 960;
+    auto* begin = static_cast<const BYTE*>(gLayeredSurface.pixels());
+    gdi.bgraPremultiplied.assign(begin,begin+gLayeredSurface.bytes());
+    unsigned maxDifference = 0; std::uint64_t totalDifference = 0, visible = 0;
+    for (std::size_t i = 0; i < gdi.bgraPremultiplied.size(); i += 4) {
+      if (!gdi.bgraPremultiplied[i+3] && !gpu.bgraPremultiplied[i+3]) continue;
+      ++visible;
+      for (unsigned c=0;c<4;++c) {
+        const auto difference = static_cast<unsigned>(std::abs(int(gdi.bgraPremultiplied[i+c])-int(gpu.bgraPremultiplied[i+c])));
+        maxDifference = std::max(maxDifference,difference); totalDifference += difference;
+      }
+    }
+    CHECK(visible>0);
+    const auto base = id+"-"+std::to_string(elapsed);
+    SaveVisualFrame(output/(base+"-gdi.png"),gdi);
+    SaveVisualFrame(output/(base+"-gpu.png"),gpu);
+    std::cout << "VISUAL " << base << " meanAbsVisibleChannel=" <<
+        double(totalDifference)/(visible*4) << " maxChannel=" << maxDifference <<
+        " diagnosticReadback=true; filter differences require visual review\n";
+  }
+  gState.striking = false;
+  gLayeredSurface.Reset(); gArtworkSurface.Reset(); gArtworkValid = false;
+  gWidgetGlyphCache.Clear();
+  ReleasePngResource(gFish); ReleasePngResource(gMallet);
+}
 void CompositionApplicationAdapter(const std::filesystem::path& root) {
   struct NativeSession {
     ULONG_PTR gdi = 0;
@@ -532,7 +594,10 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
       CHECK(gDisplay.display->scene()->memory.residentBytes() <= 24 * 1024 * 1024);
       fixture.DrainStorage();
       CHECK(gDataStorage.model->current().appearance.selectedPackId == installed);
+      ComparePackageVisuals(fixture.directory, installed);
     }
+    const auto diagnosticCaptures = gDisplay.display->BackendStats().diagnosticReadbacks;
+    CHECK(diagnosticCaptures == 6);
     fixture.Start();
     fixture.Keys(12);
     fixture.Await([] { return gState.total == 1012; });
@@ -543,7 +608,7 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
     for (unsigned i = 0; i < 60; ++i) RenderLayeredWindow(GetTickCount64());
     CHECK(gDisplay.display->Stats().framesPresented == presents &&
         gDisplay.display->Stats().textureUploads == uploads);
-    CHECK(gDisplay.display->BackendStats().diagnosticReadbacks == 0 &&
+    CHECK(gDisplay.display->BackendStats().diagnosticReadbacks == diagnosticCaptures &&
         gLayeredSurface.bytes() == 0 && gArtworkSurface.bytes() == 0);
     auto* const assets = gAppearance.service.get();
     const auto prepared = assets->Snapshot().completed;

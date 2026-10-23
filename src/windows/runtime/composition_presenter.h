@@ -32,7 +32,9 @@ class CompositionPresenter final {
   bool Initialize(HWND window, int width, int height, bool allowSoftwareForTest = false);
   bool Resize(int width, int height);
   bool SetTextures(const std::vector<CompositionTexture>& textures);
-  bool DrawLatest(const std::vector<CompositionQuad>& quads);
+  // A non-null capture is an explicit test-only readback before Present.
+  // The normal client never supplies it; no readback is retained or automatic.
+  bool DrawLatest(const std::vector<CompositionQuad>& quads, PixelImage* diagnosticCapture = nullptr);
   void Invalidate() noexcept { frameValid_ = false; }
   void Shutdown();
   const CompositionStats& Stats() const { return stats_; }

@@ -49,7 +49,8 @@ bool ClientDisplay::SetScene(std::unique_ptr<PreparedAppearanceScene>& candidate
   player_=std::move(next); scene_=std::move(candidate); ++sceneVersion_;
   error_.clear(); return true;
 }
-bool ClientDisplay::DrawLatest(const ClientDisplayState& state,std::uint64_t now,int width,int height) {
+bool ClientDisplay::DrawLatest(const ClientDisplayState& state,std::uint64_t now,int width,int height,
+    graphics::PixelImage* diagnosticCapture) {
   if (!initialized_) { error_="Display device is not initialized"; return false; }
   if (width != width_ || height != height_) {
     if (!presenter_.Resize(width,height)) { error_=presenter_.LastErrorMessage(); return false; }
@@ -94,7 +95,7 @@ bool ClientDisplay::DrawLatest(const ClientDisplayState& state,std::uint64_t now
       if (!image) { error_="Visible text has no prepared image"; return false; }
       TextQuad(*image,slot,state.text.pixelScale,plusY,quads);
     }
-  if (!presenter_.DrawLatest(quads)) { error_=presenter_.LastErrorMessage(); return false; }
+  if (!presenter_.DrawLatest(quads,diagnosticCapture)) { error_=presenter_.LastErrorMessage(); return false; }
   if (frame) player_.MarkPresented(frame->revision);
   error_.clear(); return true;
 }

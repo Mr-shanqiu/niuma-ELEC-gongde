@@ -104,7 +104,7 @@ bool CompositionPresenter::SetTextures(const std::vector<CompositionTexture>& te
   error_ = S_OK; detail_.clear();
   return true;
 }
-bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source) {
+bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source, PixelImage* diagnosticCapture) {
   if (!window_) return Fail(E_UNEXPECTED, "Composition window is not initialized");
   if (source.empty() || source.size() > kMaximumQuads)
     return Fail(E_INVALIDARG, "Invalid composition quad count");
@@ -121,7 +121,7 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
     quads.push_back(quad);
     masks.push_back(FromRendererPreparedQuad(quad, *q.mask));
   }
-  if (frameValid_ && previous_.size() == quads.size() &&
+  if (!diagnosticCapture && frameValid_ && previous_.size() == quads.size() &&
       std::equal(previous_.begin(), previous_.end(), quads.begin(), Equal)) {
     ++stats_.unchangedFrames;
     error_ = S_OK; detail_.clear();
@@ -139,7 +139,9 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
   region.ReleaseRegion();
   stats_.lastRegionMs = Milliseconds(regionStart);
   const auto submitStart = Clock::now();
-  if (!renderer_.Draw(quads, true, &region.weakOverrides)) return BackendFailure();
+  if (!renderer_.Draw(quads, false, &region.weakOverrides)) return BackendFailure();
+  if (diagnosticCapture && !renderer_.Capture(*diagnosticCapture)) return BackendFailure();
+  if (!renderer_.Present()) return BackendFailure();
   stats_.lastSubmitMs = Milliseconds(submitStart);
   previous_ = std::move(quads);
   frameValid_ = true;

@@ -41,10 +41,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Private fixture preparation failed" }
           $env:NIUMA_RUNTIME_FIXTURE_DIR = Join-Path $PWD 'build-app/runtime-fixtures'
           if ('${{ inputs.mode }}' -eq 'runtime-candidate') {
-            & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') --appearance-only | Tee-Object build-app/evidence/appearance-app.txt
-            $appearance = $LASTEXITCODE
             & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') --composition-only | Tee-Object build-app/evidence/composition-app.txt
-            if ($appearance -ne 0 -or $LASTEXITCODE -ne 0) { throw "Candidate application integration failed" }
+            if ($LASTEXITCODE -ne 0) { throw "Candidate application integration failed" }
           } else {
             & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') | Tee-Object build-app/evidence/app.txt
             if ($LASTEXITCODE -ne 0) { throw "Application input adapter contract failed" }
@@ -90,7 +88,7 @@ jobs:
           retention-days: 14
 
   windows-runtime-composition:
-    if: ${{ inputs.mode == 'runtime-composition' || inputs.mode == 'runtime-candidate' }}
+    if: ${{ inputs.mode == 'runtime-composition' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:

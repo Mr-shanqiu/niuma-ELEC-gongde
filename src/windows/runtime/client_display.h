@@ -14,7 +14,8 @@ class ClientDisplay final {
  public:
   bool Initialize(HWND window, int width, int height, bool softwareForTest = false);
   bool SetScene(std::unique_ptr<PreparedAppearanceScene>& candidate);
-  bool DrawLatest(const ClientDisplayState& state, std::uint64_t now, int width, int height);
+  bool DrawLatest(const ClientDisplayState& state, std::uint64_t now, int width, int height,
+                  niuma::runtime::PixelImage* diagnosticCapture = nullptr);
   bool RecreateDevice();  // An explicit caller action; no hidden retry loop.
   void Invalidate() noexcept { presenter_.Invalidate(); player_.Invalidate(); }
   void Shutdown();
