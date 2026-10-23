@@ -51,7 +51,12 @@ struct Fixture {
   std::wstring today;
   unsigned verification = 0;
 
-  Fixture(const std::filesystem::path& parent, const wchar_t* name) {
+  Fixture(const std::filesystem::path& parent, const wchar_t* name, bool composition = false) {
+    gDisplay = DisplayAdapter{};
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+    gRuntimeCandidate = composition;
+    gDisplay.allowSoftwareForTest = composition;
+#endif
     gInput = InputAdapter{};
     gDataStorage = DataStorageAdapter{};
     gAppearance = AppearanceAdapter{};
@@ -97,9 +102,11 @@ struct Fixture {
     gState.total = ReadIniTotal();
     CHECK(EnsureCurrentDay());
     CHECK(gState.todayTotal == 10);
-    window = CreateWindowExW(0, kFixtureClass, L"NiuMa isolated runtime adapter test",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-        60, 60, 560, 240, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    window = CreateWindowExW(composition ? WS_EX_NOREDIRECTIONBITMAP : 0,
+        kFixtureClass, L"NiuMa isolated runtime adapter test",
+        composition ? WS_POPUP | WS_VISIBLE : WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+        60, 60, composition ? gState.windowWidth : 560,
+        composition ? gState.windowHeight : 240, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     CHECK(window && gState.window == window);
     ShowWindow(window, SW_SHOW);
     SetForegroundWindow(window);
@@ -489,6 +496,69 @@ void SessionQueryCancellation(const std::filesystem::path& root) {
   std::cout << "PASS system query cancel/timeout resumes counting and saving; accepted write retained; only confirmed end destroys HWND\n";
 }
 
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+void CompositionApplicationAdapter(const std::filesystem::path& root) {
+  struct NativeSession {
+    ULONG_PTR gdi = 0;
+    NativeSession() {
+      CHECK(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
+      Gdiplus::GdiplusStartupInput input;
+      CHECK(Gdiplus::GdiplusStartup(&gdi, &input, nullptr) == Gdiplus::Ok);
+    }
+    ~NativeSession() { Gdiplus::GdiplusShutdown(gdi); CoUninitialize(); }
+  } native;
+  {
+    Fixture fixture(root, L"composition-app", true);
+    CHECK(IsRuntimeCandidate());
+    CHECK(RequestCurrentAppearance({}, false));
+    fixture.Await([] { return !gAppearance.currentRequest && gDisplay.display &&
+        gDisplay.display->scene() != nullptr; }, 15000);
+    CHECK(!gDisplay.failed && gDisplay.display->ready() && !gAppearance.current &&
+        gDisplay.display->scene()->kind == input_runtime::AppearanceSceneKind::Woodfish);
+    fixture.Start();
+    fixture.Keys(12);
+    fixture.Await([] { return gState.total == 1012; });
+    fixture.Await([] { return !gState.striking && !gState.timerRunning; });
+    CHECK(!gDisplay.failed && gDisplay.display->Stats().framesPresented > 0);
+    auto presents = gDisplay.display->Stats().framesPresented;
+    auto uploads = gDisplay.display->Stats().textureUploads;
+    for (unsigned i = 0; i < 60; ++i) RenderLayeredWindow(GetTickCount64());
+    CHECK(gDisplay.display->Stats().framesPresented == presents &&
+        gDisplay.display->Stats().textureUploads == uploads);
+    CHECK(gDisplay.display->BackendStats().diagnosticReadbacks == 0 &&
+        gLayeredSurface.bytes() == 0 && gArtworkSurface.bytes() == 0);
+    auto* const assets = gAppearance.service.get();
+    const auto prepared = assets->Snapshot().completed;
+    const auto* const scene = gDisplay.display->scene();
+    RECT proposed{60,60,240,248};
+    WindowProcedure(fixture.window, WM_DPICHANGED, MAKELONG(144,144),
+        reinterpret_cast<LPARAM>(&proposed));
+    CHECK(!gDisplay.failed && assets->Snapshot().completed == prepared &&
+        gDisplay.display->scene() == scene && !gAppearance.currentRequest);
+    CHECK(gDisplay.display->RecreateDevice());
+    RenderLayeredWindow(GetTickCount64());
+    CHECK(!gDisplay.failed && gInput.service->running());
+    // A cancellable session query retains both scene and asset worker.
+    fixture.DrainStorage();
+    CHECK(WindowProcedure(fixture.window, WM_QUERYENDSESSION, 0, 0) == TRUE);
+    WindowProcedure(fixture.window, WM_ENDSESSION, FALSE, 0);
+    CHECK(IsWindow(fixture.window) && !gDataStorage.closing &&
+        gDisplay.display->scene() == scene && gAppearance.service.get() == assets);
+    SetForegroundWindow(fixture.window);
+    fixture.Await([&] { return GetForegroundWindow() == fixture.window; });
+    fixture.Keys(2);
+    fixture.Await([] { return gState.total == 1014; });
+    fixture.DrainStorage(); fixture.CheckStored(1014,24);
+    WindowProcedure(fixture.window, WM_CLOSE, 0, 0);
+    fixture.Await([&] { return !IsWindow(fixture.window); });
+    CHECK(gDataStorage.readyToDestroy && !gDisplay.display->ready() && assets->Snapshot().stopped);
+  }
+  gDisplay = DisplayAdapter{};
+  gRuntimeCandidate = false;
+  std::cout << "PASS actual application composition adapter: real owned popup and tagged hook, idle no Present, DPI no reload, device recreation, session cancel, durable counts, joined exit; software permitted for CI\n";
+}
+#endif
+
 void AppearanceAdapterBoundaries(const std::filesystem::path& root) {
   struct GdiSession {
     ULONG_PTR token = 0;
@@ -716,8 +786,10 @@ void RuntimeCandidateIsolation(const std::filesystem::path& evidence) {
 int wmain(int argc, wchar_t** argv) {
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
   try {
-    CHECK(argc == 2 || (argc == 3 && wcscmp(argv[2], L"--appearance-only") == 0));
-    const bool appearanceOnly = argc == 3;
+    CHECK(argc == 2 || (argc == 3 && (wcscmp(argv[2], L"--appearance-only") == 0 ||
+        wcscmp(argv[2], L"--composition-only") == 0)));
+    const bool appearanceOnly = argc == 3 && wcscmp(argv[2], L"--appearance-only") == 0;
+    const bool compositionOnly = argc == 3 && wcscmp(argv[2], L"--composition-only") == 0;
     const auto parent = std::filesystem::absolute(argv[1]);
     CHECK(std::filesystem::is_directory(parent));
     const auto root = parent / (L"niuma-runtime-app-" + std::to_wstring(GetCurrentProcessId()));
@@ -730,7 +802,7 @@ int wmain(int argc, wchar_t** argv) {
     cls.lpfnWndProc = ReminderWindowProcedure;
     cls.lpszClassName = kReminderClass;
     CHECK(RegisterClassW(&cls));
-    if (!appearanceOnly) {
+    if (!appearanceOnly && !compositionOnly) {
       FullLedgerAndFinalSave(root);
       FallbackRestartAndSelfCheck(root);
       ReminderShownOnlyAfterConfirmation(root);
@@ -740,19 +812,22 @@ int wmain(int argc, wchar_t** argv) {
       RuntimeCandidateIsolation(root);
 #endif
     }
-    AppearanceAdapterBoundaries(root);
+    if (!compositionOnly) AppearanceAdapterBoundaries(root);
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+    if (!appearanceOnly) CompositionApplicationAdapter(root);
+#endif
     std::ofstream receipt(root / L"RUNTIME_APP_RESULT.json");
     CHECK(receipt.good());
     receipt << "{\"status\":\"passed\",\"groups\":"
 #if defined(NIUMA_RUNTIME_CANDIDATE)
-        << (appearanceOnly ? 1 : 7) << ",\"candidatePathIsolation\":" << (!appearanceOnly ? "true" : "false") << ","
+        << ((appearanceOnly || compositionOnly) ? 1 : 8) << ",\"candidatePathIsolation\":" << (!appearanceOnly && !compositionOnly ? "true" : "false") << ","
 #else
-        << (appearanceOnly ? 1 : 6) << ","
+        << ((appearanceOnly || compositionOnly) ? 1 : 6) << ","
 #endif
-        << "\"scope\":\"" << (appearanceOnly ? "appearance-only" : "full-adapter") << "\","
+        << "\"scope\":\"" << (appearanceOnly ? "appearance-only" : compositionOnly ? "composition-only" : "full-adapter") << "\","
         << "\"fullLedgerRows\":529,\"realAdapterPaths\":true,"
-        << "\"inputChecksRun\":" << (appearanceOnly ? "false" : "true") << ","
-        << "\"diagnosticServiceInstallation\":" << (appearanceOnly ? "false" : "true") << ","
+        << "\"inputChecksRun\":" << (!appearanceOnly ? "true" : "false") << ","
+        << "\"diagnosticServiceInstallation\":" << (!appearanceOnly ? "true" : "false") << ","
         <<
         "\"asyncStorageAdapter\":true,\"normalCloseJoinedOwners\":true,"
         "\"syntheticShutdownCancellation\":true,\"actualSystemShutdown\":false,"

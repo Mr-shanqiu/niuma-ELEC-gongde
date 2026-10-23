@@ -19,6 +19,8 @@
 #include "runtime/input_service.h"
 #include "runtime/storage_service.h"
 #include "runtime/appearance_service.h"
+#include "runtime/client_display.h"
+#include "runtime/embedded_scene.h"
 #include "app_version.h"
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
@@ -44,6 +46,7 @@
 #include <iterator>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include "ui_theme.h"
 
@@ -82,6 +85,7 @@ constexpr UINT kCountMessage = WM_APP + 1;
 constexpr UINT kScrollMessage = WM_APP + 2;
 constexpr UINT kInputSnapshotMessage = WM_APP + 70;
 constexpr UINT kAppearanceReadyMessage = WM_APP + 71;
+constexpr UINT kDisplayFailureMessage = WM_APP + 72;
 constexpr UINT kImportQueuedMessage = WM_APP + 32;
 constexpr ULONG_PTR kPackFileCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
@@ -92,6 +96,7 @@ constexpr UINT_PTR kReminderDismissTimer = 5;
 constexpr UINT_PTR kAcceptanceExitTimer = 6;
 constexpr UINT_PTR kStorageTimer = 7;
 constexpr UINT_PTR kAppearanceTimer = 8;
+constexpr UINT_PTR kDisplayRetryTimer = 9;
 constexpr UINT kOffworkSessionChange = 0x02B1;  // WM_WTSSESSION_CHANGE
 constexpr int kFishResource = 101;
 constexpr int kMalletResource = 102;
@@ -377,6 +382,27 @@ struct AppearanceAdapter {
   std::wstring error;
 };
 AppearanceAdapter gAppearance;
+
+struct DisplayAdapter {
+  std::unique_ptr<input_runtime::ClientDisplay> display;
+  std::string startupSelection;
+  std::uint64_t startupRequest = 0;
+  unsigned recoveryAttempts = 0;
+  bool failed = false, noticeShown = false;
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+  bool allowSoftwareForTest = false;
+#endif
+};
+DisplayAdapter gDisplay;
+
+bool SoftwareDisplayForTest() {
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+  return gDisplay.allowSoftwareForTest;
+#else
+  return false;
+#endif
+}
+
 
 struct PickerState {
   HWND window = nullptr;
@@ -1515,6 +1541,9 @@ void ReleasePngResource(PngResource& resource) {
 }
 
 void ReleaseAllPngResources() {
+  if (gDisplay.display) gDisplay.display->Shutdown();
+  gDisplay.display.reset();
+
   // Normal exit has already joined the worker. No GDI+ object may outlive
   // GdiplusShutdown, including the detached current pack and picker cache.
   gAppearance.current.reset();
@@ -1707,7 +1736,73 @@ void DrawScene(Gdiplus::Graphics& graphics, ULONGLONG now,
                  Gdiplus::Color(255, 240, 139, 35));
 }
 
+void FailCompositionDisplay() {
+  if (gDisplay.failed || !gState.window || gDataStorage.closing) return;
+  gDisplay.failed = true;
+  // A failed GPU submission must not leave a stale/inconsistent hit region
+  // intercepting the desktop. Accounting continues on its independent owner.
+  ShowWindow(gState.window, SW_HIDE);
+  if (gDisplay.recoveryAttempts < 3) {
+    const UINT delay = 500u << gDisplay.recoveryAttempts;
+    if (SetTimer(gState.window, kDisplayRetryTimer, delay, nullptr)) return;
+  }
+  if (!gDisplay.noticeShown) PostMessageW(gState.window, kDisplayFailureMessage, 0, 0);
+}
+
+bool EnsureCompositionDisplay() {
+  if (gDisplay.failed) return false;
+  if (gDisplay.display && gDisplay.display->ready()) return true;
+  if (!gDisplay.display) gDisplay.display = std::make_unique<input_runtime::ClientDisplay>();
+  if (gDisplay.display->Initialize(gState.window, gState.windowWidth, gState.windowHeight,
+      SoftwareDisplayForTest())) return true;
+  FailCompositionDisplay();
+  return false;
+}
+
+void RenderCompositionWindow(ULONGLONG now) {
+  try {
+    if (!EnsureCompositionDisplay()) return;
+    input_runtime::ClientDisplayState view;
+    view.action = {gState.striking, gInput.authoritative ? gInput.latest.input.actionSerial : 0,
+        gState.strikeStarted, static_cast<std::uint32_t>(std::max(1, gState.strikeDurationMs))};
+    view.text.merit = std::to_wstring(gState.todayTotal);
+    view.text.pixelScale = static_cast<float>(gState.windowWidth) / kDesignWidth;
+    view.text.countdownVisible = gOffwork.enabled;
+    if (gOffwork.enabled) {
+      const auto& clock = gOffwork.snapshot;
+      view.text.countdownLabel = !clock.valid ? UiText(L"时间不可用", L"Time unavailable") :
+          clock.overtime ? UiText(L"已加班", L"Overtime") : UiText(L"距下班", L"Until off work");
+      view.text.countdownDuration = clock.valid ? OffworkTimeText(clock.overtime
+          ? clock.overtimeSeconds : clock.remainingSeconds) : L"--:--:--";
+    }
+    if (!gDisplay.display->DrawLatest(view, now, gState.windowWidth, gState.windowHeight)) {
+      FailCompositionDisplay(); return;
+    }
+    gDisplay.recoveryAttempts = 0;
+  } catch (...) { FailCompositionDisplay(); }
+}
+
+void RetryCompositionDisplay() {
+  if (!IsRuntimeCandidate() || !gState.window || gDataStorage.closing) return;
+  KillTimer(gState.window, kDisplayRetryTimer);
+  if (gDisplay.recoveryAttempts >= 3) return;
+  ++gDisplay.recoveryAttempts;
+  gDisplay.failed = false;
+  try {
+    if (gDisplay.display && !gDisplay.display->RecreateDevice()) {
+      FailCompositionDisplay(); return;
+    }
+    RenderCompositionWindow(GetTickCount64());
+    if (!gDisplay.failed) ShowWindow(gState.window, SW_SHOWNOACTIVATE);
+  } catch (...) { FailCompositionDisplay(); }
+}
+
 void RenderLayeredWindow(ULONGLONG now) {
+  if (IsRuntimeCandidate()) {
+    if (gState.window) RenderCompositionWindow(now);
+    return;
+  }
+
   if (gState.window == nullptr || !gFish.image || !gMallet.image) {
     return;
   }
@@ -1830,7 +1925,7 @@ void ReportAppearanceFailure(const std::wstring& detail) {
       ? UiText(L"形象未能准备完成，原有形象保持不变。请重新选择或导入原包。",
                L"The appearance could not be prepared. The previous appearance is unchanged; select it again or import the original pack.")
       : detail;
-  if (gState.window && (!gIsolatedAcceptance || IsRuntimeCandidate()))
+  if (gState.window && (!gIsolatedAcceptance || IsRuntimeCandidate()) && !SoftwareDisplayForTest())
     niuma::ui::Message(gState.window, gAppearance.error.c_str(),
         UiText(L"形象未切换", L"Appearance Unchanged"), MB_OK | MB_ICONWARNING);
 }
@@ -1868,7 +1963,10 @@ void StartAppearancePreview(bool preview) {
 
 bool RequestCurrentAppearance(const std::string& id, bool preview, bool force) {
   if (gDataStorage.closing || gAppearance.stopping) return false;
-  if (id.empty()) {
+  if (gDisplay.startupRequest) {
+    gDisplay.startupRequest = 0; gDisplay.startupSelection.clear();
+  }
+  if (id.empty() && !IsRuntimeCandidate()) {
     CancelAppearanceRequests();
     gAppearance.current.reset();
     gAppearance.currentDensity = 0;
@@ -1881,13 +1979,13 @@ bool RequestCurrentAppearance(const std::string& id, bool preview, bool force) {
     return true;
   }
   const auto* metadata = gAppearanceCatalog.Find(id);
-  if (!metadata) {
+  if (!metadata && !id.empty()) {
     ReportAppearanceFailure(UiText(L"所选形象已不在本地目录中，当前形象保持不变。请重新导入原包。",
         L"The selected appearance is no longer in the local catalog. The current appearance is unchanged; import the original pack again."));
     return false;
   }
   const float density = static_cast<float>(gState.windowWidth) / kDesignWidth;
-  if (!force && gAppearance.current && gAppearance.current->id == id &&
+  if (!IsRuntimeCandidate() && !force && gAppearance.current && gAppearance.current->id == id &&
       gAppearance.current->contentFingerprint == metadata->contentFingerprint &&
       gAppearance.currentDensity == density) {
     CancelAppearanceRequests();
@@ -1899,8 +1997,15 @@ bool RequestCurrentAppearance(const std::string& id, bool preview, bool force) {
   input_runtime::AppearanceLoadRequest request;
   request.id = ++gAppearance.nextRequest;
   request.generation = gAppearance.generation + 1;
-  request.kind = input_runtime::AppearanceLoadKind::Current;
-  request.source = niuma::RequestAppearanceResources(*metadata);
+  request.kind = IsRuntimeCandidate() ? (id.empty() ? input_runtime::AppearanceLoadKind::Woodfish
+      : input_runtime::AppearanceLoadKind::GpuCurrent) : input_runtime::AppearanceLoadKind::Current;
+  if (id.empty()) {
+    if (!input_runtime::EmbeddedWoodfishRequest(request.source)) {
+      ReportAppearanceFailure(UiText(L"内置木鱼资源无法读取，当前形象保持不变。",
+          L"The embedded woodfish could not be read. The current appearance is unchanged."));
+      return false;
+    }
+  } else request.source = niuma::RequestAppearanceResources(*metadata);
   request.animationOptions.pixelDensity = density;
   const auto submitted = gAppearance.service->TrySubmit(request);
   if (!submitted.accepted()) {
@@ -1958,14 +2063,40 @@ void ApplyAppearanceLoadResult(input_runtime::AppearanceLoadResult result) {
     const bool preview = gAppearance.currentPreview;
     gAppearance.currentRequest.reset();
     gAppearance.currentPreview = false;
-    if (!result.ready() || !CatalogStillMatches(result.request->source)) {
+    const bool builtin = result.request->kind == input_runtime::AppearanceLoadKind::Woodfish;
+    if (!result.ready() || (!builtin && !CatalogStillMatches(result.request->source))) {
       if (gPicker.window) InvalidateRect(gPicker.window, nullptr, FALSE);
       ReportAppearanceFailure(result.detail);
       return;
     }
-    gAppearance.current = std::move(result.animation);
+    if (IsRuntimeCandidate()) {
+      try {
+        if (!EnsureCompositionDisplay() || !gDisplay.display->SetScene(result.scene)) {
+          ReportAppearanceFailure(UiText(L"形象未能提交到显示设备，原有形象保持不变。请稍后再试。",
+              L"The appearance could not be installed on the display device. The previous appearance is unchanged."));
+          return;
+        }
+      } catch (...) {
+        ReportAppearanceFailure(UiText(L"准备形象时内存不足，原有形象保持不变。",
+            L"Appearance preparation ran out of memory. The previous appearance is unchanged."));
+        return;
+      }
+      gAppearance.current.reset();
+      // Display a prepared woodfish while the saved selection loads. Do not
+      // overwrite the saved selection merely because startup uses this pose.
+      if (builtin && result.request->id == gDisplay.startupRequest && !gDisplay.startupSelection.empty()) {
+        gDisplay.startupRequest = 0;
+        const auto desired = std::exchange(gDisplay.startupSelection, std::string{});
+        StartAppearancePreview(false);
+        RequestCurrentAppearance(desired, false);
+        return;
+      }
+      gState.selectedPackId = builtin ? std::string{} : result.request->source.id;
+    } else {
+      gAppearance.current = std::move(result.animation);
+      gState.selectedPackId = gAppearance.current->id;
+    }
     gAppearance.currentDensity = result.request->animationOptions.pixelDensity;
-    gState.selectedPackId = gAppearance.current->id;
     gState.selectedScene = MeritScene::Woodfish;
     gAppearance.error.clear();
     SaveState();  // A requested id is never persisted before preparation succeeds.
@@ -4720,7 +4851,22 @@ LRESULT CALLBACK WindowProcedure(
       DrainPendingImport(window, ImportPackageFile);
       return 0;
 
+    case kDisplayFailureMessage:
+      if (IsRuntimeCandidate() && gDisplay.failed && !gDisplay.noticeShown && !gDataStorage.closing) {
+        gDisplay.noticeShown = true;
+        if (SoftwareDisplayForTest()) return 0;
+        const int response = niuma::ui::Message(window,
+            UiText(L"形象显示暂时不可用，计数和记录仍在继续。选择重试恢复显示，或取消并保存退出。",
+                   L"The appearance display is unavailable. Counting and records continue. Retry to restore the display, or Cancel to save and exit."),
+            WindowTitle(), MB_RETRYCANCEL | MB_ICONWARNING);
+        if (response == IDRETRY) {
+          gDisplay.noticeShown = false; gDisplay.recoveryAttempts = 0; RetryCompositionDisplay();
+        } else BeginClientClose(window);
+      }
+      return 0;
+
     case WM_TIMER: {
+      if (wParam == kDisplayRetryTimer) { RetryCompositionDisplay(); return 0; }
       if (wParam == kAppearanceTimer) {
         KillTimer(window, kAppearanceTimer); gAppearance.timerArmed = false;
         PumpAppearanceResources();
@@ -4823,13 +4969,14 @@ LRESULT CALLBACK WindowProcedure(
       ClampWindowToWorkArea();
       const std::string requested = gAppearance.currentRequest
           ? gAppearance.currentRequest->source.id : gState.selectedPackId;
-      if (!requested.empty()) RequestCurrentAppearance(requested, false, true);
+      if (!IsRuntimeCandidate() && !requested.empty()) RequestCurrentAppearance(requested, false, true);
       RenderLayeredWindow(GetTickCount64());
       if (gReminderWindow != nullptr) PositionReminderWindow(gReminderWindow);
       return 0;
     }
 
     case WM_DISPLAYCHANGE:
+      if (IsRuntimeCandidate() && gDisplay.display) gDisplay.display->Invalidate();
       gOffwork.baselineValid = false;
       RefreshOffwork(false, true);
       ClampWindowToWorkArea();
@@ -4943,6 +5090,8 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_DESTROY:
+      KillTimer(window, kDisplayRetryTimer);
+      if (gDisplay.display) gDisplay.display->Shutdown();
       // Known exit routes arrive only after the latest file write and worker
       // stop are confirmed. Unexpected destruction uses a thread timer to keep
       // the owner alive; it never abandons an accepted file operation.
@@ -5171,7 +5320,8 @@ int WINAPI wWinMain(
   }
 
   HWND window = CreateWindowExW(
-      WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      (IsRuntimeCandidate() ? WS_EX_NOREDIRECTIONBITMAP : WS_EX_LAYERED) |
+          WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
       MainWindowClass(), WindowTitle(), WS_POPUP,
       static_cast<int>(x), static_cast<int>(y),
       gState.windowWidth, gState.windowHeight,
@@ -5191,7 +5341,15 @@ int WINAPI wWinMain(
   // that actually hosts the window, which can differ from the system DPI.
   ApplyWindowDpi(window);
   ClampWindowToWorkArea();
-  if (!gState.selectedPackId.empty()) RequestCurrentAppearance(gState.selectedPackId, false);
+  if (IsRuntimeCandidate()) {
+    gDisplay.startupSelection = gState.selectedPackId;
+    RequestCurrentAppearance({}, false);
+    if (gAppearance.currentRequest) gDisplay.startupRequest = gAppearance.currentRequest->id;
+    PrepareBuiltinThumbnail();
+    // The fixed picker image replaces these lazy GDI PNG resources; the GPU
+    // worker reads the executable's immutable resources independently.
+    ReleasePngResource(gFish); ReleasePngResource(gMallet);
+  } else if (!gState.selectedPackId.empty()) RequestCurrentAppearance(gState.selectedPackId, false);
   RefreshOffwork(false, true);
   const std::wstring dataPath = DataPath();
   if (!dataPath.empty()) {

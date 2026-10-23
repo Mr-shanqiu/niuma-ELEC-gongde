@@ -1,3 +1,4 @@
+#include <objbase.h>
 #include "../src/windows/runtime/composition_presenter.h"
 #include <cstdio>
 #include <cstdlib>

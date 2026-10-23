@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-runtime-app:
-    if: ${{ inputs.mode == 'runtime-app' || inputs.mode == 'runtime-integration' }}
+    if: ${{ inputs.mode == 'runtime-app' || inputs.mode == 'runtime-integration' || inputs.mode == 'runtime-candidate' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -37,8 +37,15 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force build-app/evidence | Out-Null
-          & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') | Tee-Object build-app/evidence/app.txt
-          if ($LASTEXITCODE -ne 0) { throw "Application input adapter contract failed" }
+          if ('${{ inputs.mode }}' -eq 'runtime-candidate') {
+            & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') --appearance-only | Tee-Object build-app/evidence/appearance-app.txt
+            $appearance = $LASTEXITCODE
+            & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') --composition-only | Tee-Object build-app/evidence/composition-app.txt
+            if ($appearance -ne 0 -or $LASTEXITCODE -ne 0) { throw "Candidate application integration failed" }
+          } else {
+            & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') | Tee-Object build-app/evidence/app.txt
+            if ($LASTEXITCODE -ne 0) { throw "Application input adapter contract failed" }
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -79,7 +86,7 @@ jobs:
           retention-days: 14
 
   windows-runtime-composition:
-    if: ${{ inputs.mode == 'runtime-composition' }}
+    if: ${{ inputs.mode == 'runtime-composition' || inputs.mode == 'runtime-candidate' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:

@@ -1,3 +1,4 @@
+#include <objbase.h>
 #include "../src/windows/runtime/client_display.h"
 #include "../src/windows/runtime/embedded_scene.h"
 #include "../src/windows/runtime/appearance_service.h"
