@@ -250,6 +250,20 @@ if(WIN32)
     target_link_options(niuma-runtime-durability-probe PRIVATE /MANIFEST:NO)
   endif()
 
+  # Private timing executable reuses the real application adapter.
+  add_executable(niuma-frame-metrics-probe
+    scripts/probe-windows-frame-metrics.cpp src/windows/runtime/input_service.cpp
+    src/windows/appearance_pack.cpp third_party/miniz/miniz.c "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")
+  target_include_directories(niuma-frame-metrics-probe PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(niuma-frame-metrics-probe PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-frame-metrics-probe PRIVATE NIUMA_RUNTIME_CANDIDATE NIUMA_INPUT_SERVICE_DIAGNOSTICS UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-frame-metrics-probe PRIVATE niuma-input-core niuma-windows-storage niuma-windows-appearance-loader Threads::Threads user32 shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  if(MSVC)
+    set_property(TARGET niuma-frame-metrics-probe PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(niuma-frame-metrics-probe PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+    target_link_options(niuma-frame-metrics-probe PRIVATE /MANIFEST:NO)
+  endif()
+
   # Developer candidate is a distinct entry: it cannot open the installed profile.
   add_executable(niuma-runtime-candidate WIN32
     src/windows/app.cpp src/windows/appearance_pack.cpp third_party/miniz/miniz.c

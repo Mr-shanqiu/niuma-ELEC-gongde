@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-metrics, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -20,6 +20,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-runtime-metrics:
+    if: ${{ inputs.mode == 'runtime-metrics' }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build new frame measurement and private candidate
+        shell: pwsh
+        run: |
+          cmake -S . -B build-metrics -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Metrics configuration failed" }
+          cmake --build build-metrics --config Release --target niuma-frame-metrics-probe niuma-runtime-candidate --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Metrics compilation failed" }
+      - name: Verify nonblocking bounded GPU queries and separated frame measurements
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-metrics/evidence | Out-Null
+          python scripts/prepare-windows-runtime-acceptance.py build-metrics/runtime-fixtures
+          if ($LASTEXITCODE -ne 0) { throw "Private fixtures failed" }
+          $env:NIUMA_RUNTIME_FIXTURE_DIR = Join-Path $PWD 'build-metrics/runtime-fixtures'
+          & ./build-metrics/Release/niuma-frame-metrics-probe.exe (Join-Path $PWD 'build-metrics/evidence') 15 | Tee-Object build-metrics/evidence/probe.txt
+          if ($LASTEXITCODE -ne 0) { throw "New frame metrics diagnostic failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-metrics-${{ github.sha }}
+          path: |
+            build-metrics/evidence/**
+            build-metrics/Release/niuma-frame-metrics-probe.exe
+            build-metrics/Release/niuma-runtime-candidate.exe
+            build-metrics/runtime-fixtures/**
+          if-no-files-found: warn
+          retention-days: 14
+
   windows-runtime-build:
     if: ${{ inputs.mode == 'runtime-build' }}
     runs-on: windows-2022

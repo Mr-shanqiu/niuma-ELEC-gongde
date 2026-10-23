@@ -89,6 +89,21 @@ struct RendererStats {
     int height = 0;
 };
 
+// Opt-in diagnostics only: timestamp interval on this device's GPU command
+// stream, excluding Present. It is not GPU utilization, active execution time,
+// DWM cost, energy, or the physical screen presentation interval.
+enum class GpuTimingRead { Disabled, Pending, Ready, Invalid, Failed };
+struct GpuTimingSample {
+    std::uint64_t frame = 0;
+    double intervalMs = 0;
+};
+struct GpuTimingStats {
+    bool enabled = false;
+    std::uint32_t pending = 0;
+    std::uint64_t issued = 0, completed = 0, invalid = 0, dropped = 0;
+    HRESULT error = S_OK;
+};
+
 // All methods, including destruction, must run on the owning render thread.
 // The caller owns the HWND and must keep it alive until Shutdown completes.
 // This class controls neither input/activation nor the window's hit-test region.
@@ -114,6 +129,12 @@ public:
     bool Draw(const std::vector<Quad>& quads, bool present = true,
               const WeakAlphaOverrides* weak = nullptr);
     bool Present();
+    // Allocates exactly four query sets. Normal product use never enables it.
+    // Reads are nonblocking and DONOTFLUSH; a full ring drops measurements,
+    // never frames. Missing/disjoint results are distinct from a measured zero.
+    bool EnableDiagnosticGpuTiming();
+    GpuTimingRead ReadDiagnosticGpuTiming(GpuTimingSample& sample);
+    const GpuTimingStats& DiagnosticGpuTimingStats() const;
     // Explicit diagnostic readback only. Call after Draw(..., false), before
     // Present. It never guesses which flip-model buffer was last presented.
     bool Capture(PixelImage& image);

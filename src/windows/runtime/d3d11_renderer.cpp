@@ -200,6 +200,43 @@ struct D3D11Renderer::Impl {
     bool initialized = false;
     bool framePending = false;
 
+    struct TimingSlot {
+        ComPtr<ID3D11Query> disjoint, begin, end;
+        std::uint64_t frame = 0;
+        bool pending = false, valid = false;
+    };
+    struct TimingState {
+        std::array<TimingSlot, 4> slots;
+    };
+    std::unique_ptr<TimingState> timing;
+    GpuTimingStats timingStats;
+
+    struct TimingScope {
+        Impl& owner;
+        TimingSlot* slot = nullptr;
+        explicit TimingScope(Impl& state) : owner(state) {
+            if (!state.timing || FAILED(state.timingStats.error)) return;
+            for (auto& candidate : state.timing->slots) {
+                if (!candidate.pending) { slot = &candidate; break; }
+            }
+            if (!slot) { ++state.timingStats.dropped; return; }
+            slot->pending = true;
+            slot->valid = false;
+            slot->frame = ++state.timingStats.issued;
+            ++state.timingStats.pending;
+            state.context->Begin(slot->disjoint.Get());
+            state.context->End(slot->begin.Get());
+        }
+        void End(bool valid) {
+            if (!slot) return;
+            owner.context->End(slot->end.Get());
+            owner.context->End(slot->disjoint.Get());
+            slot->valid = valid;
+            slot = nullptr;
+        }
+        ~TimingScope() { End(false); }
+    };
+
     bool Fail(HRESULT result, const std::string& operation) {
         lastError = result;
         lastErrorMessage = operation + ": " + HResultText(result);
@@ -237,6 +274,8 @@ struct D3D11Renderer::Impl {
             context->ClearState();
             context->Flush();
         }
+        timing.reset();
+        timingStats = {};
         textures.clear();
         std::vector<Vertex>().swap(uploadVertices);
         std::vector<WeakAlphaPixel>().swap(uploadWeakPixels);
@@ -698,6 +737,7 @@ bool D3D11Renderer::Draw(const std::vector<Quad>& quads, bool present,
     }
     state.framePending = false;
     ID3D11RenderTargetView* target = state.targetView.Get();
+    Impl::TimingScope gpuMeasurement(state);
     state.context->OMSetRenderTargets(1, &target, nullptr);
     constexpr float transparent[] = {0, 0, 0, 0};
     state.context->ClearRenderTargetView(target, transparent);
@@ -758,6 +798,7 @@ bool D3D11Renderer::Draw(const std::vector<Quad>& quads, bool present,
     state.stats.quads += quads.size();
     state.stats.weakAlphaEntries = totalWeak;
     state.stats.weakAlphaBytes = totalWeak * sizeof(WeakAlphaPixel);
+    gpuMeasurement.End(true);
     state.framePending = true;
     state.Succeed();
     return !present || Present();
@@ -774,6 +815,61 @@ bool D3D11Renderer::Present() {
     ++state.stats.presents;
     state.Succeed();
     return true;
+}
+
+bool D3D11Renderer::EnableDiagnosticGpuTiming() {
+    auto& state = *impl_;
+    if (!state.Ready("Enable GPU diagnostics")) return false;
+    if (state.timing) return SUCCEEDED(state.timingStats.error);
+    auto timing = std::make_unique<Impl::TimingState>();
+    for (auto& slot : timing->slots) {
+        D3D11_QUERY_DESC desc{};
+        desc.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
+        HRESULT result = state.device->CreateQuery(&desc, slot.disjoint.GetAddressOf());
+        if (SUCCEEDED(result)) {
+            desc.Query = D3D11_QUERY_TIMESTAMP;
+            result = state.device->CreateQuery(&desc, slot.begin.GetAddressOf());
+            if (SUCCEEDED(result)) result = state.device->CreateQuery(&desc, slot.end.GetAddressOf());
+        }
+        if (FAILED(result)) { state.timingStats.error = result; return false; }
+    }
+    state.timing = std::move(timing);
+    state.timingStats = {};
+    state.timingStats.enabled = true;
+    return true;
+}
+
+GpuTimingRead D3D11Renderer::ReadDiagnosticGpuTiming(GpuTimingSample& sample) {
+    auto& state = *impl_;
+    if (!state.Ready("Read GPU diagnostics")) return GpuTimingRead::Failed;
+    if (FAILED(state.timingStats.error)) return GpuTimingRead::Failed;
+    if (!state.timing) return GpuTimingRead::Disabled;
+    Impl::TimingSlot* oldest = nullptr;
+    for (auto& slot : state.timing->slots)
+        if (slot.pending && (!oldest || slot.frame < oldest->frame)) oldest = &slot;
+    if (!oldest) return GpuTimingRead::Pending;
+    D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint{};
+    UINT64 begin = 0, end = 0;
+    constexpr UINT flags = D3D11_ASYNC_GETDATA_DONOTFLUSH;
+    HRESULT result = state.context->GetData(oldest->disjoint.Get(), &disjoint, sizeof(disjoint), flags);
+    if (result == S_OK) result = state.context->GetData(oldest->begin.Get(), &begin, sizeof(begin), flags);
+    if (result == S_OK) result = state.context->GetData(oldest->end.Get(), &end, sizeof(end), flags);
+    if (result == S_FALSE) return GpuTimingRead::Pending;
+    if (FAILED(result)) { state.timingStats.error = result; return GpuTimingRead::Failed; }
+    oldest->pending = false;
+    --state.timingStats.pending;
+    if (!oldest->valid || disjoint.Disjoint || !disjoint.Frequency || end < begin) {
+        ++state.timingStats.invalid;
+        return GpuTimingRead::Invalid;
+    }
+    sample = {oldest->frame, static_cast<double>(end - begin) * 1000.0 /
+                             static_cast<double>(disjoint.Frequency)};
+    ++state.timingStats.completed;
+    return GpuTimingRead::Ready;
+}
+
+const GpuTimingStats& D3D11Renderer::DiagnosticGpuTimingStats() const {
+    return impl_->timingStats;
 }
 
 bool D3D11Renderer::Capture(PixelImage& image) {

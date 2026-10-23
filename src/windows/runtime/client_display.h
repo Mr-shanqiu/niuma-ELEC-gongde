@@ -23,6 +23,13 @@ class ClientDisplay final {
   const PreparedAppearanceScene* scene() const { return scene_.get(); }
   const niuma::runtime::CompositionStats& Stats() const { return presenter_.Stats(); }
   const niuma::runtime::RendererStats& BackendStats() const { return presenter_.BackendStats(); }
+  bool EnableDiagnosticGpuTiming() { return presenter_.EnableDiagnosticGpuTiming(); }
+  niuma::runtime::GpuTimingRead ReadDiagnosticGpuTiming(niuma::runtime::GpuTimingSample& sample) {
+    return presenter_.ReadDiagnosticGpuTiming(sample);
+  }
+  const niuma::runtime::GpuTimingStats& DiagnosticGpuTimingStats() const {
+    return presenter_.DiagnosticGpuTimingStats();
+  }
   const niuma::runtime::WidgetTextCacheStats& TextStats() const { return text_.Stats(); }
   const niuma::runtime::AdapterInfo& Adapter() const { return presenter_.Adapter(); }
   const std::string& LastErrorMessage() const { return error_; }

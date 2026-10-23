@@ -140,8 +140,13 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
   stats_.lastRegionMs = Milliseconds(regionStart);
   const auto submitStart = Clock::now();
   if (!renderer_.Draw(quads, false, &region.weakOverrides)) return BackendFailure();
+  stats_.lastDrawSubmitWallMs = Milliseconds(submitStart);
+  const auto readbackStart = Clock::now();
   if (diagnosticCapture && !renderer_.Capture(*diagnosticCapture)) return BackendFailure();
+  stats_.lastReadbackWallMs = diagnosticCapture ? Milliseconds(readbackStart) : 0;
+  const auto presentStart = Clock::now();
   if (!renderer_.Present()) return BackendFailure();
+  stats_.lastPresentWallMs = Milliseconds(presentStart);
   stats_.lastSubmitMs = Milliseconds(submitStart);
   previous_ = std::move(quads);
   frameValid_ = true;

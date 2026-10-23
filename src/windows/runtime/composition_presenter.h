@@ -18,6 +18,9 @@ struct CompositionStats {
   std::uint64_t textureUploads = 0, framesPresented = 0, unchangedFrames = 0;
   std::uint64_t residentTextureBytes = 0, peakTextureBytes = 0;
   double lastRegionMs = 0, lastSubmitMs = 0;
+  // CPU-side elapsed calls, not CPU execution time. Present and explicit
+  // readback are separated so synchronization cannot masquerade as CPU work.
+  double lastDrawSubmitWallMs = 0, lastPresentWallMs = 0, lastReadbackWallMs = 0;
 };
 
 // The UI owner supplies the latest scene, never a historical frame queue.
@@ -40,6 +43,11 @@ class CompositionPresenter final {
   const CompositionStats& Stats() const { return stats_; }
   const AdapterInfo& Adapter() const { return renderer_.Adapter(); }
   const RendererStats& BackendStats() const { return renderer_.Stats(); }
+  bool EnableDiagnosticGpuTiming() { return renderer_.EnableDiagnosticGpuTiming(); }
+  GpuTimingRead ReadDiagnosticGpuTiming(GpuTimingSample& sample) {
+    return renderer_.ReadDiagnosticGpuTiming(sample);
+  }
+  const GpuTimingStats& DiagnosticGpuTimingStats() const { return renderer_.DiagnosticGpuTimingStats(); }
   HRESULT LastError() const { return error_; }
   const std::string& LastErrorMessage() const { return detail_; }
 #ifdef NIUMA_COMPOSITION_DIAGNOSTICS
