@@ -36,7 +36,8 @@ type CatalogItem = { number: string; title: string; description: string; authorP
   preview?: Record<string, unknown>; firstPublishedAt: string | null; catalogRevision: string;
   deliveryBytesUpperBound: number; canClaim: boolean; snapshot: Snapshot; popularity: number };
 interface Installer { platform: "windows" | "macos"; format: string; releaseId: string; version: string;
-  bytes: number; sha256: string; publicDownloadUrl: string; perpetualCompatible: boolean; }
+  bytes: number; sha256: string; publicDownloadUrl: string; perpetualCompatible: boolean;
+  systemRequirements?: string; }
 export interface DistributionDependencies {
   database: GongdeMySqlConfiguration | null; signer: AppearancePackSigner | null; packages: PrivatePackageStore | null;
   creators: CreatorRuntime; numbers: AppearanceNumberRepository | null;
@@ -855,7 +856,11 @@ export function createFreeDistributionRuntime(deps: DistributionDependencies) {
             to:url.searchParams.get("to")||undefined,state:url.searchParams.get("state")||undefined,
             claimId:url.searchParams.get("claimId")||undefined,
             page:parseNumber(url.searchParams.get("page"),1,100000),perPage:parseNumber(url.searchParams.get("perPage"),25,100)}));
-          if(path==="/admin/stats"&&method==="GET")return send(await repo().getStats({from:url.searchParams.get("from")||undefined,to:url.searchParams.get("to")||undefined}));
+          if(path==="/admin/stats"&&method==="GET") {
+            const scope=url.searchParams.get("scope");
+            if(scope!==null&&scope!=="all")throw new FreeDistributionError("admin_date_range_invalid",400);
+            return send(await repo().getStats({from:url.searchParams.get("from")||undefined,to:url.searchParams.get("to")||undefined,allTime:scope==="all"}));
+          }
           const mutation=/^\/admin\/(code-families|contributions)\/([A-Za-z0-9._-]{1,80})\/(pause|resume|rotate|revoke|restore)$/u.exec(path);
           if(mutation&&method==="POST") {
             const body=await readDistributionBody(request);

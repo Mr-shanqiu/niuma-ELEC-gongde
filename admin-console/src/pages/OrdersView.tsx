@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, DatePicker, Descriptions, Drawer, Input, Select, Space, Table, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Drawer, Input, Select, Space, Table, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { Dayjs } from "dayjs";
+import { DateRangeFilter, useAdminRange } from "../ui/DateRangeFilter";
+import { rangeQuery, rangePreset } from "../ui/date-range";
 import { ReloadOutlined } from "@ant-design/icons";
 import { api, shapes, useRead } from "../ui/api";
 import type { ApiError } from "../ui/api";
@@ -14,7 +15,7 @@ type Order = {
   purchaseKind: string;
   channel: "wechat" | "alipay" | null;
   amountFen: number;
-  state: "PAID" | "FULFILLED";
+  state: string;
   assetIds: string[];
   createdAt: string;
 };
@@ -45,16 +46,13 @@ const kindNames: Record<string, string> = {
   support: "旧规则赞赏底账"
 };
 
-/** The server accepts exactly these two filters; offering more would be a dead control. */
-const stateChoices = [
-  { value: "PAID", label: "已支付" },
-  { value: "FULFILLED", label: "已交付" }
-];
-
 const stateMeta: Record<string, { tone: Tone; label: string }> = {
-  FULFILLED: { tone: "ok", label: "已交付" },
-  PAID: { tone: "accent", label: "已支付" }
+  PENDING_PAYMENT: {tone:"mute",label:"待支付"}, PAID:{tone:"accent",label:"已支付"},
+  FULFILLED:{tone:"ok",label:"已交付"}, EXPIRED:{tone:"mute",label:"已过期"},
+  CANCELED:{tone:"mute",label:"已取消"}, EXCEPTION:{tone:"bad",label:"异常"},
+  REFUND_PENDING:{tone:"warn",label:"退款处理中"}, REFUNDED:{tone:"mute",label:"已退款"}
 };
+const stateChoices = Object.entries(stateMeta).map(([value,meta])=>({value,label:meta.label}));
 
 const beijingTime = (value: string | null) => {
   if (!value || !Number.isFinite(Date.parse(value))) return "未提供";
@@ -71,7 +69,8 @@ export function OrdersView() {
   const [appliedOrderNo, setAppliedOrderNo] = useState("");
   const [channel, setChannel] = useState<string | undefined>();
   const [state, setState] = useState<string | undefined>();
-  const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [range, setRange] = useAdminRange();
+  const [effectiveOnly, setEffectiveOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Order | null>(null);
 
@@ -79,23 +78,24 @@ export function OrdersView() {
   if (appliedOrderNo) query.set("orderNo", appliedOrderNo);
   if (channel) query.set("channel", channel);
   if (state) query.set("state", state);
-  if (range?.[0]) query.set("from", range[0].startOf("day").toISOString());
-  if (range?.[1]) query.set("to", range[1].add(1, "day").startOf("day").toISOString());
+  new URLSearchParams(rangeQuery(range)!).forEach((value,key)=>query.set(key,value));
+  query.set("effectiveOnly", String(effectiveOnly));
 
   // 排序固定：服务端按创建时间倒序返回。表头不提供排序，避免出现点了箭头顺序不变的假交互。
   const list = useRead<{ data: Order[]; total: number }>(`/orders?${query.toString()}`, {
-    expect: shapes.list,
+    expect: shapes.orders,
     isEmpty: (body) => (body as { data: Order[] }).data.length === 0
   });
 
-  useEffect(() => { setPage(1); }, [appliedOrderNo, channel, state, range]);
+  useEffect(() => { setPage(1); }, [appliedOrderNo, channel, state, range, effectiveOnly]);
 
   const reset = () => {
     setOrderNo("");
     setAppliedOrderNo("");
     setChannel(undefined);
     setState(undefined);
-    setRange(null);
+    setRange(rangePreset("today"));
+    setEffectiveOnly(false);
     setPage(1);
   };
 
@@ -167,14 +167,12 @@ export function OrdersView() {
           style={{ width: 130 }}
           value={state}
           onChange={(value) => { setState(value); setPage(1); }}
-          options={stateChoices}
+          options={effectiveOnly?stateChoices.filter(item=>["PAID","FULFILLED"].includes(item.value)):stateChoices}
         />
-        <DatePicker.RangePicker
-          style={{ width: 250 }}
-          value={range}
-          onChange={(value) => { setRange(value as [Dayjs | null, Dayjs | null] | null); setPage(1); }}
-          placeholder={["开始日期", "结束日期"]}
-        />
+        <Select aria-label="订单范围" value={effectiveOnly?"effective":"all"} style={{width:140}}
+          options={[{value:"all",label:"全部订单"},{value:"effective",label:"仅有效订单"}]}
+          onChange={value=>{setEffectiveOnly(value==="effective");setState(undefined);setPage(1);}} />
+        <DateRangeFilter value={range} onChange={next=>{setRange(next);setPage(1);}} />
         <Button onClick={reset}>清空</Button>
         <span className="grow" />
         <Button icon={<ReloadOutlined />} onClick={list.reload}>重新读取</Button>
@@ -184,7 +182,7 @@ export function OrdersView() {
         <ReadGate
           state={list.state}
           onRetry={list.reload}
-          emptyText="这个范围内没有符合条件的有效订单。"
+          emptyText="这个范围内没有符合条件的订单。"
           emptyHint="筛选条件过窄时也会是空结果，这不等于读取失败。"
           skeletonRows={6}
         >
@@ -200,7 +198,7 @@ export function OrdersView() {
               />
               <div className="pager">
                 <Typography.Text type="secondary">
-                  共 {body.total.toLocaleString("zh-CN")} 条 · 固定按创建时间倒序 · 底账含旧规则与验收交易
+                  共 {body.total.toLocaleString("zh-CN")} 条 · 固定按创建时间倒序 · 含全部支付状态、旧规则与验收交易；免费领取见「群码与领取」
                 </Typography.Text>
                 <span className="grow" />
                 <Button size="small" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>上一页</Button>

@@ -22,5 +22,18 @@ test("admin order queries paginate, filter, and summarize without changing order
   const effective = await store.listOrders({ effectiveOnly: true, limit: 10, offset: 0 });
   assert.deepEqual(effective.orders.map((item) => item.orderNo), ["GD_FIRST"]);
   const summary = await store.summarizeOrders(new Date("2026-09-28T00:00:00Z"), new Date("2026-09-29T00:00:00Z"));
-  assert.deepEqual(summary, { orders: 1, amountFen: 100 });
+  assert.equal(summary.orders, 1); assert.equal(summary.amountFen,100);
+  assert.equal(summary.totalOrders,2);assert.equal(summary.byState.PENDING_PAYMENT,1);
+});
+
+test("operations summary separates all states and keeps exclusive upper boundary", async()=>{
+  const store=new InMemoryPaymentStore();
+  const states=["PENDING_PAYMENT","PAID","FULFILLED","EXPIRED","CANCELED","EXCEPTION","REFUND_PENDING","REFUNDED"];
+  for(const state of states) await store.insertOrder(order("GD_"+state,state,100,new Date("2026-10-22T16:00:00Z")));
+  await store.insertOrder(order("GD_OUTSIDE","PAID",999,new Date("2026-10-23T16:00:00Z")));
+  const summary=await store.summarizeOrders(new Date("2026-10-22T16:00:00Z"),new Date("2026-10-23T16:00:00Z"));
+  assert.equal(summary.totalOrders,8);assert.equal(summary.orders,2);assert.equal(summary.amountFen,200);
+  for(const state of states) assert.equal(summary.byState[state],1);
+  const page=await store.listOrders({createdFrom:new Date("2026-10-22T16:00:00Z"),createdTo:new Date("2026-10-23T16:00:00Z"),limit:25,offset:0});
+  assert.equal(page.total,8);assert.equal((await store.listOrders({state:"REFUNDED",limit:25,offset:0})).total,1);
 });

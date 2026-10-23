@@ -1,3 +1,4 @@
+import { ORDER_STATES } from "../domain/store.js";
 import { lstatSync, readFileSync } from "node:fs";
 import mysql from "mysql2/promise";
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
@@ -357,16 +358,16 @@ export class MySqlPaymentStore implements PaymentStore {
 
   async summarizeOrders(createdFrom: Date, createdTo: Date): Promise<AdminOrderSummary> {
     const [rows] = await this.executor.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS orders,
-              COALESCE(SUM(amount_fen), 0) AS amount_fen
-       FROM gongde_orders
-       WHERE created_at >= ? AND created_at < ? AND state IN ('PAID', 'FULFILLED')`,
-      [createdFrom, createdTo]
-    );
-    return {
-      orders: Number(rows[0]?.orders ?? 0),
-      amountFen: Number(rows[0]?.amount_fen ?? 0)
-    };
+      `SELECT state, COUNT(*) AS orders, COALESCE(SUM(amount_fen), 0) AS amount_fen
+       FROM gongde_orders WHERE created_at >= ? AND created_at < ? GROUP BY state`, [createdFrom, createdTo]);
+    const byState = Object.fromEntries(ORDER_STATES.map(state => [state, 0])) as AdminOrderSummary["byState"];
+    let orders = 0, amountFen = 0, totalOrders = 0;
+    for (const row of rows) {
+      if (!ORDER_STATES.includes(row.state)) throw new Error("admin_order_state_invalid");
+      const count = Number(row.orders); byState[row.state as keyof typeof byState] = count; totalOrders += count;
+      if (row.state === "PAID" || row.state === "FULFILLED") { orders += count; amountFen += Number(row.amount_fen); }
+    }
+    return { orders, amountFen, totalOrders, byState };
   }
 
   async runInTransaction<T>(work: (store: PaymentStore) => Promise<T>): Promise<T> {

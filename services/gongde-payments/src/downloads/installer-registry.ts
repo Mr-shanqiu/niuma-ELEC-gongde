@@ -20,6 +20,8 @@ export type RegisteredInstaller = {
   sha256: string;
   publicDownloadUrl: string;
   perpetualCompatible: boolean;
+  /** Optional note the site renders verbatim; preserved exactly when the registry carries one. */
+  systemRequirements?: string;
 };
 
 export type InstallerRegistry = {
@@ -109,12 +111,17 @@ export function loadInstallerRegistry(source: NodeJS.ProcessEnv = process.env): 
       if (typeof value.releaseId !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(value.releaseId)) return { status: "unavailable", items: [] };
       if (typeof value.format !== "string" || value.format.length === 0 || value.format.length > 16) return { status: "unavailable", items: [] };
       if (typeof value.perpetualCompatible !== "boolean") return { status: "unavailable", items: [] };
+      // The one optional field: the site renders it when present, so a legal
+      // string is carried through and anything else is malformed like the rest.
+      if (value.systemRequirements !== undefined && typeof value.systemRequirements !== "string") {
+        return { status: "unavailable", items: [] };
+      }
       if (!Number.isSafeInteger(value.bytes) || (value.bytes as number) < 1) return { status: "unavailable", items: [] };
       if (url.protocol !== "https:" || url.username || url.password || !ALLOWED_HOSTS.includes(url.hostname)) {
         return { status: "unavailable", items: [] };
       }
       names.add(name);
-      parsed.push({
+      const installer: RegisteredInstaller = {
         name,
         platform: value.platform,
         format: value.format,
@@ -124,7 +131,11 @@ export function loadInstallerRegistry(source: NodeJS.ProcessEnv = process.env): 
         sha256: value.sha256,
         publicDownloadUrl: url.href,
         perpetualCompatible: value.perpetualCompatible
-      });
+      };
+      // Missing stays missing: only set the key when the entry has one, so the
+      // parsed item never claims a note the registry does not carry.
+      if (value.systemRequirements !== undefined) installer.systemRequirements = value.systemRequirements;
+      parsed.push(installer);
     } catch {
       return { status: "unavailable", items: [] };
     }

@@ -145,7 +145,15 @@ test('actual HTTP checkout gates a mixed batch, freezes source identity and sign
   const adminLogin = await post('/api/gongde/admin/login', { username: 'test-admin', password: adminPassword });
   assert.equal(adminLogin.status, 200);
   const adminHeaders = { cookie: adminLogin.headers.get('set-cookie').split(';')[0] };
-  assert.equal((await request(adminDetailPath, { headers: adminHeaders })).status, 404);
+  const pendingDetail=await request(adminDetailPath,{headers:adminHeaders});
+  assert.equal(pendingDetail.status,200);assert.equal((await pendingDetail.json()).data.state,'PENDING_PAYMENT');
+  const allOrders=await request('/api/gongde/admin/orders?state=PENDING_PAYMENT',{headers:adminHeaders});
+  assert.equal(allOrders.status,200);assert.equal((await allOrders.json()).data.some(item=>item.orderNo===checkout.orderNo),true);
+  const effective=await request('/api/gongde/admin/orders?effectiveOnly=true',{headers:adminHeaders});
+  assert.equal((await effective.json()).data.some(item=>item.orderNo===checkout.orderNo),false);
+  assert.equal((await request('/api/gongde/admin/orders?state=MADE_UP',{headers:adminHeaders})).status,400);
+  assert.equal((await request('/api/gongde/admin/orders?from=2026-10-23T00:00:00Z',{headers:adminHeaders})).status,400);
+  assert.equal((await request('/api/gongde/admin/overview?from=2026-10-24T00:00:00Z&to=2026-10-23T00:00:00Z',{headers:adminHeaders})).status,400);
   const headers = { authorization: `Bearer ${checkout.buyerToken}` };
   assert.equal((await post(`/api/gongde/orders/${checkout.orderNo}/package-link`, {}, headers)).status, 410);
   const paid = await post(`/api/gongde/test/orders/${checkout.orderNo}/pay`, {}, { 'x-gongde-test-token': process.env.GONGDE_PAYMENT_TEST_TOKEN });

@@ -1,3 +1,5 @@
+import { DateRangeFilter, useAdminRange } from "../ui/DateRangeFilter";
+import { rangeQuery } from "../ui/date-range";
 import { useMemo, useState } from "react";
 import { Alert, Button, Card, Collapse, Descriptions, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -55,11 +57,12 @@ const fileSize = (bytes: number) =>
   bytes >= 1048576 ? `${(bytes / 1048576).toFixed(2)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 export function InstallersView() {
+  const [range,setRange]=useAdminRange();
   const [showHistory, setShowHistory] = useState(false);
 
   // The registry comes from the same loader the counting endpoint uses, so the
   // two cannot disagree about which file names are valid.
-  const report = useRead<DownloadReport>("/download-report", { expect: shapes.downloadReport });
+  const report = useRead<DownloadReport>(`/download-report?${rangeQuery(range)}`, { expect: shapes.downloadReport });
   const retention = useDistributionRead<Retention>("/installer-retention", { expectData: v2Shapes.retention });
 
   const reload = () => { report.reload(); retention.reload(); };
@@ -106,15 +109,6 @@ export function InstallersView() {
   const registryRead = report.state.status === "ready" || report.state.status === "empty";
 
   const retentionBody = retention.state.status === "ready" ? retention.state.data.data : null;
-  // The read time is the server's own range end, not the browser clock: a
-  // client clock that is off would label a stale number as freshly read.
-  const readAt = registry?.range?.to ?? null;
-  const asOf = readAt && Number.isFinite(Date.parse(readAt))
-    ? new Intl.DateTimeFormat("zh-CN", {
-        timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", hourCycle: "h23"
-      }).format(new Date(readAt))
-    : "未读取";
 
   const columns: ColumnsType<RegistryItem> = [
     {
@@ -131,7 +125,7 @@ export function InstallersView() {
     { title: "版本", dataIndex: "version", width: 90 },
     { title: "大小", dataIndex: "bytes", width: 96, align: "right", render: (value: number) => fileSize(value) },
     {
-      title: "当日请求",
+      title: "区间请求",
       key: "period",
       width: 104,
       align: "right",
@@ -160,6 +154,7 @@ export function InstallersView() {
 
   return (
     <div className="page">
+      <div className="page-toolbar"><DateRangeFilter value={range} onChange={setRange} /></div>
       <div className="page-toolbar">
         <Typography.Text type="secondary">
           默认每平台只显示一份当前登记版本；旧版本折叠在下面。上传只保存文件，不自动切换官网当前版本。
@@ -223,7 +218,7 @@ export function InstallersView() {
         </ReadGate>
         <div className="panel-foot">
           <Typography.Text type="secondary">
-            登记读取 {asOf} · 请求次数按请求计，不是安装人数或独立用户；重复下载会重复计数。
+            统计区间 {registryRead ? `${range.start} 至 ${range.end}（北京时间）` : "未读取"} · 请求次数按请求计，不是安装人数或独立用户；重复下载会重复计数。
           </Typography.Text>
         </div>
       </Card>
@@ -249,7 +244,7 @@ export function InstallersView() {
                 <div className="dl-row" key={platform}>
                   <div className="dl-platform"><span>{platformLabel[platform]}</span></div>
                   <div className="dl-cell">
-                    <span className="dl-cell-label">当日</span>
+                    <span className="dl-cell-label">区间</span>
                     <span className="dl-value">{value.period.toLocaleString("zh-CN")}</span>
                   </div>
                   <div className="dl-cell">

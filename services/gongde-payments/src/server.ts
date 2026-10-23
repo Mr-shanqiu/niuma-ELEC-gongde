@@ -1,3 +1,4 @@
+import { ORDER_STATES } from "./domain/store.js";
 import { createFreeCreatorRuntime } from "./creators/runtime.js";
 import { createFreeDistributionRuntime } from "./free-distribution/runtime.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -116,6 +117,16 @@ function requireAdmin(request: IncomingMessage): string {
 
 function publicAccessReference(userId: string | null): string | null {
   return userId ? createHash("sha256").update(userId).digest("hex").slice(0, 12) : null;
+}
+
+function adminDateRange(url: URL, defaults: true): {from: Date; to: Date};
+function adminDateRange(url: URL, defaults: false): {from?: Date; to?: Date};
+function adminDateRange(url: URL, defaults: boolean) {
+  const from = parseDate(url.searchParams.get("from"), "from"), to = parseDate(url.searchParams.get("to"), "to");
+  if (Boolean(from) !== Boolean(to) || (from && to && (from >= to || to.getTime() - from.getTime() > 366 * 86400000))) {
+    throw new Error("invalid_date_range");
+  }
+  return defaults ? {from: from ?? new Date(Date.now()-86400000), to: to ?? new Date()} : {from, to};
 }
 
 function adminOrder(order: GongdeOrder) {
@@ -522,8 +533,7 @@ export const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/gongde/admin/download-report") {
       requireAdmin(request);
-      const from = parseDate(url.searchParams.get("from"), "from") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const to = parseDate(url.searchParams.get("to"), "to") ?? new Date();
+      const { from, to } = adminDateRange(url, true);
       const registry = loadInstallerRegistry();
       const coverage = loadDownloadCoverage();
       const countedSince = coverage.startedAt ? new Date(coverage.startedAt) : null;
@@ -563,8 +573,7 @@ export const server = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/api/gongde/admin/overview") {
       requireAdmin(request);
-      const from = parseDate(url.searchParams.get("from"), "from") ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const to = parseDate(url.searchParams.get("to"), "to") ?? new Date();
+      const { from, to } = adminDateRange(url, true);
       const [selectedDay, allTime, downloads, recent, storeReady] = await Promise.all([
         store.summarizeOrders(from, to),
         store.summarizeOrders(new Date(0), new Date()),
@@ -577,11 +586,12 @@ export const server = createServer(async (request, response) => {
             }).then((summary) => ({ status: "available" as const, summary }))
               .catch(() => ({ status: "error" as const, summary: null }))
           : Promise.resolve({ status: "unconfigured" as const, summary: null }),
-        store.listOrders({ effectiveOnly: true, limit: 6, offset: 0 }),
+        store.listOrders({ createdFrom: from, createdTo: to, limit: 6, offset: 0 }),
         store.ready()
       ]);
       return json(response, 200, {
         periods: { selectedDay, allTime },
+        range: { from: from.toISOString(), to: to.toISOString() },
         downloads,
         recent: recent.orders.map(adminOrder),
         services: {
@@ -601,7 +611,7 @@ export const server = createServer(async (request, response) => {
       }
       const channel = url.searchParams.get("channel");
       const state = url.searchParams.get("state");
-      const validStates = new Set<OrderState>(["PAID", "FULFILLED"]);
+      const validStates = new Set<OrderState>(ORDER_STATES);
       if (channel && channel !== "wechat" && channel !== "alipay") return json(response, 400, { error: "invalid_channel" });
       if (state && !validStates.has(state as OrderState)) return json(response, 400, { error: "invalid_state" });
       const orderNo = url.searchParams.get("orderNo")?.trim();
@@ -612,14 +622,17 @@ export const server = createServer(async (request, response) => {
         try { accessId = await service.resolveAccessId(accessCode); }
         catch { return json(response, 200, { data: [], total: 0 }); }
       }
+      const effective = url.searchParams.get("effectiveOnly");
+      if (effective !== null && effective !== "true" && effective !== "false") return json(response, 400, { error: "invalid_state" });
+      const dateRange = adminDateRange(url, false);
       const result = await store.listOrders({
         orderNo: orderNo || undefined,
         userId: accessId,
-        createdFrom: parseDate(url.searchParams.get("from"), "from"),
-        createdTo: parseDate(url.searchParams.get("to"), "to"),
+        createdFrom: dateRange.from,
+        createdTo: dateRange.to,
         channel: channel as "wechat" | "alipay" | undefined,
         state: state as OrderState | undefined,
-        effectiveOnly: true,
+        effectiveOnly: effective === "true",
         limit: perPage,
         offset: (page - 1) * perPage
       });
@@ -629,7 +642,7 @@ export const server = createServer(async (request, response) => {
     if (request.method === "GET" && adminOrderMatch) {
       requireAdmin(request);
       const order = await store.findOrder(adminOrderMatch[1]);
-      if (!order || (order.state !== "PAID" && order.state !== "FULFILLED")) return json(response, 404, { error: "order_not_found" });
+      if (!order) return json(response, 404, { error: "order_not_found" });
       const [entitlements, marketItems] = await Promise.all([
         store.findEntitlementsByOrder(order.orderNo),
         store.findMarketOrderItemsByOrder(order.orderNo)

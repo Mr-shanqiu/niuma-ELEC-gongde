@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { FreeDistributionError, type ClaimItemSnapshot, type CodeFamilyKind } from "./types.js";
 
 export const FREE_DISTRIBUTION_ANCHOR_MS = Date.parse("2026-10-08T00:00:00+08:00");
-export const FREE_CODE_CYCLE_MS = 72 * 60 * 60 * 1000;
+export const FREE_CODE_CYCLE_MS = 7 * 24 * 60 * 60 * 1000;
 // A manual rotation replaces the code immediately but keeps the replaced code
 // accepting NEW claims for this long, so a group announcement can be updated
 // without stranding whoever already copied the old code. It is measured from the
@@ -27,6 +27,25 @@ export function codeCycle(now: Date | number) {
   if (!Number.isFinite(ms) || ms < FREE_DISTRIBUTION_ANCHOR_MS) throw new FreeDistributionError("free_distribution_not_started", 503);
   const index = Math.floor((ms - FREE_DISTRIBUTION_ANCHOR_MS) / FREE_CODE_CYCLE_MS);
   const validFrom = new Date(FREE_DISTRIBUTION_ANCHOR_MS + index * FREE_CODE_CYCLE_MS);
+  return { index, validFrom, expiresAt: new Date(validFrom.getTime() + FREE_CODE_CYCLE_MS) };
+}
+
+/** Preserve the published expiry of an existing token when changing period length.
+ * The next period starts at that expiry; no old index or digest is reinterpreted.
+ * Manual rotations share this schedule even though their generation changes.
+ */
+export function continuedCodeCycle(now: Date, previous: { index: number; validFrom: Date; expiresAt: Date } | null) {
+  if (!previous) return codeCycle(now);
+  const ms = now.getTime(), start = previous.validFrom.getTime(), end = previous.expiresAt.getTime();
+  if (![ms, start, end].every(Number.isFinite) || end <= start || ms < start ||
+      !Number.isSafeInteger(previous.index) || previous.index < 0) {
+    throw new FreeDistributionError("code_derivation_invalid", 503);
+  }
+  if (ms < end) return previous;
+  const skipped = Math.floor((ms - end) / FREE_CODE_CYCLE_MS);
+  const index = previous.index + skipped + 1;
+  if (!Number.isSafeInteger(index) || index > 4294967295) throw new FreeDistributionError("code_generation_exhausted", 503);
+  const validFrom = new Date(end + skipped * FREE_CODE_CYCLE_MS);
   return { index, validFrom, expiresAt: new Date(validFrom.getTime() + FREE_CODE_CYCLE_MS) };
 }
 

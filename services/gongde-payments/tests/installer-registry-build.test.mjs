@@ -25,8 +25,8 @@ const compiled = fileURLToPath(new URL("../dist/downloads/installer-registry.js"
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 const source = fileURLToPath(new URL("../src/free-distribution/installers.json", import.meta.url));
 
-/** A registry whose only difference is `releaseId`, so a stale copy is visible. */
-const registryWith = (releaseId) => JSON.stringify({
+/** A registry whose only difference is `releaseId` (and optional note), so a stale copy is visible. */
+const registryWith = (releaseId, note) => JSON.stringify({
   schemaVersion: 1,
   items: [{
     name: "niuma-merit-macos-0.9.4-test.dmg",
@@ -37,7 +37,8 @@ const registryWith = (releaseId) => JSON.stringify({
     bytes: 1024,
     sha256: "a".repeat(64),
     perpetualCompatible: true,
-    publicDownloadUrl: "https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.4-test.dmg"
+    publicDownloadUrl: "https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.4-test.dmg",
+    ...(note === undefined ? {} : { systemRequirements: note })
   }]
 });
 
@@ -55,9 +56,13 @@ async function layout(t) {
   return {
     root,
     load,
-    async writeAuthoritative(releaseId) {
+    async writeAuthoritative(releaseId, note) {
       await mkdir(join(root, "src/free-distribution"), { recursive: true });
-      await writeFile(join(root, "src/free-distribution/installers.json"), registryWith(releaseId));
+      await writeFile(join(root, "src/free-distribution/installers.json"), registryWith(releaseId, note));
+    },
+    async writeAuthoritativeRaw(contents) {
+      await mkdir(join(root, "src/free-distribution"), { recursive: true });
+      await writeFile(join(root, "src/free-distribution/installers.json"), contents);
     },
     async writeBuildCopy(releaseId) {
       await mkdir(join(root, "dist/free-distribution"), { recursive: true });
@@ -157,4 +162,52 @@ test("F1: an explicit override still wins over both shipped files", async (t) =>
   await writeFile(override, registryWith("niuma-merit-macos-0.9.4-override"));
   const loadInstallerRegistry = await fixture.load();
   assert.equal(releaseIdOf(loadInstallerRegistry({ GONGDE_FREE_INSTALLERS_FILE: override })), "niuma-merit-macos-0.9.4-override");
+});
+
+/**
+ * The optional note (`systemRequirements`) is the one field entries may carry
+ * beyond the fixed shape, and the site renders it when present. Both
+ * directions matter here: a dropped note is a rebuild regression, and an
+ * invented one would misdescribe the entry.
+ *
+ * The registry holds one entry of each kind so a single load exercises both.
+ */
+const twoItemRegistry = (note) => JSON.stringify({
+  schemaVersion: 1,
+  items: [
+    {
+      name: "niuma-merit-macos-0.9.4-annotated.dmg",
+      platform: "macos", format: "dmg", releaseId: "niuma-merit-macos-0.9.4-annotated",
+      version: "0.9.4", bytes: 1024, sha256: "a".repeat(64), perpetualCompatible: true,
+      publicDownloadUrl: "https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.4-annotated.dmg",
+      systemRequirements: note
+    },
+    {
+      name: "niuma-merit-windows-0.9.4-plain-setup.exe",
+      platform: "windows", format: "exe", releaseId: "niuma-merit-windows-0.9.4-plain-setup",
+      version: "0.9.4", bytes: 2048, sha256: "b".repeat(64), perpetualCompatible: true,
+      publicDownloadUrl: "https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.4-plain-setup.exe"
+    }
+  ]
+});
+
+test("note: a present note is carried through exactly, a missing note stays missing", async (t) => {
+  const fixture = await layout(t);
+  const note = "历史回退版；新安装请优先选择上方 Mac 0.9.3。";
+  await fixture.writeAuthoritativeRaw(twoItemRegistry(note));
+  const registry = (await fixture.load())();
+  assert.equal(registry.status, "available");
+  const annotated = registry.items.find((item) => item.releaseId === "niuma-merit-macos-0.9.4-annotated");
+  const plain = registry.items.find((item) => item.releaseId === "niuma-merit-windows-0.9.4-plain-setup");
+  assert.equal(annotated.systemRequirements, note, "the note must survive the rebuild verbatim");
+  assert.equal(JSON.parse(JSON.stringify(annotated)).systemRequirements, note,
+    "the note must survive response serialization");
+  assert.equal(plain.systemRequirements, undefined, "an entry without a note must not gain one");
+  assert.ok(!("systemRequirements" in plain), "absence must stay absence: no key at all");
+});
+
+test("note: a non-string note fails the whole list closed", async (t) => {
+  const fixture = await layout(t);
+  await fixture.writeAuthoritativeRaw(twoItemRegistry(42));
+  assert.deepEqual((await fixture.load())(), { status: "unavailable", items: [] });
 });
