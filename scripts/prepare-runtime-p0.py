@@ -10,7 +10,7 @@ import sys
 root = Path(__file__).resolve().parents[1]
 output = Path(sys.argv[1]).resolve()
 output.mkdir(parents=True, exist_ok=True)
-header = (root / 'scripts/runtime-p0-fixtures.h').read_text()
+header = (root / 'scripts/runtime-p0-fixtures.h').read_text(encoding='utf-8')
 manifest_sha = re.search(r'kOffworkManifestSha256\[\]\s*=\s*"([0-9a-f]{64})"', header).group(1)
 entries = re.findall(r'\{"(assets/[^"\n]+)",\s*(?:"([0-9a-f]{64})"|(kOffworkManifestSha256))\}', header)
 assert len(entries) == 6, 'P0 must bind every pinned image and its geometry source'
@@ -31,7 +31,7 @@ def png(path):
 
 packs = []
 for path in sorted((root / 'assets/appearance-packs').glob('*/manifest.json')):
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding='utf-8'))
     layers = data.get('layers', [])
     images = sorted({layer['image'] for layer in layers})
     if not images:
@@ -49,5 +49,5 @@ report = {'scope': 'public repository artwork only; excludes installed or custom
           'compositionBuffers': [{'scalePercent': scale, 'twoBgraBuffersBytes': (240*scale//100)*(250*scale//100)*8}
                                  for scale in [100,150,200]],
           'budgetStatus': 'inventory, not a measured process memory bound'}
-(output / 'runtime-p0-sources.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+(output / 'runtime-p0-sources.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 print(f'P0 fixture: {len(bound)} fixed sources; {len(packs)} packs inventoried; max full decode {report["maxSinglePackFullResolutionBytes"] / 1048576:.2f} MiB')
