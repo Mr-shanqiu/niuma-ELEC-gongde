@@ -539,7 +539,7 @@ async function claim() {
     $('claim-clear-access').disabled = busy || verifying;
     $('claim-access-status').textContent = validAccess(access)
       ? '官方群码已验证，每批最多 10 个，可重复免费领取，不扣额度。换码时间：' + time(access.expiresAt)
-      : '请输入 GD 加六位数字的三天官方群码，字母大小写均可；不接受作者码。';
+      : '请输入 GD 加六位数字的七天官方群码，字母大小写均可；不接受作者码。';
     const activeGroup = sessionStorage.getItem(ACTIVE_CLAIM_KEY);
     // Both pages that host this script carry the control, but bind defensively so
     // a page without it keeps working.

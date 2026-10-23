@@ -3,7 +3,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql
 import { hasCurrentFreeConsent } from "../creators/consent.js";
 import { assertExcluded, lockFreeExclusionControl } from "./exclusions.js";
 import type { FreeWorkMetadata } from "../creators/repository.js";
-import { assertCodeSecret, batchLimit, claimRequestDigest, CODE_HANDOVER_MS, codeCycle, codeDigest, creatorPublicNumber,
+import { assertCodeSecret, batchLimit, claimRequestDigest, CODE_HANDOVER_MS, continuedCodeCycle, codeDigest, creatorPublicNumber,
   deriveCode, legacyTokenDigest, DOWNLOAD_SESSION_MS, DOWNLOAD_WINDOW_MS, downloadLinkExpiresAt, MAX_DELIVERY_BYTES,
   newSessionToken, sessionDigest, stableJson, validateClaimItems } from "./codes.js";
 import { FreeDistributionError, type AuditMutation, type Claim, type ClaimItemSnapshot, type CodeAuthorization,
@@ -205,8 +205,16 @@ export class FreeDistributionRepository {
   async ensureCreatorPublicNumber(creatorId: string): Promise<string> {
     return this.#transaction(connection => ensureFreeCreatorPublicNumber(connection, creatorId));
   }
+  async #codeCycle(connection: PoolConnection, family: RowDataPacket, now: Date) {
+    // The caller holds the family row lock. A prior token is schedule evidence,
+    // including after revoke; its authorization still depends on safety checks.
+    const latest = (await rows(connection, `SELECT * FROM gongde_free_code_tokens
+      WHERE family_id = ? ORDER BY expires_at DESC, cycle_index DESC, generation DESC LIMIT 1 FOR UPDATE`, [family.id]))[0];
+    return continuedCodeCycle(now, latest ? { index: Number(latest.cycle_index),
+      validFrom: new Date(latest.valid_from), expiresAt: new Date(latest.expires_at) } : null);
+  }
   async #ensureToken(connection: PoolConnection, family: RowDataPacket, now: Date): Promise<RowDataPacket> {
-    const cycle = codeCycle(now);
+    const cycle = await this.#codeCycle(connection, family, now);
     const existing = (await rows(connection, `SELECT * FROM gongde_free_code_tokens
       WHERE family_id = ? AND cycle_index = ? AND generation = ? FOR UPDATE`, [family.id, cycle.index, family.generation]))[0];
     if (existing) {
@@ -250,7 +258,6 @@ export class FreeDistributionRepository {
     const { family, owner } = await this.#lockFamily(connection, initial.family_id);
     const token = (await rows(connection, "SELECT * FROM gongde_free_code_tokens WHERE id = ? FOR UPDATE", [tokenId]))[0];
     const now = this.#now();
-    const cycle = codeCycle(now);
     // Pause, revoke and every other safety stop stay ahead of the handover: a
     // rotation never resumes a family an operator paused.
     if (family.state !== "ACTIVE" || (family.creator_id && owner?.state !== "ACTIVE")) throw new FreeDistributionError("access_code_paused", 403);
@@ -263,7 +270,6 @@ export class FreeDistributionRepository {
     const handover = token.revoked_at != null && token.server_rotated_at != null &&
       token.handover_until != null && now.getTime() < new Date(token.handover_until).getTime();
     if (!handover && (token.revoked_at || Number(token.generation) !== Number(family.generation) ||
-      Number(token.cycle_index) !== cycle.index ||
       now.getTime() < new Date(token.valid_from).getTime() || now.getTime() >= new Date(token.expires_at).getTime())) {
       throw new FreeDistributionError("access_code_expired", 410);
     }
@@ -612,11 +618,12 @@ export class FreeDistributionRepository {
         // token is already outside its window and must not be brought back, and
         // COALESCE keeps an earlier rotation's deadline from being pushed out.
         if (input.action === "rotate") {
+          const cycle = await this.#codeCycle(connection, family, now);
           const handoverUntil = new Date(now.getTime() + CODE_HANDOVER_MS);
           await write(connection, `UPDATE gongde_free_code_tokens SET revoked_at = COALESCE(revoked_at, ?),
             handover_until = COALESCE(handover_until, ?), server_rotated_at = COALESCE(server_rotated_at, ?)
             WHERE family_id = ? AND cycle_index = ? AND revoked_at IS NULL`,
-          [now, handoverUntil, now, family.id, codeCycle(now).index]);
+          [now, handoverUntil, now, family.id, cycle.index]);
         } else {
           // A revoke is a stop for the whole family, not only for the code that
           // is current right now. Every handover still open must close with it:
@@ -808,7 +815,7 @@ export class FreeDistributionRepository {
     if ((options.from === undefined) !== (options.to === undefined)) throw new FreeDistributionError("admin_date_range_invalid", 400);
     const to = options.to === undefined ? this.#now() : parse(options.to);
     const from = options.from === undefined ? new Date(to.getTime() - DOWNLOAD_SESSION_MS) : parse(options.from);
-    if (from.getTime() >= to.getTime() || to.getTime() - from.getTime() > 90 * 86400000) throw new FreeDistributionError("admin_date_range_invalid", 400);
+    if (from.getTime() >= to.getTime() || to.getTime() - from.getTime() > 366 * 86400000) throw new FreeDistributionError("admin_date_range_invalid", 400);
     return [from, to];
   }
   async listCreators(options: { page?: number; perPage?: number; q?: string; state?: string } = {}): Promise<{ items: AdminCreatorSummary[]; total: number }> {
@@ -864,8 +871,9 @@ export class FreeDistributionRepository {
       return { items, total };
     });
   }
-  async getStats(options: { from?: string; to?: string; familyId?: string } = {}): Promise<AdminStats> {
-    const [from, to] = this.#dateRange(options); const family = options.familyId ?? null;
+  async getStats(options: { from?: string; to?: string; familyId?: string; allTime?: boolean } = {}): Promise<AdminStats> {
+    if (options.allTime && (options.from !== undefined || options.to !== undefined)) throw new FreeDistributionError("admin_date_range_invalid", 400);
+    const [from, to] = options.allTime ? [new Date(0), this.#now()] : this.#dateRange(options); const family = options.familyId ?? null;
     return this.#transaction(async connection => {
       const ready = (await rows(connection, `SELECT COUNT(*) AS n FROM gongde_free_claims
         WHERE issued_at >= ? AND issued_at < ? AND (? IS NULL OR family_id = ?)`, [from, to, family, family]))[0];

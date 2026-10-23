@@ -62,7 +62,11 @@ export interface AdminOrderPage {
 export interface AdminOrderSummary {
   orders: number;
   amountFen: number;
+  totalOrders: number;
+  byState: Record<OrderState, number>;
 }
+
+export const ORDER_STATES: readonly OrderState[] = ["PENDING_PAYMENT", "PAID", "FULFILLED", "EXPIRED", "CANCELED", "EXCEPTION", "REFUND_PENDING", "REFUNDED"];
 
 export interface PaymentStore {
   insertAccessAccount(account: GongdeAccessAccount): Promise<void>;
@@ -181,6 +185,8 @@ export class InMemoryPaymentStore implements PaymentStore {
     const orders = [...this.#orders.values()].filter((order) => order.createdAt >= createdFrom && order.createdAt < createdTo);
     const settled = orders.filter((order) => order.state === "PAID" || order.state === "FULFILLED");
     return {
+      totalOrders: orders.length,
+      byState: Object.fromEntries(ORDER_STATES.map(state => [state, orders.filter(order => order.state === state).length])) as Record<OrderState, number>,
       orders: settled.length,
       amountFen: settled.reduce((sum, order) => sum + order.amountFen, 0)
     };

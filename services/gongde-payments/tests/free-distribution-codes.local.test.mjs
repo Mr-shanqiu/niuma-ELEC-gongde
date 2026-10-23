@@ -24,13 +24,13 @@ const item = (number = '100001', extra = {}) => ({ appearanceNumber: number, sou
   deliveryBytesUpperBound: 1024, ...extra });
 const error = code => value => value.code === code;
 
-test('fixed Shanghai anchor and half-open 72-hour boundary', () => {
+test('fixed Shanghai anchor and half-open seven-day boundary', () => {
   const start = rules.FREE_DISTRIBUTION_ANCHOR_MS;
   assert.equal(new Date(start).toISOString(), '2026-10-07T16:00:00.000Z');
   assert.equal(rules.codeCycle(start).index, 0);
   assert.equal(rules.codeCycle(start + rules.FREE_CODE_CYCLE_MS - 1).index, 0);
   assert.equal(rules.codeCycle(start + rules.FREE_CODE_CYCLE_MS).index, 1);
-  assert.equal(rules.codeCycle(start + rules.FREE_CODE_CYCLE_MS).validFrom.toISOString(), '2026-10-10T16:00:00.000Z');
+  assert.equal(rules.codeCycle(start + rules.FREE_CODE_CYCLE_MS).validFrom.toISOString(), '2026-10-14T16:00:00.000Z');
   assert.throws(() => rules.codeCycle(start - 1), error('free_distribution_not_started'));
 });
 test('group and author live non-depleting permission matrix', () => {
@@ -102,4 +102,16 @@ test('short author numbers retain natural seven-digit growth', () => {
   assert.equal(rules.creatorPublicNumber(100001), 'C100001');
   assert.equal(rules.creatorPublicNumber(1000000), 'C1000000');
   assert.throws(() => rules.creatorPublicNumber(100000));
+});
+
+test('weekly transition preserves legacy expiry and skips missed weeks without reviving history', () => {
+  const previous = {index: 5, validFrom: new Date('2026-10-22T16:00:00Z'), expiresAt: new Date('2026-10-25T16:00:00Z')};
+  assert.deepEqual(rules.continuedCodeCycle(new Date('2026-10-23T12:00:00Z'), previous), previous);
+  const next = rules.continuedCodeCycle(previous.expiresAt, previous);
+  assert.equal(next.index, 6);
+  assert.equal(next.validFrom.toISOString(), '2026-10-25T16:00:00.000Z');
+  assert.equal(next.expiresAt.toISOString(), '2026-11-01T16:00:00.000Z');
+  const late = rules.continuedCodeCycle(new Date('2026-11-08T16:00:00Z'), previous);
+  assert.equal(late.index, 8);
+  assert.equal(late.expiresAt.toISOString(), '2026-11-15T16:00:00.000Z');
 });

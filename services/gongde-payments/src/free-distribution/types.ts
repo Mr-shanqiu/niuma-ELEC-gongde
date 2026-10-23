@@ -52,7 +52,7 @@ export interface CodeAuthorization {
   expiresAt: string;
   // True only when this authorization comes from a code the server itself
   // replaced, and only while that code's own handover window is still open.
-  // A code that merely belongs to an older 72-hour cycle is never "handover".
+  // A code that merely belongs to an earlier scheduled cycle is never "handover".
   handover?: boolean;
   handoverUntil?: string | null;
 }

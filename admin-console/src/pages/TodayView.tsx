@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Alert, Button, Card, Collapse, DatePicker, Space, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Space, Tooltip, Typography } from "antd";
 import { ArrowRightOutlined, InfoCircleOutlined, ReloadOutlined } from "@ant-design/icons";
-import dayjs, { type Dayjs } from "dayjs";
-import { beijingDate, beijingDayRange } from "../Shell";
+import { DateRangeFilter, useAdminRange } from "../ui/DateRangeFilter";
+import { rangeQuery } from "../ui/date-range";
+import { beijingDate } from "../Shell";
 import { shapes, useDistributionRead, useRead, v2Shapes } from "../ui/api";
 import type { ReadState } from "../ui/api";
 import { classifyDownloads, historicalRequests } from "../ui/downloads";
@@ -10,7 +11,7 @@ import type { DownloadCell, DownloadReport, DownloadSummary } from "../ui/downlo
 import { ReadGate } from "../ui/ReadGate";
 import { StatusTag, type Tone } from "../ui/StatusTag";
 
-type Counts = { orders: number; amountFen: number };
+type Counts = { orders: number; amountFen: number; totalOrders: number; byState: Record<string,number> };
 type Overview = {
   periods: { selectedDay: Counts; allTime: Counts };
   downloads: { status: string; summary: DownloadSummary | null };
@@ -80,9 +81,11 @@ function Stat({ label, value, unit, sub, emphasis }: {
 }
 
 export function TodayView() {
-  const [day, setDay] = useState<Dayjs>(() => dayjs(beijingDate(new Date()), "YYYY-MM-DD"));
-  const range = beijingDayRange(day.format("YYYY-MM-DD"));
-  const query = range ? `from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}` : null;
+  const [range, setRange] = useAdminRange();
+  const query = rangeQuery(range);
+  type FreeStats = {readyClaims:number|null;workClaims:number|null;verifiedCodes:number|null};
+  const freeStats=useDistributionRead<FreeStats>(query?`/stats?${query}`:null,{expectData:v2Shapes.stats});
+  const freeTotal=useDistributionRead<FreeStats>("/stats?scope=all",{expectData:v2Shapes.stats});
 
   const overview = useRead<Overview>(query ? `/overview?${query}` : null, { expect: shapes.overview });
   const downloads = useRead<DownloadReport>(query ? `/download-report?${query}` : null, { expect: shapes.downloadReport });
@@ -96,14 +99,14 @@ export function TodayView() {
   const reports = useDistributionRead<ReportPage>("/reports?page=1&perPage=1&state=OPEN", { expectData: v2Shapes.reportsPage });
 
   const reloadAll = () => {
-    overview.reload(); downloads.reload(); operations.reload(); reports.reload();
+    overview.reload(); downloads.reload(); operations.reload(); reports.reload();freeStats.reload();freeTotal.reload();
     // Only re-read the rules if they are on screen; opening them reads them.
     if (rulesOpen) config.reload();
   };
 
   const ready = (state: ReadState<unknown>) => state.status === "ready" || state.status === "empty";
 
-  /* 订单：概览一个请求同时给出当日与累计，两者口径不同，分别标注。 */
+  /* 订单：概览一个请求同时给出区间与累计，两者口径不同，分别标注。 */
   const orders = ready(overview.state) ? (overview.state as { data: Overview }).data.periods : null;
   const orderCell = orders ? { value: orders.selectedDay.orders, amount: orders.selectedDay.amountFen }
     : overview.state.status === "loading" ? "loading" as const : "unread" as const;
@@ -134,27 +137,20 @@ export function TodayView() {
   return (
     <div className="page">
       <div className="page-toolbar">
-        <DatePicker
-          value={day}
-          allowClear={false}
-          onChange={(value) => value && setDay(value)}
-          placeholder="北京时间日期"
-          aria-label="选择北京时间日期"
-        />
-        <Typography.Text type="secondary">订单与下载都按北京时间这一天统计</Typography.Text>
+        <DateRangeFilter value={range} onChange={setRange} />
         <span className="grow" />
         <Button icon={<ReloadOutlined />} onClick={reloadAll}>重新读取</Button>
       </div>
 
       <div className="stat-band">
         <Stat
-          label="当日有效订单"
+          label="区间有效订单"
           value={typeof orderCell === "object" ? orderCell.value : orderCell}
           unit="笔"
-          sub={typeof orderCell === "object" ? <>实收 ¥{(orderCell.amount / 100).toFixed(2)}</> : "订单概览未读取"}
+          sub={typeof orderCell === "object" ? <>订单金额 ¥{(orderCell.amount / 100).toFixed(2)}</> : "订单概览未读取"}
         />
         <Stat
-          label="当日下载请求"
+          label="区间下载请求"
           value={downloadCell.note === "ready" ? macos!.period + windows!.period
             : downloadCell.note === "loading" ? "loading" : downloadCell.note === "unread" ? "unread" : "unconfigured"}
           unit="次"
@@ -174,7 +170,7 @@ export function TodayView() {
           }
         />
         <Stat
-          label="待处理领取异常"
+          label="当前领取异常"
           value={
             claimCounts ? claimCounts.items
               : operations.state.status === "loading" ? "loading"
@@ -196,18 +192,31 @@ export function TodayView() {
           }
         />
         <Stat
-          label="待处理举报"
+          label="当前待处理举报"
           value={reportCell}
           unit="条"
           sub={typeof reportCell === "number" ? "官网形象编号举报 · 待处理" : "举报列表未读取"}
         />
       </div>
 
+      <Card className="flat-card" title="运营总台 · 区间与累计" extra={<Space><a href="#/orders">全部支付订单 →</a><a href="#/code">免费领取明细 →</a></Space>}>
+        <div className="stat-band">
+          <Stat label="区间全部支付订单" value={orders?orders.selectedDay.totalOrders:overview.state.status==="loading"?"loading":"unread"} unit="笔" sub={orders?`累计 ${orders.allTime.totalOrders.toLocaleString()} 笔`:undefined} />
+          <Stat label="区间已发放免费批次" value={freeStats.state.status==="ready"?freeStats.state.data.data.readyClaims:freeStats.state.status==="loading"?"loading":"unread"} unit="批"
+            sub={freeTotal.state.status==="ready"?`累计 ${freeTotal.state.data.data.readyClaims===null?"未采集":freeTotal.state.data.data.readyClaims.toLocaleString()} 批`:freeTotal.state.status==="loading"?"累计读取中":"累计未读取"} />
+          <Stat label="区间免费作品领取" value={freeStats.state.status==="ready"?freeStats.state.data.data.workClaims:freeStats.state.status==="loading"?"loading":"unread"} unit="个" />
+          <Stat label="累计有效订单金额" value={orders?orders.allTime.amountFen/100:overview.state.status==="loading"?"loading":"unread"} unit="元" sub={orders?`累计有效订单 ${orders.allTime.orders.toLocaleString()} 笔`:undefined} />
+        </div>
+        {freeStats.state.status==="error"?<Alert type="error" showIcon message="免费领取区间统计未读取" action={<Button onClick={freeStats.reload}>重试</Button>} />:null}
+        {orders?<Space wrap>{Object.entries(orders.selectedDay.byState).map(([state,count])=><StatusTag key={state} tone={state==="EXCEPTION"?"bad":"mute"}>{({PENDING_PAYMENT:"待支付",PAID:"已支付",FULFILLED:"已交付",EXPIRED:"已过期",CANCELED:"已取消",EXCEPTION:"异常",REFUND_PENDING:"退款处理中",REFUNDED:"已退款"} as Record<string,string>)[state]??state} {count}</StatusTag>)}</Space>:null}
+        <p className="page-sub">支付订单按创建时间筛选，状态为当前状态；有效订单仅含已支付与已交付，金额不是按支付日计算的结算净收入。免费批次与作品按首次发放时间统计，不混入支付订单。下方待办与服务状态为当前快照。</p>
+      </Card>
+
       <DownloadCard state={downloads.state} cell={downloadCell} onRetry={downloads.reload} />
 
       <Card
         className="flat-card"
-        title="需要你处理"
+        title="当前需要你处理"
         extra={<Typography.Text type="secondary" className="card-extra">只列会阻塞用户或影响收款的事</Typography.Text>}
         styles={{ body: { padding: 0 } }}
       >
@@ -404,7 +413,7 @@ function DownloadCard({ state, cell, onRetry }: {
               type="info"
               showIcon
               message="下载统计未接入"
-              description="服务端还没有启用下载计数的文件存储。这里不显示 0，因为 0 会被读成「今天没人下载」。"
+              description="服务端还没有启用下载计数的文件存储。这里不显示 0，因为 0 会被读成「这个区间没有下载」。"
             />
           )}
         </div>
@@ -446,7 +455,7 @@ function PlatformRow({ label, icon, today, total }: { label: string; icon: strin
         <span>{label}</span>
       </div>
       <div className="dl-cell">
-        <span className="dl-cell-label">当日</span>
+        <span className="dl-cell-label">区间</span>
         <span className="dl-value">{today.toLocaleString("zh-CN")}</span>
       </div>
       <div className="dl-cell">
@@ -469,7 +478,7 @@ function Rules({ state, onRetry }: { state: ReadState<PaymentConfig>; onRetry: (
   const rows: Array<[string, string]> = [
     ["基础形象", "免费，客户端直接下载，无需登录或付款"],
     ["扩展形象", "每个 1 元，每批最多 10 个不同形象，无套餐"],
-    ["官方群码", "GD + 6 位数字，三天轮换，每批最多 10 个"],
+    ["官方群码", "GD + 6 位数字，七天轮换，每批最多 10 个"],
     ["下载权益", "每次新下载重新付费或凭当期群码；已保存文件永久可用"],
     ["共创", "投稿、作者码与推广暂停，历史记录只读"],
     ["服务端配置", serverRule]

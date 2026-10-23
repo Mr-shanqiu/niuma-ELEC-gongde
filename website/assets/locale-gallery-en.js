@@ -66,7 +66,7 @@ window.NiuMaEnglishGallery = {
   '官方群码免费领取': 'Download free with a group code',
   ' 个': ' characters',
   '官方群码已验证，每批最多 10 个，可重复免费领取，不扣额度。换码时间：{0}': 'Group code verified. Download up to 10 per batch, with no usage quota. Code changes at {0}',
-  '请输入 GD 加六位数字的三天官方群码，字母大小写均可；不接受作者码。': 'Enter the current three-day group code: GD followed by six digits. Letters are case-insensitive. Creator codes are not accepted.',
+  '请输入 GD 加六位数字的七天官方群码，字母大小写均可；不接受作者码。': 'Enter the current seven-day group code: GD followed by six digits. Letters are case-insensitive. Creator codes are not accepted.',
   '当前有进行中的付款，请切换到“付费下载”继续；已选形象会保留。': 'You have a payment in progress. Switch to paid download to continue. Your selection is kept.',
   '当前有进行中的群码交付，请在“群码免费领取”中继续本批交付。': 'A group-code download is in progress. Switch to the group-code route to continue it.',
   '上次领取结果未确认，请继续本次领取，不会另建批次。': 'The last request is not confirmed yet. Continue it without creating another batch.',

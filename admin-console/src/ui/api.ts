@@ -320,8 +320,17 @@ const isDownloadSummary = (value: unknown): boolean => {
     isCount(summary.legacyCount) && isCount(summary.unattributed);
 };
 
+const orderStates=["PENDING_PAYMENT","PAID","FULFILLED","EXPIRED","CANCELED","EXCEPTION","REFUND_PENDING","REFUNDED"];
+const isOrder=(entry:unknown):boolean=>isObject(entry)&&isText(entry.id)&&isText(entry.orderNo)&&
+  isText(entry.purchaseKind)&&(entry.channel===null||entry.channel==="wechat"||entry.channel==="alipay")&&
+  isCount(entry.amountFen)&&orderStates.includes(String(entry.state))&&every(entry.assetIds,isText)&&isStamp(entry.createdAt);
+const isActivity=(value:unknown):boolean=>isObject(value)&&isCounts(value)&&isCount(value.totalOrders)&&
+  isObject(value.byState)&&orderStates.every(state=>isCount((value.byState as Record<string,unknown>)[state]))&&
+  orderStates.reduce((sum,state)=>sum+(value.byState as Record<string,number>)[state],0)===value.totalOrders;
+
 export const shapes = {
   session: (body: Record<string, unknown>) => typeof body.username === "string" && body.username.length > 0,
+  orders: (body: Record<string, unknown>) => every(body.data,isOrder)&&isCount(body.total),
   list: (body: Record<string, unknown>) =>
     Array.isArray(body.data) && Number.isSafeInteger(body.total) && (body.total as number) >= 0,
   page: (body: Record<string, unknown>) =>
@@ -332,7 +341,7 @@ export const shapes = {
     const services = body.services as Record<string, unknown> | undefined;
     const downloads = body.downloads as Record<string, unknown> | undefined;
     if (!periods || !services || !downloads || !Array.isArray(body.recent)) return false;
-    if (!isCounts(periods.selectedDay) || !isCounts(periods.allTime)) return false;
+    if (!isActivity(periods.selectedDay) || !isActivity(periods.allTime)) return false;
     if (typeof services !== "object" || typeof downloads.status !== "string") return false;
     return downloads.status === "available" ? isDownloadSummary(downloads.summary) : downloads.summary === null;
   },
@@ -355,7 +364,11 @@ export const shapes = {
   paymentConfig: (body: Record<string, unknown>) =>
     Number.isSafeInteger(body.unitPriceFen) && Number.isSafeInteger(body.maxItems) && typeof body.mode === "string",
   orderDetail: (body: Record<string, unknown>) =>
-    Boolean(body.data) && Array.isArray((body.data as Record<string, unknown>).marketItems),
+    isObject(body.data) && isOrder(body.data) && isTextOrNull(body.data.providerTransactionId) &&
+    isStampOrNull(body.data.paidAt) && isStampOrNull(body.data.fulfilledAt) &&
+    every(body.data.entitlements,entry=>isObject(entry)&&isText(entry.scope)&&isTextOrNull(entry.assetId)&&isText(entry.state)) &&
+    every(body.data.marketItems,entry=>isObject(entry)&&isText(entry.assetId)&&isText(entry.sourceKind)&&
+      isText(entry.titleZh)&&isText(entry.versionLabel)&&isText(entry.sourceRevision)&&isCount(entry.amountFen)),
   /**
    * The gallery plus the publication revision every write must echo.
    *
@@ -444,7 +457,8 @@ function chineseError(code: string): string {
     invalid_channel: "支付渠道筛选值无效。",
     invalid_state: "订单状态筛选值无效。",
     invalid_order_no: "订单号格式无效。",
-    order_not_found: "订单不存在或不是有效支付记录。",
+    order_not_found: "订单不存在。",
+    invalid_date_range: "日期范围无效，每次最多查询366天。",
     appearance_not_found: "形象不存在。",
     appearance_number_invalid: "请输入完整的 6 至 9 位形象编号。",
     appearance_numbers_unavailable: "形象编号服务不可用。",

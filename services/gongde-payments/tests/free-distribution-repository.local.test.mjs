@@ -210,6 +210,7 @@ class Fixture {
       if (q.includes('WHERE code_digest')) selected = selected.filter(row => row.code_digest === v[0]);
       else if (q.includes('WHERE family_id = ? AND server_rotated_at')) selected = selected.filter(row => row.family_id === v[0] &&
         row.server_rotated_at != null && row.handover_until != null && +row.handover_until > +v[1]);
+      else if (q.includes('ORDER BY expires_at DESC')) return [...selected].filter(row => row.family_id === v[0]).sort((a,b) => +b.expires_at - +a.expires_at || b.cycle_index-a.cycle_index || b.generation-a.generation).slice(0,1);
       else if (q.includes('WHERE family_id')) selected = selected.filter(row => row.family_id === v[0] && row.cycle_index === v[1] && row.generation === v[2]);
       else if (q.includes('WHERE id')) selected = selected.filter(row => row.id === v[0]);
       // The one replaced-token query names the most recent rotation, so the
@@ -413,7 +414,7 @@ test('pause/resume and generation rotation preserve original claim and attributi
 });
 test('fixed cycle boundary rejects prior code but idempotent old confirmation survives', async () => {
   const f = new Fixture(), auth = await access(f), claim = await create(f, auth);
-  f.time = Date.parse('2026-10-10T15:59:59.999Z');
+  f.time = Date.parse('2026-10-14T15:59:59.999Z');
   await f.repository.verifyCode({ code: auth.code, sessionToken: auth.sessionToken });
   f.time += 1;
   await assert.rejects(() => f.repository.verifyCode({ code: auth.code }), err('access_code_expired'));
@@ -456,9 +457,9 @@ test('rotation handover keeps the replaced code usable for new claims for exactl
 // cycle's own scheduled expiry, and the new code keeps the ordinary cycle.
 test('rotation handover survives the cycle boundary and does not move the new code expiry', async () => {
   const f = new Fixture(), auth = await access(f);
-  // The cycle the fixture starts in ends 72 hours after the 2026-10-08 00:00
+  // The cycle the fixture starts in ends seven days after the 2026-10-08 00:00
   // +08:00 anchor, i.e. at 2026-10-10T16:00:00Z.
-  const boundary = Date.parse('2026-10-10T16:00:00.000Z');
+  const boundary = Date.parse('2026-10-14T16:00:00.000Z');
   f.time = boundary - 60000;
   const before = await f.repository.getCurrentCode(auth.family.id);
   assert.equal(Date.parse(before.authorization.expiresAt), boundary);
@@ -466,7 +467,7 @@ test('rotation handover survives the cycle boundary and does not move the new co
   // The handover is a full hour from the rotation, not from the boundary.
   assert.equal(Date.parse(rotated.previousCodeHandoverUntil), f.time + 3600000);
   // The new code keeps the ordinary cycle rule: a manual rotation does NOT
-  // restart a three-day period, so it still ends at the same boundary.
+  // restart a seven-day period, so it still ends at the same boundary.
   assert.equal(Date.parse(rotated.expiresAt), boundary);
   // Past the boundary, inside the handover, the replaced code still works: the
   // full hour is kept even though its own cycle ended.
@@ -477,7 +478,7 @@ test('rotation handover survives the cycle boundary and does not move the new co
   // The current code moved on to the next cycle as it always did.
   const next = await f.repository.getCurrentCode(auth.family.id);
   assert.notEqual(next.code, rotated.code);
-  assert.equal(Date.parse(next.authorization.expiresAt), boundary + 72 * 3600000);
+  assert.equal(Date.parse(next.authorization.expiresAt), boundary + 7 * 24 * 3600000);
   f.time = Date.parse(rotated.previousCodeHandoverUntil) - 1;
   assert.equal((await f.repository.verifyCode({ code: before.code })).session.authorization.handover, true);
   f.time = Date.parse(rotated.previousCodeHandoverUntil);
@@ -712,10 +713,10 @@ test('READY and work statistics count first issuance once and explicit verificat
   f.blocked = true; await f.repository.getClaim({ sessionToken: auth.sessionToken, claimId: claim.id });
   assert.deepEqual(await f.repository.getStats(day), { readyClaims: 1, workClaims: 1, verifiedCodes: 1, installerRequests: null });
 });
-test('admin dates require timezone, ordering, <=90d and truthful claim enum', async () => {
+test('admin dates require timezone, ordering, <=366d and truthful claim enum', async () => {
   const f = new Fixture();
   for (const range of [{ from: '2026-10-08', to: '2026-10-09' }, { from: day.to, to: day.from },
-    { from: '2026-01-01T00:00:00Z', to: '2026-04-02T00:00:00Z' }, { from: '2026-02-30T00:00:00Z', to: '2026-03-02T00:00:00Z' },
+    { from: '2026-01-01T00:00:00Z', to: '2027-01-03T00:00:00Z' }, { from: '2026-02-30T00:00:00Z', to: '2026-03-02T00:00:00Z' },
     { from: day.from }]) await assert.rejects(() => f.repository.getStats(range), err('admin_date_range_invalid'));
   await assert.rejects(() => f.repository.listClaims({ ...day, state: 'CREATED' }), err('admin_claim_state_invalid'));
   await assert.rejects(() => f.repository.listClaims({ ...day, page: 0 }), err('pagination_invalid'));
@@ -728,4 +729,28 @@ test('fixed-window rate buckets are persistent hashed operations, not shared cod
   assert.ok(!JSON.stringify(f.state.gongde_free_rate_limits).includes(input.key));
   f.time += 60000;
   assert.equal((await f.repository.consumeLimit(input)).allowed, true);
+});
+
+test('existing three-day token keeps its code and expiry; next cycle is seven days', async () => {
+  const f = new Fixture(), auth = await access(f);
+  const token = f.state.gongde_free_code_tokens[0];
+  token.expires_at = new Date('2026-10-10T16:00:00.000Z');
+  const oldExpiry = +token.expires_at;
+  assert.equal((await f.repository.getCurrentCode(auth.family.id)).code, auth.code);
+  f.time = oldExpiry - 1;
+  await f.repository.verifyCode({code: auth.code});
+  f.time = oldExpiry;
+  await assert.rejects(() => f.repository.verifyCode({code: auth.code}), err('access_code_expired'));
+  const next = await f.repository.getCurrentCode(auth.family.id);
+  assert.equal(Date.parse(next.authorization.expiresAt), oldExpiry + 7 * 86400000);
+  const rotated = await f.repository.mutateFamily({familyId: auth.family.id, action:'rotate', expectedRevision:1, actor:'admin', reason:'weekly migration test'});
+  assert.equal(rotated.expiresAt, next.authorization.expiresAt);
+  assert.equal(Date.parse(rotated.previousCodeHandoverUntil), f.time + 3600000);
+});
+
+test('admin ranges allow a full year and all-time is aggregate-only with no date mixing', async()=>{
+ const f=new Fixture();
+ assert.equal((await f.repository.getStats({from:'2026-01-01T00:00:00Z',to:'2027-01-01T00:00:00Z'})).readyClaims,0);
+ assert.equal((await f.repository.getStats({allTime:true})).readyClaims,0);
+ await assert.rejects(()=>f.repository.getStats({allTime:true,...day}),err('admin_date_range_invalid'));
 });

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Col, DatePicker, Drawer, Input, Modal, Row, Select, Space, Table, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Col, Drawer, Input, Modal, Row, Select, Space, Table, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import dayjs, { type Dayjs } from "dayjs";
+import { DateRangeFilter, useAdminRange } from "../ui/DateRangeFilter";
+import { rangeInstants, rangePreset } from "../ui/date-range";
 import { CopyOutlined, ReloadOutlined } from "@ant-design/icons";
-import { beijingDate, beijingDayRange } from "../Shell";
+
 import { useDistributionRead, v2Shapes } from "../ui/api";
 import type { ApiError } from "../ui/api";
 import { parseClaimLink, type ClaimLink } from "../ui/claim-link";
@@ -16,7 +17,7 @@ import { isUnauthorized, useSessionActions } from "../ui/session";
 /**
  * Group code and its claims.
  *
- * Two independent reads: the current code, and the claims of one Beijing day.
+ * Two independent reads: the current code, and the claims in a Beijing date range.
  * Either can fail without taking the other down, and neither falls back to a
  * remembered value.
  */
@@ -154,7 +155,7 @@ export function CodeView() {
   // A link from today's issue list carries the day and the batch it came from;
   // landing on today's unfiltered list would hide the batch that was clicked.
   const link = useClaimLink();
-  const [day, setDay] = useState<Dayjs>(() => dayjs(link.date ?? beijingDate(new Date()), "YYYY-MM-DD"));
+  const [selectedRange, setRange] = useAdminRange();
   const [state, setState] = useState<string | undefined>();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Claim | null>(null);
@@ -168,13 +169,13 @@ export function CodeView() {
   // leaving a stale one on screen. A date the operator picked in the DatePicker
   // is untouched, because that does not change the hash.
   useEffect(() => {
-    setDay(dayjs(link.date ?? beijingDate(new Date()), "YYYY-MM-DD"));
+    if (link.date) setRange({start:link.date,end:link.date});
     setFocusClaim(link.claimId);
     setPage(1);
   }, [link.date, link.claimId]);
 
   const code = useDistributionRead<CodeSnapshot>("/group-code", { expectData: v2Shapes.codeSnapshot });
-  const range = beijingDayRange(day.format("YYYY-MM-DD"));
+  const range = rangeInstants(selectedRange);
   const claimsQuery = useMemo(() => {
     if (!range) return null;
     const query = new URLSearchParams({
@@ -296,7 +297,8 @@ export function CodeView() {
                         <StatusTag tone={live ? "ok" : value.status === "PAUSED" ? "warn" : "mute"} dot>
                           {live ? "当前码有效" : value.status === "PAUSED" ? "已暂停" : value.status === "INACTIVE" ? "未启用" : "当前无有效码"}
                         </StatusTag>
-                        <StatusTag tone="mute">GD + 6 位数字 · 三天轮换 · 不区分大小写</StatusTag>
+                        <StatusTag tone="mute">GD + 6 位数字 · 七天轮换 · 不区分大小写</StatusTag>
+                        <Typography.Text type="secondary">升级前已发出的码沿用原到期时间，下一周期起为七天。</Typography.Text>
                         {!value.redemptionEnabled ? <StatusTag tone="warn">免费交付尚未开放</StatusTag> : null}
                       </Space>
                       <div className="code-meta">
@@ -409,17 +411,12 @@ export function CodeView() {
 
       <Card
         className="flat-card"
-        title={focusClaim ? "定位到的领取批次" : "当日领取批次"}
-        extra={<Typography.Text type="secondary" className="card-extra">{day.format("YYYY-MM-DD")} · 北京时间一天</Typography.Text>}
+        title={focusClaim ? "定位到的领取批次" : "区间领取批次"}
+        extra={<Typography.Text type="secondary" className="card-extra">{selectedRange.start} — {selectedRange.end} · 北京时间</Typography.Text>}
         styles={{ body: { padding: 0 } }}
       >
         <div className="panel-toolbar">
-          <DatePicker
-            value={day}
-            allowClear={false}
-            onChange={(value) => { if (value) { setDay(value); setPage(1); } }}
-            aria-label="选择北京时间日期"
-          />
+          <DateRangeFilter value={selectedRange} onChange={next=>{setRange(next);setPage(1);}} />
           <Select
             allowClear
             placeholder="全部状态"
@@ -438,6 +435,7 @@ export function CodeView() {
                 // The hash stays the source of truth: clearing only the local
                 // state would leave a link that re-focuses on reload.
                 setFocusClaim(null);
+                setRange(rangePreset("today"));
                 setPage(1);
                 if (location.hash.includes("?")) history.replaceState(null, "", "#/code");
               }}
@@ -455,7 +453,7 @@ export function CodeView() {
         </div>
 
         {stats.state.status === "error" ? (
-          <Alert type="warning" showIcon className="inline-alert" message="当日统计未读取" description="上方批次列表是另一个请求，仍按真实记录展示。" />
+          <Alert type="warning" showIcon className="inline-alert" message="区间统计未读取" description="上方批次列表是另一个请求，仍按真实记录展示。" />
         ) : null}
 
         <ReadGate

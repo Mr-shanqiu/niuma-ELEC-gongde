@@ -11,7 +11,7 @@ import { classifyDownloads, historicalRequests } from "../src/ui/downloads.ts";
  */
 
 const envelope = (data) => ({ data, serverTime: "2026-10-22T02:00:00.000Z", requestId: "synthetic" });
-const counts = (orders = 3, amountFen = 600) => ({ orders, amountFen });
+const counts = (orders = 3, amountFen = 600) => ({ orders, amountFen, totalOrders:orders, byState: Object.fromEntries(["PENDING_PAYMENT","PAID","FULFILLED","EXPIRED","CANCELED","EXCEPTION","REFUND_PENDING","REFUNDED"].map(state=>[state,state==="FULFILLED"?orders:0])) });
 const platform = (total = 2, period = 1) => ({ total, period });
 
 const summary = (overrides = {}) => ({
@@ -396,4 +396,15 @@ test("a 409 carries the server's revision so the page can say what changed", () 
   assert.equal(error.status, 409);
   assert.equal(error.code, "appearance_publication_conflict");
   assert.equal(error.revision, 9);
+});
+
+test('all order states require complete rows; unknown state or malformed detail fails closed',()=>{
+ const row={id:'GD_ONE',orderNo:'GD_ONE',purchaseKind:'appearance-batch',state:'PENDING_PAYMENT',channel:'wechat',amountFen:100,assetIds:['official.a'],createdAt:'2026-10-23T01:00:00Z'};
+ for(const state of ['PENDING_PAYMENT','PAID','FULFILLED','EXPIRED','CANCELED','EXCEPTION','REFUND_PENDING','REFUNDED']) assert.equal(shapes.orders({data:[{...row,state}],total:1}),true);
+ assert.equal(shapes.orders({data:[{...row,state:'MADE_UP'}],total:1}),false);
+ assert.equal(shapes.orders({data:[null],total:1}),false);
+ assert.equal(shapes.orderDetail({data:{...row,marketItems:[]}}),false);
+ const detail={...row,providerTransactionId:null,paidAt:null,fulfilledAt:null,entitlements:[],marketItems:[]};
+ assert.equal(shapes.orderDetail({data:detail}),true);
+ assert.equal(shapes.orderDetail({data:{...detail,marketItems:[null]}}),false);
 });

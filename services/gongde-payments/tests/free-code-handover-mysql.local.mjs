@@ -174,14 +174,14 @@ try {
   });
 
   await check('handover_crosses_the_cycle_boundary_without_moving_the_new_expiry', async () => {
-    const boundary = anchor + 72 * HOUR;
+    const boundary = anchor + 7 * 24 * HOUR;
     clock = boundary - 60000;
     const snapshot = await repository.getCurrentCode(group.id);
     assert.equal(Date.parse(snapshot.authorization.expiresAt), boundary);
     const rotated = await repository.mutateFamily({ familyId: group.id, action: 'rotate',
       expectedRevision: snapshot.authorization.revision, actor: 'local-acceptance', reason: 'local boundary handover' });
     assert.equal(Date.parse(rotated.previousCodeHandoverUntil), clock + CODE_HANDOVER_MS);
-    // A manual rotation still does not restart the three-day period.
+    // A manual rotation still does not restart the seven-day period.
     assert.equal(Date.parse(rotated.expiresAt), boundary);
     clock = boundary;
     const verified = await repository.verifyCode({ code: snapshot.code });
@@ -197,14 +197,14 @@ try {
   await check('consecutive_rotations_never_extend_an_earlier_deadline', async () => {
     // The clock only ever moves forward, as a real server clock does; this
     // point is later than every earlier case in this suite.
-    clock = anchor + 80 * HOUR;
+    clock = anchor + 176 * HOUR;
     const first = await repository.getCurrentCode(group.id);
     const one = await repository.mutateFamily({ familyId: group.id, action: 'rotate',
       expectedRevision: first.authorization.revision, actor: 'local-acceptance', reason: 'local first handover' });
     clock += 10 * 60000;
     const two = await repository.mutateFamily({ familyId: group.id, action: 'rotate',
       expectedRevision: one.revision, actor: 'local-acceptance', reason: 'local second handover' });
-    assert.equal(Date.parse(one.previousCodeHandoverUntil), anchor + 80 * HOUR + CODE_HANDOVER_MS);
+    assert.equal(Date.parse(one.previousCodeHandoverUntil), anchor + 176 * HOUR + CODE_HANDOVER_MS);
     assert.equal(Date.parse(two.previousCodeHandoverUntil), clock + CODE_HANDOVER_MS);
     // Later than the first deadline: the first replaced code is gone, the second
     // is still inside its own hour.
@@ -219,7 +219,7 @@ try {
   });
 
   await check('pause_beats_the_handover_and_a_revoke_adds_none', async () => {
-    clock = anchor + 90 * HOUR;
+    clock = anchor + 186 * HOUR;
     const snapshot = await repository.getCurrentCode(group.id);
     const rotated = await repository.mutateFamily({ familyId: group.id, action: 'rotate',
       expectedRevision: snapshot.authorization.revision, actor: 'local-acceptance', reason: 'local handover then pause' });
@@ -251,7 +251,7 @@ try {
     // Two rotations inside one hour leave two replaced codes mid-handover. A
     // revoke is a stop for the whole family, so both must close; otherwise the
     // restore below would bring codes back that the operator explicitly stopped.
-    clock = anchor + 100 * HOUR;
+    clock = anchor + 196 * HOUR;
     const before = await repository.getCurrentCode(group.id);
     const one = await repository.mutateFamily({ familyId: group.id, action: 'rotate',
       expectedRevision: before.authorization.revision, actor: 'local-acceptance', reason: 'first rotation before the stop' });
