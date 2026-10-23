@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak]
+        options: [profile, soak, keyboard-chain]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-compile:
-    if: ${{ inputs.mode != 'soak' }}
+    if: ${{ inputs.mode == 'profile' || inputs.mode == '' }}
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
@@ -156,5 +156,42 @@ jobs:
           path: |
             build-soak/soak-*.json
             build-soak/render-profile-source.json
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-keyboard-chain:
+    if: ${{ inputs.mode == 'keyboard-chain' }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned original and redesigned callbacks
+        shell: pwsh
+        run: |
+          git fetch --no-tags --depth=1 origin 7370e7ab5e5be0c626858930ba34af172151d8ce
+          if ($LASTEXITCODE -ne 0) { throw "Baseline fetch failed" }
+          git fetch --no-tags --depth=1 origin 59a2304aee8c83b95889d692ca01d2db9d17fc1b
+          if ($LASTEXITCODE -ne 0) { throw "Prior source fetch failed" }
+          python scripts/prepare-windows-render-profile.py build-input
+          if ($LASTEXITCODE -ne 0) { throw "Source preparation failed" }
+          cmake -S . -B build-input -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Configuration failed" }
+          cmake --build build-input --config Release --target niuma-render-profile-before niuma-render-profile-after --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Input diagnostic compilation failed" }
+      - name: Exercise actual Windows hook chain on the dedicated runner
+        shell: pwsh
+        run: |
+          & ./build-input/Release/niuma-render-profile-before.exe $PWD (Join-Path $PWD 'build-input/keyboard-before.json') --keyboard-chain
+          $before = $LASTEXITCODE
+          & ./build-input/Release/niuma-render-profile-after.exe $PWD (Join-Path $PWD 'build-input/keyboard-after.json') --keyboard-chain
+          if ($before -ne 0 -or $LASTEXITCODE -ne 0) { throw "Real hook-chain test blocked or failed; do not substitute posted messages" }
+      - name: Retain input-chain evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-keyboard-chain-${{ github.sha }}
+          path: |
+            build-input/keyboard-*.json
+            build-input/render-profile-source.json
           if-no-files-found: error
           retention-days: 14

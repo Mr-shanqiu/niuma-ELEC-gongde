@@ -163,8 +163,11 @@ static void WriteStats(std::ostream& output) {
 }
 
 #include "windows-render-soak.h"
+#include "windows-keyboard-chain-probe.h"
 
 int wmain(int argc, wchar_t** argv) {
+  if (argc == 4 && wcscmp(argv[3], L"--keyboard-chain") == 0)
+    return RunKeyboardChainProbe(argv[1], argv[2]);
   if (argc == 4 && wcscmp(argv[3], L"--soak") == 0)
     return RunRenderSoak(argv[1], argv[2], 300);
   if (argc != 3 && argc != 4) return 2;
