@@ -42,14 +42,31 @@ function discardImage(key, entry) {
   if (imageCache.get(key) !== entry) return;
   imageCache.delete(key); cachedBytes -= entry.bytes;
 }
+function previewFailure(kind, status) {
+  const error = new Error('creator_preview_unavailable');
+  error.kind = kind;
+  if (status) error.status = status;
+  return error;
+}
 async function readPreviewBlob(path, options) {
   return schedulePreviewRequest(async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const response = await fetch(path, {
-        credentials: options.public ? 'omit' : 'same-origin',
-        cache: options.immutable ? 'force-cache' : 'no-store',
-        signal: AbortSignal.timeout(10000),
-      });
+      let response;
+      try {
+        response = await fetch(path, {
+          credentials: options.public ? 'omit' : 'same-origin',
+          cache: options.immutable ? 'force-cache' : 'no-store',
+          signal: AbortSignal.timeout(10000),
+        });
+      } catch (error) {
+        // A dropped connection or a stalled request is usually transient: retry
+        // twice with short waits before reporting the image unavailable. The
+        // kind is recorded so callers can tell a network failure from a 4xx.
+        const kind = error?.name === 'TimeoutError' ? 'timeout' : error?.name === 'AbortError' ? 'aborted' : 'network';
+        if (kind === 'aborted' || attempt === 2) throw previewFailure(kind);
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
       if (response.ok) {
         const length = Number(response.headers.get('content-length'));
         if (length > maximumImageBytes) throw new Error('creator_preview_invalid');
@@ -57,19 +74,19 @@ async function readPreviewBlob(path, options) {
         if (!blob.size || blob.size > maximumImageBytes || blob.type.split(';')[0] !== 'image/png') throw new Error('creator_preview_invalid');
         return blob;
       }
-      if (response.status !== 503) throw new Error('creator_preview_unavailable');
+      if (response.status !== 503) throw previewFailure('http', response.status);
       const problem = await response.json().catch(() => null);
-      if (!['creator_storage_busy', 'creator_service_unavailable'].includes(problem?.error) || attempt === 2) throw new Error('creator_preview_unavailable');
+      if (!['creator_storage_busy', 'creator_service_unavailable'].includes(problem?.error) || attempt === 2) throw previewFailure('busy', response.status);
       let delay = 250 * (attempt + 1);
       const retryAfter = response.headers.get('retry-after');
       if (retryAfter !== null) {
         const seconds = Number(retryAfter);
-        if (!Number.isFinite(seconds) || seconds < 0 || seconds > 1) throw new Error('creator_preview_unavailable');
+        if (!Number.isFinite(seconds) || seconds < 0 || seconds > 1) throw previewFailure('busy', response.status);
         delay = Math.max(delay, seconds * 1000);
       }
       await new Promise(resolve => setTimeout(resolve, delay));
     }
-    throw new Error('creator_preview_unavailable');
+    throw previewFailure('busy');
   }, options);
 }
 async function cachedPreviewBlob(path, revision, options = {}) {

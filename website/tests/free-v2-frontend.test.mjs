@@ -169,15 +169,17 @@ test('withdraw uses the existing creator route and cannot fake an unconfirmed re
 // Small local DOM harness: no browser, server, provider, or real network is used.
 let domModule = 0;
 async function withFlow(page, mocks, operation) {
-  const old = new Map(['document', 'window', 'location', 'sessionStorage', 'addEventListener', 'setTimeout', 'clearTimeout', '__flowTestApi'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const old = new Map(['document', 'window', 'location', 'sessionStorage', 'addEventListener', 'setTimeout', 'clearTimeout', '__flowTestApi', '__paymentFlow'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const elements = new Map(), timers = [], navigation = [], storage = mocks.storage || memory();
   class DomNode {
-    constructor() { this.children = []; this.dataset = {}; this.listeners = new Map(); this.disabled = false; this.hidden = false; this.elements = { code: { value: '', focus() {} } }; this.textContent = ''; }
+    constructor() { this.children = []; this.dataset = {}; this.listeners = new Map(); this.disabled = false; this.hidden = false; this.elements = { code: { value: '', focus() {}, setAttribute() {} } }; this.textContent = ''; }
     append(...values) { this.children.push(...values); }
     replaceChildren(...values) { this.children = values; }
     addEventListener(event, operation) { this.listeners.set(event, operation); }
     querySelector() { return this.button ||= new DomNode(); }
     querySelectorAll() { return []; }
+    setAttribute(name, value) { this[name] = value; }
+    removeAttribute(name) { delete this[name]; }
     focus() {}
     remove() {}
     async click() {
@@ -193,12 +195,26 @@ async function withFlow(page, mocks, operation) {
   doc.body.dataset.flow = '';
   const assignments = { document: doc, window: {}, location: { search: mocks.search || '', href: 'https://local.test/', origin: 'https://local.test', assign: path => navigation.push(path) },
     sessionStorage: storage, addEventListener() {}, setTimeout: (operation, delay) => { timers.push({ operation, delay }); return timers.length; }, clearTimeout() {},
-    __flowTestApi: { ...api, request: mocks.request, post: mocks.post } };
+    __flowTestApi: { ...api, request: mocks.request, post: mocks.post },
+    // The claim page imports these from payment-flow.js; the harness provides
+    // faithful stand-ins so the real free-flow.js executes unchanged.
+    __paymentFlow: {
+      ACTIVE_CLAIM_KEY: 'niuma-current-group-claim-v1',
+      officialMappings: async () => { const map = new Map(); for (const item of api.readSelection(storage)) map.set(String(item.number), { assetId: 'harness.asset', revision: '0'.repeat(64) }); return map; },
+      paymentItem: (item, mappings) => { const hit = mappings?.get?.(String(item.number)); return hit ? { ...item, paymentAssetId: hit.assetId, paymentPreviewRevision: hit.revision } : null; },
+      currentPayment: () => { const raw = storage.getItem('niuma-current-payment-v1'); return raw ? JSON.parse(raw) : null; },
+      mountPayment: () => Promise.resolve({ render() {}, destroy() {} }),
+      downloadFile: async () => {},
+      paymentError: error => error?.message || '暂时无法连接，请继续本次交易，不要重复付款。',
+    } };
   for (const [key, value] of Object.entries(assignments)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   try {
     let source = read('../free-flow.js');
-    source = source.replace(/^import \{ request[\s\S]*?from '\.\/free-api\.js';/, `const {request,post,errorText,validNumber,validAccess,readSelection,writeSelection,validateSelection,confirmation,pendingConfirmation,clearConfirmation,reportFields,CONFIRMATION_KEY,MAX_ITEMS,MAX_BYTES,PERMANENT_NOTE,safeDownloadUrl,normalizeText,codePoints}=globalThis.__flowTestApi;`);
-    source = source.replace("import { mountCreatorPreview } from './community-preview.js';", "const mountCreatorPreview=async()=>{throw new Error('unused-preview');};");
+    source = source.replace(/^import \{ request[\s\S]*?from '\.\/free-api\.js(?:\?[^']*)?';/, `const {request,post,errorText,validNumber,validAccess,readSelection,writeSelection,validateSelection,confirmation,pendingConfirmation,clearConfirmation,reportFields,CONFIRMATION_KEY,MAX_ITEMS,MAX_BYTES,PERMANENT_NOTE,safeDownloadUrl,normalizeText,codePoints}=globalThis.__flowTestApi;`);
+    // The product imports carry a locale cache-version query; rewrite each
+    // import form as it actually appears instead of failing to resolve it.
+    source = source.replace(/^import \{ officialMappings[\s\S]*?from '\.\/payment-flow\.js(?:\?[^']*)?';/m, `const {officialMappings,paymentItem,currentPayment,mountPayment,downloadFile,paymentError,ACTIVE_CLAIM_KEY}=globalThis.__paymentFlow;`);
+    source = source.replace(/^import \{ mountCreatorPreview[\s\S]*?from '\.\/community-preview\.js';/m, "const mountCreatorPreview=async()=>{throw new Error('unused-preview');};const mountPublicPreview=async()=>{throw new Error('unused-preview');};const schedulePreviewRequest=operation=>Promise.resolve().then(operation);");
     source += `\nexport {claim,delivery};\n// isolated-local-test-${++domModule}`;
     const flow = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
     await operation({ flow, elements, timers, navigation, storage });

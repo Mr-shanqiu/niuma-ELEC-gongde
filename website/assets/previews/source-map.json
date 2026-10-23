@@ -640,6 +640,82 @@
         }
       }
     },
+    "wealth-button": {
+      "id": "official.wealth-button",
+      "version": "1.0.1",
+      "manifestSha256": "d8b139402211a153c6db9c9cc08c569352bdae990c032f76017a1436f29cb15a",
+      "assetSha256": "87c9b529b2b9e6802c264ac6cb933ca79bf48eee215c5484fc1b9b28405a922e",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/wealth-button/manifest.json",
+          "sourceSha256": "d8b139402211a153c6db9c9cc08c569352bdae990c032f76017a1436f29cb15a",
+          "projectedSha256": "d8b139402211a153c6db9c9cc08c569352bdae990c032f76017a1436f29cb15a",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/wealth-button/preview.png",
+          "sourceSha256": "9f24a679ef5118fdf38ccb33fdf2f2f23ee34bb29e72b775d20c6cf700fd145a",
+          "projectedSha256": "9f24a679ef5118fdf38ccb33fdf2f2f23ee34bb29e72b775d20c6cf700fd145a",
+          "projection": "exact-copy"
+        },
+        "base.png": {
+          "source": "assets/appearance-packs/wealth-button/base.png",
+          "sourceSha256": "260cdb48bcd911fece9f87206704d1b4369d593bffbd381268c4bdfca55df546",
+          "projectedSha256": "260cdb48bcd911fece9f87206704d1b4369d593bffbd381268c4bdfca55df546",
+          "projection": "exact-copy"
+        },
+        "cap.png": {
+          "source": "assets/appearance-packs/wealth-button/cap.png",
+          "sourceSha256": "a4dc5f1687e4bdd083f9243ed2bf0a1fa3d539d47d705b7fefc7e793fa6502d0",
+          "projectedSha256": "a4dc5f1687e4bdd083f9243ed2bf0a1fa3d539d47d705b7fefc7e793fa6502d0",
+          "projection": "exact-copy"
+        },
+        "hand.png": {
+          "source": "assets/appearance-packs/wealth-button/hand.png",
+          "sourceSha256": "9f24c077fc9225a6d0418bc2a756317d7c48e70bead25aac49f343bef85adc9a",
+          "projectedSha256": "9f24c077fc9225a6d0418bc2a756317d7c48e70bead25aac49f343bef85adc9a",
+          "projection": "exact-copy"
+        }
+      }
+    },
+    "offwork-button": {
+      "id": "official.offwork-button",
+      "version": "1.0.0",
+      "manifestSha256": "360ca8cecda67f0edd3a8e678fdfe77bb91a13bb704c009c901734f51bef566c",
+      "assetSha256": "1d2a85b787950d617c6d2c3846fa17e5dbf87df1e5372ec5293ada25133c8f45",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/offwork-button/manifest.json",
+          "sourceSha256": "360ca8cecda67f0edd3a8e678fdfe77bb91a13bb704c009c901734f51bef566c",
+          "projectedSha256": "360ca8cecda67f0edd3a8e678fdfe77bb91a13bb704c009c901734f51bef566c",
+          "projection": "exact-copy"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/offwork-button/preview.png",
+          "sourceSha256": "14e219e4a01c8ebec9c14b951f7a47e31f3e9446a75cc344244c15d821b207d7",
+          "projectedSha256": "14e219e4a01c8ebec9c14b951f7a47e31f3e9446a75cc344244c15d821b207d7",
+          "projection": "exact-copy"
+        },
+        "base.png": {
+          "source": "assets/appearance-packs/offwork-button/base.png",
+          "sourceSha256": "caad2caca774c9a8a376f2fd66bc80004a6179a86fd2da9604884612621e795d",
+          "projectedSha256": "caad2caca774c9a8a376f2fd66bc80004a6179a86fd2da9604884612621e795d",
+          "projection": "exact-copy"
+        },
+        "cap.png": {
+          "source": "assets/appearance-packs/offwork-button/cap.png",
+          "sourceSha256": "436a64cdbbbedc1665fdcb1cb20d8f515c18f85cead9226950ad3dbc1cdec2d3",
+          "projectedSha256": "436a64cdbbbedc1665fdcb1cb20d8f515c18f85cead9226950ad3dbc1cdec2d3",
+          "projection": "exact-copy"
+        },
+        "hand.png": {
+          "source": "assets/appearance-packs/offwork-button/hand.png",
+          "sourceSha256": "da831976360c0e5f959042462d0cd67393f3476e2f17444848aea88a1b78f430",
+          "projectedSha256": "da831976360c0e5f959042462d0cd67393f3476e2f17444848aea88a1b78f430",
+          "projection": "exact-copy"
+        }
+      }
+    },
     "woodfish": {
       "id": "builtin.woodfish",
       "manifestSha256": "9d7b024b9bd05701cdfad7b21bad117e670695d01f7f303803115f69f9b76ef7",

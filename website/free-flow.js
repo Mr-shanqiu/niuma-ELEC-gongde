@@ -93,10 +93,30 @@ async function preview(container, item, options = {}) {
     const url = new URL(item.previewUrl, location.href);
     if (url.origin !== location.origin && url.protocol !== 'https:') throw new Error('preview_invalid');
     const resource = await schedulePreviewRequest(async () => {
-      const response = await fetch(url.href, { credentials: url.origin === location.origin ? 'same-origin' : 'omit', cache: 'no-store', signal: AbortSignal.timeout(8000) });
-      if (!response.ok) throw new Error('preview_unavailable');
-      const type = response.headers.get('content-type') || '';
-      return type.startsWith('image/') ? { image: await response.blob() } : { spec: await response.json() };
+      // A single dropped request must not surface as "封面暂未载入": retry twice
+      // with short waits, but never retry a definite client error.
+      for (let attempt = 0; ; attempt++) {
+        let response;
+        try {
+          response = await fetch(url.href, { credentials: url.origin === location.origin ? 'same-origin' : 'omit', cache: 'no-store', signal: AbortSignal.timeout(8000) });
+        } catch (error) {
+          const kind = error?.name === 'TimeoutError' ? 'timeout' : error?.name === 'AbortError' ? 'aborted' : 'network';
+          if (kind === 'aborted' || attempt >= 2) { const failure = new Error('preview_unavailable'); failure.kind = kind; throw failure; }
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+          continue;
+        }
+        if (response.ok) {
+          const type = response.headers.get('content-type') || '';
+          return type.startsWith('image/') ? { image: await response.blob() } : { spec: await response.json() };
+        }
+        if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+          continue;
+        }
+        const failure = new Error('preview_unavailable');
+        failure.kind = 'http'; failure.status = response.status;
+        throw failure;
+      }
     }, options);
     if (resource.image) {
       const image = node('img'), objectUrl = URL.createObjectURL(resource.image);
@@ -119,9 +139,12 @@ async function preview(container, item, options = {}) {
     }
     return await mountCreatorPreview(container, spec.manifest ? spec : { manifest: spec,
       images: Object.fromEntries(spec.layers.map(layer => [layer.image, new URL(layer.image, url).pathname])) }, settings);
-  } catch {
+  } catch (error) {
+    container.dataset.previewError = error?.kind || 'unavailable';
     container.replaceChildren(node('p', '封面暂未载入，仍可选择或查看作品。', 'flow-meta'));
-    throw new Error('预览暂时无法加载，请重试。');
+    const wrapped = new Error('预览暂时无法加载，请重试。');
+    wrapped.kind = error?.kind || 'unavailable';
+    throw wrapped;
   }
 }
 function summary(items, access = null) {
@@ -156,19 +179,19 @@ export async function library() {
     try {
       const player = await preview(state.picture, state.item, {
         priority: () => priority(state),
-        onAnimationError: () => {
+        onAnimationError: error => {
           if (state.disposed) return;
           clearInterval(state.animationTimer); state.animationTimer = 0;
           state.hint.textContent = '封面可用，动作暂未载入。'; state.retry.hidden = false;
-          state.hint.hidden = false;
+          state.hint.hidden = false; state.picture.dataset.previewError = error?.kind || 'animation';
         },
         onAnimationReady: () => {
           state.retry.hidden = true; state.hint.textContent = '悬停或键盘聚焦，看它动一下';
-          state.hint.hidden = !reducedMotion.matches;
+          state.hint.hidden = !reducedMotion.matches; delete state.picture.dataset.previewError;
         },
       });
       if (state.disposed) { player.destroy?.(); return; }
-      state.player = player; state.retry.hidden = true;
+      state.player = player; state.retry.hidden = true; delete state.picture.dataset.previewError;
       state.hint.textContent = reducedMotion.matches ? '已按系统设置减少动态效果' : '悬停或键盘聚焦，看它动一下';
       state.hint.hidden = !reducedMotion.matches;
       animate(state);
@@ -364,9 +387,18 @@ export async function library() {
     $('library-previous').disabled = true; $('library-next').disabled = true;
     gallery.setAttribute('aria-busy', 'true');
     try {
-      const [result, official] = await Promise.all([request('/appearances?' + params), officialMappings()]);
+      // The catalogue itself paints as soon as it arrives; the payment mapping
+      // runs alongside it and confirms every card in place. Selection stays
+      // locked ("正在确认…") until that answer, so an unconfirmed revision can
+      // never be picked or paid for.
+      const mappings = officialMappings();
+      mappings.catch(() => {});
+      const result = await request('/appearances?' + params);
       if (stamp !== generation) return;
       if (!Array.isArray(result.items) || result.items.length > 24) throw new Error('response_invalid');
+      displayGallery(result, true);
+      const official = await mappings;
+      if (stamp !== generation) return;
       result.items = result.items.map(item => paymentItem(item, official)).filter(Boolean);
       items = items.map(selected => { const latest = result.items.find(item => String(item.number) === String(selected.number));
         return latest && latest.catalogRevision === selected.catalogRevision && !selected.paymentPreviewRevision ? { ...selected, paymentAssetId: latest.paymentAssetId, paymentPreviewRevision: latest.paymentPreviewRevision } : selected; });
@@ -418,8 +450,8 @@ async function appearance() {
   const number = new URLSearchParams(location.search).get('number');
   if (!validNumber(number)) { status('请输入完整的 100001 至 999999999 形象编号。', true); return; }
   try {
-    const original = await request('/appearances/' + encodeURIComponent(number));
-    const item = paymentItem(original, await officialMappings());
+    const [original, official] = await Promise.all([request('/appearances/' + encodeURIComponent(number)), officialMappings()]);
+    const item = paymentItem(original, official);
     if (!item) { status('公开共创暂停，仅开放官方扩展形象；基础木鱼直接免费。', true); return; }
     $('appearance-title').textContent = item.title;
     $('appearance-description').textContent = item.description;
@@ -448,9 +480,11 @@ async function appearance() {
       mounting = true;
       try {
         player?.destroy?.(); player = await preview(stage, item, {
-          priority: 0, onAnimationError: () => { $('appearance-preview-retry').hidden = false; status('封面可用，动作暂未载入。仍可加入选择。'); },
+          priority: 0,
+          onAnimationError: error => { $('appearance-preview-retry').hidden = false; stage.dataset.previewError = error?.kind || 'animation'; status('封面可用，动作暂未载入。仍可加入选择。'); },
+          onAnimationReady: () => { delete stage.dataset.previewError; },
         });
-        $('appearance-play').disabled = false; $('appearance-preview-retry').hidden = true;
+        $('appearance-play').disabled = false; $('appearance-preview-retry').hidden = true; delete stage.dataset.previewError;
         $('appearance-play').onclick = () => player?.strike();
         status('封面与公开版本一致；点击播放或移入预览查看动作。');
       } finally { mounting = false; }

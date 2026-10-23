@@ -35,6 +35,11 @@ const packDefinitions = [
   ["woodpecker-peck", "assets/appearance-packs/woodpecker-peck"],
   ["fortune-bead", "assets/appearance-packs/fortune-bead"],
   ["treasure-basin", "assets/appearance-packs/treasure-basin"],
+  // The two button packs were catalogued and served by the API long before they
+  // were listed here, so their preview images 404'd on the site. Keep this list
+  // in step with every catalogued official pack.
+  ["wealth-button", "assets/appearance-packs/wealth-button"],
+  ["offwork-button", "assets/appearance-packs/offwork-button"],
 ];
 
 function sha256(buffer) {
