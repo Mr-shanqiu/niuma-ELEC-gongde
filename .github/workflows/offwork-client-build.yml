@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-check]
 
 permissions:
   contents: read
@@ -20,6 +20,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-runtime-app:
+    if: ${{ inputs.mode == 'runtime-app' }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the real application and new input and storage adapter tests
+        shell: pwsh
+        run: |
+          cmake -S . -B build-app -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Application configuration failed" }
+          cmake --build build-app --config Release --target niuma-merit niuma-runtime-app-test niuma-storage-service-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Application compilation failed" }
+      - name: Real adapter paths with isolated profiles and tagged input
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-app/evidence | Out-Null
+          & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') | Tee-Object build-app/evidence/app.txt
+          if ($LASTEXITCODE -ne 0) { throw "Application input adapter contract failed" }
+      - name: Single writer persistence and file compatibility
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-app/evidence | Out-Null
+          & ./build-app/Release/niuma-storage-service-test.exe | Tee-Object build-app/evidence/storage.txt
+          if ($LASTEXITCODE -ne 0) { throw "Storage service failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-app-${{ github.sha }}
+          path: |
+            build-app/evidence/**
+            build-app/Release/niuma-merit.exe
+          if-no-files-found: warn
+          retention-days: 14
+
   windows-runtime-contract:
     if: ${{ inputs.mode == 'runtime-contract' }}
     runs-on: windows-2022

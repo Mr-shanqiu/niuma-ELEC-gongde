@@ -16,6 +16,7 @@
 
 #include "appearance_pack.h"
 #include "render_cache.h"
+#include "runtime/input_service.h"
 #include "app_version.h"
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
@@ -62,6 +63,7 @@ constexpr wchar_t kRunKey[] =
 constexpr wchar_t kRunValue[] = L"NiuMaMerit";
 constexpr UINT kCountMessage = WM_APP + 1;
 constexpr UINT kScrollMessage = WM_APP + 2;
+constexpr UINT kInputSnapshotMessage = WM_APP + 70;
 constexpr UINT kImportQueuedMessage = WM_APP + 32;
 constexpr ULONG_PTR kPackFileCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
@@ -185,6 +187,54 @@ struct AppState {
 };
 
 AppState gState;
+namespace input_runtime = niuma::windows::runtime;
+namespace input_core = niuma::client::core;
+
+// The input thread owns accounting. UI views are coalesced; persistence always
+// uses a separate complete ledger, never a total paired with partial dates.
+struct InputAdapter {
+  std::unique_ptr<input_runtime::InputService> service;
+  input_runtime::InputServiceSnapshot latest;
+  input_core::InputSnapshot ledger;
+  std::vector<input_core::DailyTotal> daily;
+  std::map<std::wstring, std::uint64_t> savedDaily;
+  std::uint64_t savedTotal = 0;
+  std::uint64_t nextCommand = 0, nextLedger = 0;
+  std::uint64_t ledgerRequest = 0;
+  std::uint64_t handledReminder = 0;
+  HWND pendingReminderWindow = nullptr;
+  std::uint64_t reminderCommand = 0, reminderEpoch = 0, reminderOpportunity = 0;
+  ULONGLONG previewUntil = 0;
+  bool authoritative = false, loadFailed = false, finalCollected = false;
+  bool reminderConsumed = false, controlFault = false;
+};
+InputAdapter gInput;
+
+void ConsumeInputSnapshot();
+void StopInputService();
+void RequestInputLedger();
+void CancelPendingReminder();
+bool SendInputCommand(input_runtime::InputCommand command);
+void RefreshCountingStatus();
+void EnsureAnimationTimer();
+
+bool KeyboardListenerAvailable() {
+  return gInput.authoritative ? gInput.latest.running &&
+      gInput.latest.input.keyboardAvailable : gState.keyboardHook != nullptr;
+}
+bool MouseListenerAvailable() {
+  return gInput.authoritative ? gInput.latest.running &&
+      gInput.latest.input.mouseAvailable : gState.mouseHook != nullptr;
+}
+bool ReminderSegmentConsumed() {
+  return gInput.authoritative ? gInput.latest.input.reminderSegmentConsumed
+      : gState.reminderActivity.segment_consumed();
+}
+bool ReminderSuspended() {
+  return gInput.authoritative ? gInput.latest.input.reminderSuspended
+      : gState.reminderActivity.suspended();
+}
+
 niuma::render::LayeredSurface gLayeredSurface;
 niuma::render::LayeredSurface gArtworkSurface;
 struct ArtworkFrameKey {
@@ -478,10 +528,94 @@ std::wstring DateKey(const SYSTEMTIME& date) {
   return key;
 }
 
+std::wstring InputDateKey(input_core::LocalDate date) {
+  SYSTEMTIME value{};
+  value.wYear = static_cast<WORD>(date / 10000);
+  value.wMonth = static_cast<WORD>((date / 100) % 100);
+  value.wDay = static_cast<WORD>(date % 100);
+  return DateKey(value);
+}
+
+input_core::LocalDate ParseInputDate(const std::wstring& key) {
+  if (key.size() != 10 || key[4] != L'-' || key[7] != L'-') return 0;
+  input_core::LocalDate date = 0;
+  for (std::size_t i = 0; i < key.size(); ++i) {
+    if (i == 4 || i == 7) continue;
+    if (key[i] < L'0' || key[i] > L'9') return 0;
+    date = date * 10 + static_cast<unsigned>(key[i] - L'0');
+  }
+  return input_core::InputCore::ValidDate(date) ? date : 0;
+}
+
+bool ParseDailyCount(const wchar_t* text, std::uint64_t& total) {
+  if (!text || !*text) return false;
+  total = 0;
+  for (; *text; ++text) {
+    if (*text < L'0' || *text > L'9') return false;
+    const unsigned digit = static_cast<unsigned>(*text - L'0');
+    if (total > (std::numeric_limits<std::uint64_t>::max() - digit) / 10) return false;
+    total = total * 10 + digit;
+  }
+  return true;
+}
+
+bool LoadInputLedger(input_runtime::InputServiceOptions& options) {
+  const auto path = DataPath();
+  if (path.empty()) return false;
+  HANDLE readable = CreateFileW(path.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (readable == INVALID_HANDLE_VALUE) {
+    const DWORD error = GetLastError();
+    if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return false;
+  } else CloseHandle(readable);
+  gInput.savedDaily.clear();
+  // GetPrivateProfileSection reports truncation as capacity - 2. Grow to a
+  // bounded size; never silently initialize an incomplete calendar ledger.
+  std::vector<wchar_t> section(4096);
+  for (;;) {
+    const DWORD copied = GetPrivateProfileSectionW(L"daily", section.data(),
+        static_cast<DWORD>(section.size()), path.c_str());
+    if (copied < section.size() - 2) break;
+    if (section.size() >= 4 * 1024 * 1024) return false;
+    section.resize(section.size() * 2);
+  }
+  std::map<input_core::LocalDate, std::uint64_t> days;
+  for (const wchar_t* line = section.data(); *line; line += std::wcslen(line) + 1) {
+    const wchar_t* equal = std::wcschr(line, L'=');
+    if (!equal) continue;
+    const std::wstring key(line, equal);
+    const auto date = ParseInputDate(key);
+    if (!date) continue;  // Preserve unrelated/invalid keys on disk untouched.
+    std::uint64_t total = 0;
+    if (!ParseDailyCount(equal + 1, total)) return false;
+    days[date] = total;
+    gInput.savedDaily[key] = total;
+  }
+  for (const auto& day : gState.pendingDailyTotals) {
+    const auto date = ParseInputDate(day.first);
+    if (date) days[date] = day.second;
+  }
+  const auto current = ParseInputDate(gState.currentDay);
+  if (current) days[current] = gState.todayTotal;
+  if (days.size() >= input_core::InputCore::kMaximumDayCapacity) return false;
+  options.total = gState.total;
+  gInput.savedTotal = gState.total;
+  options.date = input_runtime::InputService::CaptureLocalDate();
+  options.daily.clear();
+  for (const auto& day : days) options.daily.push_back({day.first, day.second});
+  return true;
+}
+
 std::uint64_t ReadDailyTotal(const std::wstring& key) {
   if (key == gState.currentDay) return gState.todayTotal;
   const auto pending = gState.pendingDailyTotals.find(key);
   if (pending != gState.pendingDailyTotals.end()) return pending->second;
+  if (gInput.authoritative) {
+    const auto date = ParseInputDate(key);
+    for (const auto& day : gInput.daily) if (day.date == date) return day.total;
+    return 0;
+  }
   const std::wstring path = DataPath();
   if (path.empty()) return 0;
   wchar_t value[64] = {};
@@ -503,6 +637,7 @@ bool EnsureDay(const std::wstring& today) {
 }
 
 bool EnsureCurrentDay() {
+  if (gInput.authoritative || gInput.loadFailed) return false;
   SYSTEMTIME now = {};
   GetLocalTime(&now);
   return EnsureDay(DateKey(now));
@@ -742,32 +877,87 @@ bool OffworkAwakeTime(ULONGLONG& value) {
   return query && query(&value);
 }
 
+void CancelPendingReminder() {
+  const HWND popup = gInput.pendingReminderWindow;
+  gInput.pendingReminderWindow = nullptr;
+  gInput.reminderCommand = gInput.reminderEpoch = gInput.reminderOpportunity = 0;
+  if (popup) DestroyWindow(popup);
+  if (!gReminderWindow) gReminderText.clear();
+}
+
+bool SendInputCommand(input_runtime::InputCommand command) {
+  if (!command.id) command.id = ++gInput.nextCommand;
+  if (gInput.service && gInput.service->PostCommand(command)) return true;
+  // A rejected lifecycle command is not silently treated as applied. Counting
+  // can continue, but reminders stay suppressed until an explicit restart.
+  gInput.controlFault = true;
+  gCountingCheck.deliveryFault = true;
+  CancelPendingReminder();
+  return false;
+}
+
+void ResetInputReminderObservation() {
+  CancelPendingReminder();
+  if (gInput.authoritative) {
+    input_runtime::InputCommand command;
+    command.kind = input_runtime::InputCommandKind::ResetReminderObservation;
+    SendInputCommand(command);
+  } else {
+    gState.reminderActivity.ResetForListenerRestart();
+  }
+}
+
+void SyncInputClockGuard() {
+  if (!gInput.authoritative) return;
+  CancelPendingReminder();
+  input_runtime::InputCommand command;
+  command.kind = input_runtime::InputCommandKind::SetClockGuard;
+  command.enabled = gState.reminderClockGuard.guarded();
+  SendInputCommand(command);
+}
+
 void PersistReminderUnlockIfNeeded(bool wasConsumed) {
-  if (!wasConsumed || gState.reminderActivity.segment_consumed()) return;
+  if (!wasConsumed || ReminderSegmentConsumed()) return;
   const auto result = gState.reminderStore
       ? gState.reminderStore->SetSegmentConsumed(false,
           static_cast<std::int64_t>(std::time(nullptr)))
       : niuma::reminder::StoreResult::IoError;
   if (result != niuma::reminder::StoreResult::Success) {
     gState.reminderStorageFault = true;
-    gState.reminderActivity.RestoreSegmentConsumed(true);
+    if (gInput.authoritative) {
+      if (gInput.service && gInput.service->running()) {
+        input_runtime::InputCommand command;
+        command.kind = input_runtime::InputCommandKind::RestoreReminderSegmentConsumed;
+        command.expectedEpoch = gInput.latest.input.epoch;
+        command.enabled = true;
+        SendInputCommand(command);
+      } else {
+        // Retain the durable conservative value if restart follows teardown.
+        gInput.reminderConsumed = true;
+        gInput.latest.input.reminderSegmentConsumed = true;
+      }
+    } else gState.reminderActivity.RestoreSegmentConsumed(true);
   } else {
     gState.reminderStorageFault = false;
   }
 }
 
 void BeginReminderPause(AppState::ReminderPauseKind kind) {
-  if (gState.reminderActivity.suspended()) return;
+  if (gState.reminderPauseKind != AppState::ReminderPauseKind::None) return;
+  CancelPendingReminder();
   gState.reminderPauseKind = kind;
   gState.reminderPauseTick = GetTickCount64();
   gState.reminderPauseAwakeValid = OffworkAwakeTime(gState.reminderPauseAwake);
-  gState.reminderActivity.BeginSuspend(gState.reminderPauseTick);
+  if (gInput.authoritative) {
+    input_runtime::InputCommand command;
+    command.kind = input_runtime::InputCommandKind::BeginSuspend;
+    SendInputCommand(command);
+  } else gState.reminderActivity.BeginSuspend(gState.reminderPauseTick);
 }
 
 void ResumeReminderPause(bool fromSystemSleep) {
   const ULONGLONG now = GetTickCount64();
-  const bool paired = gState.reminderActivity.suspended() &&
-      gState.reminderPauseKind != AppState::ReminderPauseKind::None;
+  const bool paired = gState.reminderPauseKind != AppState::ReminderPauseKind::None;
   bool durationTrusted = false;
   ULONGLONG inactiveDuration = 0;
   if (paired && now >= gState.reminderPauseTick) {
@@ -784,10 +974,19 @@ void ResumeReminderPause(bool fromSystemSleep) {
       }
     }
   }
-  const bool wasConsumed = gState.reminderActivity.segment_consumed();
-  gState.reminderActivity.ResumeFromSuspend(now, paired, durationTrusted,
-      inactiveDuration);
-  PersistReminderUnlockIfNeeded(wasConsumed);
+  CancelPendingReminder();
+  if (gInput.authoritative) {
+    input_runtime::InputCommand command;
+    command.kind = input_runtime::InputCommandKind::ResumeFromSuspend;
+    command.pairedSignal = paired;
+    command.durationTrusted = durationTrusted;
+    command.inactiveDurationMs = inactiveDuration;
+    SendInputCommand(command);
+  } else {
+    const bool wasConsumed = gState.reminderActivity.segment_consumed();
+    gState.reminderActivity.ResumeFromSuspend(now, paired, durationTrusted, inactiveDuration);
+    PersistReminderUnlockIfNeeded(wasConsumed);
+  }
   gState.reminderPauseKind = AppState::ReminderPauseKind::None;
   gState.reminderPauseTick = 0;
   gState.reminderPauseAwake = 0;
@@ -795,10 +994,17 @@ void ResumeReminderPause(bool fromSystemSleep) {
 }
 
 void InterruptReminderObservation() {
-  if (gState.reminderActivity.suspended()) return;
-  const bool wasConsumed = gState.reminderActivity.segment_consumed();
-  gState.reminderActivity.ResumeFromSuspend(GetTickCount64(), false, false, 0);
-  PersistReminderUnlockIfNeeded(wasConsumed);
+  if (gState.reminderPauseKind != AppState::ReminderPauseKind::None) return;
+  CancelPendingReminder();
+  if (gInput.authoritative) {
+    input_runtime::InputCommand command;
+    command.kind = input_runtime::InputCommandKind::ResumeFromSuspend;
+    SendInputCommand(command);
+  } else {
+    const bool wasConsumed = gState.reminderActivity.segment_consumed();
+    gState.reminderActivity.ResumeFromSuspend(GetTickCount64(), false, false, 0);
+    PersistReminderUnlockIfNeeded(wasConsumed);
+  }
   gState.reminderPauseKind = AppState::ReminderPauseKind::None;
   gState.reminderPauseTick = 0;
   gState.reminderPauseAwake = 0;
@@ -824,7 +1030,8 @@ void NotifyReminderClockChange() {
             CurrentReminderLocalDate().c_str()) !=
         niuma::reminder::StoreResult::Success) gState.reminderStorageFault = true;
   }
-  gState.reminderActivity.ResetForListenerRestart();
+  ResetInputReminderObservation();
+  SyncInputClockGuard();
 }
 
 void ApplyReminderClockTransition(niuma::reminder::WallClockGuard::Transition transition,
@@ -835,7 +1042,8 @@ void ApplyReminderClockTransition(niuma::reminder::WallClockGuard::Transition tr
         niuma::reminder::StoreResult::Success) {
       gState.reminderStorageFault = true;
     }
-    gState.reminderActivity.ResetForListenerRestart();
+    ResetInputReminderObservation();
+    SyncInputClockGuard();
   } else if (transition == niuma::reminder::WallClockGuard::Transition::Recovered) {
     const auto result = gState.reminderStore
         ? gState.reminderStore->SetClockGuard(false, nowUtc,
@@ -847,6 +1055,7 @@ void ApplyReminderClockTransition(niuma::reminder::WallClockGuard::Transition tr
     } else {
       gState.reminderStorageFault = false;
     }
+    SyncInputClockGuard();
   }
 }
 
@@ -934,7 +1143,32 @@ void UnregisterOffworkSessionNotifications(HWND window) {
 // Keep every unflushed date until all count writes succeed. A failed write
 // must not discard an old day's value when the local date changes again.
 bool SaveCountState(const std::wstring& path) {
-  if (path.empty()) return false;
+  if (path.empty() || gInput.loadFailed) return false;
+  if (gInput.authoritative) {
+    bool saved = true;
+    if (gInput.savedTotal != gInput.ledger.total) {
+      saved = WritePrivateProfileStringW(L"state", L"total",
+          std::to_wstring(gInput.ledger.total).c_str(), path.c_str()) != FALSE;
+    }
+    for (const auto& day : gInput.daily) {
+      const auto key = InputDateKey(day.date);
+      const auto previous = gInput.savedDaily.find(key);
+      if (previous != gInput.savedDaily.end() && previous->second == day.total) continue;
+      const bool written = WritePrivateProfileStringW(L"daily", key.c_str(),
+          std::to_wstring(day.total).c_str(), path.c_str()) != FALSE;
+      saved = written && saved;
+    }
+    if (saved) {
+      gInput.savedTotal = gInput.ledger.total;
+      for (const auto& day : gInput.daily) gInput.savedDaily[InputDateKey(day.date)] = day.total;
+    }
+    const bool caughtUp = gInput.ledger.countedOperations ==
+            gInput.latest.input.countedOperations &&
+        gInput.ledger.total == gInput.latest.input.total &&
+        gInput.ledger.date == gInput.latest.input.date;
+    if (!caughtUp) RequestInputLedger();
+    return saved && caughtUp;
+  }
   if (!gState.currentDay.empty())
     gState.pendingDailyTotals[gState.currentDay] = gState.todayTotal;
   bool saved = WritePrivateProfileStringW(L"state", L"total",
@@ -1312,6 +1546,7 @@ void EnsureAnimationTimer() {
 }
 
 void CountOneOperation() {
+  if (gInput.authoritative || gInput.loadFailed) return;
   if (EnsureCurrentDay()) {
     RenderLayeredWindow(GetTickCount64());
   }
@@ -1580,6 +1815,11 @@ LRESULT CALLBACK ReminderWindowProcedure(HWND window, UINT message,
       }
       break;
     case WM_DESTROY:
+      if (gInput.pendingReminderWindow == window) {
+        gInput.pendingReminderWindow = nullptr;
+        gInput.reminderCommand = gInput.reminderEpoch = gInput.reminderOpportunity = 0;
+        if (!gReminderWindow) gReminderText.clear();
+      }
       if (gReminderWindow == window) {
         gReminderWindow = nullptr;
         gReminderText.clear();
@@ -1610,7 +1850,8 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
     if (acceptanceStage != nullptr) *acceptanceStage = value;
   };
   stage("store-or-existing-window");
-  if (!gState.reminderStore || gReminderWindow != nullptr) return;
+  if (!gState.reminderStore || gReminderWindow != nullptr ||
+      gInput.pendingReminderWindow != nullptr) return;
   const std::int64_t nowUtc = static_cast<std::int64_t>(std::time(nullptr));
   stage("segment-save");
   if (gState.reminderStore->SetSegmentConsumed(true, nowUtc) !=
@@ -1692,6 +1933,20 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
     return;
   }
   gState.reminderStorageFault = false;
+  if (gInput.authoritative && acceptanceStage == nullptr) {
+    gInput.pendingReminderWindow = popup;
+    gInput.reminderCommand = ++gInput.nextCommand;
+    gInput.reminderEpoch = gInput.latest.input.epoch;
+    gInput.reminderOpportunity = gInput.latest.pendingReminderId;
+    input_runtime::InputCommand command;
+    command.kind = input_runtime::InputCommandKind::ConfirmReminder;
+    command.id = gInput.reminderCommand;
+    command.expectedEpoch = gInput.reminderEpoch;
+    command.opportunityId = gInput.reminderOpportunity;
+    SendInputCommand(command);
+    stage("awaiting-owner-confirmation");
+    return;
+  }
   gReminderWindow = popup;
   gReminderDismissAt = GetTickCount64() + niuma::reminder::kReminderDisplayMilliseconds;
   SetTimer(popup, kReminderDismissTimer, niuma::reminder::kReminderDisplayMilliseconds, nullptr);
@@ -1750,6 +2005,7 @@ LRESULT CALLBACK MouseHook(
 }
 
 void CountGlobalDelivery(bool scroll, LPARAM generation, WPARAM listenerGeneration) {
+  if (gInput.authoritative || gInput.loadFailed) return;
   const std::uint64_t before = gState.total;
   gCountingCheck.counting = generation != 0 &&
       static_cast<unsigned int>(generation) == gCountingCheck.generation;
@@ -1761,24 +2017,242 @@ void CountGlobalDelivery(bool scroll, LPARAM generation, WPARAM listenerGenerati
     gCountingCheck.observedCount = true;
 }
 
+void ApplyInputView(const input_runtime::InputServiceSnapshot& snapshot) {
+  if (!snapshot.input.ready) return;
+  const auto previousDate = gState.currentDay;
+  const bool countsChanged = gState.total != snapshot.input.total ||
+      gState.todayTotal != snapshot.input.today;
+  const bool previousStrike = gState.striking;
+  const ULONGLONG previousStart = gState.strikeStarted;
+  gInput.latest = snapshot;
+  gState.total = snapshot.input.total;
+  gState.todayTotal = snapshot.input.today;
+  gState.currentDay = InputDateKey(snapshot.input.date);
+  gState.lastInputTime = snapshot.input.lastInputMs;
+  gState.lastScrollEventTime = snapshot.input.lastScrollMs;
+  gState.intervalEma = snapshot.input.intervalEmaMs;
+  const auto now = GetTickCount64();
+  if (!gInput.previewUntil || now >= gInput.previewUntil) {
+    gInput.previewUntil = 0;
+    gState.striking = snapshot.input.striking && now >= snapshot.input.strikeStartedMs &&
+        now - snapshot.input.strikeStartedMs < static_cast<ULONGLONG>(snapshot.input.strikeDurationMs);
+    gState.strikeStarted = snapshot.input.strikeStartedMs;
+    gState.strikeDurationMs = snapshot.input.strikeDurationMs;
+  }
+  gCountingCheck.keyboardError = snapshot.keyboardError;
+  gCountingCheck.mouseError = snapshot.mouseError;
+  gCountingCheck.observedCount = snapshot.observedGlobalCount;
+  gCountingCheck.deliveryFault = gInput.controlFault || snapshot.notificationError ||
+      snapshot.input.fault != input_core::InputFault::None ||
+      snapshot.input.unaccountedOperations != 0 || !snapshot.running;
+  const auto& check = snapshot.selfCheck;
+  if (gCountingCheck.active && check.generation == gCountingCheck.generation) {
+    gCountingCheck.starts = check.startsMs;
+    gCountingCheck.ends = check.endsMs;
+    gCountingCheck.keys = check.keys;
+    gCountingCheck.clicks = check.clicks;
+    gCountingCheck.scrolls = check.scrolls;
+    gCountingCheck.handled = check.handled;
+    gCountingCheck.expected = check.expected;
+    gCountingCheck.counted = check.counted;
+    gCountingCheck.lastRelative = check.lastRelativeMs;
+    if (check.cancelled || check.error != ERROR_SUCCESS) {
+      gCountingCheck.active = false;
+      gCountingCheck.result = UiText(L"自检未完成，监听状态已改变或请求来迟。请重新开始自检。",
+          L"The check did not complete because listener state changed or the request arrived late. Start a new check.");
+    }
+  }
+  if (countsChanged || previousDate != gState.currentDay) gState.dirty = true;
+  if (gState.window && (countsChanged || previousDate != gState.currentDay ||
+      previousStrike != gState.striking || previousStart != gState.strikeStarted)) {
+    const bool wasRunning = gState.timerRunning;
+    if (gState.striking || gState.dirty) EnsureAnimationTimer();
+    if (!wasRunning || !gState.striking) RenderLayeredWindow(now);
+    if (gCalendar.window) InvalidateRect(gCalendar.window, nullptr, FALSE);
+  }
+  if (previousDate != gState.currentDay) RequestInputLedger();
+}
+
+void RequestInputLedger() {
+  if (!gInput.service || !gInput.service->running() || gInput.ledgerRequest ||
+      !gInput.latest.input.epoch) return;
+  const auto id = ++gInput.nextLedger;
+  const auto result = gInput.service->RequestLedger({id, gInput.latest.input.epoch});
+  if (result == input_core::LedgerRequestResult::Accepted) gInput.ledgerRequest = id;
+}
+
+void StopInputService() {
+  CancelPendingReminder();
+  if (!gInput.service || gInput.finalCollected) return;
+  const bool wasConsumed = gInput.reminderConsumed;
+  const auto& final = gInput.service->Stop();
+  if (final.stopped && final.snapshot.input.ready) {
+    gInput.ledger = final.snapshot.input;
+    gInput.daily = final.daily;
+    ApplyInputView(final.snapshot);
+    gInput.reminderConsumed = final.snapshot.input.reminderSegmentConsumed;
+    if (wasConsumed && !gInput.reminderConsumed) PersistReminderUnlockIfNeeded(true);
+  }
+  gInput.ledgerRequest = 0;
+  gInput.finalCollected = true;
+}
+
+void ConsumeInputSnapshot() {
+  if (!gInput.service || gInput.finalCollected) return;
+  input_runtime::InputServiceSnapshot snapshot;
+  if (gInput.service->ReadLatest(snapshot)) {
+    const bool wasConsumed = gInput.reminderConsumed;
+    ApplyInputView(snapshot);
+    gInput.reminderConsumed = snapshot.input.reminderSegmentConsumed;
+    if (wasConsumed && !gInput.reminderConsumed) PersistReminderUnlockIfNeeded(true);
+    if (!snapshot.running) {
+      StopInputService();
+      gState.dirty = true;
+      EnsureAnimationTimer();
+      RefreshCountingStatus();
+      return;
+    }
+  }
+  input_core::LedgerSnapshotResult ledger;
+  try {
+    if (gInput.service->TryConsumeLedger(ledger)) {
+      gInput.ledgerRequest = 0;
+      if (ledger.header.status == input_core::LedgerResultStatus::Complete) {
+        gInput.ledger = ledger.header.input;
+        gInput.daily.assign(ledger.daily.begin(), ledger.daily.end());
+        if (gCalendar.window) InvalidateRect(gCalendar.window, nullptr, FALSE);
+      } else if (ledger.header.status == input_core::LedgerResultStatus::EpochMismatch) {
+        RequestInputLedger();
+      } else {
+        gCountingCheck.deliveryFault = true;
+      }
+    }
+  } catch (...) {
+    // The service retains its Ready ledger on allocation failure. Retry from
+    // the ordinary UI timer; no partial ledger is installed or saved.
+    gCountingCheck.deliveryFault = true;
+  }
+  if (gInput.pendingReminderWindow) {
+    const auto& confirmation = gInput.latest.reminderConfirmation;
+    const bool stillValid = !gInput.controlFault &&
+        gInput.latest.input.epoch == gInput.reminderEpoch &&
+        gInput.latest.input.keyboardAvailable && gInput.latest.input.mouseAvailable &&
+        gInput.latest.input.reminderSegmentConsumed && !ReminderSuspended() &&
+        gState.reminderPauseKind == AppState::ReminderPauseKind::None &&
+        !gState.reminderClockGuard.guarded();
+    if (!stillValid || (confirmation.commandId >= gInput.reminderCommand &&
+        (!confirmation.confirmed || confirmation.commandId != gInput.reminderCommand ||
+         confirmation.epoch != gInput.reminderEpoch ||
+         confirmation.opportunityId != gInput.reminderOpportunity))) {
+      CancelPendingReminder();
+    } else if (confirmation.commandId == gInput.reminderCommand && confirmation.confirmed) {
+      const HWND popup = gInput.pendingReminderWindow;
+      gInput.pendingReminderWindow = nullptr;
+      gInput.reminderCommand = gInput.reminderEpoch = gInput.reminderOpportunity = 0;
+      gReminderWindow = popup;
+      gReminderDismissAt = GetTickCount64() + niuma::reminder::kReminderDisplayMilliseconds;
+      SetTimer(popup, kReminderDismissTimer, niuma::reminder::kReminderDisplayMilliseconds, nullptr);
+      ShowWindow(popup, SW_SHOWNOACTIVATE);
+      InvalidateRect(popup, nullptr, TRUE);
+    }
+  }
+  if (!gInput.controlFault && !gState.reminderStorageFault &&
+      !gState.reminderClockGuard.guarded() &&
+      gState.reminderPauseKind == AppState::ReminderPauseKind::None &&
+      gInput.latest.pendingReminderId &&
+      gInput.latest.pendingReminderId != gInput.handledReminder &&
+      gInput.latest.pendingReminderEpoch == gInput.latest.input.epoch &&
+      !gReminderWindow && !gInput.pendingReminderWindow) {
+    gInput.handledReminder = gInput.latest.pendingReminderId;
+    PresentReminderForTrigger(gInput.latest.pendingReminder);
+  }
+  RefreshCountingStatus();
+}
+
 void RestartGlobalListeners() {
+  CancelPendingReminder();
   ++gCountingCheck.listenerGeneration;
-  if (gState.keyboardHook != nullptr) UnhookWindowsHookEx(gState.keyboardHook);
-  if (gState.mouseHook != nullptr) UnhookWindowsHookEx(gState.mouseHook);
-  gState.reminderActivity.ResetForListenerRestart();
   gCountingCheck.observedCount = false;
   gCountingCheck.deliveryFault = false;
-  HINSTANCE instance = GetModuleHandleW(nullptr);
-  gState.keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHook, instance, 0);
-  gCountingCheck.keyboardError = gState.keyboardHook ? ERROR_SUCCESS : GetLastError();
-  gState.mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseHook, instance, 0);
-  gCountingCheck.mouseError = gState.mouseHook ? ERROR_SUCCESS : GetLastError();
+  if (gInput.service && gInput.service->running()) {
+    input_runtime::InputCommand command;
+    command.kind = input_runtime::InputCommandKind::RestartListeners;
+    if (SendInputCommand(command)) gInput.controlFault = false;
+    return;
+  }
+  StopInputService();
+  input_runtime::InputServiceOptions options;
+  try {
+    if (gInput.authoritative) {
+      options.total = gInput.ledger.total;
+      options.date = input_runtime::InputService::CaptureLocalDate();
+      options.daily = gInput.daily;
+      options.reminderSegmentConsumed = gInput.reminderConsumed;
+    } else {
+      if (!LoadInputLedger(options)) {
+        gInput.loadFailed = true;
+        gCountingCheck.deliveryFault = true;
+        gCountingCheck.keyboardError = gCountingCheck.mouseError = ERROR_INVALID_DATA;
+        return;
+      }
+      gInput.loadFailed = false;
+      options.reminderSegmentConsumed = gState.reminderActivity.segment_consumed();
+      gInput.ledger.total = options.total;
+      gInput.ledger.date = options.date;
+      gInput.daily = options.daily;
+    }
+    options.notificationWindow = gState.window;
+    options.notificationMessage = kInputSnapshotMessage;
+    const auto capacity = std::min(input_core::InputCore::kMaximumDayCapacity,
+        std::max(input_core::InputCore::kDefaultDayCapacity, options.daily.size() + 366));
+    gInput.daily.reserve(capacity);
+    gInput.service = std::make_unique<input_runtime::InputService>(capacity);
+    gInput.finalCollected = false;
+    const auto started = gInput.service->Start(options);
+    if (!started.started) {
+      // A ready timeout can still have started the owner. Preserve its final
+      // ledger before discarding the failed instance; do not roll counts back.
+      const auto& final = gInput.service->Stop();
+      if (final.stopped && final.snapshot.input.ready) {
+        gInput.authoritative = true;
+        StopInputService();
+      }
+      gCountingCheck.keyboardError = gCountingCheck.mouseError = started.error;
+      gCountingCheck.deliveryFault = true;
+      gInput.service.reset();
+      return;
+    }
+    gInput.authoritative = true;
+    gInput.loadFailed = false;
+    gInput.finalCollected = false;
+    gInput.controlFault = false;
+    gInput.ledgerRequest = 0;
+    gInput.handledReminder = 0;
+    gInput.reminderConsumed = options.reminderSegmentConsumed;
+    gState.pendingDailyTotals.clear();
+    SyncInputClockGuard();
+    ConsumeInputSnapshot();
+    RequestInputLedger();
+    if (gState.reminderPauseKind != AppState::ReminderPauseKind::None) {
+      input_runtime::InputCommand command;
+      command.kind = input_runtime::InputCommandKind::BeginSuspend;
+      SendInputCommand(command);
+    }
+  } catch (...) {
+    gCountingCheck.deliveryFault = true;
+    gCountingCheck.keyboardError = gCountingCheck.mouseError = ERROR_NOT_ENOUGH_MEMORY;
+  }
 }
 
 std::wstring CountingStatusTitle() {
-  if (!gState.keyboardHook && !gState.mouseHook)
+  if (gInput.loadFailed)
+    return UiText(L"计数暂停：完整日历记录未读取，请检查本地存储后重试。",
+                  L"Counting paused: the complete daily ledger could not be read. Check local storage and retry.");
+  if (gInput.authoritative && !gInput.latest.running)
+    return UiText(L"计数服务已停止，请重试监听。", L"Counting service stopped. Retry the listener.");
+  if (!KeyboardListenerAvailable() && !MouseListenerAvailable())
     return UiText(L"仅点击小伙伴计数", L"Pet-click Counting Only");
-  if (!gState.keyboardHook || !gState.mouseHook)
+  if (!KeyboardListenerAvailable() || !MouseListenerAvailable())
     return UiText(L"待检查：部分监听未建立", L"Check Needed: Partial Listener");
   if (gCountingCheck.deliveryFault)
     return UiText(L"待检查：监听与计数结果不一致", L"Check Needed: Counting Mismatch");
@@ -1793,7 +2267,10 @@ void RefreshCountingStatus() {
   const ULONGLONG now = GetTickCount64();
   const std::uint64_t events =
       gCountingCheck.keys + gCountingCheck.clicks + gCountingCheck.scrolls;
-  if (gCountingCheck.active && now >= gCountingCheck.ends) {
+  const bool ownerFinished = !gInput.authoritative ||
+      (gInput.latest.selfCheck.generation == gCountingCheck.generation &&
+       !gInput.latest.selfCheck.active);
+  if (gCountingCheck.active && now >= gCountingCheck.ends && ownerFinished) {
     gCountingCheck.active = false;
     if (events == 0) {
       gCountingCheck.observedCount = false;
@@ -1823,9 +2300,11 @@ void RefreshCountingStatus() {
     if (now < gCountingCheck.starts) {
       progress = UiText(L"准备中：请切换到其他应用。2 秒后开始记录。",
                         L"Get ready: switch to another app. Recording starts after 2 seconds.");
-    } else {
+    } else if (now < gCountingCheck.ends) {
       progress = UiText(L"记录中，剩余秒数：", L"Recording; seconds left: ") +
           std::to_wstring((gCountingCheck.ends - now + 999) / 1000);
+    } else {
+      progress = UiText(L"记录结束，正在核对计数。", L"Recording ended; checking the counts.");
     }
   }
   std::wstring text = CountingStatusTitle();
@@ -1842,12 +2321,12 @@ void RefreshCountingStatus() {
       std::to_wstring(gCountingCheck.lastRelative);
   text += UiText(L"（无事件时为 0）。连续滚动按一次手势计数。", L" (0 if none). Continuous scrolling counts as one gesture.");
   text += UiText(L"\r\n\r\n键盘监听句柄：", L"\r\n\r\nKeyboard listener handle: ");
-  text += gState.keyboardHook ? UiText(L"已建立", L"created") : UiText(L"未建立", L"unavailable");
+  text += KeyboardListenerAvailable() ? UiText(L"已建立", L"created") : UiText(L"未建立", L"unavailable");
   text += UiText(L"；鼠标监听句柄：", L"; mouse listener handle: ");
-  text += gState.mouseHook ? UiText(L"已建立", L"created") : UiText(L"未建立", L"unavailable");
-  if (!gState.keyboardHook)
+  text += MouseListenerAvailable() ? UiText(L"已建立", L"created") : UiText(L"未建立", L"unavailable");
+  if (!KeyboardListenerAvailable())
     text += UiText(L"；键盘错误码 ", L"; keyboard error ") + std::to_wstring(gCountingCheck.keyboardError);
-  if (!gState.mouseHook)
+  if (!MouseListenerAvailable())
     text += UiText(L"；鼠标错误码 ", L"; mouse error ") + std::to_wstring(gCountingCheck.mouseError);
   text += UiText(
       L"。句柄存在不保证仍在收到输入，请以实际自检为准。\r\n\r\nWindows 安全桌面、会话切换或监听超时可能影响监听。可点“重试监听”，不需要开启 macOS 权限，也不要求管理员提权或关闭安全保护。\r\n\r\n自检仅在内存中保留事件次数与相对时间；不读取或保存具体键值、内容、坐标、应用或窗口信息。不联网。",
@@ -1909,6 +2388,7 @@ LRESULT CALLBACK CountingStatusProcedure(HWND window, UINT message, WPARAM wPara
       return 0;
     }
     case WM_TIMER:
+      ConsumeInputSnapshot();
       RefreshCountingStatus();
       return 0;
     case WM_COMMAND:
@@ -1919,9 +2399,22 @@ LRESULT CALLBACK CountingStatusProcedure(HWND window, UINT message, WPARAM wPara
         gCountingCheck.handled = gCountingCheck.expected = gCountingCheck.counted = 0;
         gCountingCheck.lastRelative = 0;
         gCountingCheck.result.clear();
-        gCountingCheck.starts = GetTickCount64() + 2000;
+        const auto captured = GetTickCount64();
+        gCountingCheck.starts = captured + 2000;
         gCountingCheck.ends = gCountingCheck.starts + 10000;
         gCountingCheck.active = true;
+        if (gInput.authoritative) {
+          input_runtime::InputCommand command;
+          command.kind = input_runtime::InputCommandKind::BeginSelfCheck;
+          command.expectedEpoch = gInput.latest.input.epoch;
+          command.capturedMs = captured;
+          command.selfCheckGeneration = gCountingCheck.generation;
+          if (!SendInputCommand(command)) {
+            gCountingCheck.active = false;
+            gCountingCheck.result = UiText(L"自检请求未提交，请重试监听后再试。",
+                L"The check request was not accepted. Retry the listener and try again.");
+          }
+        }
         RefreshCountingStatus();
         return 0;
       }
@@ -2723,6 +3216,7 @@ LRESULT CALLBACK CalendarWindowProcedure(HWND window, UINT message, WPARAM wPara
 }
 
 void ShowMeritCalendar(HWND owner) {
+  RequestInputLedger();
   if (gCalendar.window == nullptr) {
     SYSTEMTIME now = {};
     GetLocalTime(&now);
@@ -3087,6 +3581,7 @@ void ShowAppearancePicker(HWND owner) {
     gState.striking = true;
     gState.strikeStarted = GetTickCount64();
     gState.strikeDurationMs = 800;
+    gInput.previewUntil = gState.strikeStarted + 800;
     SaveState();
     EnsureAnimationTimer();
     RenderLayeredWindow(gState.strikeStarted);
@@ -3535,6 +4030,10 @@ LRESULT CALLBACK WindowProcedure(
       gState.window = window;
       return 0;
 
+    case kInputSnapshotMessage:
+      ConsumeInputSnapshot();
+      return 0;
+
     case kCountMessage:
       CountGlobalDelivery(false, lParam, wParam);
       return 0;
@@ -3574,6 +4073,7 @@ LRESULT CALLBACK WindowProcedure(
         return 0;
       }
       if (wParam == kReminderTimer) {
+        ConsumeInputSnapshot();  // Also recovers a failed coalesced PostMessage.
         const ULONGLONG now = GetTickCount64();
         const auto nowUtc = static_cast<std::int64_t>(std::time(nullptr));
         const auto clockTransition = gState.reminderClockGuard.Observe(nowUtc, now);
@@ -3583,6 +4083,7 @@ LRESULT CALLBACK WindowProcedure(
           KillTimer(gReminderWindow, kReminderDismissTimer);
           DestroyWindow(gReminderWindow);
         }
+        if (gInput.authoritative || gInput.loadFailed) return 0;
         const bool listenerHealthy = gState.keyboardHook != nullptr &&
             gState.mouseHook != nullptr && !gState.reminderClockGuard.guarded();
         const bool wasConsumed = gState.reminderActivity.segment_consumed();
@@ -3609,7 +4110,10 @@ LRESULT CALLBACK WindowProcedure(
       if (wParam == kDayTimer) {
         // Retry failed local saves even when the countdown itself is disabled.
         if (GetTickCount64() - gOffwork.lastFlush >= 60000) FlushOffwork();
-        if (EnsureCurrentDay()) RenderLayeredWindow(GetTickCount64());
+        if (gInput.authoritative) {
+          ConsumeInputSnapshot();
+          RequestInputLedger();
+        } else if (EnsureCurrentDay()) RenderLayeredWindow(GetTickCount64());
         if (gCalendar.window != nullptr) InvalidateRect(gCalendar.window, nullptr, FALSE);
         return 0;
       }
@@ -3617,6 +4121,10 @@ LRESULT CALLBACK WindowProcedure(
         break;
       }
       const ULONGLONG now = GetTickCount64();
+      if (gInput.previewUntil && now >= gInput.previewUntil) {
+        gInput.previewUntil = 0;
+        if (gInput.authoritative) ApplyInputView(gInput.latest);
+      }
       bool needsRender = gState.striking;
       if (gState.striking &&
           now - gState.strikeStarted >=
@@ -3627,8 +4135,8 @@ LRESULT CALLBACK WindowProcedure(
       if (needsRender) {
         RenderLayeredWindow(now);
       }
-      if (gState.dirty && gState.lastInputTime != 0 &&
-          now - gState.lastInputTime >= 500 && now - gState.lastSaveAttempt >= 1000) {
+      if (gState.dirty && (gState.lastInputTime == 0 ||
+          now - gState.lastInputTime >= 500) && now - gState.lastSaveAttempt >= 1000) {
         gState.lastSaveAttempt = now;
         SaveState();
       }
@@ -3715,7 +4223,16 @@ LRESULT CALLBACK WindowProcedure(
     case WM_NCRBUTTONDOWN:
     case WM_NCMBUTTONDOWN:
     case WM_NCXBUTTONDOWN:
-      if (!gState.mouseHook) CountOneOperation();
+      if (gInput.authoritative) {
+        // Let the input owner decide hook availability at dispatch. The UI
+        // never increments its view while another thread owns the ledger.
+        input_runtime::InputCommand command;
+        command.kind = input_runtime::InputCommandKind::LocalFallbackClick;
+        command.expectedEpoch = gInput.latest.input.epoch;
+        command.capturedMs = GetTickCount64();
+        command.capturedDate = input_runtime::InputService::CaptureLocalDate();
+        if (!MouseListenerAvailable()) SendInputCommand(command);
+      } else if (!gInput.loadFailed && !gState.mouseHook) CountOneOperation();
       break;
 
     case WM_NCHITTEST:
@@ -3749,12 +4266,16 @@ LRESULT CALLBACK WindowProcedure(
 
     case WM_ENDSESSION:
       if (wParam != 0) {
+        StopInputService();
         RefreshOffwork(true, true);
         SaveState();
       }
       return 0;
 
     case WM_DESTROY:
+      // Join before invalidating the notification HWND or saving the ledger.
+      StopInputService();
+      if (gReminderWindow) DestroyWindow(gReminderWindow);
       RefreshOffwork(true, true);
       KillTimer(window, kOffworkTimer);
       gOffwork.timerRunning = false;
@@ -4049,6 +4570,8 @@ int WINAPI wWinMain(
     }
   }
 
+  StopInputService();
+  if (gState.window != nullptr) SaveState();
   if (gState.keyboardHook != nullptr) {
     UnhookWindowsHookEx(gState.keyboardHook);
   }
