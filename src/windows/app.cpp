@@ -3156,8 +3156,8 @@ bool ShowPrivacyNotice(HWND owner) {
 constexpr int kAboutHelpLink = 3090;
 
 const wchar_t* AboutDouyinCaption() {
-  return UiText(L"扫码进粉丝群，免费领取权益包。\n和我一起学习 AI，创建并上架你的专属形象包。\n抖音号：1872941388",
-                L"Scan with Douyin to join the fan group and claim free benefit packs.\nLearn AI with me, and create and publish your own appearance packs.\nDouyin ID: 1872941388");
+  return UiText(L"用抖音扫一扫，加入牛马电子功德共创群＆AI学习。\n群号：117093216342\n免费领取权益包，交流形象创意。\n开发者抖音号：1872941388",
+                L"Scan with Douyin to join the NiuMa Merit & AI learning group.\nGroup: 117093216342\nClaim free benefit packs and share appearance ideas.\nDeveloper Douyin ID: 1872941388");
 }
 
 struct AboutDialogState {

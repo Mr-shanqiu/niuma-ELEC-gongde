@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -20,6 +20,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-runtime-build:
+    if: ${{ inputs.mode == 'runtime-build' }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile private candidate without rerunning closed acceptance suites
+        shell: pwsh
+        run: |
+          cmake -S . -B build-candidate -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Candidate configuration failed" }
+          cmake --build build-candidate --config Release --target niuma-runtime-candidate --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Candidate compilation failed" }
+      - name: Bind the executable and updated static resource
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib, json, os
+          names = ['CMakeLists.txt', 'src/windows/app.cpp', 'src/windows/app.rc',
+                   'assets/douyin-group-qr.png']
+          exe = Path('build-candidate/Release/niuma-runtime-candidate.exe')
+          result = {'commit': os.environ['GITHUB_SHA'], 'kind': 'unsigned-private-candidate',
+                    'executableSha256': hashlib.sha256(exe.read_bytes()).hexdigest(),
+                    'executableBytes': exe.stat().st_size,
+                    'sourceSha256': {n: hashlib.sha256(Path(n).read_bytes()).hexdigest() for n in names},
+                    'acceptanceSuitesRerun': False, 'humanVisualAcceptance': False}
+          Path('build-candidate/BUILD_BINDING.json').write_text(json.dumps(result, indent=2))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-build-${{ github.sha }}
+          path: |
+            build-candidate/Release/niuma-runtime-candidate.exe
+            build-candidate/BUILD_BINDING.json
+          if-no-files-found: error
+          retention-days: 14
+
   windows-runtime-ui:
     if: ${{ inputs.mode == 'runtime-ui' }}
     runs-on: windows-2022
