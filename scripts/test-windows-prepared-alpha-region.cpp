@@ -117,6 +117,42 @@ void TransformMapsCroppedCorners() {
     }
 }
 
+void SubpixelBandsSurviveMinification() {
+    Image image(256,256);
+    // Disconnected one-texel strokes disappear if integer native regions are
+    // transformed first. They must survive whenever a destination sample sees them.
+    for (unsigned x=0;x<256;++x) image.Set(x,97,255);
+    for (unsigned y=0;y<256;++y) image.Set(113,y,255);
+    for (unsigned y=150;y<220;++y) for(unsigned x=40;x<90;++x) image.Set(x,y,255);
+    auto mask=PrepareAlphaMask(image.View());
+    for (int step=0;step<16;++step) {
+        PreparedAlphaQuad quad; quad.mask=&mask;
+        const double angle=step*0.07, scale=0.22+step*0.01;
+        const double c=std::cos(angle)*scale, t=std::sin(angle)*scale;
+        const double xs[]={0,256,256,0}, ys[]={0,0,256,256};
+        AlphaRegionQuad reference; reference.image=image.View();
+        for (int i=0;i<4;++i) {
+            quad.positions[i]={static_cast<float>(80+c*xs[i]-t*ys[i]),static_cast<float>(10+t*xs[i]+c*ys[i])};
+            reference.positions[i]=quad.positions[i];
+        }
+        auto actual=TransformPreparedAlphaRegion(160,160,{quad});
+        auto expected=RasterizeAlphaRegion(160,160,{reference});
+        Require(actual.success && expected.success,"both support paths succeed");
+        std::vector<unsigned char> a(160*160),e(160*160);
+        for(const auto& r:actual.rectangles) for(int y=r.top;y<r.bottom;++y) for(int x=r.left;x<r.right;++x) a[y*160+x]=1;
+        for(const auto& r:expected.rectangles) for(int y=r.top;y<r.bottom;++y) for(int x=r.left;x<r.right;++x) e[y*160+x]=1;
+        for(int y=0;y<160;++y) for(int x=0;x<160;++x) {
+            Require(!e[y*160+x] || a[y*160+x],"prepared support does not drop thin reference samples");
+            if(a[y*160+x] && !e[y*160+x]) {
+                bool nearby=false;
+                for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx)
+                    if(x+dx>=0 && x+dx<160 && y+dy>=0 && y+dy<160 && e[(y+dy)*160+x+dx]) nearby=true;
+                Require(nearby,"prepared support never fills distant empty areas");
+            }
+        }
+    }
+}
+
 void UnsupportedIsExplicit() {
     Image image(2, 2);
     const auto mask = PrepareAlphaMask(image.View());
@@ -150,12 +186,13 @@ int main() {
         {"support-matches-independent-texel-union", SupportMatchesIndependentTexelUnion},
         {"transform-maps-cropped-corners", TransformMapsCroppedCorners},
         {"unsupported-is-explicit", UnsupportedIsExplicit},
+        {"subpixel-bands-survive-minification", SubpixelBandsSurviveMinification},
     };
     unsigned passed = 0;
     for (const auto& test : tests) {
         try { test.run(); ++passed; std::cout << "PASS " << test.name << '\n'; }
         catch (const std::exception& error) { std::cerr << "FAIL " << test.name << ": " << error.what() << '\n'; return 1; }
     }
-    std::cout << "prepared-alpha-region: " << passed << "/4 passed\n";
+    std::cout << "prepared-alpha-region: " << passed << "/5 passed\n";
     return 0;
 }

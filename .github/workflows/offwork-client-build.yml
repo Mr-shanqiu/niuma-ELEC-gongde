@@ -39,15 +39,17 @@ jobs:
         run: |
           cmake -S . -B build-runtime -G "Visual Studio 17 2022" -A x64
           if ($LASTEXITCODE -ne 0) { throw "Runtime configuration failed" }
-          cmake --build build-runtime --config Release --target niuma-runtime-p0 niuma-prepared-alpha-test niuma-client-ledger-test niuma-windows-input --parallel 2
+          cmake --build build-runtime --config Release --target niuma-runtime-p0 niuma-prepared-alpha-test niuma-animation-player-test niuma-storage-state-test --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Runtime P0 compilation failed" }
-      - name: New prepared region and complete-ledger tests (reuse prior input-chain evidence)
+      - name: Prepared subpixel spans and new shared animation/storage modules
         shell: pwsh
         run: |
           & ./build-runtime/Release/niuma-prepared-alpha-test.exe
           if ($LASTEXITCODE -ne 0) { throw "Prepared alpha region failed" }
-          & ./build-runtime/Release/niuma-client-ledger-test.exe
-          if ($LASTEXITCODE -ne 0) { throw "Complete ledger channel failed" }
+          & ./build-runtime/Release/niuma-animation-player-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "Animation player failed" }
+          & ./build-runtime/Release/niuma-storage-state-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "Storage state failed" }
       - name: Owned windows, separate process click witness and transparent frames
         shell: pwsh
         run: |

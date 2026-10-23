@@ -248,7 +248,7 @@ struct Probe {
                << ",\n  \"presents\":" << presentCount << ",\n  \"regionMeanMs\":" << regionMean
                << ",\n  \"regionP95Ms\":" << regionP95 << ",\n  \"submitMeanMs\":" << submitMean
                << ",\n  \"regionSamples\":" << regionSamples
-               << ",\n  \"regionMethod\":\"prepared source support / native transform\""
+               << ",\n  \"regionMethod\":\"prepared source support / subpixel spans\""
                << ",\n  \"regionPreparationMs\":" << preparationMs
                << ",\n  \"preparedMaskBytesPeak\":" << preparedBytes
                << ",\n  \"distantTransparentPixelsPeak\":" << distantTransparentPixelsPeak
@@ -443,9 +443,10 @@ int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware, b
                     Check(renderer.Capture(frame),renderer.LastErrorMessage());
                     const auto mask = RegionMask(region);
                     std::size_t clippedVisible = 0, visible = 0, distantTransparent = 0;
+                    unsigned clippedAlphaMax = 0;
                     for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
                         const auto alpha = frame.bgraPremultiplied[y*frame.strideBytes+x*4+3];
-                        if (alpha != 0) { ++visible; if (!mask[y*width+x]) ++clippedVisible; }
+                        if (alpha != 0) { ++visible; if (!mask[y*width+x]) { ++clippedVisible; clippedAlphaMax=std::max(clippedAlphaMax,static_cast<unsigned>(alpha)); } }
                         else if (mask[y*width+x]) {
                             bool nearVisible = false;
                             for (int dy=-2;dy<=2 && !nearVisible;++dy)
@@ -462,9 +463,23 @@ int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware, b
                     probe.distantTransparentPixelsPeak=std::max(probe.distantTransparentPixelsPeak,static_cast<std::uint64_t>(distantTransparent));
                     probe.Add(prefix+"/alpha-"+std::to_string(sample), visible > 100 && clippedVisible == 0, regionMs);
                     probe.Add(prefix+"/no-distant-transparent-interception-"+std::to_string(sample), distantTransparent==0);
+                    if (clippedVisible || distantTransparent)
+                        std::cout << prefix << '/' << sample << " clipped=" << clippedVisible
+                                  << " maxAlpha=" << clippedAlphaMax << " distant=" << distantTransparent << '\n';
                     std::string pngError;
-                    if (sample==0 || sample==5 || sample==11)
+                    if (sample==0 || sample==5 || sample==11) {
                         Check(p0::SavePng(output/(prefix+"-"+std::to_string(sample)+".png"),frame,pngError),pngError);
+                        PixelImage compared = frame;
+                        for (int y=0;y<height;++y) for(int x=0;x<width;++x) {
+                            const auto offset=y*compared.strideBytes+x*4;
+                            const bool shown=frame.bgraPremultiplied[offset+3]!=0;
+                            compared.bgraPremultiplied[offset+0]=shown?0:255;
+                            compared.bgraPremultiplied[offset+1]=shown && mask[y*width+x]?255:0;
+                            compared.bgraPremultiplied[offset+2]=shown && !mask[y*width+x]?255:0;
+                            compared.bgraPremultiplied[offset+3]=(shown||mask[y*width+x])?255:0;
+                        }
+                        Check(p0::SavePng(output/(prefix+"-"+std::to_string(sample)+"-region.png"),compared,pngError),pngError);
+                    }
                     Check(renderer.Present(),renderer.LastErrorMessage()); Pump(30);
                     if (sample==0 && interactive) {
                         InteractionChecks(window,windowState,*witness,frame,region,prefix,probe);

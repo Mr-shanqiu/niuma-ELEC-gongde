@@ -54,14 +54,19 @@ bool ResolvePreparedAlphaTransform(const PreparedAlphaQuad& quad,
                                    PreparedAlphaAffine& transform,
                                    std::string& error);
 
+// Portable span transformation: work follows prepared boundaries, not the
+// destination pixel area. Keeps subpixel bands until scan conversion.
+AlphaRegionResult TransformPreparedAlphaRegion(
+    int width, int height, const std::vector<PreparedAlphaQuad>& quads);
+
 #ifdef _WIN32
 struct Quad;
 PreparedAlphaQuad FromRendererPreparedQuad(const Quad& quad, const PreparedAlphaMask& mask);
 
 struct PreparedAlphaRegionStats {
-    double transformMs = 0;  // Includes native transform/clip/union and reporting.
+    double transformMs = 0;  // Includes span transform/clip/union and native serialization.
     std::uint64_t coveredPixels = 0;
-    std::uint64_t conservativePixels = 0;  // Added by one destination-pixel dilation.
+    std::uint64_t conservativePixels = 0;  // Reserved: span tolerance is included in coverage.
     std::size_t rectangleCount = 0;
     std::size_t transformedMasks = 0;
 };
@@ -85,8 +90,8 @@ struct PreparedAlphaRegionResult {
 };
 
 // No CPU texel/pixel loop and no GPU readback. Cached source regions are
-// transformed by GDI, clipped to the quad and surface/scissor, conservatively
-// dilated by one destination pixel, then unioned. SetWindowRgn stays caller-owned
+// transformed as subpixel scanline spans, clipped to the quad and surface,
+// merged, and serialized once for USER. SetWindowRgn stays caller-owned
 // and its time must be added by the caller when reporting total region cost.
 PreparedAlphaRegionResult BuildPreparedAlphaRegion(
     int width, int height, const std::vector<PreparedAlphaQuad>& quads);

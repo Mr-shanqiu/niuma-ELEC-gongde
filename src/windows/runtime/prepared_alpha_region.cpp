@@ -19,9 +19,7 @@ using Run = std::pair<int, int>;
 constexpr int kMaxTextureDimension = 16384;
 constexpr std::size_t kMaxRectangles = 262144;
 constexpr std::size_t kMaxSourceRuns = 1048576;
-#ifdef _WIN32
 constexpr std::size_t kMaxQuads = 4096;
-#endif
 
 double Milliseconds(Clock::time_point start) {
     return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
@@ -192,83 +190,121 @@ bool ResolvePreparedAlphaTransform(const PreparedAlphaQuad& quad,
     return true;
 }
 
-#ifdef _WIN32
+// Scan-convert only prepared support rectangles. Native transformed HRGNs can
+// drop a thin source band entirely during minification; growing that already
+// empty result cannot recover the visible sample. Keep subpixel geometry until
+// the destination scanline is known instead.
 namespace {
-struct Region {
-    HRGN value = nullptr;
-    ~Region() { if (value) DeleteObject(value); }
-    Region(const Region&) = delete;
-    Region& operator=(const Region&) = delete;
-    explicit Region(HRGN initial = nullptr) : value(initial) {}
-};
-
-bool Combine(HRGN destination, HRGN first, HRGN second, int mode) {
-    return CombineRgn(destination, first, second, mode) != ERROR;
-}
-
-bool DilateOnePixel(HRGN region) {
-    Region shifted(CreateRectRgn(0, 0, 0, 0));
-    if (!shifted.value || !Combine(shifted.value, region, nullptr, RGN_COPY) ||
-        OffsetRgn(shifted.value, -1, 0) == ERROR ||
-        !Combine(region, region, shifted.value, RGN_OR) ||
-        OffsetRgn(shifted.value, 2, 0) == ERROR ||
-        !Combine(region, region, shifted.value, RGN_OR) ||
-        !Combine(shifted.value, region, nullptr, RGN_COPY) ||
-        OffsetRgn(shifted.value, 0, -1) == ERROR ||
-        !Combine(region, region, shifted.value, RGN_OR) ||
-        OffsetRgn(shifted.value, 0, 2) == ERROR ||
-        !Combine(region, region, shifted.value, RGN_OR)) return false;
-    return true;
-}
-
-HRGN QuadDomain(const PreparedAlphaQuad& quad) {
-    // A high-resolution unit square avoids pre-rounding each transformed
-    // corner to integer pixels. GDI performs the same affine region transform.
-    struct SingleRect { RGNDATAHEADER header; RECT rect; } data{};
-    constexpr LONG unit = 65536;
-    data.header.dwSize = sizeof(RGNDATAHEADER);
-    data.header.iType = RDH_RECTANGLES;
-    data.header.nCount = 1;
-    data.header.nRgnSize = sizeof(RECT);
-    data.header.rcBound = data.rect = {0, 0, unit, unit};
-    const XFORM transform{
-        (quad.positions[1].x - quad.positions[0].x) / unit,
-        (quad.positions[1].y - quad.positions[0].y) / unit,
-        (quad.positions[3].x - quad.positions[0].x) / unit,
-        (quad.positions[3].y - quad.positions[0].y) / unit,
-        quad.positions[0].x, quad.positions[0].y};
-    return ExtCreateRegion(&transform, sizeof(data), reinterpret_cast<const RGNDATA*>(&data));
-}
-
-bool ReadNativeRegion(HRGN region, int width, int height, AlphaRegionResult& output) {
-    const DWORD bytes = GetRegionData(region, 0, nullptr);
-    if (bytes < sizeof(RGNDATAHEADER) ||
-        bytes > sizeof(RGNDATAHEADER) + kMaxRectangles * sizeof(RECT)) return false;
-    std::vector<std::uint32_t> words((bytes + sizeof(std::uint32_t) - 1) / sizeof(std::uint32_t));
-    auto* data = reinterpret_cast<RGNDATA*>(words.data());
-    if (GetRegionData(region, bytes, data) != bytes || data->rdh.iType != RDH_RECTANGLES ||
-        data->rdh.nCount > kMaxRectangles ||
-        sizeof(RGNDATAHEADER) + static_cast<std::size_t>(data->rdh.nCount) * sizeof(RECT) > bytes)
-        return false;
-    output = {};
-    output.width = width;
-    output.height = height;
-    output.rectangles.reserve(data->rdh.nCount);
-    const auto* rectangles = reinterpret_cast<const RECT*>(data->Buffer);
-    for (DWORD i = 0; i < data->rdh.nCount; ++i) {
-        const auto& rect = rectangles[i];
-        if (rect.left < 0 || rect.top < 0 || rect.right > width || rect.bottom > height ||
-            rect.right <= rect.left || rect.bottom <= rect.top) return false;
-        output.rectangles.push_back({rect.left, rect.top, rect.right, rect.bottom});
-        output.stats.coveredPixels += static_cast<std::uint64_t>(rect.right - rect.left) *
-                                     static_cast<std::uint64_t>(rect.bottom - rect.top);
+bool SpanAtRow(const std::array<AlphaRegionPoint, 4>& points, double centerY,
+               double allowance, double& left, double& right) {
+    const double low = centerY - allowance, high = centerY + allowance;
+    left = std::numeric_limits<double>::infinity();
+    right = -left;
+    const auto include = [&](double x) { left = std::min(left, x); right = std::max(right, x); };
+    for (std::size_t i = 0; i < 4; ++i) {
+        const auto& a = points[i]; const auto& b = points[(i + 1) % 4];
+        if (a.y >= low && a.y <= high) include(a.x);
+        if (a.y == b.y) continue;
+        for (const auto boundary : {low, high}) {
+            const double t = (boundary - a.y) / (static_cast<double>(b.y) - a.y);
+            if (t >= 0 && t <= 1) include(a.x + t * (static_cast<double>(b.x) - a.x));
+        }
     }
-    output.stats.rectangleCount = output.rectangles.size();
-    output.success = true;
-    return true;
+    return left <= right;
 }
-}  // namespace
+}
 
+AlphaRegionResult TransformPreparedAlphaRegion(
+    int width, int height, const std::vector<PreparedAlphaQuad>& quads) {
+    const auto start = Clock::now();
+    AlphaRegionResult result;
+    result.width = width; result.height = height;
+    const auto finish = [&](const std::string& error = {}) {
+        result.success = error.empty(); result.error = error;
+        result.stats.rasterMs = Milliseconds(start);
+        result.stats.rectangleCount = result.rectangles.size();
+        if (!result.success) result.rectangles.clear();
+        return std::move(result);
+    };
+    if (width <= 0 || height <= 0 || width > 16384 || height > 16384 || quads.size() > kMaxQuads)
+        return finish("prepared alpha surface/quad limit");
+    try {
+        std::vector<std::vector<Run>> rows(static_cast<std::size_t>(height));
+        const double allowance = 1.0 / 128.0 + std::max(width, height) *
+            2.0 * std::numeric_limits<float>::epsilon();
+        std::size_t work = 0;
+        for (const auto& quad : quads) {
+            PreparedAlphaAffine affine;
+            std::string error;
+            if (!ResolvePreparedAlphaTransform(quad, affine, error)) return finish(error);
+            if (quad.opacity == 0) continue;
+            int clipLeft = 0, clipTop = 0, clipRight = width, clipBottom = height;
+            if (quad.scissor) {
+                const auto& sc = *quad.scissor;
+                clipLeft = std::clamp(sc.x, 0, width); clipTop = std::clamp(sc.y, 0, height);
+                clipRight = static_cast<int>(std::clamp<std::int64_t>(static_cast<std::int64_t>(sc.x)+sc.width, 0, width));
+                clipBottom = static_cast<int>(std::clamp<std::int64_t>(static_cast<std::int64_t>(sc.y)+sc.height, 0, height));
+            }
+            if (clipLeft >= clipRight || clipTop >= clipBottom) continue;
+            // Domain spans are reused for every prepared rectangle in this quad.
+            std::vector<std::pair<double,double>> domain(static_cast<std::size_t>(clipBottom-clipTop));
+            for (int y=clipTop;y<clipBottom;++y) {
+                double left=0,right=0;
+                if (!SpanAtRow(quad.positions,y+0.5,allowance,left,right)) left=1,right=0;
+                domain[static_cast<std::size_t>(y-clipTop)]={left,right};
+            }
+            // Support epsilon covers 8-bit subtexel interpolation and float UV
+            // arithmetic; this is not a whole destination-pixel dilation.
+            const double sx = 1.0 / 128.0 + 32 * std::numeric_limits<float>::epsilon() * quad.mask->width;
+            const double sy = 1.0 / 128.0 + 32 * std::numeric_limits<float>::epsilon() * quad.mask->height;
+            for (const auto& rect : quad.mask->supportRectangles) {
+                const double xs[] = {rect.left-sx, rect.right+sx};
+                const double ys[] = {rect.top-sy, rect.bottom+sy};
+                std::array<AlphaRegionPoint,4> polygon{};
+                const int xi[] = {0,1,1,0}, yi[] = {0,0,1,1};
+                double minY=std::numeric_limits<double>::infinity(),maxY=-minY;
+                for (int i=0;i<4;++i) {
+                    const double x=affine.xx*xs[xi[i]]+affine.yx*ys[yi[i]]+affine.tx;
+                    const double y=affine.xy*xs[xi[i]]+affine.yy*ys[yi[i]]+affine.ty;
+                    polygon[i]={static_cast<float>(x),static_cast<float>(y)};
+                    minY=std::min(minY,y); maxY=std::max(maxY,y);
+                }
+                const int top=static_cast<int>(std::clamp(std::ceil(minY-0.5-allowance),static_cast<double>(clipTop),static_cast<double>(clipBottom)));
+                const int bottom=static_cast<int>(std::clamp(std::floor(maxY-0.5+allowance)+1,static_cast<double>(clipTop),static_cast<double>(clipBottom)));
+                for (int y=top;y<bottom;++y) {
+                    if (++work>8*1024*1024) return finish("prepared alpha span-work limit");
+                    const auto& bounds=domain[static_cast<std::size_t>(y-clipTop)];
+                    if (bounds.first>bounds.second) continue;
+                    double left=0,right=0;
+                    if (!SpanAtRow(polygon,y+0.5,allowance,left,right)) continue;
+                    left=std::max(left,bounds.first)-allowance;
+                    right=std::min(right,bounds.second)+allowance;
+                    if (left>right) continue;
+                    const int x0=static_cast<int>(std::clamp(std::ceil(left-0.5),static_cast<double>(clipLeft),static_cast<double>(clipRight)));
+                    const int x1=static_cast<int>(std::clamp(std::floor(right-0.5)+1,static_cast<double>(clipLeft),static_cast<double>(clipRight)));
+                    if (x0<x1) rows[static_cast<std::size_t>(y)].emplace_back(x0,x1);
+                }
+            }
+        }
+        std::vector<Run> previous;
+        int bandTop=0;
+        for (int y=0;y<height;++y) {
+            auto& raw=rows[static_cast<std::size_t>(y)];
+            std::sort(raw.begin(),raw.end());
+            std::vector<Run> merged;
+            for (const auto& span:raw) AppendRun(merged,span);
+            for (const auto& span:merged) result.stats.coveredPixels+=static_cast<std::uint64_t>(span.second-span.first);
+            if (merged!=previous) {
+                if (!AppendBand(previous,bandTop,y,result.rectangles)) return finish("prepared alpha rectangle limit");
+                previous=std::move(merged); bandTop=y;
+            }
+        }
+        if (!AppendBand(previous,bandTop,height,result.rectangles)) return finish("prepared alpha rectangle limit");
+    } catch(const std::bad_alloc&) { return finish("prepared alpha frame allocation failed"); }
+    return finish();
+}
+
+#ifdef _WIN32
 PreparedAlphaQuad FromRendererPreparedQuad(const Quad& quad, const PreparedAlphaMask& mask) {
     PreparedAlphaQuad result;
     result.mask = &mask;
@@ -318,51 +354,16 @@ PreparedAlphaRegionResult BuildPreparedAlphaRegion(
     if (width <= 0 || height <= 0 || width > 16384 || height > 16384 || quads.size() > kMaxQuads)
         return finish("prepared alpha surface/quad limit");
     try {
-        result.region = CreateRectRgn(0, 0, 0, 0);
-        Region undilated(CreateRectRgn(0, 0, 0, 0));
-        if (!result.region || !undilated.value) return finish("create prepared alpha destination failed");
-        for (const auto& quad : quads) {
-            PreparedAlphaAffine affine;
-            std::string error;
-            if (!ResolvePreparedAlphaTransform(quad, affine, error)) return finish(error);
-            if (quad.opacity == 0 || quad.mask->supportRectangles.empty()) continue;
-            if (quad.mask->nativeByteCount == 0 || quad.mask->nativeWords.empty())
-                return finish("prepared alpha native data missing");
-            const XFORM transform{static_cast<float>(affine.xx), static_cast<float>(affine.xy),
-                static_cast<float>(affine.yx), static_cast<float>(affine.yy),
-                static_cast<float>(affine.tx), static_cast<float>(affine.ty)};
-            Region layer(ExtCreateRegion(&transform, quad.mask->nativeByteCount,
-                reinterpret_cast<const RGNDATA*>(quad.mask->nativeWords.data())));
-            Region domain(QuadDomain(quad));
-            if (!layer.value || !domain.value) return finish("native alpha transform failed");
-            ++result.stats.transformedMasks;
-            int left = 0, top = 0, right = width, bottom = height;
-            if (quad.scissor) {
-                const auto& scissor = *quad.scissor;
-                left = std::clamp(scissor.x, 0, width);
-                top = std::clamp(scissor.y, 0, height);
-                right = static_cast<int>(std::clamp<std::int64_t>(
-                    static_cast<std::int64_t>(scissor.x) + scissor.width, 0, width));
-                bottom = static_cast<int>(std::clamp<std::int64_t>(
-                    static_cast<std::int64_t>(scissor.y) + scissor.height, 0, height));
-            }
-            Region clip(CreateRectRgn(left, top, right, bottom));
-            if (!clip.value || !Combine(layer.value, layer.value, domain.value, RGN_AND) ||
-                !Combine(layer.value, layer.value, clip.value, RGN_AND) ||
-                !Combine(undilated.value, undilated.value, layer.value, RGN_OR) ||
-                !DilateOnePixel(layer.value) ||
-                !Combine(layer.value, layer.value, clip.value, RGN_AND) ||
-                !Combine(result.region, result.region, layer.value, RGN_OR))
-                return finish("native alpha clip/dilate/union failed");
-        }
-        AlphaRegionResult raw;
-        if (!ReadNativeRegion(result.region, width, height, result.raster) ||
-            !ReadNativeRegion(undilated.value, width, height, raw))
-            return finish("native alpha result query failed");
+        result.raster = TransformPreparedAlphaRegion(width,height,quads);
+        if (!result.raster.success) return finish(result.raster.error);
+        auto native = MakeAlphaRegionData(result.raster);
+        if (!native.success) return finish(native.error);
+        result.region = ExtCreateRegion(nullptr,native.byteCount,
+            reinterpret_cast<const RGNDATA*>(native.words.data()));
+        if (!result.region) return finish("create destination alpha region failed");
         result.stats.coveredPixels = result.raster.stats.coveredPixels;
         result.stats.rectangleCount = result.raster.rectangles.size();
-        result.stats.conservativePixels = result.stats.coveredPixels - raw.stats.coveredPixels;
-        result.raster.stats.conservativePixels = result.stats.conservativePixels;
+        result.stats.transformedMasks = quads.size();
     } catch (const std::bad_alloc&) {
         return finish("prepared alpha frame allocation failed");
     }
