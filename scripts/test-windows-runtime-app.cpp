@@ -479,6 +479,94 @@ void SessionQueryCancellation(const std::filesystem::path& root) {
   }
   std::cout << "PASS system query cancel/timeout resumes counting and saving; accepted write retained; only confirmed end destroys HWND\n";
 }
+
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+void RuntimeCandidateIsolation(const std::filesystem::path& evidence) {
+  CHECK(!gInput.service && !gDataStorage.service);
+  CHECK(!InitializeAcceptanceMode(false, false, false, false, L""));
+  CHECK(!InitializeAcceptanceMode(false, false, true, false, L""));
+  wchar_t temporary[MAX_PATH]{};
+  const DWORD length = GetTempPathW(MAX_PATH, temporary);
+  CHECK(length && length < MAX_PATH);
+  const auto root = std::filesystem::path(temporary) /
+      (L"niuma-candidate-path-test-" + std::to_wstring(GetCurrentProcessId()) +
+       L"-" + std::to_wstring(GetTickCount64()));
+  CHECK(CreateDirectoryW(root.c_str(), nullptr));
+  // This is the only tree this scope may remove; every entry is test-owned.
+  struct RemoveOwnedTree {
+    std::filesystem::path path;
+    ~RemoveOwnedTree() { std::error_code error; std::filesystem::remove_all(path, error); }
+  } cleanup{root};
+  const auto valid = root / L"valid";
+  const auto copied = root / L"copied-marker";
+  const auto foreign = root / L"foreign";
+  CHECK(CreateDirectoryW(valid.c_str(), nullptr));
+  CHECK(CreateDirectoryW(copied.c_str(), nullptr));
+  CHECK(CreateDirectoryW(foreign.c_str(), nullptr));
+  CHECK(!InitializeAcceptanceMode(true, false, true, false, valid.wstring()));
+  CHECK(!InitializeAcceptanceMode(false, true, true, false, valid.wstring()));
+  CHECK(!InitializeAcceptanceMode(false, false, true, true, valid.wstring()));
+  CHECK(std::filesystem::is_empty(valid));
+  std::wstring canonical;
+  CHECK(!InitializeRuntimeCandidateDirectory(temporary, &canonical));
+  CHECK(!InitializeRuntimeCandidateDirectory(evidence.wstring(), &canonical));
+  CHECK(InitializeRuntimeCandidateDirectory(valid.wstring(), &canonical));
+  const auto boundRoot = canonical;
+  const auto marker = valid / kRuntimeProfileMarker;
+  CHECK(std::filesystem::is_regular_file(marker));
+  {
+    std::ofstream file(valid / L"data.ini"); file << "[state]\ntotal=27\n";
+    CHECK(file.good());
+  }
+  CHECK(InitializeRuntimeCandidateDirectory(valid.wstring(), &canonical));
+  CHECK(canonical == boundRoot);
+  CHECK(CopyFileW(marker.c_str(), (copied / kRuntimeProfileMarker).c_str(), TRUE));
+  CHECK(!InitializeRuntimeCandidateDirectory(copied.wstring(), &canonical));
+  {
+    std::ofstream file(foreign / L"data.ini"); file << "existing foreign data";
+    CHECK(file.good());
+  }
+  CHECK(!InitializeRuntimeCandidateDirectory(foreign.wstring(), &canonical));
+
+  bool reparseChecked = false;
+  const auto link = root / L"linked-root";
+  if (CreateSymbolicLinkW(link.c_str(), valid.c_str(),
+      SYMBOLIC_LINK_FLAG_DIRECTORY | 0x2 /* ALLOW_UNPRIVILEGED_CREATE */)) {
+    reparseChecked = true;
+    CHECK(!InitializeRuntimeCandidateDirectory(link.wstring(), &canonical));
+    CHECK(!InitializeRuntimeCandidateDirectory((link / L"..").wstring(), &canonical));
+    CHECK(RemoveDirectoryW(link.c_str()));
+    const auto nested = valid / L"linked-child";
+    CHECK(CreateSymbolicLinkW(nested.c_str(), foreign.c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | 0x2));
+    CHECK(!InitializeRuntimeCandidateDirectory(valid.wstring(), &canonical));
+    CHECK(RemoveDirectoryW(nested.c_str()));
+  } else {
+    CHECK(GetLastError() == ERROR_PRIVILEGE_NOT_HELD || GetLastError() == ERROR_INVALID_PARAMETER);
+    std::cout << "SKIP filesystem reparse fixture: runner has no symlink privilege\n";
+  }
+  CHECK(InitializeAcceptanceMode(false, false, true, false, valid.wstring()));
+  CHECK(IsRuntimeCandidate() && gIsolatedAcceptance && !gReminderPreviewAcceptance);
+  CHECK(DataPath() == boundRoot + L"\\data.ini");
+  CHECK(wcscmp(MainWindowClass(), kWindowClass) != 0 &&
+      wcscmp(kRuntimeMutexName, kMutexName) != 0 &&
+      (wcsstr(WindowTitle(), L"测试数据") || wcsstr(WindowTitle(), L"Test Data")));
+  CHECK(!SetLaunchAtLoginEnabled(true) && !SetLaunchAtLoginEnabled(false) &&
+      !IsLaunchAtLoginEnabled());
+  CHECK(!gInput.service && !gDataStorage.service);  // No global hooks or worker launched.
+  CHECK(ProfileCount(valid / L"data.ini", L"state", L"total") == 27);
+  {
+    std::ofstream file(marker, std::ios::binary | std::ios::trunc);
+    file << "not a candidate marker"; CHECK(file.good());
+  }
+  CHECK(!InitializeRuntimeCandidateDirectory(valid.wstring(), &canonical));
+  gRuntimeCandidate = false;
+  gIsolatedAcceptance = false;
+  gReminderPreviewAcceptance = false;
+  gAcceptanceRoot.clear();
+  std::cout << "PASS isolated runtime candidate entry, path-bound marker/restart, no system writes or hooks; reparse="
+      << reparseChecked << "\n";
+}
+#endif
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -502,9 +590,18 @@ int wmain(int argc, wchar_t** argv) {
     ReminderShownOnlyAfterConfirmation(root);
     ReminderDiscardedAfterEpochChange(root);
     SessionQueryCancellation(root);
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+    RuntimeCandidateIsolation(root);
+#endif
     std::ofstream receipt(root / L"RUNTIME_APP_RESULT.json");
     CHECK(receipt.good());
-    receipt << "{\"status\":\"passed\",\"groups\":5,"
+    receipt << "{\"status\":\"passed\",\"groups\":"
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+        << 6 << ",\"candidatePathIsolation\":true,"
+#else
+        << 5 << ","
+#endif
+        <<
         "\"fullLedgerRows\":529,\"realAdapterPaths\":true,"
         "\"taggedInputOnly\":true,\"diagnosticServiceInstallation\":true,"
         "\"asyncStorageAdapter\":true,\"normalCloseJoinedOwners\":true,"

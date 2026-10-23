@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <climits>
 #include <cmath>
@@ -43,92 +44,16 @@ constexpr size_t kMaximumFiles = 8;
 constexpr size_t kMaximumLayers = 6;
 constexpr size_t kMaximumKeyframes = 8;
 
-// UI-thread-only rasters sized for this display, not the source PNG dimensions.
-// Keep source PNGs for fades, where premultiplying changes color rounding.
-std::uint64_t gRenderSourceGeneration = 0;
-struct RenderRasterCache {
-  static constexpr size_t kByteLimit = 8ULL * 1024ULL * 1024ULL;
-  struct Entry {
-    const Gdiplus::Image* source = nullptr;
-    bool attempted = false;
-    UINT width = 0, height = 0;
-    std::unique_ptr<Gdiplus::Bitmap> raster;
-  };
-  const AppearancePack* owner = nullptr;
-  size_t count = 0;
-  size_t bytes = 0;
-  float density = 0;
-  std::array<Entry, kMaximumLayers> entries;
+// Image ownership is local to prepared resources. Destruction on a worker must
+// never mutate UI-owned rasters or the catalog.
+std::atomic<std::uint64_t> gRenderSourceGeneration{0};
+constexpr size_t kMaximumRasterBytes = 8ULL * 1024ULL * 1024ULL;
+enum class PackLoadMode { Legacy, Metadata, Animation, Thumbnail };
 
-  void Clear() {
-    for (auto& entry : entries) entry = Entry{};
-    owner = nullptr;
-    count = bytes = 0;
-  }
-  void Select(const AppearancePack& pack, float pixelDensity = 1.0f) {
-    if (!std::isfinite(pixelDensity) || pixelDensity <= 0) { Clear(); return; }
-    bool same = owner == &pack && count == pack.layers.size() && density == pixelDensity;
-    if (same) for (size_t i = 0; i < count; ++i)
-      if (entries[i].source != pack.layers[i].image.image.get()) same = false;
-    if (same) return;
-    Clear();
-    if (pack.layers.size() > entries.size()) return;
-    owner = &pack;
-    count = pack.layers.size();
-    // Two samples per displayed pixel preserve edges under subpixel transforms.
-    density = pixelDensity;
-    for (size_t i = 0; i < count; ++i) {
-      const auto& layer = pack.layers[i];
-      auto& entry = entries[i];
-      entry.source = layer.image.image.get();
-      if (!entry.source) continue;
-      float maximumX = 1, maximumY = 1;
-      for (const auto& key : layer.keyframes) {
-        maximumX = std::max(maximumX, std::abs(key.scale));
-        maximumY = std::max(maximumY, std::abs(key.scale * key.scaleY));
-      }
-      const auto dimension = [](float displayed, UINT original) -> UINT {
-        if (!std::isfinite(displayed) || displayed <= 0) return 0;
-        return static_cast<UINT>(std::min(std::ceil(displayed), static_cast<float>(original)));
-      };
-      entry.width = dimension(layer.width * density * maximumX * 2.0f, layer.image.image->GetWidth());
-      entry.height = dimension(layer.height * density * maximumY * 2.0f, layer.image.image->GetHeight());
-    }
-  }
-  void Invalidate(const Gdiplus::Image* source) {
-    if (!source) return;
-    ++gRenderSourceGeneration;
-    for (const auto& entry : entries) if (entry.source == source) { Clear(); return; }
-  }
-  Gdiplus::Image* Image(size_t index, Gdiplus::Image* source) {
-    if (!owner || index >= count || !source) return source;
-    auto& entry = entries[index];
-    if (entry.raster) return entry.raster.get();
-    if (entry.attempted) return source;
-    entry.attempted = true;
-    const auto width = entry.width, height = entry.height;
-    if (!width || !height || width > 2048 || height > 2048) return source;
-    const size_t needed = static_cast<size_t>(width) * height * 4;
-    if (needed > kByteLimit - bytes) return source;
-    std::unique_ptr<Gdiplus::Bitmap> raster;
-    try {
-      raster = std::make_unique<Gdiplus::Bitmap>(width, height, PixelFormat32bppPARGB);
-    } catch (const std::bad_alloc&) { return source; }
-    if (raster->GetLastStatus() != Gdiplus::Ok) return source;
-    {
-      Gdiplus::Graphics graphics(raster.get());
-      if (graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy) != Gdiplus::Ok ||
-          graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic) != Gdiplus::Ok ||
-          graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality) != Gdiplus::Ok ||
-          graphics.DrawImage(source, Gdiplus::Rect(0, 0, width, height), 0, 0,
-              source->GetWidth(), source->GetHeight(), Gdiplus::UnitPixel) != Gdiplus::Ok) return source;
-    }
-    entry.raster = std::move(raster);
-    bytes += needed;
-    return entry.raster.get();
-  }
-};
-RenderRasterCache gRenderRasterCache;
+PackKeyframe Interpolate(const std::vector<PackKeyframe>& keyframes,
+                         float progress, bool smooth);
+bool DrawLayer(Gdiplus::Graphics& graphics, const PackLayer& layer, float progress);
+
 constexpr unsigned char kPublicX[32] = {
     0x2a, 0xc5, 0xfc, 0x45, 0x26, 0x01, 0xd3, 0x9c, 0xc4, 0xe2, 0x9e,
     0xcf, 0xf9, 0xb6, 0x16, 0x95, 0xe3, 0x1c, 0x78, 0x67, 0x27, 0x41,
@@ -462,10 +387,7 @@ bool LoadImage(const void* bytes, size_t size, PackImage* output) {
   HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size);
   if (memory == nullptr) return false;
   void* destination = GlobalLock(memory);
-  if (destination == nullptr) {
-    GlobalFree(memory);
-    return false;
-  }
+  if (destination == nullptr) { GlobalFree(memory); return false; }
   CopyMemory(destination, bytes, size);
   GlobalUnlock(memory);
   IStream* stream = nullptr;
@@ -473,17 +395,98 @@ bool LoadImage(const void* bytes, size_t size, PackImage* output) {
     GlobalFree(memory);
     return false;
   }
-  std::unique_ptr<Gdiplus::Image> image(Gdiplus::Image::FromStream(stream));
-  if (!image || image->GetLastStatus() != Gdiplus::Ok ||
-      image->GetWidth() == 0 || image->GetHeight() == 0 ||
-      image->GetWidth() > 2048 || image->GetHeight() > 2048) {
-    image.reset();
-    stream->Release();
-    return false;
+  struct StreamGuard {
+    IStream* value;
+    ~StreamGuard() { value->Release(); }
+  } streamGuard{stream};
+  // Copy straight-alpha pixels instead of leaving a lazy PNG decoder attached
+  // to the image. Fades keep their original straight-alpha rounding; all PNG
+  // decoding and compressed-stream ownership end before the UI receives it.
+  std::unique_ptr<Gdiplus::Bitmap> source(Gdiplus::Bitmap::FromStream(stream));
+  bool ok = source && source->GetLastStatus() == Gdiplus::Ok &&
+      source->GetWidth() > 0 && source->GetHeight() > 0 &&
+      source->GetWidth() <= 2048 && source->GetHeight() <= 2048;
+  std::unique_ptr<Gdiplus::Bitmap> decoded;
+  if (ok) {
+    const auto width = source->GetWidth(), height = source->GetHeight();
+    decoded = std::make_unique<Gdiplus::Bitmap>(width, height, PixelFormat32bppARGB);
+    ok = decoded->GetLastStatus() == Gdiplus::Ok;
+    Gdiplus::Rect area(0, 0, width, height);
+    Gdiplus::BitmapData input{}, outputData{};
+    const bool inputLocked = ok && source->LockBits(&area, Gdiplus::ImageLockModeRead,
+        PixelFormat32bppARGB, &input) == Gdiplus::Ok;
+    const bool outputLocked = inputLocked && decoded->LockBits(&area,
+        Gdiplus::ImageLockModeWrite, PixelFormat32bppARGB, &outputData) == Gdiplus::Ok;
+    ok = inputLocked && outputLocked;
+    if (ok) for (UINT row = 0; row < height; ++row) {
+      std::memcpy(static_cast<BYTE*>(outputData.Scan0) +
+          static_cast<std::ptrdiff_t>(row) * outputData.Stride,
+          static_cast<const BYTE*>(input.Scan0) +
+          static_cast<std::ptrdiff_t>(row) * input.Stride, static_cast<size_t>(width) * 4);
+    }
+    if (outputLocked && decoded->UnlockBits(&outputData) != Gdiplus::Ok) ok = false;
+    if (inputLocked && source->UnlockBits(&input) != Gdiplus::Ok) ok = false;
   }
-  output->stream = stream;
-  output->image = std::move(image);
+  source.reset();
+  if (!ok) return false;
+  output->image = std::move(decoded);
   return true;
+}
+
+size_t ImageBytes(const PackImage& image) {
+  return image.image ? static_cast<size_t>(image.image->GetWidth()) *
+      image.image->GetHeight() * 4 : 0;
+}
+
+bool PrepareLayerRaster(PackLayer& layer, const AppearanceAnimationOptions& options,
+                        AppearanceResourceMemory& memory, bool retainOpaqueSource = false) {
+  auto* source = layer.image.image.get();
+  const size_t sourceBytes = ImageBytes(layer.image);
+  float maximumX = 1, maximumY = 1;
+  bool hasFade = false;
+  retainOpaqueSource = retainOpaqueSource || options.retainSourcePixels;
+  for (const auto& key : layer.keyframes) {
+    maximumX = std::max(maximumX, std::abs(key.scale));
+    maximumY = std::max(maximumY, std::abs(key.scale * key.scaleY));
+    hasFade = hasFade || key.alpha != 1.0f;
+  }
+  const auto dimension = [](float displayed, UINT original) -> UINT {
+    if (!std::isfinite(displayed) || displayed <= 0) return 0;
+    return static_cast<UINT>(std::min(std::ceil(displayed), static_cast<float>(original)));
+  };
+  const UINT width = dimension(layer.width * options.pixelDensity * maximumX * 2,
+      source->GetWidth());
+  const UINT height = dimension(layer.height * options.pixelDensity * maximumY * 2,
+      source->GetHeight());
+  const size_t rasterBytes = static_cast<size_t>(width) * height * 4;
+  const size_t retainedSource = (hasFade || retainOpaqueSource) ? sourceBytes : 0;
+  const size_t resident = memory.residentBytes();
+  const bool fits = width && height && width <= 2048 && height <= 2048 &&
+      rasterBytes <= kMaximumRasterBytes - memory.rasterBytes &&
+      resident <= options.byteLimit && retainedSource <= options.byteLimit - resident &&
+      rasterBytes <= options.byteLimit - resident - retainedSource;
+  if (fits) {
+    auto raster = std::make_unique<Gdiplus::Bitmap>(width, height, PixelFormat32bppPARGB);
+    bool ok = raster->GetLastStatus() == Gdiplus::Ok;
+    if (ok) {
+      Gdiplus::Graphics graphics(raster.get());
+      ok = graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy) == Gdiplus::Ok &&
+          graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic) == Gdiplus::Ok &&
+          graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality) == Gdiplus::Ok &&
+          graphics.DrawImage(layer.image.image.get(), Gdiplus::Rect(0, 0, width, height),
+              0, 0, source->GetWidth(), source->GetHeight(), Gdiplus::UnitPixel) == Gdiplus::Ok;
+    }
+    if (ok) {
+      layer.raster.image = std::move(raster);
+      memory.rasterBytes += rasterBytes;
+      if (!hasFade && !retainOpaqueSource) layer.image = PackImage{};
+      memory.sourceRgbaBytes += retainedSource;
+      return true;
+    }
+  }
+  memory.rasterFallback = true;
+  memory.sourceRgbaBytes += sourceBytes;
+  return memory.residentBytes() <= options.byteLimit;
 }
 
 bool ReadArchiveEntry(mz_zip_archive* archive, const std::string& name,
@@ -859,7 +862,13 @@ bool ParseManifest(const std::string& text, AppearancePack* pack,
 bool LoadAppearancePackFile(const std::wstring& path,
                             bool enforceImportDeadline,
                             std::unique_ptr<AppearancePack>* output,
-                            std::wstring* error) {
+                            std::wstring* error,
+                            PackLoadMode mode = PackLoadMode::Legacy,
+                            const AppearanceResourceRequest* expected = nullptr,
+                            const AppearanceAnimationOptions* options = nullptr,
+                            AppearanceResourceMemory* resourceMemory = nullptr,
+                            PackImage* thumbnail = nullptr,
+                            AppearancePreparationStatus* status = nullptr) {
   (void)enforceImportDeadline; // Neither V1 nor V2 has a local clock gate.
   WIN32_FILE_ATTRIBUTE_DATA attributes = {};
   if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) ||
@@ -949,18 +958,6 @@ bool LoadAppearancePackFile(const std::wstring& path,
       return false;
     }
   }
-  if (!LoadImage(pngFiles[previewName].data(), pngFiles[previewName].size(),
-                 &pack->preview)) {
-    SetError(error, L"形象封面损坏或尺寸不合规。请重新下载；自行制作的包请按指南重新导出 PNG。");
-    return false;
-  }
-  for (PackLayer& layer : pack->layers) {
-    const auto& pngBytes = pngFiles[layer.imageName];
-    if (!LoadImage(pngBytes.data(), pngBytes.size(), &layer.image)) {
-      SetError(error, L"形象图层图片损坏或尺寸不合规。请重新下载；自行制作的包请按指南重新导出 PNG。");
-      return false;
-    }
-  }
   if (license.signedDelivery) {
     const std::string actualHash = ContentHash(pngFiles);
     const std::string message = (license.perpetual
@@ -977,6 +974,98 @@ bool LoadAppearancePackFile(const std::wstring& path,
       return false;
     }
   }
+  pngFiles.emplace("manifest.json", std::move(manifestBytes));
+  pack->contentFingerprint = ContentHash(pngFiles);
+  pngFiles.erase("manifest.json");
+  if (pack->contentFingerprint.empty()) {
+    SetError(error, L"无法校验形象内容。原有形象未改变，请重试。");
+    return false;
+  }
+  if (expected && (expected->id != pack->id ||
+      expected->contentFingerprint.empty() ||
+      expected->contentFingerprint != pack->contentFingerprint)) {
+    if (status) *status = AppearancePreparationStatus::Changed;
+    SetError(error, L"形象文件在读取后发生变化，未启用旧请求。请重新读取形象列表。");
+    return false;
+  }
+  AppearanceResourceMemory localMemory;
+  auto& memory = resourceMemory ? *resourceMemory : localMemory;
+  size_t archiveBytes = 0;
+  for (const auto& png : pngFiles) archiveBytes += png.second.size();
+  const auto trackDecode = [&](const PackImage& image, size_t compressedBytes) {
+    memory.preparationPeakBytes = std::max(memory.preparationPeakBytes,
+        archiveBytes + memory.residentBytes() + 2 * ImageBytes(image) + compressedBytes);
+  };
+  {
+    PackImage preview;
+    if (!LoadImage(pngFiles[previewName].data(), pngFiles[previewName].size(), &preview)) {
+      SetError(error, L"形象封面损坏或尺寸不合规。请重新下载；自行制作的包请按指南重新导出 PNG。");
+      return false;
+    }
+    trackDecode(preview, pngFiles[previewName].size());
+    if (mode == PackLoadMode::Legacy) pack->preview = std::move(preview);
+  }
+  std::unique_ptr<Gdiplus::Graphics> thumbnailGraphics;
+  if (mode == PackLoadMode::Thumbnail) {
+    auto bitmap = std::make_unique<Gdiplus::Bitmap>(240, 250, PixelFormat32bppARGB);
+    if (bitmap->GetLastStatus() != Gdiplus::Ok) {
+      SetError(error, L"无法准备形象缩略图。请稍后重试。");
+      return false;
+    }
+    thumbnail->image = std::move(bitmap);
+    memory.thumbnailBytes = 240 * 250 * 4;
+    thumbnailGraphics = std::make_unique<Gdiplus::Graphics>(thumbnail->image.get());
+    if (thumbnailGraphics->Clear(Gdiplus::Color(0, 0, 0, 0)) != Gdiplus::Ok ||
+        thumbnailGraphics->SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias) != Gdiplus::Ok ||
+        thumbnailGraphics->SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic) != Gdiplus::Ok ||
+        thumbnailGraphics->SetClip(Gdiplus::RectF(0, 80, 240, 170)) != Gdiplus::Ok) {
+      SetError(error, L"无法准备形象缩略图。请稍后重试。");
+      return false;
+    }
+  }
+  AppearanceResourceMemory thumbnailPreparationMemory;
+  for (PackLayer& layer : pack->layers) {
+    const auto& pngBytes = pngFiles[layer.imageName];
+    if (!LoadImage(pngBytes.data(), pngBytes.size(), &layer.image)) {
+      SetError(error, L"形象图层图片损坏或尺寸不合规。请重新下载；自行制作的包请按指南重新导出 PNG。");
+      return false;
+    }
+    layer.sourcePixelWidth = layer.image.image->GetWidth();
+    layer.sourcePixelHeight = layer.image.image->GetHeight();
+    trackDecode(layer.image, pngBytes.size());
+    if (mode == PackLoadMode::Animation || mode == PackLoadMode::Legacy) {
+      AppearanceAnimationOptions legacyOptions;
+      legacyOptions.byteLimit = 128ULL * 1024ULL * 1024ULL;
+      const auto& selectedOptions = options ? *options : legacyOptions;
+      if (!PrepareLayerRaster(layer, selectedOptions, memory,
+                              mode == PackLoadMode::Legacy)) {
+        if (status) *status = AppearancePreparationStatus::BudgetExceeded;
+        SetError(error, L"形象显示资源超过当前内存预算，未启用。原有形象保留，请选择较小形象或调整资源预算。");
+        return false;
+      }
+      memory.preparationPeakBytes = std::max(memory.preparationPeakBytes,
+          archiveBytes + memory.residentBytes() + ImageBytes(layer.image));
+    } else if (mode == PackLoadMode::Thumbnail) {
+      AppearanceAnimationOptions thumbnailOptions;
+      thumbnailOptions.byteLimit = 128ULL * 1024ULL * 1024ULL;
+      // Match the former idle picker rendering, while releasing each layer as
+      // soon as it is composited. Keep only the raster-budget tally between
+      // layers, not the images or full-resolution source pixels themselves.
+      thumbnailPreparationMemory.sourceRgbaBytes = 0;
+      if (!PrepareLayerRaster(layer, thumbnailOptions, thumbnailPreparationMemory) ||
+          !DrawLayer(*thumbnailGraphics, layer, 0)) {
+        SetError(error, L"形象缩略图未能完整绘制，请重新读取或重新下载形象包。");
+        return false;
+      }
+      memory.preparationPeakBytes = std::max(memory.preparationPeakBytes,
+          archiveBytes + memory.thumbnailBytes + ImageBytes(layer.image) + ImageBytes(layer.raster));
+      layer.image = PackImage{};
+      layer.raster = PackImage{};
+    } else if (mode == PackLoadMode::Metadata) {
+      layer.image = PackImage{};
+    }
+  }
+  thumbnailGraphics.reset();
   pack->sourcePath = path;
   *output = std::move(pack);
   return true;
@@ -1013,7 +1102,7 @@ std::wstring FileNameForId(const std::string& id) {
 }  // namespace
 
 PackImage::~PackImage() {
-  if (image) gRenderRasterCache.Invalidate(image.get());
+  if (image) ++gRenderSourceGeneration;
   image.reset();
   if (stream != nullptr) stream->Release();
 }
@@ -1025,7 +1114,7 @@ PackImage::PackImage(PackImage&& other) noexcept
 
 PackImage& PackImage::operator=(PackImage&& other) noexcept {
   if (this == &other) return *this;
-  if (image) gRenderRasterCache.Invalidate(image.get());
+  if (image) ++gRenderSourceGeneration;
   image.reset();
   if (stream != nullptr) stream->Release();
   stream = other.stream;
@@ -1062,6 +1151,11 @@ static bool SamePackArchive(const std::wstring& leftPath, const std::wstring& ri
   return same;
 }
 
+bool AppearanceCatalog::ReloadMetadata(const std::wstring& directory, std::wstring* error) {
+  metadataOnly_ = true;
+  return Reload(directory, error);
+}
+
 bool AppearanceCatalog::Reload(const std::wstring& directory,
                                std::wstring* error) {
   // Keep the prior valid in-memory catalog if directory enumeration fails.
@@ -1083,7 +1177,7 @@ bool AppearanceCatalog::Reload(const std::wstring& directory,
     std::unique_ptr<AppearancePack> pack;
     std::wstring packError;
     if (LoadAppearancePackFile(directory + L"\\" + entry.cFileName, false, &pack,
-                               &packError)) {
+                               &packError, metadataOnly_ ? PackLoadMode::Metadata : PackLoadMode::Legacy)) {
       if (Find(pack->id) == nullptr) packs_.push_back(std::move(pack));
     } else {
       unavailable += L"\n" + std::wstring(entry.cFileName) + L" : " + packError;
@@ -1113,7 +1207,7 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
   if (alreadyInstalled) *alreadyInstalled = false;
   if (error) error->clear();
   std::unique_ptr<AppearancePack> validated;
-  if (!LoadAppearancePackFile(sourcePath, true, &validated, error)) return false;
+  if (!LoadAppearancePackFile(sourcePath, true, &validated, error, PackLoadMode::Metadata)) return false;
   CreateDirectoryW(directory.c_str(), nullptr);
   const std::wstring destination =
       directory + L"\\" + FileNameForId(validated->id);
@@ -1121,7 +1215,7 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
   if (destinationAttributes != INVALID_FILE_ATTRIBUTES) {
     std::unique_ptr<AppearancePack> existing;
     if ((destinationAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
-        !LoadAppearancePackFile(destination, false, &existing, error) ||
+        !LoadAppearancePackFile(destination, false, &existing, error, PackLoadMode::Metadata) ||
         existing->publisher != validated->publisher) {
       SetError(error, L"同名形象来源不一致或原形象无法校验。原形象已保留；请确认来源后重新下载。");
       return false;
@@ -1146,7 +1240,7 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
     return false;
   }
   std::unique_ptr<AppearancePack> copied;
-  if (!LoadAppearancePackFile(temporary, true, &copied, error) ||
+  if (!LoadAppearancePackFile(temporary, true, &copied, error, PackLoadMode::Metadata) ||
       copied->id != validated->id || copied->publisher != validated->publisher ||
       !MoveFileExW(temporary.c_str(), destination.c_str(),
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
@@ -1387,62 +1481,160 @@ bool RegisterPackFileAssociations(const std::wstring& executable,
   return true;
 }
 
-std::uint64_t AppearanceRenderGeneration() { return gRenderSourceGeneration; }
+std::uint64_t AppearanceRenderGeneration() { return gRenderSourceGeneration.load(); }
 
 void ClearAppearanceRenderCache() {
-  gRenderRasterCache.Clear();
+  // Compatibility invalidation only: prepared resources own their own rasters.
+  ++gRenderSourceGeneration;
 }
 
-void DrawAppearancePack(Gdiplus::Graphics& graphics,
+namespace {
+bool DrawLayer(Gdiplus::Graphics& graphics, const PackLayer& layer, float progress) {
+  if (layer.keyframes.empty()) return false;
+  const PackKeyframe keyframe = Interpolate(layer.keyframes,
+      std::clamp(progress, 0.0f, 1.0f), layer.smoothInterpolation);
+  auto* image = keyframe.alpha == 1.0f && layer.raster.image
+      ? layer.raster.image.get() : layer.image.image.get();
+  if (!image) return false;
+  const float top = 250.0f - layer.y - layer.height;
+  const float anchorX = layer.x + layer.width * layer.anchorX;
+  const float anchorY = top + layer.height * (1.0f - layer.anchorY);
+  const auto state = graphics.Save();
+  bool ok = graphics.TranslateTransform(anchorX + keyframe.x, anchorY - keyframe.y) == Gdiplus::Ok &&
+      graphics.RotateTransform(-keyframe.rotation) == Gdiplus::Ok &&
+      graphics.ScaleTransform(keyframe.scale, keyframe.scale * keyframe.scaleY) == Gdiplus::Ok &&
+      graphics.TranslateTransform(-anchorX, -anchorY) == Gdiplus::Ok;
+  const Gdiplus::RectF destination(layer.x, top, layer.width, layer.height);
+  const auto width = static_cast<Gdiplus::REAL>(image->GetWidth());
+  const auto height = static_cast<Gdiplus::REAL>(image->GetHeight());
+  if (ok && keyframe.alpha == 1.0f) {
+    ok = graphics.DrawImage(image, destination, 0, 0, width, height, Gdiplus::UnitPixel) == Gdiplus::Ok;
+  } else if (ok) {
+    Gdiplus::ImageAttributes attributes;
+    Gdiplus::ColorMatrix matrix = {
+        1, 0, 0, 0, 0,
+        0, 1, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, keyframe.alpha, 0,
+        0, 0, 0, 0, 1};
+    ok = attributes.SetColorMatrix(&matrix) == Gdiplus::Ok &&
+        graphics.DrawImage(image, destination, 0, 0, width, height,
+            Gdiplus::UnitPixel, &attributes) == Gdiplus::Ok;
+  }
+  return graphics.Restore(state) == Gdiplus::Ok && ok;
+}
+}
+
+bool DrawAppearancePack(Gdiplus::Graphics& graphics,
                         const AppearancePack& pack,
                         float progress) {
-  const Gdiplus::GraphicsState clipState = graphics.Save();
-  graphics.SetClip(Gdiplus::RectF(0.0f, 80.0f, 240.0f, 170.0f));
-  Gdiplus::Matrix transform;
-  graphics.GetTransform(&transform);
-  Gdiplus::REAL elements[6]{};
-  transform.GetElements(elements);
-  const float density = std::max(std::hypot(elements[0], elements[1]),
-      std::hypot(elements[2], elements[3]));
-  gRenderRasterCache.Select(pack, density);
-  size_t layerIndex = 0;
-  for (const PackLayer& layer : pack.layers) {
-    const PackKeyframe keyframe = Interpolate(
-        layer.keyframes, std::clamp(progress, 0.0f, 1.0f), layer.smoothInterpolation);
-    const float top = 250.0f - layer.y - layer.height;
-    const float anchorX = layer.x + layer.width * layer.anchorX;
-    const float anchorY = top + layer.height * (1.0f - layer.anchorY);
-    const Gdiplus::GraphicsState state = graphics.Save();
-    graphics.TranslateTransform(anchorX + keyframe.x, anchorY - keyframe.y);
-    graphics.RotateTransform(-keyframe.rotation);
-    graphics.ScaleTransform(keyframe.scale, keyframe.scale * keyframe.scaleY);
-    graphics.TranslateTransform(-anchorX, -anchorY);
-    const Gdiplus::RectF destination(layer.x, top, layer.width, layer.height);
-    auto* image = keyframe.alpha == 1.0f
-        ? gRenderRasterCache.Image(layerIndex, layer.image.image.get()) : layer.image.image.get();
-    const auto width = static_cast<Gdiplus::REAL>(image->GetWidth());
-    const auto height = static_cast<Gdiplus::REAL>(image->GetHeight());
-    if (keyframe.alpha == 1.0f) {
-      // Preserve the PNG's own transparency. An identity color matrix is not
-      // needed when no additional layer opacity adjustment is requested.
-      graphics.DrawImage(image, destination, 0, 0, width, height,
-                         Gdiplus::UnitPixel);
-    } else {
-      Gdiplus::ImageAttributes attributes;
-      Gdiplus::ColorMatrix matrix = {
-          1, 0, 0, 0, 0,
-          0, 1, 0, 0, 0,
-          0, 0, 1, 0, 0,
-          0, 0, 0, keyframe.alpha, 0,
-          0, 0, 0, 0, 1};
-      attributes.SetColorMatrix(&matrix);
-      graphics.DrawImage(image, destination, 0, 0, width, height,
-                         Gdiplus::UnitPixel, &attributes);
-    }
-    ++layerIndex;
-    graphics.Restore(state);
+  if (pack.layers.empty() || !std::isfinite(progress)) return false;
+  // Preflight every layer before painting so metadata never paints a partial
+  // shape and cannot be mistaken for a successfully loaded blank appearance.
+  for (const auto& layer : pack.layers) {
+    if (layer.keyframes.empty() || (!layer.image.image && !layer.raster.image)) return false;
+    if (!layer.image.image) for (const auto& key : layer.keyframes)
+      if (key.alpha != 1.0f) return false;
   }
-  graphics.Restore(clipState);
+  const auto clipState = graphics.Save();
+  bool ok = graphics.SetClip(Gdiplus::RectF(0, 80, 240, 170)) == Gdiplus::Ok;
+  for (const auto& layer : pack.layers) if (ok) ok = DrawLayer(graphics, layer, progress);
+  return graphics.Restore(clipState) == Gdiplus::Ok && ok;
 }
+
+AppearanceResourceRequest RequestAppearanceResources(const AppearancePack& pack) {
+  return {pack.sourcePath, pack.id, pack.contentFingerprint};
+}
+
+AppearancePreparationStatus PrepareAppearanceAnimation(
+    const AppearanceResourceRequest& request, const AppearanceAnimationOptions& options,
+    std::unique_ptr<AppearancePack>* output, AppearanceResourceMemory* memory,
+    std::wstring* error) {
+  if (output) output->reset();
+  if (memory) *memory = {};
+  if (error) error->clear();
+  if (!output || !memory || !std::isfinite(options.pixelDensity) ||
+      options.pixelDensity <= 0 || options.byteLimit == 0) {
+    SetError(error, L"形象显示参数不完整，未启用。请重新读取形象列表。");
+    return AppearancePreparationStatus::Invalid;
+  }
+  auto status = AppearancePreparationStatus::Invalid;
+  try {
+    if (LoadAppearancePackFile(request.sourcePath, false, output, error,
+        PackLoadMode::Animation, &request, &options, memory, nullptr, &status))
+      return AppearancePreparationStatus::Ready;
+  } catch (const std::bad_alloc&) {
+    SetError(error, L"内存不足，未能准备形象。原有形象保留，请稍后重试。");
+    return AppearancePreparationStatus::BudgetExceeded;
+  }
+  return status;
+}
+
+AppearancePreparationStatus PrepareAppearanceThumbnail(
+    const AppearanceResourceRequest& request, std::unique_ptr<AppearanceThumbnail>* output,
+    std::wstring* error) {
+  if (output) output->reset();
+  if (error) error->clear();
+  if (!output) return AppearancePreparationStatus::Invalid;
+  auto status = AppearancePreparationStatus::Invalid;
+  try {
+    auto result = std::make_unique<AppearanceThumbnail>();
+    result->source = request;
+    std::unique_ptr<AppearancePack> metadata;
+    if (LoadAppearancePackFile(request.sourcePath, false, &metadata, error,
+        PackLoadMode::Thumbnail, &request, nullptr, &result->memory, &result->image, &status)) {
+      *output = std::move(result);
+      return AppearancePreparationStatus::Ready;
+    }
+  } catch (const std::bad_alloc&) {
+    SetError(error, L"内存不足，无法准备缩略图。请稍后重试。");
+    return AppearancePreparationStatus::BudgetExceeded;
+  }
+  return status;
+}
+
+AppearanceThumbnailCache::AppearanceThumbnailCache(size_t byteLimit, size_t entryLimit)
+    : byteLimit_(byteLimit), entryLimit_(entryLimit) {}
+
+const AppearanceThumbnail* AppearanceThumbnailCache::Find(
+    const AppearanceResourceRequest& request) {
+  for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+    const auto& source = (*it)->source;
+    if (source.sourcePath == request.sourcePath && source.id == request.id &&
+        source.contentFingerprint == request.contentFingerprint) {
+      auto entry = std::move(*it);
+      entries_.erase(it);
+      entries_.push_back(std::move(entry));
+      return entries_.back().get();
+    }
+  }
+  return nullptr;
+}
+
+bool AppearanceThumbnailCache::Put(std::unique_ptr<AppearanceThumbnail> thumbnail) {
+  if (!thumbnail || !thumbnail->image.image || thumbnail->image.stream ||
+      thumbnail->source.contentFingerprint.empty()) return false;
+  const size_t needed = ImageBytes(thumbnail->image);
+  if (needed == 0 || needed > byteLimit_ || entryLimit_ == 0) return false;
+  // Compute actual CPU bitmap bytes rather than trusting a caller's report.
+  thumbnail->memory.thumbnailBytes = needed;
+  for (auto it = entries_.begin(); it != entries_.end();) {
+    if ((*it)->source.sourcePath == thumbnail->source.sourcePath &&
+        (*it)->source.id == thumbnail->source.id) {
+      bytes_ -= ImageBytes((*it)->image);
+      it = entries_.erase(it);
+    } else ++it;
+  }
+  while (!entries_.empty() &&
+      (entries_.size() >= entryLimit_ || needed > byteLimit_ - bytes_)) {
+    bytes_ -= ImageBytes(entries_.front()->image);
+    entries_.erase(entries_.begin());
+  }
+  entries_.push_back(std::move(thumbnail));
+  bytes_ += needed;
+  return true;
+}
+
+void AppearanceThumbnailCache::Clear() { entries_.clear(); bytes_ = 0; }
 
 }  // namespace niuma

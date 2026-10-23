@@ -59,6 +59,20 @@ constexpr wchar_t kCalendarClass[] = L"NiuMaMeritCalendar";
 constexpr wchar_t kReminderClass[] = L"NiuMaMeritReminder";
 constexpr wchar_t kMutexName[] = L"Local\\NiuMaMeritCounter";
 constexpr wchar_t kAcceptanceMutexName[] = L"Local\\NiuMaMeritCounter.Acceptance";
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+constexpr wchar_t kRuntimeWindowClass[] = L"NiuMaMeritWindow.RuntimeCandidate";
+constexpr wchar_t kRuntimeMutexName[] = L"Local\\NiuMaMeritCounter.RuntimeCandidate";
+constexpr wchar_t kRuntimeProfileMarker[] = L"runtime-candidate.owner";
+bool gRuntimeCandidate = false;
+#endif
+
+bool IsRuntimeCandidate() {
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+  return gRuntimeCandidate;
+#else
+  return false;
+#endif
+}
 constexpr wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr wchar_t kRunValue[] = L"NiuMaMerit";
@@ -125,7 +139,16 @@ const wchar_t* UiText(const wchar_t* chinese, const wchar_t* english) {
 }
 
 const wchar_t* WindowTitle() {
+  if (IsRuntimeCandidate())
+    return UiText(L"牛马电子功德 · 测试数据", L"NiuMa Merit · Test Data");
   return UiText(L"牛马电子功德", L"NiuMa Merit");
+}
+
+const wchar_t* MainWindowClass() {
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+  if (gRuntimeCandidate) return kRuntimeWindowClass;
+#endif
+  return kWindowClass;
 }
 
 enum class MeritScene : int {
@@ -480,28 +503,190 @@ bool IsPrivateEmptyAcceptanceDirectory(const std::wstring& requestedPath,
   return true;
 }
 
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+bool RuntimeCanonicalDirectory(const std::wstring& requested, std::wstring* output) {
+  if (!output || requested.empty()) return false;
+  wchar_t full[MAX_PATH]{};
+  const DWORD length = GetFullPathNameW(requested.c_str(), MAX_PATH, full, nullptr);
+  if (!length || length >= MAX_PATH) return false;
+  const std::wstring path = TrimDirectorySeparators(full);
+  // Only local drive paths; inspect every ancestor before resolving aliases.
+  if (path.size() < 3 || path[1] != L':' || path[2] != L'\\' ||
+      path.find(L':', 2) != std::wstring::npos) return false;
+  for (std::size_t end = 3;;) {
+    const DWORD attributes = GetFileAttributesW(path.substr(0, end).c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+    if (end == path.size()) break;
+    const auto next = path.find(L'\\', end + 1);
+    end = next == std::wstring::npos ? path.size() : next;
+  }
+  HANDLE directory = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (directory == INVALID_HANDLE_VALUE) return false;
+  wchar_t canonical[MAX_PATH + 4]{};
+  const DWORD count = GetFinalPathNameByHandleW(directory, canonical,
+      static_cast<DWORD>(std::size(canonical)), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  CloseHandle(directory);
+  if (!count || count >= std::size(canonical) ||
+      wcsncmp(canonical, L"\\\\?\\", 4) != 0) return false;
+  *output = TrimDirectorySeparators(canonical + 4);
+  return output->size() < MAX_PATH;
+}
+
+bool RuntimePathWithin(const std::wstring& parent, const std::wstring& path) {
+  return path.size() >= parent.size() &&
+      CompareStringOrdinal(path.c_str(), static_cast<int>(parent.size()), parent.c_str(),
+          static_cast<int>(parent.size()), TRUE) == CSTR_EQUAL &&
+      (path.size() == parent.size() || path[parent.size()] == L'\\');
+}
+
+bool RuntimeTreeIsPlain(const std::wstring& root, bool* empty) {
+  std::vector<std::wstring> directories{root};
+  std::size_t entries = 0;
+  *empty = true;
+  while (!directories.empty()) {
+    const auto directory = std::move(directories.back());
+    directories.pop_back();
+    WIN32_FIND_DATAW item{};
+    HANDLE find = FindFirstFileW((directory + L"\\*").c_str(), &item);
+    if (find == INVALID_HANDLE_VALUE) return false;
+    bool valid = true;
+    do {
+      if (wcscmp(item.cFileName, L".") == 0 || wcscmp(item.cFileName, L"..") == 0) continue;
+      *empty = false;
+      if (++entries > 100000 || (item.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        valid = false; break;
+      }
+      if (item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        directories.push_back(directory + L"\\" + item.cFileName);
+    } while (FindNextFileW(find, &item));
+    if (valid && GetLastError() != ERROR_NO_MORE_FILES) valid = false;
+    FindClose(find);
+    if (!valid) return false;
+  }
+  return true;
+}
+
+bool InitializeRuntimeCandidateDirectory(const std::wstring& requested,
+                                         std::wstring* output) {
+  if (!output) return false;
+  std::wstring root, temp, local;
+  wchar_t temporary[MAX_PATH]{}, localAppData[MAX_PATH]{};
+  const DWORD length = GetTempPathW(MAX_PATH, temporary);
+  if (!length || length >= MAX_PATH || !RuntimeCanonicalDirectory(temporary, &temp) ||
+      !RuntimeCanonicalDirectory(requested, &root) || root.size() == temp.size() ||
+      !RuntimePathWithin(temp, root) ||
+      FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr,
+          SHGFP_TYPE_CURRENT, localAppData)) ||
+      !RuntimeCanonicalDirectory(localAppData, &local) ||
+      RuntimePathWithin(local + L"\\NiuMaMerit", root)) return false;
+  bool empty = false;
+  if (!RuntimeTreeIsPlain(root, &empty)) return false;
+  const std::wstring marker = root + L"\\" + kRuntimeProfileMarker;
+  const std::wstring prefix = L"\xfeffNIUMA_RUNTIME_CANDIDATE_PROFILE_V1\nroot=" + root + L"\nid=";
+  if (empty) {
+    BYTE random[16]{};
+    if (BCryptGenRandom(nullptr, random, sizeof(random), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
+      return false;
+    random[6] = (random[6] & 0x0f) | 0x40;
+    random[8] = (random[8] & 0x3f) | 0x80;
+    std::wstring identity;
+    constexpr wchar_t hex[] = L"0123456789abcdef";
+    for (unsigned index = 0; index < sizeof(random); ++index) {
+      if (index == 4 || index == 6 || index == 8 || index == 10) identity += L'-';
+      identity += hex[random[index] >> 4]; identity += hex[random[index] & 15];
+    }
+    const std::wstring contents = prefix + identity + L"\n";
+    HANDLE file = CreateFileW(marker.c_str(), GENERIC_WRITE, 0, nullptr,
+        CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    const DWORD bytes = static_cast<DWORD>(contents.size() * sizeof(wchar_t));
+    DWORD written = 0;
+    const bool okay = WriteFile(file, contents.data(), bytes, &written, nullptr) &&
+        written == bytes && FlushFileBuffers(file);
+    CloseHandle(file);
+    if (!okay) { DeleteFileW(marker.c_str()); return false; }
+  } else {
+    HANDLE file = CreateFileW(marker.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    const auto expected = (prefix.size() + 37) * sizeof(wchar_t);
+    if (!GetFileSizeEx(file, &size) || size.QuadPart != static_cast<LONGLONG>(expected)) {
+      CloseHandle(file); return false;
+    }
+    std::wstring contents(prefix.size() + 37, L'\0');
+    DWORD read = 0;
+    const bool okay = ReadFile(file, contents.data(), static_cast<DWORD>(expected), &read, nullptr) &&
+        read == expected;
+    CloseHandle(file);
+    if (!okay || contents.compare(0, prefix.size(), prefix) != 0 || contents.back() != L'\n')
+      return false;
+    const auto id = contents.substr(prefix.size(), 36);
+    for (unsigned index = 0; index < id.size(); ++index) {
+      if (index == 8 || index == 13 || index == 18 || index == 23) {
+        if (id[index] != L'-') return false;
+      } else if (!((id[index] >= L'0' && id[index] <= L'9') ||
+          (id[index] >= L'a' && id[index] <= L'f'))) return false;
+    }
+    if (id[14] != L'4' || (id[19] != L'8' && id[19] != L'9' && id[19] != L'a' && id[19] != L'b'))
+      return false;
+  }
+  *output = root;
+  return true;
+}
+#endif
+
+bool InitializeAcceptanceMode(bool isolated, bool preview, bool runtimeCandidate,
+                              bool automatic, const std::wstring& root) {
+  if (runtimeCandidate) {
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+    if (isolated || preview || automatic ||
+        !InitializeRuntimeCandidateDirectory(root, &gAcceptanceRoot)) return false;
+    gRuntimeCandidate = true;
+    gIsolatedAcceptance = true;
+    gReminderPreviewAcceptance = false;
+    return true;
+#else
+    return false;
+#endif
+  }
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+  // The separate development binary must never fall through to a real profile.
+  return false;
+#else
+  if (!isolated && !preview && root.empty()) return true;
+  if (!isolated || !preview || root.empty() ||
+      !IsPrivateEmptyAcceptanceDirectory(root, &gAcceptanceRoot)) return false;
+  gIsolatedAcceptance = true;
+  gReminderPreviewAcceptance = true;
+  return true;
+#endif
+}
+
 bool InitializeAcceptanceContext() {
   int argumentCount = 0;
   LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
   if (arguments == nullptr) return false;
   bool isolated = false;
   bool preview = false;
+  bool runtimeCandidate = false;
+  bool automatic = false;
   for (int index = 1; index < argumentCount; ++index) {
     if (wcscmp(arguments[index], L"--isolated-acceptance") == 0) isolated = true;
     if (wcscmp(arguments[index], L"--reminder-ui-preview") == 0) preview = true;
+    if (wcscmp(arguments[index], L"--runtime-candidate") == 0) runtimeCandidate = true;
+    if (lstrcmpiW(arguments[index], L"--autostart") == 0) automatic = true;
   }
   LocalFree(arguments);
   wchar_t rootBuffer[MAX_PATH]{};
   const DWORD rootLength = GetEnvironmentVariableW(
       L"NIUMA_ACCEPTANCE_ROOT", rootBuffer,
       static_cast<DWORD>(std::size(rootBuffer)));
-  if (!isolated && !preview && rootLength == 0) return true;
-  if (!isolated || !preview || rootLength == 0 ||
-      rootLength >= std::size(rootBuffer) ||
-      !IsPrivateEmptyAcceptanceDirectory(rootBuffer, &gAcceptanceRoot)) return false;
-  gIsolatedAcceptance = true;
-  gReminderPreviewAcceptance = true;
-  return true;
+  if (rootLength >= std::size(rootBuffer)) return false;
+  return InitializeAcceptanceMode(isolated, preview, runtimeCandidate, automatic, rootBuffer);
 }
 
 std::wstring DataPath() {
@@ -682,6 +867,7 @@ bool StartedAutomatically() {
 }
 
 bool SetLaunchAtLoginEnabled(bool enabled) {
+  if (gIsolatedAcceptance) return false;
   HKEY key = nullptr;
   if (RegCreateKeyExW(HKEY_CURRENT_USER, kRunKey, 0, nullptr, 0,
                       KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key,
@@ -715,6 +901,7 @@ bool SetLaunchAtLoginEnabled(bool enabled) {
 }
 
 bool IsLaunchAtLoginEnabled() {
+  if (gIsolatedAcceptance) return false;
   HKEY key = nullptr;
   if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_QUERY_VALUE, &key) !=
       ERROR_SUCCESS) {
@@ -727,7 +914,7 @@ bool IsLaunchAtLoginEnabled() {
 }
 
 void SaveLaunchAtLoginPreference(bool enabled) {
-  if (!gDataStorage.model) return;
+  if (gIsolatedAcceptance || !gDataStorage.model) return;
   MergeDataUpdate(gDataStorage.model->UpdateAutostart({true, enabled}, GetTickCount64()));
   PumpDataStorage();
 }
@@ -3115,11 +3302,11 @@ void ReloadCalendarRange() {
   // All valid historical keys were loaded by the storage worker at startup.
   if (gDataStorage.model) {
     for (const auto& entry : gDataStorage.model->current().counts.daily)
-      if (entry.second > 0) gCalendar.range.IncludeRecordedDay(InputDateKey(entry.first));
+      if (entry.second > 0) gCalendar.range.IncludeRecordedDay(std::wstring_view(InputDateKey(entry.first)));
   }
   if (gInput.authoritative) {
     for (const auto& entry : gInput.daily)
-      if (entry.total > 0) gCalendar.range.IncludeRecordedDay(InputDateKey(entry.date));
+      if (entry.total > 0) gCalendar.range.IncludeRecordedDay(std::wstring_view(InputDateKey(entry.date)));
   }
   for (const auto& entry : gState.pendingDailyTotals)
     if (entry.second > 0) gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
@@ -4029,7 +4216,7 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     return;
   }
   std::vector<niuma::ui::MenuItem> items;
-  items.reserve(6);
+  items.reserve(8);
   const auto append = [&](UINT_PTR id, const wchar_t* text, const wchar_t* icon,
                            bool checked = false, bool dividerBefore = false) {
     items.push_back({text, icon, checked, dividerBefore});
@@ -4039,7 +4226,13 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   append(kMenuAppearance, UiText(L"更换形象", L"Change Appearance"), L"\xE77B");
   append(kMenuCalendar, UiText(L"功德日历…", L"Merit Calendar…"), L"\xE787");
   append(kMenuOffwork, UiText(L"下班倒计时…", L"Off-work Countdown…"), L"\xE823", gOffwork.enabled);
-  append(kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"), L"\xE7F4", IsLaunchAtLoginEnabled(), true);
+  if (IsRuntimeCandidate()) {
+    append(kMenuLaunchAtLogin, UiText(L"测试数据 · 自动启动已禁用", L"Test data · Startup disabled"), L"\xE7F4", false, true);
+    EnableMenuItem(menu, kMenuLaunchAtLogin, MF_BYCOMMAND | MF_GRAYED);
+  } else {
+    append(kMenuLaunchAtLogin, UiText(L"登录后自动启动", L"Start at Login"), L"\xE7F4", IsLaunchAtLoginEnabled(), true);
+    if (gIsolatedAcceptance) EnableMenuItem(menu, kMenuLaunchAtLogin, MF_BYCOMMAND | MF_GRAYED);
+  }
   append(kMenuAbout, UiText(L"关于牛马电子功德", L"About NiuMa Merit"), L"\xE946", false, true);
   append(kMenuQuit, UiText(L"退出", L"Exit"), L"\xE8AC");
   MENUINFO style{}; style.cbSize = sizeof(style); style.fMask = MIM_BACKGROUND | MIM_STYLE;
@@ -4053,6 +4246,7 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   if (command == static_cast<int>(kMenuAbout)) {
     ShowAboutDialog(window);
   } else if (command == static_cast<int>(kMenuLaunchAtLogin)) {
+    if (gIsolatedAcceptance) return;
     const bool enabled = !IsLaunchAtLoginEnabled();
     if (SetLaunchAtLoginEnabled(enabled)) {
       SaveLaunchAtLoginPreference(enabled);
@@ -4074,7 +4268,7 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
 }
 
 void CancelClientClose(HWND window) {
-  const bool resumeInput = !gIsolatedAcceptance ||
+  const bool resumeInput = !gIsolatedAcceptance || IsRuntimeCandidate() ||
       (gDataStorage.sessionQueryPending && gDataStorage.sessionResumeInput);
   gDataStorage.sessionQueryPending = false;
   gDataStorage.sessionResumeInput = false;
@@ -4523,15 +4717,28 @@ int WINAPI wWinMain(
   const std::wstring pendingImportFile = ImportFileArgument();
 
   gState.mutex = CreateMutexW(nullptr, TRUE,
+#if defined(NIUMA_RUNTIME_CANDIDATE)
+      IsRuntimeCandidate() ? kRuntimeMutexName :
+#endif
       gIsolatedAcceptance ? kAcceptanceMutexName : kMutexName);
   if (gState.mutex == nullptr) {
     return 1;
   }
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (IsRuntimeCandidate()) {
+      // A second candidate may name another private profile. Do not forward
+      // its import into the already-running candidate's different test data.
+      niuma::ui::Message(nullptr,
+          UiText(L"独立测试版已经运行。请在当前测试版中导入素材，或先退出后再打开另一测试目录。",
+                 L"A development candidate is already running. Import packs there, or exit it before opening another test profile."),
+          WindowTitle(), MB_OK | MB_ICONINFORMATION);
+      CloseHandle(gState.mutex); gState.mutex = nullptr;
+      return 0;
+    }
     if (!pendingImportFile.empty()) {
       HWND existingWindow = nullptr;
       for (int attempt = 0; attempt < 20 && existingWindow == nullptr; ++attempt) {
-        existingWindow = FindWindowW(kWindowClass, nullptr);
+        existingWindow = FindWindowW(MainWindowClass(), nullptr);
         if (existingWindow == nullptr) Sleep(50);
       }
       if (!TransferImport(existingWindow, pendingImportFile)) {
@@ -4588,7 +4795,7 @@ int WINAPI wWinMain(
   windowClass.lpfnWndProc = WindowProcedure;
   windowClass.hInstance = instance;
   windowClass.hCursor = LoadCursorW(nullptr, IDC_HAND);
-  windowClass.lpszClassName = kWindowClass;
+  windowClass.lpszClassName = MainWindowClass();
   if (RegisterClassExW(&windowClass) == 0) {
     ReleaseAllPngResources();
     Gdiplus::GdiplusShutdown(gState.gdiplusToken);
@@ -4683,7 +4890,7 @@ int WINAPI wWinMain(
 
   HWND window = CreateWindowExW(
       WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-      kWindowClass, WindowTitle(), WS_POPUP,
+      MainWindowClass(), WindowTitle(), WS_POPUP,
       static_cast<int>(x), static_cast<int>(y),
       gState.windowWidth, gState.windowHeight,
       nullptr, nullptr, instance, nullptr);
@@ -4729,7 +4936,7 @@ int WINAPI wWinMain(
   SetTimer(window, kDayTimer, 30000, nullptr);
   SetTimer(window, kReminderTimer, 1000, nullptr);
   ArmDataStorageTimer();
-  if (!gIsolatedAcceptance) RegisterOffworkSessionNotifications(window);
+  if (!gIsolatedAcceptance || IsRuntimeCandidate()) RegisterOffworkSessionNotifications(window);
   if (!SyncOffworkTimer()) {
     niuma::ui::Message(window, UiText(L"无法启动下班倒计时逐秒刷新，请在设置中关闭后重新开启。",
         L"The countdown refresh timer could not start. Turn it off and on in settings."),
@@ -4745,11 +4952,16 @@ int WINAPI wWinMain(
     }
   }
 
-  if (!gIsolatedAcceptance) {
-    ConfigureLaunchAtLogin();
+  if (!gIsolatedAcceptance) ConfigureLaunchAtLogin();
+  if (!gIsolatedAcceptance || IsRuntimeCandidate()) {
+    if (IsRuntimeCandidate())
+      niuma::ui::Message(window,
+          UiText(L"这是独立开发测试版。功德、日历、设置和导入素材仅保存在本次测试目录，不会更改正式版数据。\n\n确认后正常统计本机输入次数，不保存按键内容。自动启动和文件关联已禁用。",
+                 L"This is an isolated development candidate. Counts, calendar, settings and imported packs stay in its test folder; installed-app data is unchanged.\n\nAfter this notice, normal input counting starts without storing key contents. Startup registration and file associations are disabled."),
+          WindowTitle(), MB_OK | MB_ICONINFORMATION);
     RestartGlobalListeners();
   }
-  if (!gIsolatedAcceptance &&
+  if ((!gIsolatedAcceptance || IsRuntimeCandidate()) &&
       !PrepareClientStartup(window, pendingImportFile) && IsMainWindowAlive(window)) {
     PostMessageW(window, WM_CLOSE, 0, 0);
   }

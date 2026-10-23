@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-runtime-app:
-    if: ${{ inputs.mode == 'runtime-app' }}
+    if: ${{ inputs.mode == 'runtime-app' || inputs.mode == 'runtime-integration' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -31,7 +31,7 @@ jobs:
         run: |
           cmake -S . -B build-app -G "Visual Studio 17 2022" -A x64
           if ($LASTEXITCODE -ne 0) { throw "Application configuration failed" }
-          cmake --build build-app --config Release --target niuma-merit niuma-runtime-app-test --parallel 2
+          cmake --build build-app --config Release --target niuma-merit niuma-runtime-candidate niuma-runtime-app-test --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Application compilation failed" }
       - name: Real adapter paths with isolated profiles and tagged input
         shell: pwsh
@@ -45,7 +45,36 @@ jobs:
           name: windows-runtime-app-${{ github.sha }}
           path: |
             build-app/evidence/**
-            build-app/Release/niuma-merit.exe
+            build-app/Release/niuma-runtime-candidate.exe
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-runtime-resources:
+    if: ${{ inputs.mode == 'runtime-resources' || inputs.mode == 'runtime-integration' }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile bounded resource preparation and loader contracts
+        shell: pwsh
+        run: |
+          cmake -S . -B build-resources -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Resource configuration failed" }
+          cmake --build build-resources --config Release --target niuma-appearance-resources-test niuma-appearance-service-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Resource compilation failed" }
+      - name: Private PNG fixtures and loader lifetime contracts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-resources/evidence | Out-Null
+          & ./build-resources/Release/niuma-appearance-resources-test.exe | Tee-Object build-resources/evidence/resources.txt
+          $resources = $LASTEXITCODE
+          & ./build-resources/Release/niuma-appearance-service-test.exe | Tee-Object build-resources/evidence/service.txt
+          if ($resources -ne 0 -or $LASTEXITCODE -ne 0) { throw "Resource contract failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-resources-${{ github.sha }}
+          path: build-resources/evidence/**
           if-no-files-found: warn
           retention-days: 14
 

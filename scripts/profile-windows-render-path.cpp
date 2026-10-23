@@ -203,6 +203,9 @@ int wmain(int argc, wchar_t** argv) {
   auto observedPrivatePeakBytes = initialPrivateBytes;
   {
     niuma::AppearancePack offwork;
+#if defined(NIUMA_PROFILE_AFTER)
+    niuma::AppearanceResourceMemory preparedMemory;
+#endif
     LoadFixture(root / L"assets/appearance-packs/offwork-button", offwork);
     if (rasterExperiment) for (auto& layer : offwork.layers) {
       const auto width = static_cast<INT>(layer.image.image->GetWidth());
@@ -234,6 +237,22 @@ int wmain(int argc, wchar_t** argv) {
         // Only the new memory comparison is needed for the unchanged prior candidate.
         if (mode != 1 || !countdown || dpi != 192) continue;
 #endif
+#if defined(NIUMA_PROFILE_AFTER)
+        // Preparation belongs to the worker phase, outside measured drawing.
+        // A real switch replaces one owned prepared pack; no global cache.
+        offwork = niuma::AppearancePack{};
+        preparedMemory = {};
+        if (pack) {
+          LoadFixture(root / L"assets/appearance-packs/offwork-button", offwork);
+          niuma::AppearanceAnimationOptions options;
+          options.pixelDensity = static_cast<float>(dpi) / 192.0f;
+          for (auto& layer : offwork.layers) {
+            if (mode == 2) for (auto& key : layer.keyframes) key.alpha = 0.5f;
+            Check(niuma::PrepareLayerRaster(layer, options, preparedMemory),
+                "prepare selected fixture within total resource budget");
+          }
+        }
+#endif
         gState.dpi = static_cast<UINT>(dpi);
         gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
         gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
@@ -259,13 +278,18 @@ int wmain(int argc, wchar_t** argv) {
         perf::enabled = false;
         observedPrivatePeakBytes = std::max(observedPrivatePeakBytes, PrivateBytes());
         std::size_t sceneRasterBytes = 0, sceneArtworkBytes = 0;
-#if defined(NIUMA_PROFILE_AFTER) || defined(NIUMA_PROFILE_PREVIOUS)
+#if defined(NIUMA_PROFILE_PREVIOUS)
         Check(niuma::gRenderRasterCache.bytes <= niuma::RenderRasterCache::kByteLimit,
             "decoded cache budget");
         rasterPeakBytes = std::max(rasterPeakBytes, niuma::gRenderRasterCache.bytes);
         sceneRasterBytes = niuma::gRenderRasterCache.bytes;
 #endif
 #if defined(NIUMA_PROFILE_AFTER)
+        Check(preparedMemory.rasterBytes <= 8ULL * 1024 * 1024 &&
+            preparedMemory.residentBytes() <= 24ULL * 1024 * 1024,
+            "prepared raster and total resource budgets");
+        sceneRasterBytes = preparedMemory.rasterBytes;
+        rasterPeakBytes = std::max(rasterPeakBytes, sceneRasterBytes);
         Check(gArtworkSurface.bytes() <= kArtworkByteLimit, "artwork surface budget");
         artworkPeakBytes = std::max(artworkPeakBytes, gArtworkSurface.bytes());
         sceneArtworkBytes = gArtworkSurface.bytes();
@@ -279,6 +303,11 @@ int wmain(int argc, wchar_t** argv) {
             << ",\"privateBytes\":" << PrivateBytes()
             << ",\"decodedCacheBytes\":" << sceneRasterBytes
             << ",\"artworkCacheBytes\":" << sceneArtworkBytes
+#if defined(NIUMA_PROFILE_AFTER)
+            << ",\"preparedSourceRgbaBytes\":" << preparedMemory.sourceRgbaBytes
+            << ",\"preparedCompressedBytes\":" << preparedMemory.compressedBytes
+            << ",\"preparedResidentBytes\":" << preparedMemory.residentBytes()
+#endif
             << ",\"stages\":{";
         WriteStats(output);
         output << "},\"pixelHashes\":[";
@@ -308,34 +337,29 @@ int wmain(int argc, wchar_t** argv) {
         "60 counter/countdown changes do not rebuild idle artwork");
     gProfileFixturePack = nullptr;
     RenderLayeredWindow(10000);
-    Check(niuma::gRenderRasterCache.bytes == 0, "builtin switch releases decoded cache");
-    for (auto& layer : offwork.layers) for (auto& key : layer.keyframes) key.alpha = 1.0f;
-    gProfileFixturePack = &offwork;
-    RenderLayeredWindow(10000);
-    Check(niuma::gRenderRasterCache.bytes > 0, "cache restarts on selected pack");
-    offwork.layers[0].image = niuma::PackImage{};
-    Check(niuma::gRenderRasterCache.bytes == 0, "source replacement invalidates cache");
+    offwork = niuma::AppearancePack{};
+    Check(offwork.layers.empty(), "builtin switch releases owned prepared resources");
     gProfileFixturePack = nullptr;
 #endif
   }
 #if defined(NIUMA_PROFILE_AFTER)
-  Check(niuma::gRenderRasterCache.bytes == 0, "pack destruction clears cache");
   {
     niuma::AppearancePack large;
+    niuma::AppearanceResourceMemory memory;
+    niuma::AppearanceAnimationOptions options;
     for (int i = 0; i < 3; ++i) {
       niuma::PackLayer layer;
-      layer.image.image = std::make_unique<Gdiplus::Bitmap>(1024, 1024, PixelFormat32bppPARGB);
+      layer.image.image = std::make_unique<Gdiplus::Bitmap>(1024, 1024, PixelFormat32bppARGB);
       layer.width = layer.height = 1024;
+      Check(niuma::PrepareLayerRaster(layer, options, memory), "bounded prepare fallback");
       large.layers.push_back(std::move(layer));
     }
-    niuma::gRenderRasterCache.Select(large);
-    for (std::size_t i = 0; i < large.layers.size(); ++i)
-      niuma::gRenderRasterCache.Image(i, large.layers[i].image.image.get());
-    Check(niuma::gRenderRasterCache.bytes == niuma::RenderRasterCache::kByteLimit,
-        "capacity stops at 8MiB without rejecting uncached layers");
-    Check(!niuma::gRenderRasterCache.entries[2].raster, "over-budget layer falls back");
+    Check(memory.rasterBytes == 8ULL * 1024 * 1024,
+        "raster capacity stops at 8MiB without rejecting uncached layers");
+    Check(!large.layers[2].raster.image && large.layers[2].image.image &&
+        memory.sourceRgbaBytes == 4ULL * 1024 * 1024,
+        "over-budget raster retains bounded original pixels");
   }
-  Check(niuma::gRenderRasterCache.bytes == 0, "large fixture resources released");
 #endif
   // Known synthetic messages exercise the actual count handler, not a physical
   // keyboard or WH_KEYBOARD_LL/CallNextHookEx chain. No raw keys are collected.
