@@ -9,6 +9,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <string>
 #include <thread>
 
 namespace {
