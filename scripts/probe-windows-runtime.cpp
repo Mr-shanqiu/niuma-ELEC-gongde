@@ -221,7 +221,7 @@ struct Probe {
     bool software = true;
     std::uint64_t textureBytes = 0, cpuTextureBytes = 0, captures = 0, presentCount = 0;
     double regionMean = 0, regionP95 = 0, submitMean = 0;
-    std::uint64_t regionSamples = 0;
+    std::uint64_t regionSamples = 0, conservativePixelsPeak = 0, rectangleCountPeak = 0;
     explicit Probe(const fs::path& output) : report(output) { Check(report.good(), "Open P0 report"); }
     void Add(std::string name, bool ok, double ms = 0) { records.push_back({std::move(name), ms, ok}); }
     ~Probe() {
@@ -232,7 +232,9 @@ struct Probe {
                << ",\n  \"cpuTextureBytesPeak\":" << cpuTextureBytes << ",\n  \"diagnosticReadbacks\":" << captures
                << ",\n  \"presents\":" << presentCount << ",\n  \"regionMeanMs\":" << regionMean
                << ",\n  \"regionP95Ms\":" << regionP95 << ",\n  \"submitMeanMs\":" << submitMean
-               << ",\n  \"regionSamples\":" << regionSamples << ",\n  \"checks\":[\n";
+               << ",\n  \"regionSamples\":" << regionSamples
+               << ",\n  \"conservativePixelsPeak\":" << conservativePixelsPeak
+               << ",\n  \"rectangleCountPeak\":" << rectangleCountPeak << ",\n  \"checks\":[\n";
         for (std::size_t i = 0; i < records.size(); ++i) {
             const auto& record = records[i];
             report << (i ? ",\n" : "") << "    {\"name\":" << JsonString(record.name)
@@ -277,7 +279,7 @@ void InstallRegion(HWND window, const AlphaRegionResult& region) {
     Check(data.success, "Serialize hit region: " + data.error);
     RegionHandle owned{ExtCreateRegion(nullptr, data.byteCount,
         reinterpret_cast<const RGNDATA*>(data.words.data()))};
-    Check(owned.value != nullptr, "Create exact alpha region");
+    Check(owned.value != nullptr, "Create conservative alpha region");
     Check(SetWindowRgn(window, owned.value, TRUE) != 0, "Install alpha region");
     owned.value = nullptr;  // Ownership transferred to USER, never delete again.
 }
@@ -391,6 +393,8 @@ int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware) {
                     const auto beginRegion = Clock::now();
                     const auto region = RegionFor(width,height,quads,scene);
                     Check(region.success, "Compute alpha region: " + region.error);
+                    probe.conservativePixelsPeak = std::max(probe.conservativePixelsPeak,region.stats.conservativePixels);
+                    probe.rectangleCountPeak = std::max(probe.rectangleCountPeak,static_cast<std::uint64_t>(region.stats.rectangleCount));
                     InstallRegion(window,region);
                     const double regionMs = std::chrono::duration<double,std::milli>(Clock::now()-beginRegion).count();
                     regionTimes.push_back(regionMs);
