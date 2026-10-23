@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "weak_alpha_override.h"
+
 namespace niuma::runtime {
 
 // Pixels and output surfaces use BGRA8, with RGB already multiplied by alpha.
@@ -78,6 +80,11 @@ struct RendererStats {
     std::uint64_t diagnosticReadbacks = 0;
     std::uint64_t textureBytes = 0;
     std::uint32_t textureCount = 0;
+    // Most recent successful Draw's sparse decisions and uploaded byte count.
+    std::uint64_t weakAlphaEntries = 0;
+    std::uint64_t weakAlphaBytes = 0;
+    // Reusable GPU allocation, retained until Shutdown; bounded by 8 MiB.
+    std::uint64_t weakAlphaBufferBytes = 0;
     int width = 0;
     int height = 0;
 };
@@ -101,7 +108,11 @@ public:
     std::uint32_t AddTexture(const PixelImage& image);
     bool RemoveTexture(std::uint32_t textureId);
     void ClearTextures();
-    bool Draw(const std::vector<Quad>& quads, bool present = true);
+    // Optional sparse decisions have one list per quad. A malformed, unsorted,
+    // oversized or out-of-surface list fails before any frame is drawn. Upload
+    // copies the lists; their storage may be released as soon as Draw returns.
+    bool Draw(const std::vector<Quad>& quads, bool present = true,
+              const WeakAlphaOverrides* weak = nullptr);
     bool Present();
     // Explicit diagnostic readback only. Call after Draw(..., false), before
     // Present. It never guesses which flip-model buffer was last presented.

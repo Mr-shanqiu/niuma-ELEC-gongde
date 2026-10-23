@@ -53,7 +53,7 @@ bool AppendBand(const std::vector<Run>& runs, int top, int bottom,
 }
 }  // namespace
 
-PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image) {
+static PreparedAlphaMask PrepareThresholdMask(const AlphaRegionImageView& image, std::uint8_t threshold) {
     const auto start = Clock::now();
     PreparedAlphaMask result;
     result.width = image.width;
@@ -63,15 +63,10 @@ PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image) {
         if (error) {
             result.error = error;
             result.supportRectangles.clear();
-#ifdef _WIN32
-            result.nativeWords.clear();
-            result.nativeByteCount = 0;
-#endif
+
         }
         result.storageBytes = result.supportRectangles.capacity() * sizeof(AlphaRegionRect);
-#ifdef _WIN32
-        result.storageBytes += result.nativeWords.capacity() * sizeof(std::uint32_t);
-#endif
+
         result.preparationMs = Milliseconds(start);
         return std::move(result);
     };
@@ -90,9 +85,9 @@ PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image) {
             const auto* row = image.bgra + static_cast<std::size_t>(y) * image.strideBytes;
             std::uint32_t x = 0;
             while (x < image.width) {
-                while (x < image.width && row[static_cast<std::size_t>(x) * 4 + 3] == 0) ++x;
+                while (x < image.width && row[static_cast<std::size_t>(x) * 4 + 3] < threshold) ++x;
                 const auto begin = x;
-                while (x < image.width && row[static_cast<std::size_t>(x) * 4 + 3] != 0) {
+                while (x < image.width && row[static_cast<std::size_t>(x) * 4 + 3] >= threshold) {
                     ++result.nonzeroSourcePixels;
                     ++x;
                 }
@@ -124,22 +119,28 @@ PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image) {
         }
         if (!AppendBand(previous, bandTop, static_cast<int>(2 * image.height), result.supportRectangles))
             return finish("prepared alpha rectangle limit");
-#ifdef _WIN32
-        AlphaRegionResult source;
-        source.success = true;
-        source.width = static_cast<int>(2 * image.width);
-        source.height = static_cast<int>(2 * image.height);
-        source.rectangles = std::move(result.supportRectangles);
-        auto data = MakeAlphaRegionData(source);
-        result.supportRectangles = std::move(source.rectangles);
-        if (!data.success) return finish("prepared alpha native serialization failed");
-        result.nativeWords = std::move(data.words);
-        result.nativeByteCount = data.byteCount;
-#endif
+
     } catch (const std::bad_alloc&) {
         return finish("prepared alpha allocation failed");
     }
     return finish();
+}
+
+PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image) {
+    const auto start = Clock::now();
+    auto result = PrepareThresholdMask(image,1);
+    if (!result.success) return result;
+    auto strong = PrepareThresholdMask(image,2);
+    if (!strong.success) return strong;
+    try {
+        result.strongSupportRectangles = std::move(strong.supportRectangles);
+        result.sourceAlpha.resize(static_cast<std::size_t>(image.width)*image.height);
+        for (std::uint32_t y=0;y<image.height;++y) for(std::uint32_t x=0;x<image.width;++x)
+            result.sourceAlpha[static_cast<std::size_t>(y)*image.width+x]=image.bgra[static_cast<std::size_t>(y)*image.strideBytes+x*4+3];
+        result.storageBytes = (result.supportRectangles.capacity()+result.strongSupportRectangles.capacity())*sizeof(AlphaRegionRect)+result.sourceAlpha.capacity();
+        result.preparationMs = Milliseconds(start);
+    } catch (const std::bad_alloc&) { result.success=false; result.error="prepared alpha coverage allocation failed"; }
+    return result;
 }
 
 bool ResolvePreparedAlphaTransform(const PreparedAlphaQuad& quad,
@@ -214,8 +215,8 @@ bool SpanAtRow(const std::array<AlphaRegionPoint, 4>& points, double centerY,
 }
 }
 
-AlphaRegionResult TransformPreparedAlphaRegion(
-    int width, int height, const std::vector<PreparedAlphaQuad>& quads) {
+static AlphaRegionResult TransformSupport(
+    int width, int height, const std::vector<PreparedAlphaQuad>& quads, bool strong) {
     const auto start = Clock::now();
     AlphaRegionResult result;
     result.width = width; result.height = height;
@@ -257,7 +258,7 @@ AlphaRegionResult TransformPreparedAlphaRegion(
             // arithmetic; this is not a whole destination-pixel dilation.
             const double sx = 1.0 / 128.0 + 32 * std::numeric_limits<float>::epsilon() * quad.mask->width;
             const double sy = 1.0 / 128.0 + 32 * std::numeric_limits<float>::epsilon() * quad.mask->height;
-            for (const auto& rect : quad.mask->supportRectangles) {
+            for (const auto& rect : (strong ? quad.mask->strongSupportRectangles : quad.mask->supportRectangles)) {
                 const double xs[] = {rect.left-sx, rect.right+sx};
                 const double ys[] = {rect.top-sy, rect.bottom+sy};
                 std::array<AlphaRegionPoint,4> polygon{};
@@ -304,6 +305,129 @@ AlphaRegionResult TransformPreparedAlphaRegion(
     return finish();
 }
 
+namespace {
+struct AlphaSampler {
+    const PreparedAlphaQuad* quad;
+    PreparedAlphaAffine transform;
+    double determinant = 0;
+};
+// Evaluate only the weak-only fragments, where every contributing source
+// texel is alpha 0 or 1. Solid shape interiors retain span operations.
+std::uint32_t WeakCoverageByte(int x, int y, const AlphaSampler& item,
+                               std::uint64_t& sampledTexels) {
+    const auto& q=*item.quad; const auto& m=*q.mask; const auto& f=item.transform;
+    if(q.opacity==0) return 0;
+    if(q.scissor && (x<q.scissor->x || y<q.scissor->y ||
+        static_cast<std::int64_t>(x)>=static_cast<std::int64_t>(q.scissor->x)+q.scissor->width ||
+        static_cast<std::int64_t>(y)>=static_cast<std::int64_t>(q.scissor->y)+q.scissor->height)) return 0;
+    const double dx=x+0.5-f.tx,dy=y+0.5-f.ty;
+    const double sx=(f.yy*dx-f.yx*dy)/item.determinant/2;
+    const double sy=(-f.xy*dx+f.xx*dy)/item.determinant/2;
+    const auto u0=std::min(q.uv[0].x,q.uv[1].x)*m.width, u1=std::max(q.uv[0].x,q.uv[1].x)*m.width;
+    const auto v0=std::min(q.uv[0].y,q.uv[3].y)*m.height, v1=std::max(q.uv[0].y,q.uv[3].y)*m.height;
+    if(sx<u0 || sx>u1 || sy<v0 || sy>v1) return 0;
+    const double tx=sx-0.5,ty=sy-0.5;
+    const int ix=static_cast<int>(std::floor(tx)),iy=static_cast<int>(std::floor(ty));
+    const double fx=tx-ix,fy=ty-iy;
+    const auto alpha=[&](int px,int py) {
+        px=std::clamp(px,0,static_cast<int>(m.width)-1); py=std::clamp(py,0,static_cast<int>(m.height)-1);
+        return static_cast<double>(m.sourceAlpha[static_cast<std::size_t>(py)*m.width+px]);
+    };
+    sampledTexels += 4;
+    const double a=((1-fy)*((1-fx)*alpha(ix,iy)+fx*alpha(ix+1,iy))+
+        fy*((1-fx)*alpha(ix,iy+1)+fx*alpha(ix+1,iy+1)))*q.opacity;
+    // A single quantization decision serves both the native region and shader.
+    // No driver-dependent epsilon and no hardware Sample threshold assumption.
+    return static_cast<std::uint32_t>(std::floor(a+0.5));
+}
+}
+
+AlphaRegionResult TransformPreparedAlphaRegion(
+    int width,int height,const std::vector<PreparedAlphaQuad>& quads,
+    WeakAlphaOverrides* weakOverrides) {
+    const auto start = Clock::now();
+    if (weakOverrides) weakOverrides->clear();
+    auto all=TransformSupport(width,height,quads,false);
+    if(!all.success) return all;
+    auto strong=TransformSupport(width,height,quads,true);
+    if(!strong.success) return strong;
+    const auto fail = [&](const std::string& error) {
+        all.success = false;
+        all.error = error;
+        all.rectangles.clear();
+        all.stats = {};
+        all.stats.rasterMs = Milliseconds(start);
+        return std::move(all);
+    };
+    try {
+        WeakAlphaOverrides overrides(quads.size());
+        std::vector<AlphaSampler> samplers;
+        for(const auto& q:quads) {
+            if(q.mask->sourceAlpha.size()!=static_cast<std::size_t>(q.mask->width)*q.mask->height) {
+                return fail("prepared alpha source coverage unavailable");
+            }
+            AlphaSampler item{&q,{}};std::string error;
+            if(!ResolvePreparedAlphaTransform(q,item.transform,error)) return fail(error);
+            const auto& t=item.transform;item.determinant=t.xx*t.yy-t.xy*t.yx;
+            if (!std::isfinite(item.determinant) || item.determinant == 0)
+                return fail("prepared alpha inverse transform is degenerate");
+            samplers.push_back(item);
+        }
+        std::vector<std::vector<Run>> weakRows(static_cast<std::size_t>(height)),strongRows(static_cast<std::size_t>(height));
+        for(const auto& r:all.rectangles) for(int y=r.top;y<r.bottom;++y) weakRows[y].emplace_back(r.left,r.right);
+        for(const auto& r:strong.rectangles) for(int y=r.top;y<r.bottom;++y) strongRows[y].emplace_back(r.left,r.right);
+        std::vector<AlphaRegionRect> filtered;std::vector<Run> previous;
+        int bandTop=0;std::uint64_t covered=0,samples=0,sampledTexels=0;
+        bool invalidWeak = false;
+        for(int y=0;y<height;++y) {
+            std::vector<Run> row;
+            const auto sample=[&](int left,int right) {
+                if (invalidWeak) return;
+                int begin=-1;
+                for(int x=left;x<right;++x) {
+                    if ((samples+1)*samplers.size()>kMaxWeakAlphaEntries) { invalidWeak=true; return; }
+                    ++samples;
+                    bool visible = false;
+                    for (std::size_t i=0;i<samplers.size();++i) {
+                        const auto byte=WeakCoverageByte(x,y,samplers[i],sampledTexels);
+                        if (byte>1) { invalidWeak=true; return; }
+                        overrides[i].push_back({static_cast<std::uint32_t>(y*width+x),byte});
+                        visible = visible || byte!=0;
+                    }
+                    if(visible) {if(begin<0)begin=x;}
+                    else if(begin>=0) {AppendRun(row,{begin,x});begin=-1;}
+                }
+                if(begin>=0) AppendRun(row,{begin,right});
+            };
+            for(const auto& run:weakRows[y]) {
+                int left=run.first;
+                for(const auto& solid:strongRows[y]) {
+                    if(solid.second<=left)continue;
+                    if(solid.first>=run.second)break;
+                    if(left<solid.first)sample(left,std::min(solid.first,run.second));
+                    const int begin=std::max(left,solid.first),end=std::min(run.second,solid.second);
+                    if(begin<end)AppendRun(row,{begin,end});
+                    left=std::max(left,end);
+                }
+                if(left<run.second)sample(left,run.second);
+            }
+            if(invalidWeak) return fail("prepared weak-coverage contract/work limit");
+            for(const auto& run:row)covered+=static_cast<std::uint64_t>(run.second-run.first);
+            if(row!=previous) {
+                if(!AppendBand(previous,bandTop,y,filtered)) return fail("prepared filtered rectangle limit");
+                previous=std::move(row);bandTop=y;
+            }
+        }
+        if(!AppendBand(previous,bandTop,height,filtered)) return fail("prepared filtered rectangle limit");
+        all.rectangles=std::move(filtered);all.stats.coveredPixels=covered;all.stats.rectangleCount=all.rectangles.size();
+        all.stats.testedPixels=samples;
+        all.stats.sampledTexels=sampledTexels;
+        if(weakOverrides) *weakOverrides=std::move(overrides);
+    } catch(const std::bad_alloc&) { return fail("prepared weak-coverage allocation failed"); }
+    all.stats.rasterMs=Milliseconds(start);
+    return all;
+}
+
 #ifdef _WIN32
 PreparedAlphaQuad FromRendererPreparedQuad(const Quad& quad, const PreparedAlphaMask& mask) {
     PreparedAlphaQuad result;
@@ -329,6 +453,7 @@ PreparedAlphaRegionResult& PreparedAlphaRegionResult::operator=(PreparedAlphaReg
     error = std::move(other.error);
     region = std::exchange(other.region, nullptr);
     raster = std::move(other.raster);
+    weakOverrides = std::move(other.weakOverrides);
     stats = other.stats;
     other.success = false;
     return *this;
@@ -348,13 +473,14 @@ PreparedAlphaRegionResult BuildPreparedAlphaRegion(
             if (result.region) DeleteObject(result.region);
             result.region = nullptr;
             result.raster = {};
+            result.weakOverrides.clear();
         }
         return std::move(result);
     };
     if (width <= 0 || height <= 0 || width > 16384 || height > 16384 || quads.size() > kMaxQuads)
         return finish("prepared alpha surface/quad limit");
     try {
-        result.raster = TransformPreparedAlphaRegion(width,height,quads);
+        result.raster = TransformPreparedAlphaRegion(width,height,quads,&result.weakOverrides);
         if (!result.raster.success) return finish(result.raster.error);
         auto native = MakeAlphaRegionData(result.raster);
         if (!native.success) return finish(native.error);

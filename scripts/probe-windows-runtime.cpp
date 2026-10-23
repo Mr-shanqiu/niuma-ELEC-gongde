@@ -227,6 +227,8 @@ struct Probe {
     double regionMean = 0, regionP95 = 0, submitMean = 0;
     double preparationMs = 0;
     std::uint64_t preparedBytes = 0, distantTransparentPixelsPeak = 0;
+    std::uint64_t weakAlphaEntriesPeak = 0, weakAlphaBufferBytesPeak = 0;
+    unsigned weakAlphaMaxChannelDifference = 0;
     std::uint64_t regionSamples = 0, conservativePixelsPeak = 0, rectangleCountPeak = 0;
     explicit Probe(const fs::path& output) : report(output) { Check(report.good(), "Open P0 report"); }
     void Add(std::string name, bool ok, double ms = 0) { records.push_back({std::move(name), ms, ok}); }
@@ -251,6 +253,9 @@ struct Probe {
                << ",\n  \"regionMethod\":\"prepared source support / subpixel spans\""
                << ",\n  \"regionPreparationMs\":" << preparationMs
                << ",\n  \"preparedMaskBytesPeak\":" << preparedBytes
+               << ",\n  \"weakAlphaEntriesPeak\":" << weakAlphaEntriesPeak
+               << ",\n  \"weakAlphaBufferBytesPeak\":" << weakAlphaBufferBytesPeak
+               << ",\n  \"weakAlphaMaxChannelDifference\":" << weakAlphaMaxChannelDifference
                << ",\n  \"distantTransparentPixelsPeak\":" << distantTransparentPixelsPeak
                << ",\n  \"conservativePixelsPeak\":" << conservativePixelsPeak
                << ",\n  \"rectangleCountPeak\":" << rectangleCountPeak << ",\n  \"checks\":[\n";
@@ -435,12 +440,35 @@ int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware, b
                     InstallRegion(window,preparedRegion);
                     const double regionMs = std::chrono::duration<double,std::milli>(Clock::now()-beginRegion).count();
                     regionTimes.push_back(regionMs);
-                    const auto beginSubmit = Clock::now();
+                    // Reference is the same GPU pipeline without weak decisions.
+                    // This diagnostic work is excluded from normal submit timing.
+                    PixelImage reference;
                     Check(renderer.Draw(quads,false),renderer.LastErrorMessage());
+                    Check(renderer.Capture(reference),renderer.LastErrorMessage());
+                    const auto beginSubmit = Clock::now();
+                    Check(renderer.Draw(quads,false,&preparedRegion.weakOverrides),renderer.LastErrorMessage());
                     submitTimes.push_back(std::chrono::duration<double,std::milli>(Clock::now()-beginSubmit).count());
+                    probe.weakAlphaEntriesPeak=std::max(probe.weakAlphaEntriesPeak,renderer.Stats().weakAlphaEntries);
+                    probe.weakAlphaBufferBytesPeak=std::max(probe.weakAlphaBufferBytesPeak,renderer.Stats().weakAlphaBufferBytes);
                     // Diagnostic-only readback is excluded from CPU submit timing.
                     PixelImage frame;
                     Check(renderer.Capture(frame),renderer.LastErrorMessage());
+                    std::vector<unsigned char> weakPixels(static_cast<std::size_t>(width)*height);
+                    for(const auto& draw:preparedRegion.weakOverrides) for(const auto& pixel:draw)
+                        weakPixels[pixel.pixelKey]=1;
+                    unsigned maxDifference=0;std::uint64_t differenceSum=0,changedOutsideWeak=0;
+                    for(std::size_t i=0;i<frame.bgraPremultiplied.size();++i) {
+                        const auto delta=static_cast<unsigned>(std::abs(static_cast<int>(frame.bgraPremultiplied[i])-reference.bgraPremultiplied[i]));
+                        maxDifference=std::max(maxDifference,delta);differenceSum+=delta;
+                        if(delta && !weakPixels[i/4])++changedOutsideWeak;
+                    }
+                    probe.weakAlphaMaxChannelDifference=std::max(probe.weakAlphaMaxChannelDifference,maxDifference);
+                    // A weak texel has at most one byte per channel. Preserve all
+                    // stronger output exactly, and explicitly bound even this
+                    // sparse difference rather than changing the image gate.
+                    probe.Add(prefix+"/weak-alpha-quality-"+std::to_string(sample),
+                        changedOutsideWeak==0 && maxDifference<=1 &&
+                        differenceSum<=frame.bgraPremultiplied.size()/100);
                     const auto mask = RegionMask(region);
                     std::size_t clippedVisible = 0, visible = 0, distantTransparent = 0;
                     unsigned clippedAlphaMax = 0;

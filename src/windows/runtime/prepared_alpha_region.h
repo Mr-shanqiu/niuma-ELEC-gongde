@@ -1,6 +1,7 @@
 #pragma once
 
 #include "alpha_region.h"
+#include "weak_alpha_override.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -20,15 +21,14 @@ struct PreparedAlphaMask {
     // alpha texel (i,j) contributes [i-.5,i+1.5] x [j-.5,j+1.5], clipped to
     // the texture domain. These bands preserve transparent holes.
     std::vector<AlphaRegionRect> supportRectangles;
+    std::vector<AlphaRegionRect> strongSupportRectangles;
+    // Alpha only, retained for sparse weak-coverage sampling; no color decode.
+    std::vector<std::uint8_t> sourceAlpha;
     std::uint64_t sourcePixels = 0;
     std::uint64_t nonzeroSourcePixels = 0;
     std::uint64_t storageBytes = 0;
     double preparationMs = 0;
-#ifdef _WIN32
-    // Prepared once, used directly by ExtCreateRegion(XFORM) each frame.
-    std::vector<std::uint32_t> nativeWords;
-    std::uint32_t nativeByteCount = 0;
-#endif
+
 };
 
 PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image);
@@ -54,10 +54,12 @@ bool ResolvePreparedAlphaTransform(const PreparedAlphaQuad& quad,
                                    PreparedAlphaAffine& transform,
                                    std::string& error);
 
-// Portable span transformation: work follows prepared boundaries, not the
-// destination pixel area. Keeps subpixel bands until scan conversion.
+// Main coverage follows prepared boundaries. Only weak-only fragments (source
+// alpha <= 1) are sampled. Their per-draw quantized alpha is shared with the GPU
+// so hardware filter rounding cannot create invisible input traps.
 AlphaRegionResult TransformPreparedAlphaRegion(
-    int width, int height, const std::vector<PreparedAlphaQuad>& quads);
+    int width, int height, const std::vector<PreparedAlphaQuad>& quads,
+    WeakAlphaOverrides* weakOverrides = nullptr);
 
 #ifdef _WIN32
 struct Quad;
@@ -77,6 +79,7 @@ struct PreparedAlphaRegionResult {
     HRGN region = nullptr;
     // Same native region in band form for diagnostics; no output pixel scan.
     AlphaRegionResult raster;
+    WeakAlphaOverrides weakOverrides;
     PreparedAlphaRegionStats stats;
 
     PreparedAlphaRegionResult() = default;
@@ -89,9 +92,10 @@ struct PreparedAlphaRegionResult {
     HRGN ReleaseRegion() noexcept;
 };
 
-// No CPU texel/pixel loop and no GPU readback. Cached source regions are
-// transformed as subpixel scanline spans, clipped to the quad and surface,
-// merged, and serialized once for USER. SetWindowRgn stays caller-owned
+// No full-surface CPU pixel loop and no GPU readback. Prepared contours are
+// transformed as subpixel spans; only weak-alpha fragments use sparse sampling.
+// The returned weakOverrides must accompany the same quads in Draw. Regions
+// are serialized once for USER. SetWindowRgn stays caller-owned
 // and its time must be added by the caller when reporting total region cost.
 PreparedAlphaRegionResult BuildPreparedAlphaRegion(
     int width, int height, const std::vector<PreparedAlphaQuad>& quads);

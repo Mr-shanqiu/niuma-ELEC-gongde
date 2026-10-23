@@ -177,6 +177,41 @@ void UnsupportedIsExplicit() {
     auto shortImage = image.View(); shortImage.byteCount = 1;
     Require(!PrepareAlphaMask(shortImage).success, "short source pixel buffer fails");
 }
+
+void WeakPixelsShareOneDecision() {
+    Image image(16,16);
+    image.Set(4,4,1);
+    const auto mask=PrepareAlphaMask(image.View());
+    PreparedAlphaQuad q; q.mask=&mask;
+    q.positions={{{0,0},{32,0},{32,32},{0,32}}};
+    WeakAlphaOverrides overrides;
+    const auto r=TransformPreparedAlphaRegion(32,32,{q},&overrides);
+    Require(r.success && overrides.size()==1 && !overrides[0].empty(),"weak support emits sparse GPU decisions");
+    std::vector<unsigned char> shown(32*32);
+    for(const auto& rect:r.rectangles) for(int y=rect.top;y<rect.bottom;++y)
+        for(int x=rect.left;x<rect.right;++x) shown[y*32+x]=1;
+    std::uint32_t previous=0;bool first=true,zero=false,one=false;
+    for(const auto& pixel:overrides[0]) {
+        Require(first || pixel.pixelKey>previous,"weak decisions sorted uniquely");
+        first=false;previous=pixel.pixelKey;
+        Require(pixel.alphaByte<=1 && pixel.pixelKey<shown.size(),"only quantized weak alpha and valid coordinates");
+        Require(shown[pixel.pixelKey]==pixel.alphaByte,"region and GPU use identical weak decision");
+        zero|=pixel.alphaByte==0;one|=pixel.alphaByte==1;
+    }
+    Require(zero && one,"both force-transparent and retained visible samples exported");
+    Require(shown[8*32+8] && shown[9*32+9] && !shown[7*32+7],"independent bilinear center/corner coverage");
+    q.opacity=0.49f;
+    const auto repeated=TransformPreparedAlphaRegion(32,32,{q,q},&overrides);
+    Require(repeated.success && repeated.rectangles.empty() && overrides.size()==2,
+        "each BGRA8 draw quantizes before composition; invisible draws do not accumulate");
+    for(const auto& draw:overrides) for(const auto& pixel:draw)
+        Require(pixel.alphaByte==0,"explicit zero decision for both weak draws");
+    q.opacity=1;
+    auto solid=q; Image strong(16,16);strong.Set(4,4,255);const auto strongMask=PrepareAlphaMask(strong.View());solid.mask=&strongMask;
+    const auto mixed=TransformPreparedAlphaRegion(32,32,{q,solid},&overrides);
+    Require(mixed.success && overrides.size()==2 && overrides[0].empty() && overrides[1].empty(),
+        "strong coverage retains original GPU sampling, without weak overrides");
+}
 }  // namespace
 
 int main() {
@@ -187,12 +222,13 @@ int main() {
         {"transform-maps-cropped-corners", TransformMapsCroppedCorners},
         {"unsupported-is-explicit", UnsupportedIsExplicit},
         {"subpixel-bands-survive-minification", SubpixelBandsSurviveMinification},
+        {"weak-pixels-share-one-decision", WeakPixelsShareOneDecision},
     };
     unsigned passed = 0;
     for (const auto& test : tests) {
         try { test.run(); ++passed; std::cout << "PASS " << test.name << '\n'; }
         catch (const std::exception& error) { std::cerr << "FAIL " << test.name << ": " << error.what() << '\n'; return 1; }
     }
-    std::cout << "prepared-alpha-region: " << passed << "/5 passed\n";
+    std::cout << "prepared-alpha-region: " << passed << "/" << std::size(tests) << " passed\n";
     return 0;
 }
