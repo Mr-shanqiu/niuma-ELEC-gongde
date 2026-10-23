@@ -63,7 +63,7 @@ bool EmbeddedWoodfishRequest(niuma::AppearanceResourceRequest& request) {
   request={L"","builtin.woodfish",fingerprint};
   return true;
 }
-AppearanceSceneStatus PrepareEmbeddedWoodfishScene(const niuma::AppearanceResourceRequest& expected,
+AppearanceSceneStatus PrepareEmbeddedWoodfishScene(const niuma::AppearanceResourceRequest& expected, const AppearanceSceneOptions& options,
     std::unique_ptr<PreparedAppearanceScene>* output,std::wstring* error) {
   if(output) output->reset();
   niuma::AppearanceResourceRequest actual;
@@ -81,6 +81,6 @@ AppearanceSceneStatus PrepareEmbeddedWoodfishScene(const niuma::AppearanceResour
     return AppearanceSceneStatus::ImageUnavailable;
   }
   return PrepareWoodfishScene(std::move(bodyPixels),std::move(malletPixels),actual.contentFingerprint,
-      {},output,error);
+      options,output,error);
 }
 }

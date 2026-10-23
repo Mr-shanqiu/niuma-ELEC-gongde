@@ -5,6 +5,6 @@ namespace niuma::windows::runtime {
 // Reading resource bytes here does not decode or open any user files.
 bool EmbeddedWoodfishRequest(niuma::AppearanceResourceRequest& request);
 AppearanceSceneStatus PrepareEmbeddedWoodfishScene(
-    const niuma::AppearanceResourceRequest& expected,
+    const niuma::AppearanceResourceRequest& expected, const AppearanceSceneOptions& options,
     std::unique_ptr<PreparedAppearanceScene>* output,std::wstring* error);
 }

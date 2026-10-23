@@ -94,6 +94,7 @@ struct AppearanceAnimationOptions {
   float pixelDensity = 1.0f;
   size_t byteLimit = 24ULL * 1024ULL * 1024ULL;
   bool retainSourcePixels = false;
+  bool prepareDisplayRaster = true;
 };
 
 struct AppearanceThumbnail {

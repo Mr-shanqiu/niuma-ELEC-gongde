@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cmath>
 #include <limits>
 #include <map>
 #include <new>
@@ -102,6 +103,16 @@ bool ConvertPixels(const niuma::PackImage& source, PixelImage& output) {
   auto* bitmap = static_cast<Gdiplus::Bitmap*>(source.image.get());
   const auto width = bitmap->GetWidth(), height = bitmap->GetHeight();
   const size_t bytes = static_cast<size_t>(width) * height * 4;
+  if (bitmap->GetPixelFormat() == PixelFormat32bppPARGB) {
+    Gdiplus::Rect area(0,0,width,height);
+    Gdiplus::BitmapData data{};
+    if (bitmap->LockBits(&area,Gdiplus::ImageLockModeRead,PixelFormat32bppPARGB,&data) != Gdiplus::Ok) return false;
+    output.width=width; output.height=height; output.strideBytes=width*4;
+    output.bgraPremultiplied.resize(bytes);
+    for(UINT y=0;y<height;++y) std::memcpy(output.bgraPremultiplied.data()+static_cast<size_t>(y)*width*4,
+        static_cast<const BYTE*>(data.Scan0)+static_cast<std::ptrdiff_t>(y)*data.Stride,static_cast<size_t>(width)*4);
+    return bitmap->UnlockBits(&data)==Gdiplus::Ok;
+  }
   std::vector<std::uint8_t> straight(bytes);
   Gdiplus::Rect area(0, 0, width, height);
   Gdiplus::BitmapData data{};
@@ -130,6 +141,35 @@ bool ConvertPixels(const niuma::PackImage& source, PixelImage& output) {
       output.bgraPremultiplied.data()));
 }
 
+bool FilterPixels(const niuma::PackImage& source, UINT width, UINT height, PixelImage& output) {
+  if (width==source.image->GetWidth() && height==source.image->GetHeight())
+    return ConvertPixels(source,output);
+  niuma::PackImage filtered;
+  filtered.image=std::make_unique<Gdiplus::Bitmap>(width,height,PixelFormat32bppPARGB);
+  if(filtered.image->GetLastStatus()!=Gdiplus::Ok) return false;
+  {
+    Gdiplus::Graphics graphics(filtered.image.get());
+    if(graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy)!=Gdiplus::Ok ||
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic)!=Gdiplus::Ok ||
+        graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality)!=Gdiplus::Ok ||
+        graphics.DrawImage(source.image.get(),Gdiplus::Rect(0,0,width,height),0,0,
+            source.image->GetWidth(),source.image->GetHeight(),Gdiplus::UnitPixel)!=Gdiplus::Ok) return false;
+  }
+  return ConvertPixels(filtered,output);
+}
+bool FilterBuiltin(PixelImage& pixels, UINT width, UINT height) {
+  width=std::min(width,pixels.width); height=std::min(height,pixels.height);
+  if(!width || !height) return false;
+  if(width==pixels.width && height==pixels.height) return true;
+  niuma::PackImage source;
+  source.image=std::make_unique<Gdiplus::Bitmap>(pixels.width,pixels.height,pixels.strideBytes,
+      PixelFormat32bppPARGB,pixels.bgraPremultiplied.data());
+  PixelImage output;
+  if(source.image->GetLastStatus()!=Gdiplus::Ok || !FilterPixels(source,width,height,output)) return false;
+  source.image.reset();
+  pixels=std::move(output);
+  return true;
+}
 PixelImage Shadow() {
   PixelImage image;
   image.width = 320; image.height = 32; image.strideBytes = 320 * 4;
@@ -147,7 +187,8 @@ PixelImage Shadow() {
   return image;
 }
 bool OptionsValid(const AppearanceSceneOptions& options) {
-  return options.residentByteLimit > 0 && options.bridgePeakByteLimit > 0;
+  return options.residentByteLimit > 0 && options.bridgePeakByteLimit > 0 &&
+      std::isfinite(options.pixelDensity) && options.pixelDensity>0 && options.pixelDensity<=8;
 }
 }  // namespace
 
@@ -184,10 +225,12 @@ AppearanceSceneStatus ConvertPreparedAppearanceScene(std::unique_ptr<niuma::Appe
   try {
     auto scene = std::make_unique<PreparedAppearanceScene>();
     scene->source = expected;
+    scene->pixelDensity = options.pixelDensity;
     scene->plusY = pack->plusY;
     scene->images.reserve(pack->layers.size());
     scene->layers.reserve(pack->layers.size());
     std::map<std::string, AnimationImageId> ids;
+    std::map<std::string,std::pair<UINT,UINT>> dimensions;
     for (const auto& layer : pack->layers) {
       if (layer.imageName.empty() || !layer.image.image || layer.image.stream ||
           layer.image.image->GetPixelFormat() != PixelFormat32bppARGB ||
@@ -198,6 +241,16 @@ AppearanceSceneStatus ConvertPreparedAppearanceScene(std::unique_ptr<niuma::Appe
         return Fail(AppearanceSceneStatus::ImageUnavailable,
             L"形象未保留完整原始像素，请在后台重新准备。", error);
       const auto inserted = ids.emplace(layer.imageName, ids.size() + 1);
+      float maximumX=1, maximumY=1;
+      for(const auto& key:layer.keyframes) {
+        maximumX=std::max(maximumX,std::abs(key.scale));
+        maximumY=std::max(maximumY,std::abs(key.scale*key.scaleY));
+      }
+      auto& desired=dimensions[layer.imageName];
+      desired.first=std::max(desired.first,static_cast<UINT>(std::min(
+          std::ceil(layer.width*options.pixelDensity*maximumX*2),static_cast<float>(layer.sourcePixelWidth))));
+      desired.second=std::max(desired.second,static_cast<UINT>(std::min(
+          std::ceil(layer.height*options.pixelDensity*maximumY*2),static_cast<float>(layer.sourcePixelHeight))));
       niuma::client::core::AppearanceLayer translated;
       translated.image = inserted.first->second;
       translated.frame = {layer.x, layer.y, layer.width, layer.height};
@@ -225,8 +278,8 @@ AppearanceSceneStatus ConvertPreparedAppearanceScene(std::unique_ptr<niuma::Appe
       const auto id = ids.at(layer.imageName);
       const auto sourceBytes = BitmapBytes(layer.image);
       if (const auto* duplicate = scene->Find(id)) {
-        if (duplicate->pixels.width != layer.sourcePixelWidth ||
-            duplicate->pixels.height != layer.sourcePixelHeight)
+        if (duplicate->pixels.width != dimensions.at(layer.imageName).first ||
+            duplicate->pixels.height != dimensions.at(layer.imageName).second)
           return Fail(AppearanceSceneStatus::Invalid, L"相同图层资源尺寸不一致。", error);
         layer.image = {};
         budget.sources -= sourceBytes;
@@ -238,7 +291,8 @@ AppearanceSceneStatus ConvertPreparedAppearanceScene(std::unique_ptr<niuma::Appe
         return Fail(AppearanceSceneStatus::BudgetExceeded, L"形象像素转换超过资源预算。", error);
       PreparedSceneImage image;
       image.id = id;
-      if (!ConvertPixels(layer.image, image.pixels))
+      const auto target=dimensions.at(layer.imageName);
+      if (!FilterPixels(layer.image, target.first, target.second, image.pixels))
         return Fail(AppearanceSceneStatus::ImageUnavailable, L"无法准备形象显示像素。", error);
       scene->memory.uploadPixelBytes += image.pixels.bgraPremultiplied.capacity();
       layer.image = {};
@@ -267,6 +321,8 @@ AppearanceSceneStatus PrepareAppearanceScene(const niuma::AppearanceResourceRequ
     return Fail(AppearanceSceneStatus::Invalid, L"形象资源请求不完整。", error);
   niuma::AppearanceAnimationOptions loadOptions;
   loadOptions.retainSourcePixels = true;
+  loadOptions.prepareDisplayRaster = false;
+  loadOptions.pixelDensity = options.pixelDensity;
   loadOptions.byteLimit = std::min(options.residentByteLimit, options.bridgePeakByteLimit);
   niuma::AppearanceResourceMemory loadMemory;
   std::unique_ptr<niuma::AppearancePack> pack;
@@ -289,8 +345,23 @@ AppearanceSceneStatus PrepareWoodfishScene(PixelImage body, PixelImage mallet,
       !ValidPixels(body, true) || !ValidPixels(mallet, true) || mallet.width <= 108)
     return Fail(AppearanceSceneStatus::Invalid, L"内置木鱼资源不完整。", error);
   try {
+    const auto originalMalletWidth=mallet.width;
+    const auto originalBytes=body.bgraPremultiplied.capacity()+mallet.bgraPremultiplied.capacity();
+    if(originalBytes>options.bridgePeakByteLimit/3)
+      return Fail(AppearanceSceneStatus::BudgetExceeded,L"内置木鱼准备峰值超过当前预算。",error);
+    const float density=options.pixelDensity*.88f*2;
+    const auto malletWidth=static_cast<UINT>(std::ceil(std::max(
+        266*density*originalMalletWidth/(originalMalletWidth-108),
+        60*density*originalMalletWidth/std::min(145u,originalMalletWidth))));
+    if(!FilterBuiltin(body,static_cast<UINT>(std::ceil(214*density)),static_cast<UINT>(std::ceil(129*density))) ||
+        !FilterBuiltin(mallet,malletWidth,static_cast<UINT>(std::ceil(54*density))))
+      return Fail(AppearanceSceneStatus::ImageUnavailable,L"内置木鱼显示图片无法准备。",error);
     auto scene = std::make_unique<PreparedAppearanceScene>();
     scene->kind = AppearanceSceneKind::Woodfish;
+    scene->pixelDensity = options.pixelDensity;
+    scene->memory.sourceRgbaBytesAtEntry=originalBytes;
+    scene->memory.trackedPeakBytes=originalBytes*3;
+    scene->memory.peakReservationBytes=originalBytes*3;
     scene->source = {L"", "builtin.woodfish", contentFingerprint};
     scene->images.reserve(3);
     scene->memory.uploadPixelBytes = body.bgraPremultiplied.capacity() + mallet.bgraPremultiplied.capacity();
@@ -315,7 +386,7 @@ AppearanceSceneStatus PrepareWoodfishScene(PixelImage body, PixelImage mallet,
       const auto status = PrepareMask(image, budget, error);
       if (status != AppearanceSceneStatus::Ready) return status;
     }
-    scene->woodfish = {1, 2, 3, scene->images[2].pixels.width};
+    scene->woodfish = {1, 2, 3, originalMalletWidth};
     *output = std::move(scene);
     return AppearanceSceneStatus::Ready;
   } catch (const std::bad_alloc&) {

@@ -503,19 +503,24 @@ void SaveVisualFrame(const std::filesystem::path& path, const niuma::runtime::Pi
   const CLSID encoder = {0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0, 0, 0xf8, 0x1e, 0xf3, 0x2e}};
   CHECK(bitmap.Save(path.c_str(), &encoder) == Gdiplus::Ok);
 }
-void ComparePackageVisuals(const std::filesystem::path& output, const std::string& id) {
+void ComparePackageVisuals(Fixture& fixture, const std::filesystem::path& output, const std::string& id) {
   const auto* metadata = gAppearanceCatalog.Find(id);
-  CHECK(metadata);
+  CHECK(id.empty() || metadata);
   niuma::AppearanceAnimationOptions options;
   options.pixelDensity = 1;
   niuma::AppearanceResourceMemory memory;
   std::unique_ptr<niuma::AppearancePack> reference;
   std::wstring error;
-  CHECK(niuma::PrepareAppearanceAnimation(niuma::RequestAppearanceResources(*metadata), options,
+  if (metadata) CHECK(niuma::PrepareAppearanceAnimation(niuma::RequestAppearanceResources(*metadata), options,
       &reference, &memory, &error) == niuma::AppearancePreparationStatus::Ready);
   CHECK(LoadAllPngResources());
   gState.windowWidth = 240; gState.windowHeight = 250; gState.dpi = 192;
   SetWindowPos(gState.window, nullptr, 0, 0, 240, 250, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+  if (gDisplay.display->scene()->pixelDensity != 1) {
+    CHECK(RequestCurrentAppearance(id,false,true));
+    fixture.Await([] { return !gAppearance.currentRequest; },15000);
+    CHECK(!gDisplay.failed && gDisplay.display->scene()->pixelDensity == 1);
+  }
   for (unsigned elapsed : {0u,420u,650u}) {
     const auto now = GetTickCount64();
     gState.striking = true; gState.strikeStarted = now - elapsed; gState.strikeDurationMs = 1000;
@@ -547,7 +552,7 @@ void ComparePackageVisuals(const std::filesystem::path& output, const std::strin
       }
     }
     CHECK(visible>0);
-    const auto base = id+"-"+std::to_string(elapsed);
+    const auto base = (id.empty() ? "builtin.woodfish" : id)+"-"+std::to_string(elapsed);
     SaveVisualFrame(output/(base+"-gdi.png"),gdi);
     SaveVisualFrame(output/(base+"-gpu.png"),gpu);
     std::cout << "VISUAL " << base << " meanAbsVisibleChannel=" <<
@@ -577,6 +582,7 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
         gDisplay.display->scene() != nullptr; }, 15000);
     CHECK(!gDisplay.failed && gDisplay.display->ready() && !gAppearance.current &&
         gDisplay.display->scene()->kind == input_runtime::AppearanceSceneKind::Woodfish);
+    ComparePackageVisuals(fixture, fixture.directory, {});
     wchar_t fixtureRoot[MAX_PATH]{};
     CHECK(GetEnvironmentVariableW(L"NIUMA_RUNTIME_FIXTURE_DIR", fixtureRoot, MAX_PATH) > 0);
     std::wstring catalogError;
@@ -594,10 +600,10 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
       CHECK(gDisplay.display->scene()->memory.residentBytes() <= 24 * 1024 * 1024);
       fixture.DrainStorage();
       CHECK(gDataStorage.model->current().appearance.selectedPackId == installed);
-      ComparePackageVisuals(fixture.directory, installed);
+      ComparePackageVisuals(fixture, fixture.directory, installed);
     }
     const auto diagnosticCaptures = gDisplay.display->BackendStats().diagnosticReadbacks;
-    CHECK(diagnosticCaptures == 6);
+    CHECK(diagnosticCaptures == 9);
     fixture.Start();
     fixture.Keys(12);
     fixture.Await([] { return gState.total == 1012; });
@@ -610,20 +616,24 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
         gDisplay.display->Stats().textureUploads == uploads);
     CHECK(gDisplay.display->BackendStats().diagnosticReadbacks == diagnosticCaptures &&
         gLayeredSurface.bytes() == 0 && gArtworkSurface.bytes() == 0);
+    gDisplay.measuredFrames = 0;  // Cold startup/assets/visual diagnostics are separate.
     for (unsigned i = 0; i < 30; ++i) {
       fixture.Keys(1);
       fixture.Until(GetTickCount64()+100);
     }
     fixture.Await([] { return gState.total == 1042 && !gState.striking && !gState.timerRunning; });
     CHECK(!gDisplay.failed);
+    const auto activeFrames = gDisplay.measuredFrames;
     auto* const assets = gAppearance.service.get();
     const auto prepared = assets->Snapshot().completed;
-    const auto* const scene = gDisplay.display->scene();
+    const auto* scene = gDisplay.display->scene();
     RECT proposed{60,60,240,248};
     WindowProcedure(fixture.window, WM_DPICHANGED, MAKELONG(144,144),
         reinterpret_cast<LPARAM>(&proposed));
-    CHECK(!gDisplay.failed && assets->Snapshot().completed == prepared &&
-        gDisplay.display->scene() == scene && !gAppearance.currentRequest);
+    CHECK(!gDisplay.failed && gDisplay.display->scene() == scene && gAppearance.currentRequest);
+    fixture.Await([&] { return !gAppearance.currentRequest && assets->Snapshot().completed > prepared; },15000);
+    CHECK(!gDisplay.failed && gDisplay.display->scene()->pixelDensity == .75f);
+    scene = gDisplay.display->scene();
     CHECK(gDisplay.display->RecreateDevice());
     RenderLayeredWindow(GetTickCount64());
     CHECK(!gDisplay.failed && gInput.service->running());
@@ -643,21 +653,21 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
       std::sort(samples.begin(),samples.begin()+count);
       return samples[static_cast<std::size_t>(std::ceil(count*fraction))-1];
     };
-    const auto frameP95 = percentile(gDisplay.frameWorkMs,gDisplay.measuredFrames,.95);
-    const auto frameP99 = percentile(gDisplay.frameWorkMs,gDisplay.measuredFrames,.99);
-    const auto regionP95 = percentile(gDisplay.regionWorkMs,gDisplay.measuredFrames,.95);
+    const auto frameP95 = percentile(gDisplay.frameWorkMs,activeFrames,.95);
+    const auto frameP99 = percentile(gDisplay.frameWorkMs,activeFrames,.99);
+    const auto regionP95 = percentile(gDisplay.regionWorkMs,activeFrames,.95);
     const auto& adapter = gDisplay.display->Adapter();
     std::ofstream metrics(fixture.directory / L"display-metrics.json");
     CHECK(metrics.good());
     metrics << "{\"adapterKind\":\"" << adapter.kind << "\",\"vendor\":" << adapter.vendorId <<
         ",\"device\":" << adapter.deviceId << ",\"hardwareAccelerated\":" <<
-        (adapter.hardwareAccelerated ? "true" : "false") << ",\"frameSamples\":" << gDisplay.measuredFrames <<
-        ",\"frameCpuP95Ms\":" << frameP95 << ",\"frameCpuP99Ms\":" << frameP99 <<
+        (adapter.hardwareAccelerated ? "true" : "false") << ",\"frameSamples\":" << activeFrames <<
+        ",\"frameWorkWallP95Ms\":" << frameP95 << ",\"frameWorkWallP99Ms\":" << frameP99 <<
         ",\"regionP95Ms\":" << regionP95 << ",\"currentCpuSceneBytes\":" <<
         gDisplay.display->scene()->memory.residentBytes() << ",\"textureBytes\":" <<
         gDisplay.display->BackendStats().textureBytes << ",\"textPixelBytes\":" <<
         gDisplay.display->TextStats().pixelBytes << ",\"physicalTypingMeasured\":false,"
-        "\"scope\":\"actual app adapter, private data, tagged synthetic input, diagnostic timings\"}\n";
+        "\"scope\":\"actual app adapter, private data, tagged synthetic input; active-frame elapsed wall time includes Present wait; not thread CPU time\"}\n";
     metrics.close(); CHECK(metrics.good());
     WindowProcedure(fixture.window, WM_CLOSE, 0, 0);
     fixture.Await([&] { return !IsWindow(fixture.window); });
@@ -665,7 +675,7 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
   }
   gDisplay = DisplayAdapter{};
   gRuntimeCandidate = false;
-  std::cout << "PASS actual application composition adapter: real package imports/worker and owned popup with tagged hook, idle no Present, DPI no reload, device recreation, session cancel, durable counts, joined exit; software permitted for CI\n";
+  std::cout << "PASS actual application composition adapter: real package imports/worker and owned popup with tagged hook, idle no Present, DPI prepared swap, device recreation, session cancel, durable counts, joined exit; software permitted for CI\n";
 }
 #endif
 

@@ -18,6 +18,7 @@ enum class AppearanceSceneStatus {
 };
 
 struct AppearanceSceneOptions {
+  float pixelDensity = 1;  // physical pixels per design unit; 0.5 at 100% DPI.
   // CPU colors plus prepared alpha retained in the completed scene. This is
   // not a whole-process or GPU limit; the caller separately budgets old current
   // resources, pending results and uploaded GPU textures during a switch.
@@ -60,6 +61,7 @@ class PreparedAppearanceScene final {
   std::vector<niuma::client::core::AppearanceLayer> layers;
   niuma::client::core::WoodfishImages woodfish;
   int plusY = 174;
+  float pixelDensity = 1;
   std::vector<PreparedSceneImage> images;
   AppearanceSceneMemory memory;
 

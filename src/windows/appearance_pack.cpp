@@ -442,6 +442,10 @@ bool PrepareLayerRaster(PackLayer& layer, const AppearanceAnimationOptions& opti
                         AppearanceResourceMemory& memory, bool retainOpaqueSource = false) {
   auto* source = layer.image.image.get();
   const size_t sourceBytes = ImageBytes(layer.image);
+  if (!options.prepareDisplayRaster) {
+    memory.sourceRgbaBytes += sourceBytes;
+    return memory.residentBytes() <= options.byteLimit;
+  }
   float maximumX = 1, maximumY = 1;
   bool hasFade = false;
   retainOpaqueSource = retainOpaqueSource || options.retainSourcePixels;

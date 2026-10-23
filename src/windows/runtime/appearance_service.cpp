@@ -40,9 +40,12 @@ DWORD PreparationError(niuma::AppearancePreparationStatus status) noexcept {
 }
 void Prepare(const AppearanceLoadRequest& request, AppearanceLoadResult& output) {
   if (request.kind == AppearanceLoadKind::GpuCurrent || request.kind == AppearanceLoadKind::Woodfish) {
+    AppearanceSceneOptions options;
+    options.pixelDensity = request.animationOptions.pixelDensity;
+    options.residentByteLimit = request.animationOptions.byteLimit;
     const auto status = request.kind == AppearanceLoadKind::GpuCurrent
-        ? PrepareAppearanceScene(request.source, {}, &output.scene, &output.detail)
-        : PrepareEmbeddedWoodfishScene(request.source, &output.scene, &output.detail);
+        ? PrepareAppearanceScene(request.source, options, &output.scene, &output.detail)
+        : PrepareEmbeddedWoodfishScene(request.source, options, &output.scene, &output.detail);
     output.status = status == AppearanceSceneStatus::Ready ? niuma::AppearancePreparationStatus::Ready
         : status == AppearanceSceneStatus::Changed ? niuma::AppearancePreparationStatus::Changed
         : status == AppearanceSceneStatus::BudgetExceeded ? niuma::AppearancePreparationStatus::BudgetExceeded
@@ -58,7 +61,8 @@ void Prepare(const AppearanceLoadRequest& request, AppearanceLoadResult& output)
 bool ValidResource(const AppearanceLoadRequest& request, const AppearanceLoadResult& result) noexcept {
   if (request.kind == AppearanceLoadKind::GpuCurrent || request.kind == AppearanceLoadKind::Woodfish)
     return result.scene && !result.animation && !result.thumbnail &&
-        SameSource(result.scene->source, request.source) && result.scene->HasColorPixels();
+        SameSource(result.scene->source, request.source) && result.scene->HasColorPixels() &&
+        result.scene->pixelDensity == request.animationOptions.pixelDensity;
   if (result.scene) return false;
   if (request.kind == AppearanceLoadKind::Current)
     return result.animation && !result.thumbnail && result.animation->id == request.source.id &&
@@ -72,7 +76,8 @@ bool AppearanceLoadResult::Matches(const AppearanceLoadRequest& expected) const 
       request->kind == expected.kind && SameSource(request->source, expected.source) &&
       request->animationOptions.pixelDensity == expected.animationOptions.pixelDensity &&
       request->animationOptions.byteLimit == expected.animationOptions.byteLimit &&
-      request->animationOptions.retainSourcePixels == expected.animationOptions.retainSourcePixels;
+      request->animationOptions.retainSourcePixels == expected.animationOptions.retainSourcePixels &&
+      request->animationOptions.prepareDisplayRaster == expected.animationOptions.prepareDisplayRaster;
 }
 bool AppearanceLoadResult::ready() const noexcept {
   return request && status == niuma::AppearancePreparationStatus::Ready && error == ERROR_SUCCESS &&

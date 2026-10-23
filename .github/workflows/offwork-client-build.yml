@@ -89,7 +89,7 @@ jobs:
           retention-days: 14
 
   windows-runtime-composition:
-    if: ${{ inputs.mode == 'runtime-composition' }}
+    if: ${{ inputs.mode == 'runtime-composition' || inputs.mode == 'runtime-candidate' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -106,7 +106,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force build-composition/evidence | Out-Null
           $failed = @()
-          $scopes = if ('${{ inputs.mode }}' -eq 'runtime-candidate') { @('fading-alpha', 'appearance-scene') } else { @('fading-alpha', 'appearance-scene', 'widget-text-cache', 'composition-presenter', 'client-display', 'appearance-service') }
+          $scopes = if ('${{ inputs.mode }}' -eq 'runtime-candidate') { @('appearance-scene', 'client-display') } else { @('fading-alpha', 'appearance-scene', 'widget-text-cache', 'composition-presenter', 'client-display', 'appearance-service') }
           foreach ($name in $scopes) {
             & "./build-composition/Release/niuma-$name-test.exe" | Tee-Object "build-composition/evidence/$name.txt"
             if ($LASTEXITCODE -ne 0) { $failed += $name }

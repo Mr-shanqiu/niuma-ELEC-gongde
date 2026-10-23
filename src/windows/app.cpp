@@ -4986,7 +4986,9 @@ LRESULT CALLBACK WindowProcedure(
       ClampWindowToWorkArea();
       const std::string requested = gAppearance.currentRequest
           ? gAppearance.currentRequest->source.id : gState.selectedPackId;
-      if (!IsRuntimeCandidate() && !requested.empty()) RequestCurrentAppearance(requested, false, true);
+      if (IsRuntimeCandidate())
+        RequestCurrentAppearance(requested == "builtin.woodfish" ? std::string{} : requested, false, true);
+      else if (!requested.empty()) RequestCurrentAppearance(requested, false, true);
       RenderLayeredWindow(GetTickCount64());
       if (gReminderWindow != nullptr) PositionReminderWindow(gReminderWindow);
       return 0;
