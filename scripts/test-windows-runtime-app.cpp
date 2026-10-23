@@ -610,6 +610,12 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
         gDisplay.display->Stats().textureUploads == uploads);
     CHECK(gDisplay.display->BackendStats().diagnosticReadbacks == diagnosticCaptures &&
         gLayeredSurface.bytes() == 0 && gArtworkSurface.bytes() == 0);
+    for (unsigned i = 0; i < 30; ++i) {
+      fixture.Keys(1);
+      fixture.Until(GetTickCount64()+100);
+    }
+    fixture.Await([] { return gState.total == 1042 && !gState.striking && !gState.timerRunning; });
+    CHECK(!gDisplay.failed);
     auto* const assets = gAppearance.service.get();
     const auto prepared = assets->Snapshot().completed;
     const auto* const scene = gDisplay.display->scene();
@@ -630,8 +636,29 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
     SetForegroundWindow(fixture.window);
     fixture.Await([&] { return GetForegroundWindow() == fixture.window; });
     fixture.Keys(2);
-    fixture.Await([] { return gState.total == 1014; });
-    fixture.DrainStorage(); fixture.CheckStored(1014,24);
+    fixture.Await([] { return gState.total == 1044; });
+    fixture.DrainStorage(); fixture.CheckStored(1044,54);
+    const auto percentile = [](auto samples, std::size_t count, double fraction) {
+      CHECK(count > 0);
+      std::sort(samples.begin(),samples.begin()+count);
+      return samples[static_cast<std::size_t>(std::ceil(count*fraction))-1];
+    };
+    const auto frameP95 = percentile(gDisplay.frameWorkMs,gDisplay.measuredFrames,.95);
+    const auto frameP99 = percentile(gDisplay.frameWorkMs,gDisplay.measuredFrames,.99);
+    const auto regionP95 = percentile(gDisplay.regionWorkMs,gDisplay.measuredFrames,.95);
+    const auto& adapter = gDisplay.display->Adapter();
+    std::ofstream metrics(fixture.directory / L"display-metrics.json");
+    CHECK(metrics.good());
+    metrics << "{\"adapterKind\":\"" << adapter.kind << "\",\"vendor\":" << adapter.vendorId <<
+        ",\"device\":" << adapter.deviceId << ",\"hardwareAccelerated\":" <<
+        (adapter.hardwareAccelerated ? "true" : "false") << ",\"frameSamples\":" << gDisplay.measuredFrames <<
+        ",\"frameCpuP95Ms\":" << frameP95 << ",\"frameCpuP99Ms\":" << frameP99 <<
+        ",\"regionP95Ms\":" << regionP95 << ",\"currentCpuSceneBytes\":" <<
+        gDisplay.display->scene()->memory.residentBytes() << ",\"textureBytes\":" <<
+        gDisplay.display->BackendStats().textureBytes << ",\"textPixelBytes\":" <<
+        gDisplay.display->TextStats().pixelBytes << ",\"physicalTypingMeasured\":false,"
+        "\"scope\":\"actual app adapter, private data, tagged synthetic input, diagnostic timings\"}\n";
+    metrics.close(); CHECK(metrics.good());
     WindowProcedure(fixture.window, WM_CLOSE, 0, 0);
     fixture.Await([&] { return !IsWindow(fixture.window); });
     CHECK(gDataStorage.readyToDestroy && !gDisplay.display->ready() && assets->Snapshot().stopped);

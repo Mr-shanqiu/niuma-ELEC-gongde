@@ -54,6 +54,7 @@ jobs:
           path: |
             build-app/evidence/**
             build-app/Release/niuma-runtime-candidate.exe
+            build-app/Release/niuma-runtime-app-test.exe
             build-app/runtime-fixtures/**
           if-no-files-found: warn
           retention-days: 14

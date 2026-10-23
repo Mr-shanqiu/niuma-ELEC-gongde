@@ -33,6 +33,8 @@
 #include "../reminder_catalog_trust.h"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -391,6 +393,8 @@ struct DisplayAdapter {
   bool failed = false, noticeShown = false;
 #if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
   bool allowSoftwareForTest = false;
+  std::array<double, 1024> frameWorkMs{}, regionWorkMs{};
+  std::size_t measuredFrames = 0;
 #endif
 };
 DisplayAdapter gDisplay;
@@ -1762,6 +1766,10 @@ bool EnsureCompositionDisplay() {
 void RenderCompositionWindow(ULONGLONG now) {
   try {
     if (!EnsureCompositionDisplay()) return;
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+    const auto started = std::chrono::steady_clock::now();
+    const auto before = gDisplay.display->Stats().framesPresented;
+#endif
     input_runtime::ClientDisplayState view;
     view.action = {gState.striking, gInput.authoritative ? gInput.latest.input.actionSerial : 0,
         gState.strikeStarted, static_cast<std::uint32_t>(std::max(1, gState.strikeDurationMs))};
@@ -1779,6 +1787,15 @@ void RenderCompositionWindow(ULONGLONG now) {
       FailCompositionDisplay(); return;
     }
     gDisplay.recoveryAttempts = 0;
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+    if (gDisplay.display->Stats().framesPresented != before &&
+        gDisplay.measuredFrames < gDisplay.frameWorkMs.size()) {
+      const auto index = gDisplay.measuredFrames++;
+      gDisplay.frameWorkMs[index] = std::chrono::duration<double,std::milli>(
+          std::chrono::steady_clock::now()-started).count();
+      gDisplay.regionWorkMs[index] = gDisplay.display->Stats().lastRegionMs;
+    }
+#endif
   } catch (...) { FailCompositionDisplay(); }
 }
 
