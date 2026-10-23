@@ -15,13 +15,14 @@ using client::core::ObserveResult;
 using Trigger = niuma::reminder::ActivitySampler::Trigger;
 
 struct InputService::Impl {
-  explicit Impl(std::size_t capacity) : core(capacity) {}
+  explicit Impl(std::size_t capacity) : core(capacity), ledger(capacity) {}
 
   static thread_local Impl* owner;
   static constexpr std::size_t kCommandCapacity = 32;
   static constexpr ULONGLONG kViewIntervalMs = 16;
 
   InputCore core;
+  client::core::LedgerSnapshotChannel ledger;
   InputServiceOptions options;
   client::core::LatestSnapshot<InputServiceSnapshot> snapshots;
   client::core::LatestSnapshotWake wake;
@@ -273,6 +274,9 @@ struct InputService::Impl {
       nextReminder = now + 1000;
     }
     if (oldVersion != core.snapshot().version) Publish(now);
+    // A requested ledger copy is bounded by constructor capacity and happens
+    // outside callbacks. Ready belongs to the slow consumer until it releases.
+    if (ledger.ProduceIfRequested(core)) Publish(now);
     TryNotify(now);
   }
 
@@ -322,6 +326,7 @@ struct InputService::Impl {
       Deferred(GetTickCount64());
     }
     Uninstall();
+    ledger.Close(core.snapshot());
     view.running = false;
     ClearOpportunity();
     Publish(GetTickCount64());
@@ -420,6 +425,19 @@ bool InputService::PostCommand(const InputCommand& command) noexcept {
 bool InputService::ReadLatest(InputServiceSnapshot& snapshot) noexcept {
   impl_->wake.BeginConsume();
   return impl_->snapshots.Read(snapshot);
+}
+
+client::core::LedgerRequestResult InputService::RequestLedger(
+    client::core::LedgerRequest request) noexcept {
+  auto& self = *impl_;
+  if (!self.live.load(std::memory_order_acquire)) return client::core::LedgerRequestResult::Stopped;
+  const auto result = self.ledger.Request(request);
+  if (result == client::core::LedgerRequestResult::Accepted) SetEvent(self.commandEvent);
+  return result;
+}
+
+bool InputService::TryConsumeLedger(client::core::LedgerSnapshotResult& result) {
+  return impl_->ledger.TryConsume(result);
 }
 
 const InputServiceStop& InputService::Stop() noexcept {

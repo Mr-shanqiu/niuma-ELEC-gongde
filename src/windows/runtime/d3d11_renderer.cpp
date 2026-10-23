@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cwctype>
 #include <iomanip>
 #include <sstream>
 #include <unordered_map>
@@ -60,6 +61,62 @@ std::string HResultText(HRESULT result) {
     text << "0x" << std::hex << std::uppercase << std::setw(8)
          << std::setfill('0') << static_cast<std::uint32_t>(result);
     return text.str();
+}
+
+void ClassifyAdapter(AdapterInfo& adapter) {
+    std::wstring name = adapter.description + L" " + adapter.descriptor1Description;
+    std::transform(name.begin(), name.end(), name.begin(),
+        [](wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
+    const auto contains = [&name](const wchar_t* token) {
+        return name.find(token) != std::wstring::npos;
+    };
+    const bool createdWithWarp = adapter.createdDriverType == D3D_DRIVER_TYPE_WARP;
+    const bool softwareFlag = adapter.descriptor1Available &&
+        (adapter.descriptor1Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+    const bool knownSoftwareIdentity = contains(L"basic render driver") || contains(L"warp") ||
+        contains(L"software renderer") || contains(L"software rasterizer") ||
+        contains(L"swiftshader") || contains(L"llvmpipe") ||
+        (adapter.vendorId == 0x1414 && adapter.deviceId == 0x008c) ||
+        (adapter.descriptor1VendorId == 0x1414 && adapter.descriptor1DeviceId == 0x008c);
+    adapter.software = createdWithWarp || softwareFlag || knownSoftwareIdentity;
+    adapter.hardwareAccelerated = false;
+    if (adapter.software) {
+        adapter.kind = "software";
+        adapter.classificationReason = createdWithWarp ? "device-created-with-warp"
+            : softwareFlag ? "dxgi-software-flag" : "known-software-adapter-identity";
+        return;
+    }
+    const bool remoteFlag = adapter.descriptor1Available &&
+        (adapter.descriptor1Flags & DXGI_ADAPTER_FLAG_REMOTE) != 0;
+    const bool virtualIdentity = contains(L"virtual") || contains(L"vmware") ||
+        contains(L"parallels") || contains(L"citrix") || contains(L"remote display") ||
+        contains(L"hyper-v") || contains(L"virtio") || contains(L"qxl") ||
+        adapter.vendorId == 0x15ad || adapter.vendorId == 0x80ee ||
+        adapter.vendorId == 0x1af4 || adapter.vendorId == 0x1ab8;
+    if (remoteFlag || virtualIdentity) {
+        adapter.kind = "virtual";
+        adapter.classificationReason = remoteFlag ? "dxgi-remote-flag" : "virtual-adapter-identity";
+        return;
+    }
+    // A successful HARDWARE request alone is insufficient: Windows sessions can
+    // still expose Basic Render Driver. Require a usable descriptor and known
+    // physical GPU vendor; unfamiliar adapters remain usable but unclassified.
+    const bool knownGpuVendor = adapter.vendorId == 0x8086 || adapter.vendorId == 0x10de ||
+        adapter.vendorId == 0x1002 || adapter.vendorId == 0x5143 || adapter.vendorId == 0x17cb;
+    const bool consistentIdentity = adapter.vendorId == adapter.descriptor1VendorId &&
+        adapter.deviceId == adapter.descriptor1DeviceId;
+    if (adapter.descriptor1Available && consistentIdentity && knownGpuVendor &&
+        !adapter.description.empty() &&
+        adapter.createdDriverType == D3D_DRIVER_TYPE_HARDWARE &&
+        SUCCEEDED(adapter.hardwareCreateResult)) {
+        adapter.kind = "hardware";
+        adapter.classificationReason = "recognized-gpu-with-nonsoftware-dxgi-descriptor";
+        adapter.hardwareAccelerated = true;
+        return;
+    }
+    adapter.kind = "unknown";
+    adapter.classificationReason = !adapter.descriptor1Available ? "adapter1-description-unavailable"
+        : !consistentIdentity ? "inconsistent-adapter-descriptions" : "unrecognized-adapter-identity";
 }
 }  // namespace
 
@@ -249,26 +306,35 @@ bool D3D11Renderer::Initialize(HWND window, int width, int height, bool allowSof
     }
     // A failed initialization releases every partial COM resource, while keeping
     // its original error available to the caller.
-    const auto failed = [&state](HRESULT result, const char* operation) {
-        state.Fail(result, operation);
+    const auto releaseFailed = [&state]() {
+        auto adapterDetails = std::move(state.adapter);
         state.Release();
+        state.adapter = std::move(adapterDetails);
         return false;
+    };
+    const auto failed = [&state, &releaseFailed](HRESULT result, const char* operation) {
+        state.Fail(result, operation);
+        return releaseFailed();
     };
     constexpr D3D_FEATURE_LEVEL levels[] = {
         D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0,
     };
     D3D_FEATURE_LEVEL level{};
+    state.adapter.requestedDriverType = D3D_DRIVER_TYPE_HARDWARE;
     HRESULT result = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 3, D3D11_SDK_VERSION,
         state.device.GetAddressOf(), &level, state.context.GetAddressOf());
-    bool warp = false;
+    state.adapter.hardwareCreateResult = result;
+    if (SUCCEEDED(result)) state.adapter.createdDriverType = D3D_DRIVER_TYPE_HARDWARE;
     if (FAILED(result) && allowSoftwareForTest) {
         state.context.Reset();
         state.device.Reset();
         result = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr,
             D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 3, D3D11_SDK_VERSION,
             state.device.GetAddressOf(), &level, state.context.GetAddressOf());
-        warp = SUCCEEDED(result);
+        state.adapter.warpCreateResult = result;
+        state.adapter.createdDriverType = SUCCEEDED(result)
+            ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_UNKNOWN;
     }
     if (FAILED(result)) return failed(result, "Create D3D11 device");
 
@@ -280,19 +346,26 @@ bool D3D11Renderer::Initialize(HWND window, int width, int height, bool allowSof
     if (FAILED(result)) return failed(result, "Get DXGI adapter");
     DXGI_ADAPTER_DESC adapterDesc{};
     result = adapter->GetDesc(&adapterDesc);
+    state.adapter.getDescResult = result;
     if (FAILED(result)) return failed(result, "Read adapter description");
     state.adapter.description = adapterDesc.Description;
     state.adapter.vendorId = adapterDesc.VendorId;
     state.adapter.deviceId = adapterDesc.DeviceId;
     state.adapter.featureLevel = static_cast<std::uint32_t>(level);
-    state.adapter.software = warp;
     ComPtr<IDXGIAdapter1> adapter1;
-    if (SUCCEEDED(adapter.As(&adapter1))) {
+    state.adapter.queryAdapter1Result = adapter.As(&adapter1);
+    if (SUCCEEDED(state.adapter.queryAdapter1Result)) {
         DXGI_ADAPTER_DESC1 desc1{};
-        if (SUCCEEDED(adapter1->GetDesc1(&desc1))) {
-            state.adapter.software = warp || (desc1.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+        state.adapter.getDesc1Result = adapter1->GetDesc1(&desc1);
+        if (SUCCEEDED(state.adapter.getDesc1Result)) {
+            state.adapter.descriptor1Available = true;
+            state.adapter.descriptor1Flags = desc1.Flags;
+            state.adapter.descriptor1Description = desc1.Description;
+            state.adapter.descriptor1VendorId = desc1.VendorId;
+            state.adapter.descriptor1DeviceId = desc1.DeviceId;
         }
     }
+    ClassifyAdapter(state.adapter);
     if (state.adapter.software && !allowSoftwareForTest) {
         return failed(DXGI_ERROR_UNSUPPORTED, "Software adapter disallowed");
     }
@@ -326,8 +399,7 @@ bool D3D11Renderer::Initialize(HWND window, int width, int height, bool allowSof
     result = state.compositionTarget->SetRoot(state.visual.Get());
     if (FAILED(result)) return failed(result, "Set composition root");
     if (!state.CreateTarget() || !state.CreatePipeline()) {
-        state.Release();
-        return false;
+        return releaseFailed();
     }
     result = state.composition->Commit();
     if (FAILED(result)) return failed(result, "Commit composition tree");

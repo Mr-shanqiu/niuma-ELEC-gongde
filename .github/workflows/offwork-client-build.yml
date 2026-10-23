@@ -39,15 +39,15 @@ jobs:
         run: |
           cmake -S . -B build-runtime -G "Visual Studio 17 2022" -A x64
           if ($LASTEXITCODE -ne 0) { throw "Runtime configuration failed" }
-          cmake --build build-runtime --config Release --target niuma-runtime-p0 niuma-client-input-test niuma-alpha-region-test --parallel 2
+          cmake --build build-runtime --config Release --target niuma-runtime-p0 niuma-prepared-alpha-test niuma-client-ledger-test niuma-windows-input --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Runtime P0 compilation failed" }
-      - name: New pure-core rules and CPU hit-region tests
+      - name: New prepared region and complete-ledger tests (reuse prior input-chain evidence)
         shell: pwsh
         run: |
-          & ./build-runtime/Release/niuma-client-input-test.exe
-          if ($LASTEXITCODE -ne 0) { throw "Input core failed" }
-          & ./build-runtime/Release/niuma-alpha-region-test.exe
-          if ($LASTEXITCODE -ne 0) { throw "Alpha region failed" }
+          & ./build-runtime/Release/niuma-prepared-alpha-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "Prepared alpha region failed" }
+          & ./build-runtime/Release/niuma-client-ledger-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "Complete ledger channel failed" }
       - name: Owned windows, separate process click witness and transparent frames
         shell: pwsh
         run: |

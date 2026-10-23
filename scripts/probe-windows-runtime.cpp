@@ -2,6 +2,7 @@
 // separate witness process. It never opens installed data or registers hooks.
 #include "runtime-p0-fixtures.h"
 #include "../src/windows/runtime/alpha_region.h"
+#include "../src/windows/runtime/prepared_alpha_region.h"
 
 #include <windowsx.h>
 #include <objbase.h>
@@ -219,21 +220,38 @@ struct Probe {
     std::ofstream report;
     std::vector<Record> records;
     std::string adapter, error;
+    AdapterInfo adapterInfo;
     bool software = true;
+    bool interactive = true;
     std::uint64_t textureBytes = 0, cpuTextureBytes = 0, captures = 0, presentCount = 0;
     double regionMean = 0, regionP95 = 0, submitMean = 0;
+    double preparationMs = 0;
+    std::uint64_t preparedBytes = 0, distantTransparentPixelsPeak = 0;
     std::uint64_t regionSamples = 0, conservativePixelsPeak = 0, rectangleCountPeak = 0;
     explicit Probe(const fs::path& output) : report(output) { Check(report.good(), "Open P0 report"); }
     void Add(std::string name, bool ok, double ms = 0) { records.push_back({std::move(name), ms, ok}); }
     ~Probe() {
         report << "{\n  \"scope\":\"P0 diagnostic, not installed client acceptance\",\n"
+               << "  \"crossProcessInteractionExercised\":" << (interactive ? "true" : "false") << ",\n"
                << "  \"adapter\":" << JsonString(adapter) << ",\n  \"softwareAdapter\":" << (software ? "true" : "false")
+               << ",\n  \"adapterKind\":" << JsonString(adapterInfo.kind)
+               << ",\n  \"adapterClassificationReason\":" << JsonString(adapterInfo.classificationReason)
+               << ",\n  \"hardwareAcceleratedIdentity\":" << (adapterInfo.hardwareAccelerated ? "true" : "false")
+               << ",\n  \"adapterVendor\":" << adapterInfo.vendorId << ",\n  \"adapterDevice\":" << adapterInfo.deviceId
+               << ",\n  \"hardwareCreateResult\":" << static_cast<long>(adapterInfo.hardwareCreateResult)
+               << ",\n  \"warpCreateResult\":" << static_cast<long>(adapterInfo.warpCreateResult)
+               << ",\n  \"getDescResult\":" << static_cast<long>(adapterInfo.getDescResult)
+               << ",\n  \"getDesc1Result\":" << static_cast<long>(adapterInfo.getDesc1Result)
                << ",\n  \"hardwarePerformanceProven\":false,\n  \"physicalTypingMeasured\":false,\n"
                << "  \"error\":" << JsonString(error) << ",\n  \"textureBytesPeak\":" << textureBytes
                << ",\n  \"cpuTextureBytesPeak\":" << cpuTextureBytes << ",\n  \"diagnosticReadbacks\":" << captures
                << ",\n  \"presents\":" << presentCount << ",\n  \"regionMeanMs\":" << regionMean
                << ",\n  \"regionP95Ms\":" << regionP95 << ",\n  \"submitMeanMs\":" << submitMean
                << ",\n  \"regionSamples\":" << regionSamples
+               << ",\n  \"regionMethod\":\"prepared source support / native transform\""
+               << ",\n  \"regionPreparationMs\":" << preparationMs
+               << ",\n  \"preparedMaskBytesPeak\":" << preparedBytes
+               << ",\n  \"distantTransparentPixelsPeak\":" << distantTransparentPixelsPeak
                << ",\n  \"conservativePixelsPeak\":" << conservativePixelsPeak
                << ",\n  \"rectangleCountPeak\":" << rectangleCountPeak << ",\n  \"checks\":[\n";
         for (std::size_t i = 0; i < records.size(); ++i) {
@@ -245,17 +263,17 @@ struct Probe {
     }
 };
 // Implemented below after the independent alpha-region interface is included.
-int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware);
+int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware, bool interactive);
 int wmain(int argc, wchar_t** argv) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     try {
         if (argc == 3 && std::wstring(argv[1]) == L"--witness") return Witness(argv[2]);
-        if (argc < 4 || std::wstring(argv[1]) != L"--ci-probe") {
-            std::cerr << "Diagnostic only. Usage: --ci-probe <repo-root> <output-directory> [--allow-software-for-test]\n";
+        if (argc < 4 || (std::wstring(argv[1]) != L"--ci-probe" && std::wstring(argv[1]) != L"--display-probe")) {
+            std::cerr << "Diagnostic only. Usage: --ci-probe|--display-probe <repo-root> <output-directory> [--allow-software-for-test]\n";
             return 2;
         }
         const bool allowSoftware = argc == 5 && std::wstring(argv[4]) == L"--allow-software-for-test";
-        return RunProbe(fs::path(argv[2]), fs::path(argv[3]), allowSoftware);
+        return RunProbe(fs::path(argv[2]), fs::path(argv[3]), allowSoftware, std::wstring(argv[1]) == L"--ci-probe");
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
 
@@ -263,26 +281,22 @@ struct RegionHandle {
     HRGN value = nullptr;
     ~RegionHandle() { if (value) DeleteObject(value); }
 };
-AlphaRegionResult RegionFor(int width, int height, const std::vector<Quad>& quads,
-                            const p0::FixtureScene& scene) {
-    std::vector<AlphaRegionQuad> inputs;
+using PreparedMasks = std::vector<std::pair<std::uint32_t, PreparedAlphaMask>>;
+PreparedAlphaRegionResult RegionFor(int width, int height, const std::vector<Quad>& quads,
+                                   const PreparedMasks& masks) {
+    std::vector<PreparedAlphaQuad> inputs;
     for (const auto& quad : quads) {
-        const auto& textures = scene.Textures();
-        const auto found = std::find_if(textures.begin(), textures.end(),
+        const auto found = std::find_if(masks.begin(), masks.end(),
             [&](const auto& item) { return item.first == quad.textureId; });
-        Check(found != textures.end(), "Resolve CPU alpha texture");
-        inputs.push_back(FromRendererQuad(quad, found->second));
+        Check(found != masks.end(), "Resolve prepared alpha mask");
+        inputs.push_back(FromRendererPreparedQuad(quad, found->second));
     }
-    return RasterizeAlphaRegion(width, height, inputs);
+    return BuildPreparedAlphaRegion(width, height, inputs);
 }
-void InstallRegion(HWND window, const AlphaRegionResult& region) {
-    auto data = MakeAlphaRegionData(region);
-    Check(data.success, "Serialize hit region: " + data.error);
-    RegionHandle owned{ExtCreateRegion(nullptr, data.byteCount,
-        reinterpret_cast<const RGNDATA*>(data.words.data()))};
-    Check(owned.value != nullptr, "Create conservative alpha region");
-    Check(SetWindowRgn(window, owned.value, TRUE) != 0, "Install alpha region");
-    owned.value = nullptr;  // Ownership transferred to USER, never delete again.
+void InstallRegion(HWND window, PreparedAlphaRegionResult& region) {
+    Check(region.region != nullptr, "Prepared region handle missing");
+    Check(SetWindowRgn(window, region.region, TRUE) != 0, "Install alpha region");
+    region.ReleaseRegion();  // Ownership transferred only after USER accepts it.
 }
 std::vector<std::uint8_t> RegionMask(const AlphaRegionResult& region) {
     std::vector<std::uint8_t> out(static_cast<std::size_t>(region.width) * region.height, 0);
@@ -358,13 +372,20 @@ void InteractionChecks(HWND overlay, OverlayState& overlayState, WitnessProcess&
     probe.Add(prefix + "/drag-no-focus-steal", afterDrag.left == beforeDrag.left + 13 && afterDrag.top == beforeDrag.top + 9 && GetForegroundWindow() == witness.window());
     SetWindowPos(overlay, nullptr, beforeDrag.left, beforeDrag.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
 }
-int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware) {
+int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware, bool interactive) {
     fs::create_directories(output);
     Probe probe(output / "runtime-p0.json");
+    probe.interactive = interactive;
     try {
         ComScope com; Check(SUCCEEDED(com.result), "Initialize COM");
-        CursorScope cursor;
-        WitnessProcess witness;
+        // Passive display mode never moves the pointer, changes foreground,
+        // injects input, or captures whatever is behind the owned overlay.
+        std::unique_ptr<CursorScope> cursor;
+        std::unique_ptr<WitnessProcess> witness;
+        if (interactive) {
+            cursor = std::make_unique<CursorScope>();
+            witness = std::make_unique<WitnessProcess>();
+        }
         RegisterProbeClass(L"NiuMaP0Overlay", OverlayProc);
         OverlayState windowState;
         HWND window = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
@@ -372,13 +393,27 @@ int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware) {
             nullptr, nullptr, GetModuleHandleW(nullptr), &windowState);
         Check(window != nullptr, "Create composition overlay");
         D3D11Renderer renderer;
-        Check(renderer.Initialize(window, 240, 250, allowSoftware), renderer.LastErrorMessage());
+        const bool initialized = renderer.Initialize(window, 240, 250, allowSoftware);
+        probe.adapterInfo = renderer.Adapter();
         probe.adapter = Narrow(renderer.Adapter().description); probe.software = renderer.Adapter().software;
+        Check(initialized, renderer.LastErrorMessage());
         ShowWindow(window, SW_SHOWNOACTIVATE);
         std::vector<double> regionTimes, submitTimes;
         for (bool offwork : {false,true}) {
             p0::FixtureScene scene;
             Check(scene.Load(renderer,root,offwork), scene.LastError());
+            PreparedMasks masks;
+            std::uint64_t preparedBytes = 0;
+            for (const auto& item : scene.Textures()) {
+                const auto& image = item.second;
+                auto prepared = PrepareAlphaMask({image.bgraPremultiplied.data(), image.bgraPremultiplied.size(),
+                    image.width, image.height, image.strideBytes});
+                Check(prepared.success, "Prepare source alpha: " + prepared.error);
+                preparedBytes += prepared.storageBytes;
+                probe.preparationMs += prepared.preparationMs;
+                masks.emplace_back(item.first, std::move(prepared));
+            }
+            probe.preparedBytes = std::max(probe.preparedBytes, preparedBytes);
             std::uint64_t cpuBytes = 0;
             for (const auto& texture : scene.Textures()) cpuBytes += texture.second.bgraPremultiplied.size();
             probe.cpuTextureBytes = std::max(probe.cpuTextureBytes,cpuBytes);
@@ -392,11 +427,12 @@ int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware) {
                     const float phase = sample / 11.0f;
                     const auto quads = scene.Quads(phase,scale);
                     const auto beginRegion = Clock::now();
-                    const auto region = RegionFor(width,height,quads,scene);
-                    Check(region.success, "Compute alpha region: " + region.error);
-                    probe.conservativePixelsPeak = std::max(probe.conservativePixelsPeak,region.stats.conservativePixels);
-                    probe.rectangleCountPeak = std::max(probe.rectangleCountPeak,static_cast<std::uint64_t>(region.stats.rectangleCount));
-                    InstallRegion(window,region);
+                    auto preparedRegion = RegionFor(width,height,quads,masks);
+                    Check(preparedRegion.success, "Transform prepared alpha: " + preparedRegion.error);
+                    const auto& region = preparedRegion.raster;
+                    probe.conservativePixelsPeak = std::max(probe.conservativePixelsPeak,preparedRegion.stats.conservativePixels);
+                    probe.rectangleCountPeak = std::max(probe.rectangleCountPeak,static_cast<std::uint64_t>(preparedRegion.stats.rectangleCount));
+                    InstallRegion(window,preparedRegion);
                     const double regionMs = std::chrono::duration<double,std::milli>(Clock::now()-beginRegion).count();
                     regionTimes.push_back(regionMs);
                     const auto beginSubmit = Clock::now();
@@ -406,18 +442,32 @@ int RunProbe(const fs::path& root, const fs::path& output, bool allowSoftware) {
                     PixelImage frame;
                     Check(renderer.Capture(frame),renderer.LastErrorMessage());
                     const auto mask = RegionMask(region);
-                    std::size_t clippedVisible = 0, visible = 0;
+                    std::size_t clippedVisible = 0, visible = 0, distantTransparent = 0;
                     for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
                         const auto alpha = frame.bgraPremultiplied[y*frame.strideBytes+x*4+3];
                         if (alpha != 0) { ++visible; if (!mask[y*width+x]) ++clippedVisible; }
+                        else if (mask[y*width+x]) {
+                            bool nearVisible = false;
+                            for (int dy=-2;dy<=2 && !nearVisible;++dy)
+                                for (int dx=-2;dx<=2;++dx) {
+                                    const int px=x+dx, py=y+dy;
+                                    if (px>=0 && py>=0 && px<width && py<height &&
+                                        frame.bgraPremultiplied[py*frame.strideBytes+px*4+3]!=0) {
+                                        nearVisible=true; break;
+                                    }
+                                }
+                            if (!nearVisible) ++distantTransparent;
+                        }
                     }
+                    probe.distantTransparentPixelsPeak=std::max(probe.distantTransparentPixelsPeak,static_cast<std::uint64_t>(distantTransparent));
                     probe.Add(prefix+"/alpha-"+std::to_string(sample), visible > 100 && clippedVisible == 0, regionMs);
+                    probe.Add(prefix+"/no-distant-transparent-interception-"+std::to_string(sample), distantTransparent==0);
                     std::string pngError;
                     if (sample==0 || sample==5 || sample==11)
                         Check(p0::SavePng(output/(prefix+"-"+std::to_string(sample)+".png"),frame,pngError),pngError);
                     Check(renderer.Present(),renderer.LastErrorMessage()); Pump(30);
-                    if (sample==0) {
-                        InteractionChecks(window,windowState,witness,frame,region,prefix,probe);
+                    if (sample==0 && interactive) {
+                        InteractionChecks(window,windowState,*witness,frame,region,prefix,probe);
                         Pump(100);
                         const auto crop = DesktopCrop(window);
                         if (!crop.bgraPremultiplied.empty())

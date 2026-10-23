@@ -52,6 +52,23 @@ struct AdapterInfo {
     std::uint32_t deviceId = 0;
     std::uint32_t featureLevel = 0;
     bool software = false;
+    // Classification of reported adapter identity, not a performance verdict.
+    // Unknown/virtual adapters must not be reported as proven hardware execution.
+    std::string kind = "unknown";
+    std::string classificationReason;
+    bool hardwareAccelerated = false;
+    std::uint32_t requestedDriverType = 0;
+    std::uint32_t createdDriverType = 0;
+    HRESULT hardwareCreateResult = E_PENDING;
+    HRESULT warpCreateResult = E_PENDING;
+    HRESULT getDescResult = E_PENDING;
+    HRESULT queryAdapter1Result = E_PENDING;
+    HRESULT getDesc1Result = E_PENDING;
+    bool descriptor1Available = false;
+    std::uint32_t descriptor1Flags = 0;
+    std::wstring descriptor1Description;
+    std::uint32_t descriptor1VendorId = 0;
+    std::uint32_t descriptor1DeviceId = 0;
 };
 
 struct RendererStats {

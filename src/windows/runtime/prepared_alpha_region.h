@@ -1,0 +1,95 @@
+#pragma once
+
+#include "alpha_region.h"
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
+namespace niuma::runtime {
+
+struct PreparedAlphaMask {
+    bool success = false;
+    std::string error;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    // Integer coordinates are twice source texel coordinates. Each nonzero
+    // alpha texel (i,j) contributes [i-.5,i+1.5] x [j-.5,j+1.5], clipped to
+    // the texture domain. These bands preserve transparent holes.
+    std::vector<AlphaRegionRect> supportRectangles;
+    std::uint64_t sourcePixels = 0;
+    std::uint64_t nonzeroSourcePixels = 0;
+    std::uint64_t storageBytes = 0;
+    double preparationMs = 0;
+#ifdef _WIN32
+    // Prepared once, used directly by ExtCreateRegion(XFORM) each frame.
+    std::vector<std::uint32_t> nativeWords;
+    std::uint32_t nativeByteCount = 0;
+#endif
+};
+
+PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image);
+
+struct PreparedAlphaQuad {
+    const PreparedAlphaMask* mask = nullptr;
+    std::array<AlphaRegionPoint, 4> positions{};
+    std::array<AlphaRegionPoint, 4> uv{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+    float opacity = 1;
+    std::optional<AlphaRegionScissor> scissor;
+};
+
+// x' = xx*x + yx*y + tx; y' = xy*x + yy*y + ty.
+struct PreparedAlphaAffine {
+    double xx = 0, xy = 0, yx = 0, yy = 0, tx = 0, ty = 0;
+};
+
+// Pure calculation for the supported P0 domain: affine positions and an
+// axis-aligned, nonempty UV rectangle within [0,1]. Rotation, shear and flipped
+// UVs are supported. Perspective/non-affine quads and wrapping UVs explicitly
+// fail; callers may report unsupported, never silently use a bounding box.
+bool ResolvePreparedAlphaTransform(const PreparedAlphaQuad& quad,
+                                   PreparedAlphaAffine& transform,
+                                   std::string& error);
+
+#ifdef _WIN32
+struct Quad;
+PreparedAlphaQuad FromRendererPreparedQuad(const Quad& quad, const PreparedAlphaMask& mask);
+
+struct PreparedAlphaRegionStats {
+    double transformMs = 0;  // Includes native transform/clip/union and reporting.
+    std::uint64_t coveredPixels = 0;
+    std::uint64_t conservativePixels = 0;  // Added by one destination-pixel dilation.
+    std::size_t rectangleCount = 0;
+    std::size_t transformedMasks = 0;
+};
+
+struct PreparedAlphaRegionResult {
+    bool success = false;
+    std::string error;
+    HRGN region = nullptr;
+    // Same native region in band form for diagnostics; no output pixel scan.
+    AlphaRegionResult raster;
+    PreparedAlphaRegionStats stats;
+
+    PreparedAlphaRegionResult() = default;
+    ~PreparedAlphaRegionResult();
+    PreparedAlphaRegionResult(PreparedAlphaRegionResult&&) noexcept;
+    PreparedAlphaRegionResult& operator=(PreparedAlphaRegionResult&&) noexcept;
+    PreparedAlphaRegionResult(const PreparedAlphaRegionResult&) = delete;
+    PreparedAlphaRegionResult& operator=(const PreparedAlphaRegionResult&) = delete;
+    // Call only after SetWindowRgn succeeds: USER now owns the handle.
+    HRGN ReleaseRegion() noexcept;
+};
+
+// No CPU texel/pixel loop and no GPU readback. Cached source regions are
+// transformed by GDI, clipped to the quad and surface/scissor, conservatively
+// dilated by one destination pixel, then unioned. SetWindowRgn stays caller-owned
+// and its time must be added by the caller when reporting total region cost.
+PreparedAlphaRegionResult BuildPreparedAlphaRegion(
+    int width, int height, const std::vector<PreparedAlphaQuad>& quads);
+#endif
+
+}  // namespace niuma::runtime

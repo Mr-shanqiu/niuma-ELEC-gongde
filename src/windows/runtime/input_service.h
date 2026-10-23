@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../client/core/input_state.h"
+#include "../../client/core/ledger_snapshot.h"
 
 #include <windows.h>
 
@@ -86,7 +87,8 @@ struct InputServiceStop {
 };
 
 // One start per instance; restart hooks through the command mailbox. Start,
-// commands, ReadLatest and Stop belong to one UI owner. The notification HWND
+// commands, ReadLatest, ledger requests/consumption and Stop belong to one UI
+// owner. The notification HWND
 // must remain alive until Stop has joined the input thread. No input callback
 // waits for this owner, reads/writes files, or calls a window synchronously.
 class InputService {
@@ -99,6 +101,13 @@ class InputService {
   InputServiceStart Start(const InputServiceOptions& options);
   bool PostCommand(const InputCommand& command) noexcept;
   bool ReadLatest(InputServiceSnapshot& snapshot) noexcept;
+  // A full, versioned daily ledger, separate from the latest UI view. Only one
+  // request/result may be outstanding; consume before requesting another.
+  // EpochMismatch requires a new request using the newly observed epoch.
+  // Test for a result on every notification, even if input.version is unchanged.
+  // A failed result allocation leaves Ready intact for the same consumer retry.
+  client::core::LedgerRequestResult RequestLedger(client::core::LedgerRequest request) noexcept;
+  bool TryConsumeLedger(client::core::LedgerSnapshotResult& result);
   const InputServiceStop& Stop() noexcept;
   bool running() const noexcept;
   static client::core::LocalDate CaptureLocalDate() noexcept;
