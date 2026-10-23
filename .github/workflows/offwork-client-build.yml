@@ -25,6 +25,9 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
+      - name: Preserve pinned source bytes on this disposable runner
+        shell: pwsh
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - name: Bind source artwork and inventory decoded resources
         shell: pwsh
