@@ -21,12 +21,34 @@ bool InputDesktopAvailable() {
   if(!desktop) return false;
   CloseDesktop(desktop); return true;
 }
+std::uint64_t CpuTime100ns(bool uiThread) {
+  FILETIME created{}, exited{}, kernel{}, user{};
+  CHECK(uiThread ? GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user)
+                 : GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user));
+  ULARGE_INTEGER k{},u{};
+  k.LowPart=kernel.dwLowDateTime; k.HighPart=kernel.dwHighDateTime;
+  u.LowPart=user.dwLowDateTime; u.HighPart=user.dwHighDateTime;
+  return k.QuadPart+u.QuadPart;
+}
+double Percentile(std::array<double,1024> values,std::size_t count,double fraction) {
+  CHECK(count>0 && count<=values.size());
+  std::sort(values.begin(),values.begin()+count);
+  return values[static_cast<std::size_t>(std::ceil(count*fraction))-1];
+}
 void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned activeFirstSeconds,unsigned mixedPeriodSeconds) {
   CHECK(SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)));
   Gdiplus::GdiplusStartupInput startup; ULONG_PTR gdi=0;
   CHECK(Gdiplus::GdiplusStartup(&gdi,&startup,nullptr)==Gdiplus::Ok);
   {
     Fixture fixture(parent,L"durability",true);
+    // Exercise the planned 200% complex-scene budget without changing the
+    // machine's actual display settings. Only this owned window is resized.
+    gOffwork.enabled=true; gOffwork.hour=18; gOffwork.minute=0;
+    gState.dpi=192;
+    gState.windowWidth=ScaleDip(kWindowDipWidth,gState.dpi);
+    gState.windowHeight=ScaleDip(MainWindowDipHeight(),gState.dpi);
+    CHECK(SetWindowPos(fixture.window,nullptr,0,0,gState.windowWidth,gState.windowHeight,
+        SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE));
     wchar_t fixtureRoot[MAX_PATH]{};
     CHECK(GetEnvironmentVariableW(L"NIUMA_RUNTIME_FIXTURE_DIR",fixtureRoot,MAX_PATH)>0);
     std::wstring error;
@@ -46,7 +68,6 @@ void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned
     consumed.kind=input_runtime::InputCommandKind::RestoreReminderSegmentConsumed;
     consumed.enabled=true;
     CHECK(SendInputCommand(consumed));
-    gOffwork.enabled=true; gOffwork.hour=18; gOffwork.minute=0;
     RefreshOffwork(false); CHECK(SyncOffworkTimer()); ResizeOffworkWindow();
     std::ofstream samples(fixture.directory/L"samples.jsonl",std::ios::binary);
     CHECK(samples.good());
@@ -83,8 +104,10 @@ void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned
       if(now>=nextSample) {
         PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb=sizeof(memory);
         DWORD handles=0;
+        MEMORYSTATUSEX systemMemory{}; systemMemory.dwLength=sizeof(systemMemory);
         CHECK(GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory)));
         CHECK(GetProcessHandleCount(GetCurrentProcess(),&handles));
+        CHECK(GlobalMemoryStatusEx(&systemMemory));
         const auto& backend=gDisplay.display->BackendStats();
         const auto worker=gAppearance.service->Snapshot();
         const bool interactive=InputDesktopAvailable();
@@ -94,13 +117,25 @@ void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned
         samples<<"{\"elapsedSeconds\":"<<elapsed<<",\"active\":"<<(active?"true":"false")<<
             ",\"inputDesktopAvailable\":"<<(interactive?"true":"false")<<
             ",\"privateBytes\":"<<memory.PrivateUsage<<",\"workingSetBytes\":"<<memory.WorkingSetSize<<
+            ",\"systemAvailableBytes\":"<<systemMemory.ullAvailPhys<<
+            ",\"systemCommitHeadroomBytes\":"<<systemMemory.ullAvailPageFile<<
+            ",\"processCpuTime100ns\":"<<CpuTime100ns(false)<<",\"uiThreadCpuTime100ns\":"<<CpuTime100ns(true)<<
             ",\"handles\":"<<handles<<",\"gdiObjects\":"<<GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS)<<
             ",\"userObjects\":"<<GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS)<<
             ",\"threads\":"<<ProcessThreads()<<",\"textures\":"<<backend.textureCount<<
             ",\"textureBytes\":"<<backend.textureBytes<<",\"sceneCpuBytes\":"<<gDisplay.display->scene()->memory.residentBytes()<<
             ",\"thumbnailBytes\":"<<gAppearance.thumbnails.bytes()<<",\"textBytes\":"<<gDisplay.display->TextStats().pixelBytes<<
             ",\"presents\":"<<backend.presents<<",\"assetPreparations\":"<<worker.completed<<
-            ",\"syntheticCommands\":"<<operations<<",\"switches\":"<<switches<<"}\n";
+            ",\"syntheticCommands\":"<<operations<<",\"switches\":"<<switches<<
+            ",\"dpi\":"<<gState.dpi<<",\"clientWidth\":"<<gState.windowWidth<<
+            ",\"clientHeight\":"<<gState.windowHeight<<",\"frameSamples\":"<<gDisplay.measuredFrames;
+        if(gDisplay.measuredFrames) {
+          samples<<",\"frameWorkWallP95Ms\":"<<Percentile(gDisplay.frameWorkMs,gDisplay.measuredFrames,.95)<<
+              ",\"frameWorkWallP99Ms\":"<<Percentile(gDisplay.frameWorkMs,gDisplay.measuredFrames,.99)<<
+              ",\"regionWallP95Ms\":"<<Percentile(gDisplay.regionWorkMs,gDisplay.measuredFrames,.95);
+        }
+        samples<<"}\n";
+        gDisplay.measuredFrames=0; // Fixed capacity, per-interval samples, no retained frame history.
         samples.flush(); CHECK(samples.good()); nextSample=now+15000;
       }
     }
@@ -122,6 +157,7 @@ void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned
         ",\"additionalLocalOperations\":"<<(finalTotal-1000-operations)<<",\"samples\":"<<sampleCount<<",\"interactiveSamples\":"<<interactiveSamples<<
         ",\"syntheticCommands\":"<<operations<<",\"switches\":"<<switches<<
         ",\"adapterKind\":\""<<kind<<"\",\"globalInputInjected\":false,\"physicalTypingMeasured\":false,"
+        "\"diagnosticDpi\":192,\"frameTimingIncludesPresentWait\":true,\"gpuExecutionTimed\":false,"
         "\"memoryTrendReviewRequired\":true,\"scope\":\"real application adapter; private fixtures and data; synthetic local-fallback activity; no system security or installed profile changes\"}\n";
     result.close(); CHECK(result.good());
     std::wcout<<L"DURABILITY RESULT "<<fixture.directory.wstring()<<L"\n";
