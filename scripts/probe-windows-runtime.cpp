@@ -4,6 +4,7 @@
 #include "../src/windows/runtime/alpha_region.h"
 
 #include <windowsx.h>
+#include <objbase.h>
 #include <psapi.h>
 #include <algorithm>
 #include <chrono>

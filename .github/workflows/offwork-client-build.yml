@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-check]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-runtime-p0:
-    if: ${{ inputs.mode == 'runtime-p0' }}
+    if: ${{ inputs.mode == 'runtime-p0' || inputs.mode == 'runtime-check' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -70,6 +70,43 @@ jobs:
             build-runtime/evidence/*
             build-runtime/Release/niuma-runtime-p0.exe
           if-no-files-found: error
+          retention-days: 14
+
+  windows-runtime-p1:
+    if: ${{ inputs.mode == 'runtime-p1' || inputs.mode == 'runtime-check' }}
+    runs-on: windows-2022
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build new input service and its isolated diagnostic
+        shell: pwsh
+        run: |
+          cmake -S . -B build-input-service -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Input service configuration failed" }
+          cmake --build build-input-service --config Release --target niuma-windows-input niuma-input-service-probe --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Input service compilation failed" }
+      - name: Real hook chain while UI or simulated storage is blocked
+        shell: pwsh
+        run: |
+          & ./build-input-service/Release/niuma-input-service-probe.exe (Join-Path $PWD 'build-input-service/input-service.json')
+          if ($LASTEXITCODE -ne 0) { throw "Input isolation gate blocked or failed; do not substitute posted events" }
+      - name: Bind input diagnostic to source
+        if: always()
+        shell: pwsh
+        run: |
+          $file = 'build-input-service/Release/niuma-input-service-probe.exe'
+          if (Test-Path $file) {
+            @{ sourceCommit=$env:GITHUB_SHA; artifactKind='dedicated-input-service-diagnostic'; sha256=(Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant(); productMainEntryRun=$false; productDataAccessed=$false; published=$false; physicalTypingMeasured=$false } | ConvertTo-Json | Set-Content 'build-input-service/build-info.json'
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-p1-${{ github.sha }}
+          path: |
+            build-input-service/input-service.json
+            build-input-service/build-info.json
+            build-input-service/Release/niuma-input-service-probe.exe
+          if-no-files-found: warn
           retention-days: 14
 
   windows-compile:

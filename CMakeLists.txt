@@ -41,6 +41,21 @@ elseif(APPLE)
   target_compile_options(niuma-reminder-activity-test PRIVATE -Wall -Wextra)
 endif()
 if(WIN32)
+  add_library(niuma-windows-input STATIC src/windows/runtime/input_service.cpp)
+  target_link_libraries(niuma-windows-input PUBLIC niuma-input-core Threads::Threads user32)
+  target_compile_definitions(niuma-windows-input PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+  add_executable(niuma-input-service-probe
+    scripts/probe-windows-input-service.cpp
+    src/windows/runtime/input_service.cpp)
+  target_link_libraries(niuma-input-service-probe PRIVATE niuma-input-core Threads::Threads user32)
+  target_compile_definitions(niuma-input-service-probe PRIVATE
+    NIUMA_INPUT_SERVICE_DIAGNOSTICS UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+  if(MSVC)
+    foreach(input_target niuma-windows-input niuma-input-service-probe)
+      target_compile_options(${input_target} PRIVATE /W4 /permissive- /utf-8)
+      set_property(TARGET ${input_target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endforeach()
+  endif()
   add_executable(niuma-runtime-p0
     scripts/probe-windows-runtime.cpp
     scripts/runtime-p0-fixtures.cpp
