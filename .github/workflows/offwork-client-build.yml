@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain]
+        options: [profile, soak, keyboard-chain, runtime-p0]
 
 permissions:
   contents: read
@@ -20,6 +20,55 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-runtime-p0:
+    if: ${{ inputs.mode == 'runtime-p0' }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bind source artwork and inventory decoded resources
+        shell: pwsh
+        run: |
+          python scripts/prepare-runtime-p0.py build-runtime/evidence
+          if ($LASTEXITCODE -ne 0) { throw "Fixed fixture binding failed" }
+      - name: Build only new shared core and composition diagnostic
+        shell: pwsh
+        run: |
+          cmake -S . -B build-runtime -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Runtime configuration failed" }
+          cmake --build build-runtime --config Release --target niuma-runtime-p0 niuma-client-input-test niuma-alpha-region-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Runtime P0 compilation failed" }
+      - name: New pure-core rules and CPU hit-region tests
+        shell: pwsh
+        run: |
+          & ./build-runtime/Release/niuma-client-input-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "Input core failed" }
+          & ./build-runtime/Release/niuma-alpha-region-test.exe
+          if ($LASTEXITCODE -ne 0) { throw "Alpha region failed" }
+      - name: Owned windows, separate process click witness and transparent frames
+        shell: pwsh
+        run: |
+          & ./build-runtime/Release/niuma-runtime-p0.exe --ci-probe $PWD (Join-Path $PWD 'build-runtime/evidence') --allow-software-for-test
+          if ($LASTEXITCODE -ne 0) { throw "P0 functional gate failed; no substituted hit-test messages" }
+      - name: Bind unpublished diagnostic
+        if: always()
+        shell: pwsh
+        run: |
+          $file = 'build-runtime/Release/niuma-runtime-p0.exe'
+          if (Test-Path $file) {
+            @{ sourceCommit=$env:GITHUB_SHA; artifactKind='composition-p0-diagnostic'; sha256=(Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant(); installerBuilt=$false; published=$false; physicalTypingMeasured=$false } | ConvertTo-Json | Set-Content 'build-runtime/evidence/build-info.json'
+          }
+      - name: Retain new runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-p0-${{ github.sha }}
+          path: |
+            build-runtime/evidence/*
+            build-runtime/Release/niuma-runtime-p0.exe
+          if-no-files-found: error
+          retention-days: 14
+
   windows-compile:
     if: ${{ inputs.mode == 'profile' || inputs.mode == '' }}
     runs-on: windows-2022
