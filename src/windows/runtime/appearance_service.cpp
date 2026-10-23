@@ -1,4 +1,5 @@
 #include "appearance_service.h"
+#include "embedded_scene.h"
 
 #include <objbase.h>
 
@@ -19,11 +20,13 @@ bool SameSource(const niuma::AppearanceResourceRequest& a,
       a.contentFingerprint == b.contentFingerprint;
 }
 bool ValidRequest(const AppearanceLoadRequest& request) noexcept {
-  return request.id && request.generation && !request.source.sourcePath.empty() &&
+  return request.id && request.generation &&
+      (request.kind == AppearanceLoadKind::Woodfish ? request.source.sourcePath.empty() && request.source.id == "builtin.woodfish" : !request.source.sourcePath.empty()) &&
       request.source.sourcePath.size() <= 32767 && !request.source.id.empty() &&
       request.source.id.size() <= 256 && !request.source.contentFingerprint.empty() &&
       request.source.contentFingerprint.size() <= 256 &&
-      (request.kind == AppearanceLoadKind::Current || request.kind == AppearanceLoadKind::Thumbnail) &&
+      (request.kind == AppearanceLoadKind::Current || request.kind == AppearanceLoadKind::Thumbnail ||
+       request.kind == AppearanceLoadKind::GpuCurrent || request.kind == AppearanceLoadKind::Woodfish) &&
       std::isfinite(request.animationOptions.pixelDensity) && request.animationOptions.pixelDensity > 0 &&
       request.animationOptions.byteLimit > 0;
 }
@@ -36,7 +39,15 @@ DWORD PreparationError(niuma::AppearancePreparationStatus status) noexcept {
   }
 }
 void Prepare(const AppearanceLoadRequest& request, AppearanceLoadResult& output) {
-  if (request.kind == AppearanceLoadKind::Current) {
+  if (request.kind == AppearanceLoadKind::GpuCurrent || request.kind == AppearanceLoadKind::Woodfish) {
+    const auto status = request.kind == AppearanceLoadKind::GpuCurrent
+        ? PrepareAppearanceScene(request.source, {}, &output.scene, &output.detail)
+        : PrepareEmbeddedWoodfishScene(request.source, &output.scene, &output.detail);
+    output.status = status == AppearanceSceneStatus::Ready ? niuma::AppearancePreparationStatus::Ready
+        : status == AppearanceSceneStatus::Changed ? niuma::AppearancePreparationStatus::Changed
+        : status == AppearanceSceneStatus::BudgetExceeded ? niuma::AppearancePreparationStatus::BudgetExceeded
+        : niuma::AppearancePreparationStatus::Invalid;
+  } else if (request.kind == AppearanceLoadKind::Current) {
     output.status = niuma::PrepareAppearanceAnimation(request.source, request.animationOptions,
         &output.animation, &output.memory, &output.detail);
   } else {
@@ -45,6 +56,10 @@ void Prepare(const AppearanceLoadRequest& request, AppearanceLoadResult& output)
   }
 }
 bool ValidResource(const AppearanceLoadRequest& request, const AppearanceLoadResult& result) noexcept {
+  if (request.kind == AppearanceLoadKind::GpuCurrent || request.kind == AppearanceLoadKind::Woodfish)
+    return result.scene && !result.animation && !result.thumbnail &&
+        SameSource(result.scene->source, request.source) && result.scene->HasColorPixels();
+  if (result.scene) return false;
   if (request.kind == AppearanceLoadKind::Current)
     return result.animation && !result.thumbnail && result.animation->id == request.source.id &&
         result.animation->contentFingerprint == request.source.contentFingerprint;
@@ -111,7 +126,7 @@ struct AppearanceService::Impl {
       }
       output.request = request;
       if (output.error || output.status != niuma::AppearancePreparationStatus::Ready) {
-        output.animation.reset(); output.thumbnail.reset(); output.memory = {};
+        output.animation.reset(); output.thumbnail.reset(); output.scene.reset(); output.memory = {};
       }
       lock.lock();
       active.reset();
@@ -159,7 +174,7 @@ AppearanceSubmitResult AppearanceService::TrySubmit(const AppearanceLoadRequest&
   if (!self.started) return {AppearanceSubmit::NotStarted};
   if (!ValidRequest(request)) return {AppearanceSubmit::Invalid};
   if (request.id <= self.lastId) return {AppearanceSubmit::Stale};
-  if (self.pending && self.pending->kind == AppearanceLoadKind::Current &&
+  if (self.pending && self.pending->kind != AppearanceLoadKind::Thumbnail &&
       request.kind == AppearanceLoadKind::Thumbnail) return {AppearanceSubmit::LowerPriority};
   try {
     auto frozen = std::make_shared<const AppearanceLoadRequest>(request);
@@ -195,7 +210,7 @@ AppearanceServiceSnapshot AppearanceService::Snapshot() const noexcept {
   output.completed = self.completed; output.replaced = self.replaced;
   output.discardedPendingId = self.discardedPendingId;
   output.workerThreadId = self.workerThreadId;
-  output.readyResourceBytes = self.result ? self.result->memory.residentBytes() : 0;
+  output.readyResourceBytes = self.result ? (self.result->scene ? self.result->scene->memory.residentBytes() : self.result->memory.residentBytes()) : 0;
   return output;
 }
 

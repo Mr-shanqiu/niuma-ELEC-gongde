@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -75,6 +75,37 @@ jobs:
         with:
           name: windows-runtime-resources-${{ github.sha }}
           path: build-resources/evidence/**
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-runtime-composition:
+    if: ${{ inputs.mode == 'runtime-composition' }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production scene, text, presenter and complete display adapters
+        shell: pwsh
+        run: |
+          cmake -S . -B build-composition -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Composition configuration failed" }
+          cmake --build build-composition --config Release --target niuma-appearance-scene-test niuma-widget-text-cache-test niuma-composition-presenter-test niuma-client-display-test niuma-appearance-service-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Composition compilation failed" }
+      - name: Exercise only newly integrated scene and display paths
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-composition/evidence | Out-Null
+          $failed = @()
+          foreach ($name in @('appearance-scene', 'widget-text-cache', 'composition-presenter', 'client-display', 'appearance-service')) {
+            & "./build-composition/Release/niuma-$name-test.exe" | Tee-Object "build-composition/evidence/$name.txt"
+            if ($LASTEXITCODE -ne 0) { $failed += $name }
+          }
+          if ($failed.Count -ne 0) { throw "Failed composition scopes: $failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-composition-${{ github.sha }}
+          path: build-composition/evidence/**
           if-no-files-found: warn
           retention-days: 14
 

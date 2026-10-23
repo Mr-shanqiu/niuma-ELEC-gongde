@@ -4,6 +4,7 @@
 #define NOMINMAX
 #endif
 #include "../appearance_pack.h"
+#include "appearance_scene.h"
 
 #include <cstdint>
 #include <memory>
@@ -13,7 +14,7 @@
 
 namespace niuma::windows::runtime {
 
-enum class AppearanceLoadKind : std::uint8_t { Current, Thumbnail };
+enum class AppearanceLoadKind : std::uint8_t { Current, Thumbnail, GpuCurrent, Woodfish };
 
 struct AppearanceLoadRequest {
   std::uint64_t id = 0;          // Increasing across this service's submissions.
@@ -32,6 +33,7 @@ struct AppearanceLoadResult {
   std::wstring detail;
   std::unique_ptr<niuma::AppearancePack> animation;
   std::unique_ptr<niuma::AppearanceThumbnail> thumbnail;
+  std::unique_ptr<PreparedAppearanceScene> scene;
   niuma::AppearanceResourceMemory memory;
   bool Matches(const AppearanceLoadRequest& expected) const noexcept;
   bool ready() const noexcept;
