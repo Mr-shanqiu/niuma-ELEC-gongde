@@ -37,6 +37,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force build-app/evidence | Out-Null
+          python scripts/prepare-windows-runtime-acceptance.py build-app/runtime-fixtures
+          if ($LASTEXITCODE -ne 0) { throw "Private fixture preparation failed" }
+          $env:NIUMA_RUNTIME_FIXTURE_DIR = Join-Path $PWD 'build-app/runtime-fixtures'
           if ('${{ inputs.mode }}' -eq 'runtime-candidate') {
             & ./build-app/Release/niuma-runtime-app-test.exe (Join-Path $PWD 'build-app/evidence') --appearance-only | Tee-Object build-app/evidence/appearance-app.txt
             $appearance = $LASTEXITCODE
@@ -53,6 +56,7 @@ jobs:
           path: |
             build-app/evidence/**
             build-app/Release/niuma-runtime-candidate.exe
+            build-app/runtime-fixtures/**
           if-no-files-found: warn
           retention-days: 14
 
@@ -96,14 +100,15 @@ jobs:
         run: |
           cmake -S . -B build-composition -G "Visual Studio 17 2022" -A x64
           if ($LASTEXITCODE -ne 0) { throw "Composition configuration failed" }
-          cmake --build build-composition --config Release --target niuma-appearance-scene-test niuma-widget-text-cache-test niuma-composition-presenter-test niuma-client-display-test niuma-appearance-service-test --parallel 2
+          cmake --build build-composition --config Release --target niuma-fading-alpha-test niuma-appearance-scene-test niuma-widget-text-cache-test niuma-composition-presenter-test niuma-client-display-test niuma-appearance-service-test --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Composition compilation failed" }
       - name: Exercise only newly integrated scene and display paths
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force build-composition/evidence | Out-Null
           $failed = @()
-          foreach ($name in @('appearance-scene', 'widget-text-cache', 'composition-presenter', 'client-display', 'appearance-service')) {
+          $scopes = if ('${{ inputs.mode }}' -eq 'runtime-candidate') { @('fading-alpha', 'appearance-scene') } else { @('fading-alpha', 'appearance-scene', 'widget-text-cache', 'composition-presenter', 'client-display', 'appearance-service') }
+          foreach ($name in $scopes) {
             & "./build-composition/Release/niuma-$name-test.exe" | Tee-Object "build-composition/evidence/$name.txt"
             if ($LASTEXITCODE -ne 0) { $failed += $name }
           }

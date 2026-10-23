@@ -126,7 +126,8 @@ static PreparedAlphaMask PrepareThresholdMask(const AlphaRegionImageView& image,
     return finish();
 }
 
-PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image) {
+PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image, bool prepareOpacityBands,
+    std::size_t storageByteLimit) {
     const auto start = Clock::now();
     auto result = PrepareThresholdMask(image,1);
     if (!result.success) return result;
@@ -138,6 +139,22 @@ PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image) {
         for (std::uint32_t y=0;y<image.height;++y) for(std::uint32_t x=0;x<image.width;++x)
             result.sourceAlpha[static_cast<std::size_t>(y)*image.width+x]=image.bgra[static_cast<std::size_t>(y)*image.strideBytes+x*4+3];
         result.storageBytes = (result.supportRectangles.capacity()+result.strongSupportRectangles.capacity())*sizeof(AlphaRegionRect)+result.sourceAlpha.capacity();
+        if (result.storageBytes > storageByteLimit) {
+            result.success=false; result.error="prepared alpha storage budget exceeded"; return result;
+        }
+        if (prepareOpacityBands) {
+            for (unsigned index=0; index<6; ++index) {
+                auto band=PrepareThresholdMask(image,static_cast<std::uint8_t>(4u<<index));
+                if (!band.success) return band;
+                const auto bytes=band.supportRectangles.capacity()*sizeof(AlphaRegionRect);
+                if (bytes > storageByteLimit-result.storageBytes) {
+                    result.success=false; result.error="prepared fading alpha storage budget exceeded"; return result;
+                }
+                result.opacitySupportRectangles[index]=std::move(band.supportRectangles);
+                result.storageBytes+=bytes;
+            }
+            result.opacityBandsPrepared=true;
+        }
         result.preparationMs = Milliseconds(start);
     } catch (const std::bad_alloc&) { result.success=false; result.error="prepared alpha coverage allocation failed"; }
     return result;
@@ -258,7 +275,17 @@ static AlphaRegionResult TransformSupport(
             // arithmetic; this is not a whole destination-pixel dilation.
             const double sx = 1.0 / 128.0 + 32 * std::numeric_limits<float>::epsilon() * quad.mask->width;
             const double sy = 1.0 / 128.0 + 32 * std::numeric_limits<float>::epsilon() * quad.mask->height;
-            for (const auto& rect : (strong ? quad.mask->strongSupportRectangles : quad.mask->supportRectangles)) {
+            const auto* support = strong ? &quad.mask->strongSupportRectangles : &quad.mask->supportRectangles;
+            if (strong && quad.mask->opacityBandsPrepared && quad.opacity < 1) {
+                unsigned threshold=2, index=0;
+                // Outside the chosen contour, effective alpha rounds to at
+                // most one byte. Such pixels use the shared sparse decision.
+                while (threshold<256 && threshold*2*static_cast<double>(quad.opacity)<=1.5) {
+                    threshold*=2; ++index;
+                }
+                if (index) support=&quad.mask->opacitySupportRectangles[index-1];
+            }
+            for (const auto& rect : *support) {
                 const double xs[] = {rect.left-sx, rect.right+sx};
                 const double ys[] = {rect.top-sy, rect.bottom+sy};
                 std::array<AlphaRegionPoint,4> polygon{};
@@ -311,7 +338,7 @@ struct AlphaSampler {
     PreparedAlphaAffine transform;
     double determinant = 0;
 };
-// Evaluate only the weak-only fragments, where every contributing source
+// Evaluate only the weak-only fragments, where every contributing effective
 // texel is alpha 0 or 1. Solid shape interiors retain span operations.
 std::uint32_t WeakCoverageByte(int x, int y, const AlphaSampler& item,
                                std::uint64_t& sampledTexels) {

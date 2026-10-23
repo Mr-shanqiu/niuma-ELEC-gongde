@@ -2,6 +2,7 @@
 
 #include "alpha_region.h"
 #include "weak_alpha_override.h"
+#include <limits>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -22,6 +23,10 @@ struct PreparedAlphaMask {
     // the texture domain. These bands preserve transparent holes.
     std::vector<AlphaRegionRect> supportRectangles;
     std::vector<AlphaRegionRect> strongSupportRectangles;
+    // Optional load-time contours for effective alpha during fades. Thresholds
+    // 4/8/16/32/64/128; index 6 denotes an empty threshold-256 support.
+    std::array<std::vector<AlphaRegionRect>, 7> opacitySupportRectangles;
+    bool opacityBandsPrepared = false;
     // Alpha only, retained for sparse weak-coverage sampling; no color decode.
     std::vector<std::uint8_t> sourceAlpha;
     std::uint64_t sourcePixels = 0;
@@ -31,7 +36,9 @@ struct PreparedAlphaMask {
 
 };
 
-PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image);
+PreparedAlphaMask PrepareAlphaMask(const AlphaRegionImageView& image,
+    bool prepareOpacityBands = false,
+    std::size_t storageByteLimit = std::numeric_limits<std::size_t>::max());
 
 struct PreparedAlphaQuad {
     const PreparedAlphaMask* mask = nullptr;

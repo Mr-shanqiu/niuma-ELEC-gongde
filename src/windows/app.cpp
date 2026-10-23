@@ -372,7 +372,7 @@ niuma::AppearanceCatalog gAppearanceCatalog;
 struct AppearanceAdapter {
   std::unique_ptr<input_runtime::AppearanceService> service;
   std::unique_ptr<niuma::AppearancePack> current;
-  niuma::AppearanceThumbnailCache thumbnails;
+  niuma::AppearanceThumbnailCache thumbnails{};
   std::unique_ptr<Gdiplus::Bitmap> builtinThumbnail;
   std::optional<input_runtime::AppearanceLoadRequest> currentRequest, thumbnailRequest;
   std::vector<niuma::AppearanceResourceRequest> failedThumbnails;

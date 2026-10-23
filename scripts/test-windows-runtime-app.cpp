@@ -515,6 +515,24 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
         gDisplay.display->scene() != nullptr; }, 15000);
     CHECK(!gDisplay.failed && gDisplay.display->ready() && !gAppearance.current &&
         gDisplay.display->scene()->kind == input_runtime::AppearanceSceneKind::Woodfish);
+    wchar_t fixtureRoot[MAX_PATH]{};
+    CHECK(GetEnvironmentVariableW(L"NIUMA_RUNTIME_FIXTURE_DIR", fixtureRoot, MAX_PATH) > 0);
+    std::wstring catalogError;
+    CHECK(gAppearanceCatalog.ReloadMetadata(AppearanceDirectory(), &catalogError) && catalogError.empty());
+    for (const wchar_t* name : {L"offwork-button.nmgpack", L"koi-bubbles.nmgpack"}) {
+      std::string installed;
+      std::wstring error;
+      CHECK(gAppearanceCatalog.Install((std::filesystem::path(fixtureRoot) / name).wstring(),
+          AppearanceDirectory(), &installed, &error));
+      CHECK(!installed.empty() && error.empty());
+      CHECK(RequestCurrentAppearance(installed, false));
+      fixture.Await([&] { return !gAppearance.currentRequest && gDisplay.display->scene() &&
+          gDisplay.display->scene()->source.id == installed; }, 15000);
+      CHECK(!gDisplay.failed && gState.selectedPackId == installed && !gAppearance.current);
+      CHECK(gDisplay.display->scene()->memory.residentBytes() <= 24 * 1024 * 1024);
+      fixture.DrainStorage();
+      CHECK(gDataStorage.model->current().appearance.selectedPackId == installed);
+    }
     fixture.Start();
     fixture.Keys(12);
     fixture.Await([] { return gState.total == 1012; });
@@ -555,7 +573,7 @@ void CompositionApplicationAdapter(const std::filesystem::path& root) {
   }
   gDisplay = DisplayAdapter{};
   gRuntimeCandidate = false;
-  std::cout << "PASS actual application composition adapter: real owned popup and tagged hook, idle no Present, DPI no reload, device recreation, session cancel, durable counts, joined exit; software permitted for CI\n";
+  std::cout << "PASS actual application composition adapter: real package imports/worker and owned popup with tagged hook, idle no Present, DPI no reload, device recreation, session cancel, durable counts, joined exit; software permitted for CI\n";
 }
 #endif
 

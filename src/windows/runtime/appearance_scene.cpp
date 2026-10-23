@@ -71,7 +71,7 @@ size_t AlphaScratch(const PixelImage& image) {
       static_cast<size_t>(image.width) * image.height * 64 + image.height * 64 + 16384);
 }
 AppearanceSceneStatus PrepareMask(PreparedSceneImage& image, Budget& budget,
-                                 std::wstring* error) {
+                                 std::wstring* error, bool fading = false) {
   const size_t alphaMinimum = static_cast<size_t>(image.pixels.width) * image.pixels.height;
   const auto resident = budget.memory.residentBytes();
   if (resident > budget.options.residentByteLimit ||
@@ -81,13 +81,12 @@ AppearanceSceneStatus PrepareMask(PreparedSceneImage& image, Budget& budget,
         L"形象透明区域超过当前资源预算，未切换形象。", error);
   image.alpha = niuma::runtime::PrepareAlphaMask({image.pixels.bgraPremultiplied.data(),
       image.pixels.bgraPremultiplied.size(), image.pixels.width, image.pixels.height,
-      image.pixels.strideBytes});
+      image.pixels.strideBytes}, fading, budget.options.residentByteLimit-resident);
   if (!image.alpha.success)
-    return Fail(AppearanceSceneStatus::AlphaUnavailable,
-        L"无法完整准备形象透明区域，未切换形象。", error);
-  const auto bytes = image.alpha.sourceAlpha.capacity() +
-      (image.alpha.supportRectangles.capacity() + image.alpha.strongSupportRectangles.capacity()) *
-          sizeof(niuma::runtime::AlphaRegionRect);
+    return Fail(image.alpha.error.find("budget") != std::string::npos
+        ? AppearanceSceneStatus::BudgetExceeded : AppearanceSceneStatus::AlphaUnavailable,
+        L"无法在当前预算内完整准备形象透明区域，未切换形象。", error);
+  const auto bytes = image.alpha.storageBytes;
   if (bytes > budget.options.residentByteLimit - resident)
     return Fail(AppearanceSceneStatus::BudgetExceeded,
         L"形象透明区域超过当前资源预算，未切换形象。", error);
@@ -244,7 +243,11 @@ AppearanceSceneStatus ConvertPreparedAppearanceScene(std::unique_ptr<niuma::Appe
       scene->memory.uploadPixelBytes += image.pixels.bgraPremultiplied.capacity();
       layer.image = {};
       budget.sources -= sourceBytes;
-      const auto status = PrepareMask(image, budget, error);
+      const bool fading=std::any_of(scene->layers.begin(),scene->layers.end(),[&](const auto& item) {
+        return item.image==id && std::any_of(item.keyframes.begin(),item.keyframes.end(),
+            [](const auto& key) { return key.alpha<1; });
+      });
+      const auto status = PrepareMask(image, budget, error, fading);
       if (status != AppearanceSceneStatus::Ready) return status;
       scene->images.push_back(std::move(image));
     }
