@@ -2,6 +2,9 @@
 // No application adapter functions or counting shortcuts are called here.
 #include <windows.h>
 #include <filesystem>
+#include <cstdint>
+#include <cwchar>
+#include <iterator>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -50,7 +53,7 @@ std::uint64_t CreatedMs(const Child& child) {
   return (time.QuadPart-116444736000000000ULL)/10000;
 }
 int Run(const std::filesystem::path& candidate,const std::filesystem::path& receiver,
-        const std::filesystem::path& evidence,unsigned pairs) {
+        const std::filesystem::path& evidence,unsigned pairs,const std::filesystem::path& fixtures) {
   Require(std::filesystem::is_regular_file(candidate) && std::filesystem::is_regular_file(receiver),"bound executable paths required");
   Require(std::filesystem::is_directory(evidence) && !std::filesystem::exists(evidence/L"entry-result.json"),"new evidence directory required");
   wchar_t temporary[MAX_PATH]{};Require(GetTempPathW(MAX_PATH,temporary)>0,"Temp root");
@@ -61,6 +64,14 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
   Require(std::filesystem::is_empty(profile),"rejected entry must not write profile");
   { Child invalid;invalid.Start(candidate,L"--runtime-candidate --autostart");Require(invalid.Wait(5000)==2,"probe rejects automatic startup"); }
   Require(std::filesystem::is_empty(profile),"automatic entry must not write profile");
+  if(!fixtures.empty()) {
+    Require(std::filesystem::is_regular_file(fixtures/L"offwork-button.nmgpack"),"complex fixture required");
+    Require(SetEnvironmentVariableW(L"NIUMA_RUNTIME_FIXTURE_DIR",fixtures.c_str())!=FALSE,"fixture child environment");
+    Require(SetEnvironmentVariableW(L"NIUMA_ENTRY_SCENE",L"offwork")!=FALSE,"complex scene child environment");
+  } else {
+    SetEnvironmentVariableW(L"NIUMA_ENTRY_SCENE",nullptr);
+    SetEnvironmentVariableW(L"NIUMA_RUNTIME_FIXTURE_DIR",nullptr);
+  }
   Child client;client.Start(candidate,L"--runtime-candidate");
   const auto deadline=GetTickCount64()+15000;
   HWND window=nullptr;
@@ -70,6 +81,22 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
   Require(window!=nullptr,"private main window ready");
   // Startup is excluded from input timing. Final persisted count witnesses that
   // the ordinary real hook path actually received the receiver's F24 events.
+  const auto readyPath=profile/L"runtime-entry-ready.json";
+  const auto readyDeadline=GetTickCount64()+15000;
+  bool ready=false;
+  while(GetTickCount64()<readyDeadline) {
+    Require(WaitForSingleObject(client.process.hProcess,0)==WAIT_TIMEOUT,"entry stopped before actual scene ready");
+    std::ifstream stream(readyPath);
+    const std::string contents((std::istreambuf_iterator<char>(stream)),{});
+    ready=contents.size()<4096 && !contents.empty() && contents.back()=='\n' &&
+        contents.find("\"keyboardAvailable\":true")!=std::string::npos &&
+        contents.find(fixtures.empty()?"\"scene\":\"builtin.woodfish\"":"\"scene\":\"runtime.fixture.offwork-button\"")!=std::string::npos &&
+        (fixtures.empty() || contents.find("\"countdown\":true")!=std::string::npos);
+    if(ready) break;
+    Sleep(20);
+  }
+  Require(ready,"actual selected scene, rendered frame and ordinary hook readiness");
+  std::filesystem::copy_file(readyPath,evidence/L"entry-ready.json");
   Sleep(1000);
   const auto inputReport=evidence/L"input-delivery.json";
   Child input;input.Start(receiver,L"\""+inputReport.wstring()+L"\" "+std::to_wstring(pairs)+L" "+std::to_wstring(client.process.dwProcessId));
@@ -83,6 +110,9 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
   const auto inputExit=input.Wait(pairs*100+30000);
   Require(PostMessageW(window,WM_CLOSE,0,0)!=FALSE,"normal close of exact child window");
   const auto clientExit=client.Wait(15000);
+  const auto displayReport=profile/L"runtime-entry-display.json";
+  Require(std::filesystem::is_regular_file(displayReport),"final actual display observation");
+  std::filesystem::copy_file(displayReport,evidence/L"entry-display.json");
   wchar_t total[64]{};
   const auto data=profile/L"data.ini";
   GetPrivateProfileStringW(L"state",L"total",L"missing",total,64,data.c_str());
@@ -104,9 +134,9 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
 int wmain(int argc,wchar_t** argv) {
   SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
   try {
-    Require(argc==4 || argc==5,"usage: entry-check absolute-probe absolute-receiver evidence [pairs]");
-    const auto pairs=argc==5?std::stoul(argv[4]):30;
+    Require(argc>=4 && argc<=6,"usage: entry-check absolute-probe absolute-receiver evidence [pairs] [complex-fixture-dir]");
+    const auto pairs=argc>=5?std::stoul(argv[4]):30;
     Require(pairs>=20 && pairs<=600,"pairs outside test bound");
-    return Run(std::filesystem::absolute(argv[1]),std::filesystem::absolute(argv[2]),std::filesystem::absolute(argv[3]),static_cast<unsigned>(pairs));
+    return Run(std::filesystem::absolute(argv[1]),std::filesystem::absolute(argv[2]),std::filesystem::absolute(argv[3]),static_cast<unsigned>(pairs),argc==6?std::filesystem::absolute(argv[5]):std::filesystem::path{});
   }catch(const std::exception& error){std::cerr<<"FAIL full entry: "<<error.what()<<'\n';return 1;}
 }

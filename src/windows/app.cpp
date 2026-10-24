@@ -41,6 +41,9 @@
 #include <cwchar>
 #include <ctime>
 #include <cstdio>
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+#include <filesystem>
+#endif
 #include <limits>
 #include <map>
 #include <memory>
@@ -769,6 +772,10 @@ std::wstring AppearanceDirectory() {
   CreateDirectoryW(directory.c_str(), nullptr);
   return directory;
 }
+
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+#include "../../scripts/runtime-entry-observation.h"
+#endif
 
 std::string ReadSelectedPackId() {
   return gDataStorage.model ? gDataStorage.model->current().appearance.selectedPackId : std::string{};
@@ -1790,6 +1797,9 @@ void RenderCompositionWindow(ULONGLONG now) {
       FailCompositionDisplay(); return;
     }
     gDisplay.recoveryAttempts = 0;
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+    WriteRuntimeEntryObservation();
+#endif
 #if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
     if (gDisplay.display->Stats().framesPresented != before &&
         gDisplay.measuredFrames < gDisplay.frameWorkMs.size()) {
@@ -2722,6 +2732,9 @@ void ApplyInputView(const input_runtime::InputServiceSnapshot& snapshot) {
     if (gCalendar.window) InvalidateRect(gCalendar.window, nullptr, FALSE);
   }
   if (previousDate != gState.currentDay) RequestInputLedger();
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+  WriteRuntimeEntryObservation();
+#endif
 }
 
 void RequestInputLedger() {
@@ -5121,6 +5134,9 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_DESTROY:
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+      WriteRuntimeEntryObservation(true);
+#endif
       KillTimer(window, kDisplayRetryTimer);
       if (gDisplay.display) gDisplay.display->Shutdown();
       // Known exit routes arrive only after the latest file write and worker
@@ -5246,6 +5262,15 @@ int WINAPI wWinMain(
     return 1;
   }
 
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+  if (!PrepareRuntimeEntryScenario()) {
+    ReleaseAllPngResources();
+    Gdiplus::GdiplusShutdown(gState.gdiplusToken);
+    ReleaseMutex(gState.mutex); CloseHandle(gState.mutex);
+    if (SUCCEEDED(comResult)) CoUninitialize();
+    return 3;
+  }
+#endif
   std::wstring catalogError;
   const bool catalogLoaded = gAppearanceCatalog.ReloadMetadata(AppearanceDirectory(), &catalogError);
   if (!catalogLoaded || !catalogError.empty()) {
