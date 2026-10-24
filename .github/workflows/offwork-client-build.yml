@@ -256,6 +256,8 @@ jobs:
           $env:NIUMA_RUNTIME_FIXTURE_DIR = Join-Path $PWD 'build-durability/runtime-fixtures'
           & ./build-durability/Release/niuma-runtime-durability-probe.exe (Join-Path $PWD 'build-durability/evidence') 75 15 15 | Tee-Object build-durability/evidence/probe.txt
           if ($LASTEXITCODE -ne 0) { throw "Durability sampler smoke test failed" }
+          python scripts/check-windows-memory-observation.py build-durability/evidence/durability
+          if ($LASTEXITCODE -ne 0) { throw "New memory observation schema failed" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -51,7 +51,8 @@ struct Fixture {
   std::wstring today;
   unsigned verification = 0;
 
-  Fixture(const std::filesystem::path& parent, const wchar_t* name, bool composition = false) {
+  Fixture(const std::filesystem::path& parent, const wchar_t* name, bool composition = false,
+          bool requireForeground = true) {
     gDisplay = DisplayAdapter{};
 #if defined(NIUMA_RUNTIME_CANDIDATE)
     gRuntimeCandidate = composition;
@@ -102,15 +103,18 @@ struct Fixture {
     gState.total = ReadIniTotal();
     CHECK(EnsureCurrentDay());
     CHECK(gState.todayTotal == 10);
-    window = CreateWindowExW(composition ? WS_EX_NOREDIRECTIONBITMAP : 0,
+    window = CreateWindowExW((composition ? WS_EX_NOREDIRECTIONBITMAP : 0) |
+        (requireForeground ? 0 : WS_EX_NOACTIVATE),
         kFixtureClass, L"NiuMa isolated runtime adapter test",
         composition ? WS_POPUP | WS_VISIBLE : WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
         60, 60, composition ? gState.windowWidth : 560,
         composition ? gState.windowHeight : 240, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     CHECK(window && gState.window == window);
-    ShowWindow(window, SW_SHOW);
-    SetForegroundWindow(window);
-    Await([&] { return GetForegroundWindow() == window; });
+    ShowWindow(window, requireForeground ? SW_SHOW : SW_SHOWNOACTIVATE);
+    if (requireForeground) {
+      SetForegroundWindow(window);
+      Await([&] { return GetForegroundWindow() == window; });
+    }
   }
 
   ~Fixture() {

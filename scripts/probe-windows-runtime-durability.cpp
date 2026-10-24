@@ -5,6 +5,7 @@
 #undef wmain
 #include <psapi.h>
 #include <tlhelp32.h>
+#include "windows-memory-observation.h"
 
 namespace {
 std::uint64_t ProcessThreads() {
@@ -36,11 +37,20 @@ double Percentile(std::array<double,1024> values,std::size_t count,double fracti
   return values[static_cast<std::size_t>(std::ceil(count*fraction))-1];
 }
 void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned activeFirstSeconds,unsigned mixedPeriodSeconds) {
+  std::array<std::pair<const char*,niuma::diagnostic::MemoryObservation>,7> memoryStages;
+  unsigned memoryStageCount=0;
+  const auto markMemory=[&](const char* stage) {
+    CHECK(memoryStageCount<memoryStages.size());
+    memoryStages[memoryStageCount++]={stage,niuma::diagnostic::ObserveMemory()};
+  };
+  markMemory("before-runtime");
+  std::filesystem::path observationDirectory;
   CHECK(SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)));
   Gdiplus::GdiplusStartupInput startup; ULONG_PTR gdi=0;
   CHECK(Gdiplus::GdiplusStartup(&gdi,&startup,nullptr)==Gdiplus::Ok);
   {
-    Fixture fixture(parent,L"durability",true);
+    Fixture fixture(parent,L"durability",true,false);
+    observationDirectory=fixture.directory;
     // Exercise the planned 200% complex-scene budget without changing the
     // machine's actual display settings. Only this owned window is resized.
     gOffwork.enabled=true; gOffwork.hour=18; gOffwork.minute=0;
@@ -69,6 +79,7 @@ void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned
     consumed.enabled=true;
     CHECK(SendInputCommand(consumed));
     RefreshOffwork(false); CHECK(SyncOffworkTimer()); ResizeOffworkWindow();
+    markMemory("scene-ready");
     std::ofstream samples(fixture.directory/L"samples.jsonl",std::ios::binary);
     CHECK(samples.good());
     const auto started=GetTickCount64();
@@ -134,6 +145,8 @@ void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned
               ",\"frameWorkWallP99Ms\":"<<Percentile(gDisplay.frameWorkMs,gDisplay.measuredFrames,.99)<<
               ",\"regionWallP95Ms\":"<<Percentile(gDisplay.regionWorkMs,gDisplay.measuredFrames,.95);
         }
+        samples<<",\"memoryObservation\":";
+        niuma::diagnostic::WriteMemory(samples,niuma::diagnostic::ObserveMemory());
         samples<<"}\n";
         gDisplay.measuredFrames=0; // Fixed capacity, per-interval samples, no retained frame history.
         samples.flush(); CHECK(samples.good()); nextSample=now+15000;
@@ -144,10 +157,12 @@ void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned
     fixture.DrainStorage();
     const auto finalTotal=gState.total;
     CHECK(ProfileCount(std::filesystem::path(DataPath()),L"state",L"total")==finalTotal);
+    markMemory("workload-complete-after-save");
     const auto kind=gDisplay.display->Adapter().kind;
     WindowProcedure(fixture.window,WM_CLOSE,0,0);
     fixture.Await([&] { return !IsWindow(fixture.window); },10000);
     CHECK(gDataStorage.readyToDestroy && gAppearance.service->Snapshot().stopped && !gDisplay.display->ready());
+    markMemory("window-closed-workers-stopped");
     std::ofstream result(fixture.directory/L"durability-result.json");
     result<<"{\"executionComplete\":true,\"requestedSeconds\":"<<seconds<<
         ",\"elapsedSeconds\":"<<(GetTickCount64()-started)/1000<<
@@ -162,9 +177,23 @@ void RunDurability(const std::filesystem::path& parent,unsigned seconds,unsigned
     result.close(); CHECK(result.good());
     std::wcout<<L"DURABILITY RESULT "<<fixture.directory.wstring()<<L"\n";
   }
+  markMemory("fixture-destroyed");
   gDisplay=DisplayAdapter{}; gAppearanceCatalog=niuma::AppearanceCatalog{};
+  markMemory("global-display-catalog-released");
   gRuntimeCandidate=false;
   Gdiplus::GdiplusShutdown(gdi); CoUninitialize();
+  markMemory("gdi-com-uninitialized");
+  std::ofstream memory(observationDirectory/L"memory-stages.json");
+  CHECK(memory.good());
+  memory<<"{\"scope\":\"aggregate diagnostic accounting; no forced collection or trimming\","
+      "\"defaultHeapIsAllProcessMemory\":false,\"shortRunProvesLongRunStability\":false,\"stages\":[";
+  for(unsigned i=0;i<memoryStageCount;++i) {
+    if(i) memory<<",";
+    memory<<"{\"stage\":\""<<memoryStages[i].first<<"\",\"memory\":";
+    niuma::diagnostic::WriteMemory(memory,memoryStages[i].second);
+    memory<<"}";
+  }
+  memory<<"]}\n"; memory.close(); CHECK(memory.good());
 }
 }
 int wmain(int argc,wchar_t** argv) {

@@ -41,7 +41,10 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
   ULONG_PTR gdi = 0;
   CHECK(Gdiplus::GdiplusStartup(&gdi, &startup, nullptr) == Gdiplus::Ok);
   {
-    Fixture fixture(parent, L"frame-metrics", true);
+    // No system input is injected by this probe. A foreground-window wait is
+    // unrelated to the measurement and can fail for an SSH-launched process.
+    Fixture fixture(parent, L"frame-metrics", true, false);
+    std::cout << "STAGE passive-fixture-ready\n" << std::flush;
     gOffwork.enabled = true; gOffwork.hour = 18; gOffwork.minute = 0;
     gState.dpi = 192;
     gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
@@ -58,6 +61,7 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
     fixture.Await([] { return !gAppearance.currentRequest && gDisplay.display &&
         gDisplay.display->scene(); }, 15000);
     CHECK(!gDisplay.failed);
+    std::cout << "STAGE scene-ready\n" << std::flush;
     auto& display = *gDisplay.display;
     niuma::runtime::GpuTimingSample sentinel{123, -99};
     CHECK(display.ReadDiagnosticGpuTiming(sentinel) == GpuTimingRead::Disabled);
