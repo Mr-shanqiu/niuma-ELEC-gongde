@@ -73,7 +73,9 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
       "\"framesPresented\":%llu,\"textureUploads\":%llu,\"adapterKind\":\"%s\","
       "\"vendorId\":%u,\"deviceId\":%u,\"keyboardAvailable\":%s,\"total\":%llu,"
       "\"inputAuthoritative\":%s,\"snapshotReady\":%s,\"glyphEntries\":%zu,\"glyphGeometryBytes\":%zu,"
-      "\"glyphPathBuilds\":%llu,\"glyphPathHits\":%llu,\"fontFamilyBuilds\":%llu}\n",
+      "\"glyphPathBuilds\":%llu,\"glyphPathHits\":%llu,\"fontFamilyBuilds\":%llu,"
+      "\"nativeBandsCreated\":%llu,\"nativeBandsReused\":%llu,\"nativeBandFallbacks\":%llu,"
+      "\"retainedBandBytes\":%zu,\"retainedBandHandles\":%zu}\n",
       source.id.c_str(),source.contentFingerprint.c_str(),gState.dpi,gOffwork.enabled?"true":"false",
       static_cast<unsigned long long>(stats.framesPresented),static_cast<unsigned long long>(stats.textureUploads),
       display.Adapter().kind.c_str(),display.Adapter().vendorId,display.Adapter().deviceId,
@@ -81,7 +83,9 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
       gInput.authoritative?"true":"false",gInput.latest.input.ready?"true":"false",
       textStats.glyphEntries,textStats.glyphGeometryBytes,
       static_cast<unsigned long long>(textStats.glyphPathBuilds),static_cast<unsigned long long>(textStats.glyphPathHits),
-      static_cast<unsigned long long>(textStats.fontFamilyBuilds));
+      static_cast<unsigned long long>(textStats.fontFamilyBuilds),
+      static_cast<unsigned long long>(stats.nativeBandsCreated),static_cast<unsigned long long>(stats.nativeBandsReused),
+      static_cast<unsigned long long>(stats.nativeBandFallbacks),stats.retainedBandBytes,stats.retainedBandHandles);
   const int closed=std::fclose(file);
   if(!terminal && written>0 && closed==0) gRuntimeEntryReady=true;
 }

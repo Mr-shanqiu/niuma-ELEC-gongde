@@ -33,6 +33,8 @@ void CompositionPresenter::ForgetInstalledRegion() noexcept {
 void CompositionPresenter::Invalidate() noexcept {
   frameValid_ = false;
   ForgetInstalledRegion();
+  nativeBands_.Clear();
+  stats_.retainedBandBytes=stats_.retainedBandHandles=0;
 }
 bool CompositionPresenter::BackendFailure() {
   Invalidate();
@@ -136,9 +138,14 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
     return true;
   }
   const auto regionStart = Clock::now();
-  auto region = BuildPreparedAlphaRegion(width_, height_, masks, &installedRaster_);
+  auto region = BuildPreparedAlphaRegion(width_, height_, masks, &installedRaster_, &nativeBands_);
   if (!region.success) return Fail(E_INVALIDARG, region.error);
   stats_.lastRegionDetails = region.stats;
+  stats_.nativeBandsCreated+=region.stats.nativeBandsCreated;
+  stats_.nativeBandsReused+=region.stats.nativeBandsReused;
+  if(region.stats.nativeBandsFallback) ++stats_.nativeBandFallbacks;
+  stats_.retainedBandBytes=nativeBands_.RetainedBytes();
+  stats_.retainedBandHandles=nativeBands_.RetainedHandles();
   // Region and GPU use the very same weak-edge decisions. USER owns the region
   // only after a successful call; a failed submission remains visibly failed.
   stats_.lastRegionInstallWallMs = 0;

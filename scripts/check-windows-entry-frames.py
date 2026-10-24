@@ -11,9 +11,9 @@ def validate(data, require_hardware=False, require_dpi=None):
         if not ok:
             raise ValueError(message)
 
-    check(data['schema'] in (1, 2) and data['captureComplete'] is True, 'incomplete capture')
+    check(data['schema'] in (1, 2, 3) and data['captureComplete'] is True, 'incomplete capture')
     check(data['overflow'] == 0 and data['identityValid'] is True, 'overflow or identity change')
-    byte_limit = (3 if data['schema'] == 2 else 2) * 1024 * 1024
+    byte_limit = (3 if data['schema'] >= 2 else 2) * 1024 * 1024
     check(data['capacity'] == 8192 and 0 < data['bufferBytes'] <= byte_limit, 'buffer bound')
     check(data['scene'] in ('runtime.fixture.offwork-button', 'builtin.woodfish'), 'unknown scene')
     check(len(data['fingerprint']) == 64 and all(c in '0123456789abcdef' for c in data['fingerprint']), 'scene fingerprint')
@@ -32,10 +32,13 @@ def validate(data, require_hardware=False, require_dpi=None):
     fields = ['serial', 'relativeMs', 'wallMs', 'workMs', 'presentMs', 'readbackMs', 'drawMs',
               'regionMs', 'mathMs', 'supportAllMs', 'supportStrongMs', 'weakResolveMs',
               'serializeMs', 'nativeCreateMs', 'installMs', 'reuseComparisonMs', 'nativeRegionReused']
-    if data['schema'] == 2:
+    if data['schema'] >= 2:
         fields += ['sceneMs', 'textMs', 'texturesMs', 'assemblyMs', 'presenterMs', 'textChangedMask',
                    'meritBuildMs', 'meritRasterMs', 'meritMaskMs', 'plusBuildMs', 'plusRasterMs', 'plusMaskMs',
                    'clockBuildMs', 'clockRasterMs', 'clockMaskMs']
+    if data['schema'] == 3:
+        fields += ['nativeCombineMs', 'nativeBandLookupMs', 'nativeBandsCreated', 'nativeBandsReused',
+                   'nativeBandsUsed', 'nativeBandsFallback']
     check(data['fields'] == fields, 'unexpected sample schema')
     distributions = {k: [] for k in fields if k.endswith('Ms') and k != 'relativeMs'}
     previous_time = 0
@@ -55,10 +58,17 @@ def validate(data, require_hardware=False, require_dpi=None):
               'frame subtraction inconsistent')
         check(v['supportAllMs'] + v['supportStrongMs'] + v['weakResolveMs'] <= v['mathMs'] + .05,
               'region math scope inconsistent')
-        check(sum(v[k] for k in ('mathMs', 'serializeMs', 'nativeCreateMs', 'installMs', 'reuseComparisonMs'))
+        extra_native = sum(v[k] for k in ('nativeCombineMs', 'nativeBandLookupMs')) if data['schema'] == 3 else 0
+        check(extra_native + sum(v[k] for k in ('mathMs', 'serializeMs', 'nativeCreateMs', 'installMs', 'reuseComparisonMs'))
               <= v['regionMs'] + .05, 'region parent scope inconsistent')
         check(v['regionMs'] + v['drawMs'] <= v['workMs'] + .05, 'work parent scope inconsistent')
-        if data['schema'] == 2:
+        if data['schema'] == 3:
+            check(all(type(v[k]) is bool for k in ('nativeBandsUsed', 'nativeBandsFallback')), 'invalid native band flags')
+            check(not (v['nativeBandsUsed'] and v['nativeBandsFallback']), 'inconsistent native band outcome')
+            check(all(type(v[k]) is int and 0 <= v[k] <= 64 for k in ('nativeBandsCreated', 'nativeBandsReused')),
+                  'invalid native band count')
+            check(v['nativeBandsCreated'] + v['nativeBandsReused'] <= 64, 'native band work exceeds surface bound')
+        if data['schema'] >= 2:
             check(type(v['textChangedMask']) is int and 0 <= v['textChangedMask'] <= 7, 'invalid text change mask')
             check(sum(v[k] for k in ('sceneMs', 'textMs', 'texturesMs', 'assemblyMs', 'presenterMs'))
                   <= v['wallMs'] + .05, 'display parent scope inconsistent')

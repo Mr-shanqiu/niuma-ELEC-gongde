@@ -90,7 +90,7 @@ void WriteRuntimeEntryFrames() {
   if(!file) return; // Driver requires a complete final JSON; failure is not success.
   const bool healthy=!gDisplay.failed && f.identityValid && f.stopped && !f.overflow &&
       f.count>0 && f.endFrames>=f.startFrames && f.endFrames-f.startFrames==f.count;
-  std::fprintf(file,"{\"schema\":2,\"captureComplete\":%s,\"capacity\":%zu,\"bufferBytes\":%zu,"
+  std::fprintf(file,"{\"schema\":3,\"captureComplete\":%s,\"capacity\":%zu,\"bufferBytes\":%zu,"
       "\"samplesCount\":%zu,\"overflow\":%llu,\"identityValid\":%s,\"scene\":\"%s\",\"fingerprint\":\"%s\","
       "\"dpi\":%u,\"width\":%d,\"height\":%d,\"adapterKind\":\"%s\",\"vendorId\":%u,\"deviceId\":%u,"
       "\"startedMonotonicMs\":%llu,\"stoppedMonotonicMs\":%llu,\"startFramesPresented\":%llu,\"endFramesPresented\":%llu,"
@@ -108,7 +108,8 @@ void WriteRuntimeEntryFrames() {
       "\"serializeMs\",\"nativeCreateMs\",\"installMs\",\"reuseComparisonMs\",\"nativeRegionReused\","
       "\"sceneMs\",\"textMs\",\"texturesMs\",\"assemblyMs\",\"presenterMs\",\"textChangedMask\","
       "\"meritBuildMs\",\"meritRasterMs\",\"meritMaskMs\",\"plusBuildMs\",\"plusRasterMs\",\"plusMaskMs\","
-      "\"clockBuildMs\",\"clockRasterMs\",\"clockMaskMs\"],\"samples\":[");
+      "\"clockBuildMs\",\"clockRasterMs\",\"clockMaskMs\",\"nativeCombineMs\",\"nativeBandLookupMs\","
+      "\"nativeBandsCreated\",\"nativeBandsReused\",\"nativeBandsUsed\",\"nativeBandsFallback\"],\"samples\":[");
   for(std::size_t i=0;i<f.count;++i) {
     const auto& v=f.samples[i]; const auto& r=v.region;
     std::fprintf(file,"%s[%llu,%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%s",
@@ -116,10 +117,12 @@ void WriteRuntimeEntryFrames() {
         v.wallMs,v.workMs,v.presentMs,v.readbackMs,v.drawMs,v.regionMs,r.mathMs,r.supportAllMs,r.supportStrongMs,
         r.weakResolveMs,r.serializeMs,r.nativeCreateMs,v.installMs,r.reuseComparisonMs,r.nativeRegionReused?"true":"false");
     const auto& d=v.display; const auto& t=d.text;
-    std::fprintf(file,",%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f]",
+    std::fprintf(file,",%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f",
         d.sceneMs,d.textMs,d.texturesMs,d.assemblyMs,d.presenterMs,static_cast<unsigned>(t.changedMask),
         t.buildMs[0],t.rasterMs[0],t.maskMs[0],t.buildMs[1],t.rasterMs[1],t.maskMs[1],
         t.buildMs[2],t.rasterMs[2],t.maskMs[2]);
+    std::fprintf(file,",%.6f,%.6f,%zu,%zu,%s,%s]",r.nativeCombineMs,r.nativeBandLookupMs,
+        r.nativeBandsCreated,r.nativeBandsReused,r.nativeBandsUsed?"true":"false",r.nativeBandsFallback?"true":"false");
   }
   std::fprintf(file,"]}\n");
   std::fclose(file);

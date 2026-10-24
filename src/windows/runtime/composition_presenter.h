@@ -2,6 +2,7 @@
 
 #include "d3d11_renderer.h"
 #include "prepared_alpha_region.h"
+#include "native_region_bands.h"
 
 namespace niuma::runtime {
 
@@ -22,6 +23,8 @@ struct CompositionStats {
   double lastRegionInstallWallMs = 0;
   std::uint64_t nativeRegionInstalls = 0, nativeRegionReuses = 0;
   std::size_t retainedRegionBytes = 0;
+  std::size_t retainedBandBytes = 0, retainedBandHandles = 0;
+  std::uint64_t nativeBandsCreated = 0, nativeBandsReused = 0, nativeBandFallbacks = 0;
   // CPU-side elapsed calls, not CPU execution time. Present and explicit
   // readback are separated so synchronization cannot masquerade as CPU work.
   double lastDrawSubmitWallMs = 0, lastPresentWallMs = 0, lastReadbackWallMs = 0;
@@ -75,6 +78,7 @@ class CompositionPresenter final {
   std::vector<Quad> previous_;
   bool frameValid_ = false;
   AlphaRegionResult installedRaster_;
+  NativeRegionBands nativeBands_;
   CompositionStats stats_;
   HRESULT error_ = S_OK;
   std::string detail_;

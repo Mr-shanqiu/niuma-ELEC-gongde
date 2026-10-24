@@ -2,6 +2,7 @@
 
 #ifdef _WIN32
 #include "d3d11_renderer.h"
+#include "native_region_bands.h"
 #endif
 
 #include <algorithm>
@@ -523,7 +524,7 @@ HRGN PreparedAlphaRegionResult::ReleaseRegion() noexcept { return std::exchange(
 
 PreparedAlphaRegionResult BuildPreparedAlphaRegion(
     int width, int height, const std::vector<PreparedAlphaQuad>& quads,
-    const AlphaRegionResult* installedRaster) {
+    const AlphaRegionResult* installedRaster, NativeRegionBands* nativeBands) {
     const auto start = Clock::now();
     PreparedAlphaRegionResult result;
     const auto finish = [&](const std::string& error = {}) {
@@ -566,13 +567,26 @@ PreparedAlphaRegionResult BuildPreparedAlphaRegion(
             result.stats.nativeRegionReused = true;
             return finish();
         }
+        if (nativeBands) {
+            NativeRegionBandStats bands;
+            const bool used=nativeBands->TryBuild(result.raster,result.region,bands);
+            result.stats.serializeMs=bands.serializeMs;
+            result.stats.nativeCreateMs=bands.createMs;
+            result.stats.nativeCombineMs=bands.combineMs;
+            result.stats.nativeBandLookupMs=bands.lookupMs;
+            result.stats.nativeBandsCreated=bands.created;
+            result.stats.nativeBandsReused=bands.reused;
+            result.stats.nativeBandsUsed=used;
+            result.stats.nativeBandsFallback=!used;
+            if(used) return finish();
+        }
         auto native = MakeAlphaRegionData(result.raster);
-        result.stats.serializeMs = native.serializeMs;
+        result.stats.serializeMs += native.serializeMs;
         if (!native.success) return finish(native.error);
         const auto nativeStarted = Clock::now();
         result.region = ExtCreateRegion(nullptr,native.byteCount,
             reinterpret_cast<const RGNDATA*>(native.words.data()));
-        result.stats.nativeCreateMs = Milliseconds(nativeStarted);
+        result.stats.nativeCreateMs += Milliseconds(nativeStarted);
         if (!result.region) return finish("create destination alpha region failed");
     } catch (const std::bad_alloc&) {
         return finish("prepared alpha frame allocation failed");

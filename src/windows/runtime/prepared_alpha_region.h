@@ -70,12 +70,16 @@ AlphaRegionResult TransformPreparedAlphaRegion(
 
 #ifdef _WIN32
 struct Quad;
+class NativeRegionBands;
 PreparedAlphaQuad FromRendererPreparedQuad(const Quad& quad, const PreparedAlphaMask& mask);
 
 struct PreparedAlphaRegionStats {
     double transformMs = 0;  // Includes span transform/clip/union and native serialization.
     double mathMs = 0, serializeMs = 0, nativeCreateMs = 0, reuseComparisonMs = 0;
     bool nativeRegionReused = false;
+    double nativeCombineMs = 0, nativeBandLookupMs = 0;
+    std::size_t nativeBandsCreated = 0, nativeBandsReused = 0;
+    bool nativeBandsUsed = false, nativeBandsFallback = false;
     double supportAllMs = 0, supportStrongMs = 0, weakResolveMs = 0;
     std::uint64_t coveredPixels = 0;
     std::uint64_t conservativePixels = 0;  // Reserved: span tolerance is included in coverage.
@@ -112,7 +116,8 @@ struct PreparedAlphaRegionResult {
 // and its time must be added by the caller when reporting total region cost.
 PreparedAlphaRegionResult BuildPreparedAlphaRegion(
     int width, int height, const std::vector<PreparedAlphaQuad>& quads,
-    const AlphaRegionResult* installedRaster = nullptr);
+    const AlphaRegionResult* installedRaster = nullptr,
+    NativeRegionBands* nativeBands = nullptr);
 #endif
 
 }  // namespace niuma::runtime

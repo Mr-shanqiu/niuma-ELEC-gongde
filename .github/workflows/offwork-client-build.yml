@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -56,7 +56,7 @@ jobs:
           retention-days: 14
 
   windows-runtime-entry:
-    if: ${{ inputs.mode == 'runtime-entry' }}
+    if: ${{ inputs.mode == 'runtime-entry' || inputs.mode == 'runtime-region-bands' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -66,10 +66,21 @@ jobs:
         run: |
           cmake -S . -B build-entry -G "Visual Studio 17 2022" -A x64
           if ($LASTEXITCODE -ne 0) { throw "Entry configuration failed" }
-          cmake --build build-entry --config Release --target niuma-runtime-entry-probe niuma-runtime-entry-check niuma-input-delivery-probe niuma-widget-text-cache-test --parallel 2
+          cmake --build build-entry --config Release --target niuma-runtime-entry-probe niuma-runtime-entry-check niuma-input-delivery-probe --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Entry compilation failed" }
-          & ./build-entry/Release/niuma-widget-text-cache-test.exe
-          if ($LASTEXITCODE -ne 0) { throw "Affected text preparation pixels or timing contract failed" }
+          if ('${{ inputs.mode }}' -eq 'runtime-region-bands') {
+            cmake --build build-entry --config Release --target niuma-native-region-bands-test niuma-composition-presenter-test --parallel 2
+            if ($LASTEXITCODE -ne 0) { throw "Native band contract compilation failed" }
+            & ./build-entry/Release/niuma-native-region-bands-test.exe
+            if ($LASTEXITCODE -ne 0) { throw "Native bands differ from original native regions or leak owners" }
+            & ./build-entry/Release/niuma-composition-presenter-test.exe --region-reuse-only
+            if ($LASTEXITCODE -ne 0) { throw "Affected native coverage or GPU pixels differ" }
+          } else {
+            cmake --build build-entry --config Release --target niuma-widget-text-cache-test --parallel 2
+            if ($LASTEXITCODE -ne 0) { throw "Text contract compilation failed" }
+            & ./build-entry/Release/niuma-widget-text-cache-test.exe
+            if ($LASTEXITCODE -ne 0) { throw "Affected text preparation pixels or timing contract failed" }
+          }
       - name: Verify complex scene readiness, real hooks, final save and normal close
         shell: pwsh
         run: |
