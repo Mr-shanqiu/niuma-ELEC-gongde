@@ -54,6 +54,14 @@ bool CompositionPresenter::Resize(int width, int height) {
   width_ = width; height_ = height; Invalidate();
   return true;
 }
+void CompositionPresenter::UpdateSpareStats() noexcept {
+  stats_.spareTextureCount=spares_.size();stats_.spareTextureBytes=0;
+  for(const auto& texture:spares_)stats_.spareTextureBytes+=texture.bytes;
+}
+void CompositionPresenter::DropSpare(std::size_t index) {
+  renderer_.RemoveTexture(spares_[index].id);
+  spares_.erase(spares_.begin()+index);UpdateSpareStats();
+}
 bool CompositionPresenter::SetTextures(const std::vector<CompositionTexture>& textures) {
   if (!window_) return Fail(E_UNEXPECTED, "Composition window is not initialized");
   if (textures.empty() || textures.size() > kMaximumTextures)
@@ -77,35 +85,73 @@ bool CompositionPresenter::SetTextures(const std::vector<CompositionTexture>& te
       return Fail(E_INVALIDARG, "Incomplete composition texture pixels");
   }
   std::vector<Uploaded> next;
-  std::vector<std::uint32_t> created;
-  next.reserve(textures.size()); created.reserve(textures.size());
-  auto transientBytes = stats_.residentTextureBytes;
+  // Prepared ids are either new resources or claimed inactive buffers. Neither
+  // belongs to the active set, so a later failure may discard all of them.
+  std::vector<std::uint32_t> prepared;
+  next.reserve(textures.size()); prepared.reserve(textures.size());
+  spares_.reserve(kSpareTextureCountLimit);
+  for(std::size_t i=0;i<spares_.size();) {
+    const auto& spare=spares_[i];
+    const bool wanted=std::any_of(textures.begin(),textures.end(),[&](const auto& t) {
+      return t.reusable && t.key==spare.key && t.pixels->width==spare.width && t.pixels->height==spare.height;
+    });
+    if(wanted)++i;else DropSpare(i);
+  }
+  const auto discardPrepared=[&] {
+    for(auto id:prepared)renderer_.RemoveTexture(id);
+    UpdateSpareStats();
+  };
+  const auto backendFailure=[&] {
+    // Cleanup methods have their own success/error state. Preserve the write
+    // error before removing prepared resources rather than reporting S_OK.
+    const auto error=renderer_.LastError();const auto detail=renderer_.LastErrorMessage();
+    discardPrepared();Invalidate();return Fail(error,detail);
+  };
   for (const auto& t : textures) {
     auto found = std::find_if(uploaded_.begin(), uploaded_.end(), [&](const Uploaded& u) {
       return u.key == t.key && u.version == t.version &&
-          u.width == t.pixels->width && u.height == t.pixels->height;
+          u.width == t.pixels->width && u.height == t.pixels->height && u.reusable==t.reusable;
     });
     if (found != uploaded_.end()) { next.push_back(*found); continue; }
     const auto bytes = std::uint64_t(t.pixels->width) * t.pixels->height * 4;
-    if (bytes > kReplacementTextureLimit - transientBytes) {
-      for (auto id : created) renderer_.RemoveTexture(id);
-      return Fail(E_OUTOFMEMORY, "Composition replacement peak exceeded");
+    std::uint32_t id=0;
+    auto spare=std::find_if(spares_.begin(),spares_.end(),[&](const auto& u) {
+      return t.reusable && u.key==t.key && u.width==t.pixels->width && u.height==t.pixels->height;
+    });
+    if(spare!=spares_.end()) {
+      id=spare->id;spares_.erase(spare);UpdateSpareStats();
+      prepared.push_back(id);
+      if(!renderer_.UpdateTexture(id,*t.pixels))return backendFailure();
+    } else {
+      const auto fits=[&] {
+        const auto resident=renderer_.Stats().textureBytes;
+        return resident<=kReplacementTextureLimit && bytes<=kReplacementTextureLimit-resident;
+      };
+      // Idle buffers must never cause an otherwise valid replacement to fail.
+      // Active textures remain untouched until every replacement is ready.
+      while(!fits() && !spares_.empty())DropSpare(spares_.size()-1);
+      if(!fits()) {
+        discardPrepared();return Fail(E_OUTOFMEMORY,"Composition replacement peak exceeded");
+      }
+      id=renderer_.AddTexture(*t.pixels,t.reusable);
+      if(!id)return backendFailure();
+      prepared.push_back(id);
     }
-    const auto id = renderer_.AddTexture(*t.pixels);
-    if (!id) {
-      for (auto previous : created) renderer_.RemoveTexture(previous);
-      return BackendFailure();
-    }
-    created.push_back(id);
-    next.push_back({t.key, t.version, bytes, id, t.pixels->width, t.pixels->height});
-    transientBytes += bytes;
+    next.push_back({t.key,t.version,bytes,id,t.pixels->width,t.pixels->height,t.reusable});
     ++stats_.textureUploads;
-    stats_.peakTextureBytes = std::max(stats_.peakTextureBytes, transientBytes);
+    stats_.peakTextureBytes=std::max(stats_.peakTextureBytes,renderer_.Stats().textureBytes);
   }
-  bool changed = !created.empty() || next.size() != uploaded_.size();
+  bool changed = !prepared.empty() || next.size() != uploaded_.size();
   for (const auto& old : uploaded_) {
     if (std::none_of(next.begin(), next.end(), [&](const Uploaded& n) { return n.id == old.id; })) {
-      renderer_.RemoveTexture(old.id); changed = true;
+      const bool sameShape=std::any_of(next.begin(),next.end(),[&](const auto& n) {
+        return n.key==old.key && n.reusable && n.width==old.width && n.height==old.height;
+      });
+      if(old.reusable && sameShape && spares_.size()<kSpareTextureCountLimit &&
+          old.bytes<=kSpareTextureByteLimit-stats_.spareTextureBytes) {
+        spares_.push_back(old);UpdateSpareStats();
+      } else renderer_.RemoveTexture(old.id);
+      changed = true;
     }
   }
   uploaded_ = std::move(next);
@@ -188,7 +234,7 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
 }
 void CompositionPresenter::Shutdown() {
   renderer_.Shutdown();
-  uploaded_.clear(); previous_.clear(); Invalidate();
+  uploaded_.clear(); spares_.clear(); UpdateSpareStats(); previous_.clear(); Invalidate();
   window_ = nullptr; width_ = height_ = 0;
   stats_.residentTextureBytes = 0;
 }

@@ -165,7 +165,9 @@ void ClassifyAdapter(AdapterInfo& adapter) {
 struct D3D11Renderer::Impl {
     struct Texture {
         ComPtr<ID3D11ShaderResourceView> view;
+        ComPtr<ID3D11Texture2D> writable;
         std::uint64_t bytes = 0;
+        std::uint32_t width = 0, height = 0;
     };
 
     ComPtr<ID3D11Device> device;
@@ -532,7 +534,7 @@ bool D3D11Renderer::Resize(int width, int height) {
     return true;
 }
 
-std::uint32_t D3D11Renderer::AddTexture(const PixelImage& image) {
+std::uint32_t D3D11Renderer::AddTexture(const PixelImage& image, bool updatable) {
     auto& state = *impl_;
     if (!state.Ready("AddTexture")) return 0;
     const std::uint64_t rowBytes = static_cast<std::uint64_t>(image.width) * 4;
@@ -552,7 +554,7 @@ std::uint32_t D3D11Renderer::AddTexture(const PixelImage& image) {
     desc.ArraySize = 1;
     desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.Usage = updatable ? D3D11_USAGE_DEFAULT : D3D11_USAGE_IMMUTABLE;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     D3D11_SUBRESOURCE_DATA data{};
     data.pSysMem = image.bgraPremultiplied.data();
@@ -570,12 +572,34 @@ std::uint32_t D3D11Renderer::AddTexture(const PixelImage& image) {
         return 0;
     }
     entry.bytes = rowBytes * image.height;
+    entry.width=image.width; entry.height=image.height;
+    if(updatable)entry.writable=texture;
     const auto id = state.nextTexture++;
     state.textures.emplace(id, std::move(entry));
     state.stats.textureBytes += rowBytes * image.height;
     state.stats.textureCount = static_cast<std::uint32_t>(state.textures.size());
+    ++state.stats.textureCreations;
     state.Succeed();
     return id;
+}
+
+bool D3D11Renderer::UpdateTexture(std::uint32_t textureId,const PixelImage& image) {
+    auto& state=*impl_;
+    if(!state.Ready("UpdateTexture"))return false;
+    const auto found=state.textures.find(textureId);
+    const std::uint64_t rowBytes=static_cast<std::uint64_t>(image.width)*4;
+    if(found==state.textures.end() || !found->second.writable ||
+        image.width!=found->second.width || image.height!=found->second.height ||
+        image.strideBytes<rowBytes || image.bgraPremultiplied.size()<
+            static_cast<std::uint64_t>(image.strideBytes)*(image.height-1)+rowBytes)
+        return state.Fail(E_INVALIDARG,"UpdateTexture requires a matching writable image");
+    auto result=state.device->GetDeviceRemovedReason();
+    if(FAILED(result))return state.Fail(result,"Update texture on removed device");
+    state.context->UpdateSubresource(found->second.writable.Get(),0,nullptr,
+        image.bgraPremultiplied.data(),image.strideBytes,0);
+    result=state.device->GetDeviceRemovedReason();
+    if(FAILED(result))return state.Fail(result,"Update texture submission");
+    ++state.stats.textureUpdates;state.Succeed();return true;
 }
 
 bool D3D11Renderer::RemoveTexture(std::uint32_t textureId) {

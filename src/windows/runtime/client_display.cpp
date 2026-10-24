@@ -34,7 +34,7 @@ bool ClientDisplay::InstallTextures(const PreparedAppearanceScene* scene,std::ui
   if (scene) for (const auto& image : scene->images)
     textures.push_back({image.id,version,&image.pixels});
   for (auto slot : kSlots) if (const auto* t = text_.Get(slot))
-    textures.push_back({kTextKey+static_cast<unsigned>(slot),t->version,&t->pixels});
+    textures.push_back({kTextKey+static_cast<unsigned>(slot),t->version,&t->pixels,true});
   if (textures.empty()) return true;
   if (!presenter_.SetTextures(textures)) { error_=presenter_.LastErrorMessage(); return false; }
   return true;

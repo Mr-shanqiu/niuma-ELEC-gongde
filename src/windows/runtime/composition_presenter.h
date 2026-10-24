@@ -9,6 +9,7 @@ namespace niuma::runtime {
 struct CompositionTexture {
   std::uint64_t key = 0, version = 0;
   const PixelImage* pixels = nullptr;  // Read only for this upload call.
+  bool reusable = false; // Frequent text only; static artwork remains immutable.
 };
 struct CompositionQuad {
   std::uint64_t textureKey = 0;
@@ -18,6 +19,8 @@ struct CompositionQuad {
 struct CompositionStats {
   std::uint64_t textureUploads = 0, framesPresented = 0, unchangedFrames = 0;
   std::uint64_t residentTextureBytes = 0, peakTextureBytes = 0;
+  std::uint64_t spareTextureBytes = 0;
+  std::size_t spareTextureCount = 0;
   double lastRegionMs = 0, lastSubmitMs = 0;
   PreparedAlphaRegionStats lastRegionDetails;
   double lastRegionInstallWallMs = 0;
@@ -41,6 +44,8 @@ class CompositionPresenter final {
   static constexpr std::uint64_t kResidentTextureLimit = 26ULL * 1024 * 1024;
   // A failed replacement keeps the old set; temporary old+new uploads are bounded.
   static constexpr std::uint64_t kReplacementTextureLimit = 2 * kResidentTextureLimit;
+  static constexpr std::size_t kSpareTextureCountLimit = 3;
+  static constexpr std::uint64_t kSpareTextureByteLimit = 2ULL * 1024 * 1024;
   bool Initialize(HWND window, int width, int height, bool allowSoftwareForTest = false);
   bool Resize(int width, int height);
   bool SetTextures(const std::vector<CompositionTexture>& textures);
@@ -64,17 +69,22 @@ class CompositionPresenter final {
   D3D11Renderer& DiagnosticRenderer() { return renderer_; }
 #endif
  private:
+  friend struct CompositionPresenterTestAccess;
   struct Uploaded {
     std::uint64_t key, version, bytes;
     std::uint32_t id, width, height;
+    bool reusable;
   };
   bool Fail(HRESULT error, const std::string& detail);
   bool BackendFailure();
   void ForgetInstalledRegion() noexcept;
+  void UpdateSpareStats() noexcept;
+  void DropSpare(std::size_t index);
   D3D11Renderer renderer_;
   HWND window_ = nullptr;
   int width_ = 0, height_ = 0;
   std::vector<Uploaded> uploaded_;
+  std::vector<Uploaded> spares_; // At most one inactive buffer per retained key.
   std::vector<Quad> previous_;
   bool frameValid_ = false;
   AlphaRegionResult installedRaster_;

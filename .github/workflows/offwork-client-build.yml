@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -56,7 +56,7 @@ jobs:
           retention-days: 14
 
   windows-runtime-entry:
-    if: ${{ inputs.mode == 'runtime-entry' || inputs.mode == 'runtime-region-bands' }}
+    if: ${{ inputs.mode == 'runtime-entry' || inputs.mode == 'runtime-region-bands' || inputs.mode == 'runtime-textures' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -75,6 +75,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Native bands differ from original native regions or leak owners" }
             & ./build-entry/Release/niuma-composition-presenter-test.exe --region-reuse-only
             if ($LASTEXITCODE -ne 0) { throw "Affected native coverage or GPU pixels differ" }
+          } elseif ('${{ inputs.mode }}' -eq 'runtime-textures') {
+            cmake --build build-entry --config Release --target niuma-composition-presenter-test --parallel 2
+            if ($LASTEXITCODE -ne 0) { throw "Texture contract compilation failed" }
+            & ./build-entry/Release/niuma-composition-presenter-test.exe
+            if ($LASTEXITCODE -ne 0) { throw "Existing immutable texture/presenter contracts failed" }
+            & ./build-entry/Release/niuma-composition-presenter-test.exe --texture-reuse-only
+            if ($LASTEXITCODE -ne 0) { throw "Reusable texture pixels, ownership or failure atomicity failed" }
           } else {
             cmake --build build-entry --config Release --target niuma-widget-text-cache-test --parallel 2
             if ($LASTEXITCODE -ne 0) { throw "Text contract compilation failed" }

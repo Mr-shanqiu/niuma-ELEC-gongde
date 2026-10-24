@@ -1,9 +1,20 @@
 #include <objbase.h>
 #include "../src/windows/runtime/composition_presenter.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+
+namespace niuma::runtime {
+struct CompositionPresenterTestAccess {
+  static std::uint32_t Spare(const CompositionPresenter& p,std::uint64_t key) {
+    for(const auto& texture:p.spares_)if(texture.key==key)return texture.id;
+    return 0;
+  }
+  static D3D11Renderer& Renderer(CompositionPresenter& p){return p.renderer_;}
+};
+}
 
 namespace {
 void Check(bool okay, const char* name) {
@@ -37,6 +48,91 @@ void CheckNative(HWND window, int width, int height, const std::vector<Compositi
   Check(actual && GetWindowRgn(window, actual) != ERROR, "read installed native region");
   Check(EqualRgn(actual, reference.region), "installed coverage exactly equals fresh native region");
   DeleteObject(actual);
+}
+PixelImage Pattern(unsigned width,unsigned height,unsigned color) {
+  PixelImage result;
+  result.width=width;result.height=height;result.strideBytes=width*4;
+  result.bgraPremultiplied.resize(static_cast<std::size_t>(width)*height*4);
+  for(unsigned y=1;y+1<height;++y)for(unsigned x=1;x+1<width;++x) {
+    const unsigned alpha=(x+y+color)%11==0?1:255;
+    const auto i=static_cast<std::size_t>(y*width+x)*4;
+    result.bgraPremultiplied[i]=static_cast<unsigned char>(std::min(alpha,color%220));
+    result.bgraPremultiplied[i+3]=static_cast<unsigned char>(alpha);
+  }
+  return result;
+}
+void TextureReuse(HWND first,HWND second) {
+  CompositionPresenter cached,reference;
+  Check(cached.Initialize(first,120,125,true) && reference.Initialize(second,120,125,true),"texture presenters initialize");
+  auto art=Image(25),a=Image(40),b=Image(60);
+  auto artMask=Mask(art),aMask=Mask(a),bMask=Mask(b);
+  CompositionQuad qa;qa.textureKey=1;qa.mask=&artMask;
+  qa.geometry.positions={{{10,20},{110,20},{110,120},{10,120}}};
+  auto qb=qa;qb.textureKey=2;qb.mask=&aMask;qb.geometry.positions={{{10,0},{100,0},{100,35},{10,35}}};
+  auto qc=qb;qc.textureKey=3;qc.mask=&bMask;qc.geometry.positions={{{25,20},{115,20},{115,60},{25,60}}};
+  std::vector<CompositionQuad> quads{qa,qb,qc};
+  std::vector<CompositionTexture> textures{{1,1,&art},{2,1,&a,true},{3,1,&b,true}};
+  const auto compare=[&] {
+    auto fresh=textures;for(auto& texture:fresh)texture.reusable=false;
+    Check(cached.SetTextures(textures) && reference.SetTextures(fresh),"prepare mutable vs fresh immutable textures");
+    PixelImage actual,expected;
+    Check(cached.DrawLatest(quads,&actual) && reference.DrawLatest(quads,&expected),"capture mutable vs immutable frames");
+    Check(actual.bgraPremultiplied==expected.bgraPremultiplied,"updated GPU pixels equal fresh immutable upload");
+    HRGN x=CreateRectRgn(0,0,0,0),y=CreateRectRgn(0,0,0,0);
+    Check(x && y && GetWindowRgn(first,x)!=ERROR && GetWindowRgn(second,y)!=ERROR && EqualRgn(x,y),"updated native coverage matches fresh upload");
+    DeleteObject(x);DeleteObject(y);
+    Check(cached.Stats().spareTextureCount<=CompositionPresenter::kSpareTextureCountLimit &&
+        cached.Stats().spareTextureBytes<=CompositionPresenter::kSpareTextureByteLimit &&
+        cached.BackendStats().textureBytes==cached.Stats().residentTextureBytes+cached.Stats().spareTextureBytes &&
+        cached.Stats().peakTextureBytes<=CompositionPresenter::kReplacementTextureLimit,"spare owners and bytes bounded");
+  };
+  for(unsigned frame=0;frame<96;++frame) {
+    const unsigned size=16+(frame/32);
+    a=Pattern(size,size,30+frame);b=Pattern(size,size,80+frame);aMask=Mask(a);bMask=Mask(b);
+    textures[1].version=textures[2].version=frame+1;compare();
+    Check(cached.BackendStats().textureCount<=5,"only active art plus two text pairs retained");
+  }
+  Check(cached.BackendStats().textureCreations==13 && cached.BackendStats().textureUpdates==180,
+      "unchanged dimensions reuse resources; size changes replace both slots");
+  textures[1].reusable=false;++textures[1].version;compare();
+  Check(!CompositionPresenterTestAccess::Spare(cached,2),"immutable mode removes spare owner");
+  textures[1].reusable=true;
+  for(unsigned n=0;n<2;++n){++textures[1].version;++textures[2].version;compare();}
+  PixelImage before,after;
+  Check(cached.DrawLatest(quads,&before),"capture old active values before failed replacement");
+  const auto spare=CompositionPresenterTestAccess::Spare(cached,3);
+  Check(spare && CompositionPresenterTestAccess::Renderer(cached).RemoveTexture(spare),"inject missing inactive resource, leaving active textures intact");
+  a=Pattern(18,18,190);b=Pattern(18,18,210);
+  ++textures[1].version;++textures[2].version;
+  const auto updates=cached.BackendStats().textureUpdates;
+  Check(!cached.SetTextures(textures) && FAILED(cached.LastError()) && !cached.LastErrorMessage().empty(),
+      "later update failure remains visible after cleanup");
+  Check(cached.BackendStats().textureUpdates==updates+1,"earlier inactive update really succeeded before injected failure");
+  Check(cached.DrawLatest(quads,&after) && before.bgraPremultiplied==after.bgraPremultiplied,
+      "failed multi-texture replacement leaves every active GPU pixel unchanged");
+  aMask=Mask(a);bMask=Mask(b);compare();
+  auto invalid=textures;PixelImage shortImage=a;shortImage.bgraPremultiplied.clear();invalid[2].pixels=&shortImage;
+  Check(!cached.SetTextures(invalid),"invalid pixels rejected before any upload");
+  Check(cached.DrawLatest(quads,&before),"valid old set survives invalid replacement");
+  // More reusable keys remain valid: only three idle slots may be retained.
+  std::vector<CompositionTexture> four;
+  for(unsigned key=10;key<14;++key)four.push_back({key,1,&a,true});
+  for(unsigned frame=0;frame<5;++frame) {
+    for(auto& texture:four)++texture.version;
+    Check(cached.SetTextures(four) && cached.Stats().spareTextureCount<=3 && cached.BackendStats().textureCount<=7,
+        "four mutable keys do not grow the three-slot cache");
+  }
+  auto large=Pattern(1024,513,80); // Valid, but too large for the spare budget.
+  Check(cached.SetTextures({{20,1,&large,true}}) && cached.SetTextures({{20,2,&large,true}}) &&
+      cached.Stats().spareTextureCount==0 && cached.BackendStats().textureCount==1,
+      "oversized reusable texture falls back to replacement instead of rejecting valid content");
+  Check(cached.SetTextures({textures[0]}) && cached.BackendStats().textureCount==1 &&
+      cached.Stats().spareTextureBytes==0,"removal releases all unused text buffers");
+  cached.Shutdown();
+  Check(cached.BackendStats().textureCount==0 && cached.Stats().spareTextureCount==0,"shutdown releases active and idle buffers");
+  Check(cached.Initialize(first,120,125,true) && cached.SetTextures(textures) && cached.DrawLatest(quads),
+      "device recreation uses current content and no stale buffer ids");
+  std::puts("PASS texture reuse: 100 fresh-immutable GPU/native comparisons; bounded creation, resize, mode changes, inactive-write failure atomicity, removal and recreation");
 }
 void RegionReuse(HWND first, HWND second) {
   CompositionPresenter cached, reference;
@@ -114,12 +210,12 @@ int main(int argc, char** argv) {
       cls.lpszClassName, L"NiuMa composition test", WS_POPUP, 30, 30, 120, 125,
       nullptr, nullptr, cls.hInstance, nullptr);
   Check(window != nullptr, "owned window");
-  if(argc==2 && std::strcmp(argv[1], "--region-reuse-only")==0) {
+  if(argc==2 && (std::strcmp(argv[1], "--region-reuse-only")==0 || std::strcmp(argv[1], "--texture-reuse-only")==0)) {
     HWND second=CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         cls.lpszClassName,L"NiuMa fresh region reference",WS_POPUP,200,30,120,125,
         nullptr,nullptr,cls.hInstance,nullptr);
     Check(second!=nullptr,"reference window");
-    RegionReuse(window,second);
+    if(std::strcmp(argv[1],"--texture-reuse-only")==0)TextureReuse(window,second);else RegionReuse(window,second);
     DestroyWindow(second);DestroyWindow(window);
     UnregisterClassW(cls.lpszClassName,cls.hInstance);CoUninitialize();return 0;
   }

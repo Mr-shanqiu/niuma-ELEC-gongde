@@ -80,6 +80,7 @@ struct RendererStats {
     std::uint64_t diagnosticReadbacks = 0;
     std::uint64_t textureBytes = 0;
     std::uint32_t textureCount = 0;
+    std::uint64_t textureCreations = 0, textureUpdates = 0;
     // Most recent successful Draw's sparse decisions and uploaded byte count.
     std::uint64_t weakAlphaEntries = 0;
     std::uint64_t weakAlphaBytes = 0;
@@ -120,7 +121,10 @@ public:
     bool Resize(int width, int height);
     // Zero is reserved for failure; identifiers are valid only until removed
     // or Shutdown. Upload copies the pixels, so the caller may then release them.
-    std::uint32_t AddTexture(const PixelImage& image);
+    // Static artwork stays immutable. Updatable DEFAULT resources are for
+    // caller-owned inactive buffers; UpdateTexture does not allocate a texture.
+    std::uint32_t AddTexture(const PixelImage& image, bool updatable = false);
+    bool UpdateTexture(std::uint32_t textureId, const PixelImage& image);
     bool RemoveTexture(std::uint32_t textureId);
     void ClearTextures();
     // Optional sparse decisions have one list per quad. A malformed, unsorted,

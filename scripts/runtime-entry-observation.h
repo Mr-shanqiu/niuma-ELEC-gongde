@@ -68,12 +68,15 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
   if(!file) return;
   const auto& stats=display.Stats();
   const auto& textStats=display.TextStats();
+  const auto& backendStats=display.BackendStats();
   const int written=std::fprintf(file,
       "{\"scene\":\"%s\",\"fingerprint\":\"%s\",\"dpi\":%u,\"countdown\":%s,"
       "\"framesPresented\":%llu,\"textureUploads\":%llu,\"adapterKind\":\"%s\","
       "\"vendorId\":%u,\"deviceId\":%u,\"keyboardAvailable\":%s,\"total\":%llu,"
       "\"inputAuthoritative\":%s,\"snapshotReady\":%s,\"glyphEntries\":%zu,\"glyphGeometryBytes\":%zu,"
       "\"glyphPathBuilds\":%llu,\"glyphPathHits\":%llu,\"fontFamilyBuilds\":%llu,"
+      "\"textureCreations\":%llu,\"textureUpdates\":%llu,\"textureCount\":%u,\"textureBytes\":%llu,"
+      "\"spareTextureCount\":%zu,\"spareTextureBytes\":%llu,"
       "\"nativeBandsCreated\":%llu,\"nativeBandsReused\":%llu,\"nativeBandFallbacks\":%llu,"
       "\"retainedBandBytes\":%zu,\"retainedBandHandles\":%zu}\n",
       source.id.c_str(),source.contentFingerprint.c_str(),gState.dpi,gOffwork.enabled?"true":"false",
@@ -84,6 +87,10 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
       textStats.glyphEntries,textStats.glyphGeometryBytes,
       static_cast<unsigned long long>(textStats.glyphPathBuilds),static_cast<unsigned long long>(textStats.glyphPathHits),
       static_cast<unsigned long long>(textStats.fontFamilyBuilds),
+      static_cast<unsigned long long>(backendStats.textureCreations),
+      static_cast<unsigned long long>(backendStats.textureUpdates),backendStats.textureCount,
+      static_cast<unsigned long long>(backendStats.textureBytes),stats.spareTextureCount,
+      static_cast<unsigned long long>(stats.spareTextureBytes),
       static_cast<unsigned long long>(stats.nativeBandsCreated),static_cast<unsigned long long>(stats.nativeBandsReused),
       static_cast<unsigned long long>(stats.nativeBandFallbacks),stats.retainedBandBytes,stats.retainedBandHandles);
   const int closed=std::fclose(file);
