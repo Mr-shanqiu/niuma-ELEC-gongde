@@ -43,6 +43,7 @@
 #include <cstdio>
 #if defined(NIUMA_RUNTIME_ENTRY_PROBE)
 #include <filesystem>
+#include "../../scripts/runtime-entry-frame-protocol.h"
 #endif
 #include <limits>
 #include <map>
@@ -1782,9 +1783,14 @@ bool EnsureCompositionDisplay() {
 
 void RenderCompositionWindow(ULONGLONG now) {
   try {
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+    const auto entryFrameStarted = std::chrono::steady_clock::now();
+#endif
     if (!EnsureCompositionDisplay()) return;
 #if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
     const auto started = std::chrono::steady_clock::now();
+#endif
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS) || defined(NIUMA_RUNTIME_ENTRY_PROBE)
     const auto before = gDisplay.display->Stats().framesPresented;
 #endif
     input_runtime::ClientDisplayState view;
@@ -1805,6 +1811,7 @@ void RenderCompositionWindow(ULONGLONG now) {
     }
     gDisplay.recoveryAttempts = 0;
 #if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+    CaptureRuntimeEntryFrame(entryFrameStarted, before);
     WriteRuntimeEntryObservation();
 #endif
 #if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
@@ -4849,6 +4856,13 @@ void CALLBACK OrphanStorageTimer(HWND, UINT, UINT_PTR, DWORD) {
 LRESULT CALLBACK WindowProcedure(
     HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+    case niuma::entry_probe::kFrameControlMessage:
+      if ((wParam == niuma::entry_probe::kStartFrames && StartRuntimeEntryFrames()) ||
+          (wParam == niuma::entry_probe::kStopFrames && StopRuntimeEntryFrames()))
+        return niuma::entry_probe::kFrameControlAck;
+      return 0;
+#endif
     case WM_MEASUREITEM:
       if (niuma::ui::MeasureMenu(reinterpret_cast<MEASUREITEMSTRUCT*>(lParam), gState.dpi)) return TRUE;
       break;
@@ -5143,6 +5157,7 @@ LRESULT CALLBACK WindowProcedure(
     case WM_DESTROY:
 #if defined(NIUMA_RUNTIME_ENTRY_PROBE)
       WriteRuntimeEntryObservation(true);
+      WriteRuntimeEntryFrames();
 #endif
       KillTimer(window, kDisplayRetryTimer);
       if (gDisplay.display) gDisplay.display->Shutdown();

@@ -1,6 +1,6 @@
 #pragma once
 // Included inside the application's namespace, only in the private entry probe.
-// No sampling loop or historical frame storage is added to the runtime.
+// No sampling loop or historical frame storage is added to the normal client.
 #if !defined(NIUMA_RUNTIME_ENTRY_PROBE)
 #error Entry observations are private-probe only
 #endif
@@ -36,9 +36,9 @@ bool PrepareRuntimeEntryScenario() {
       GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES;
 }
 
+bool gRuntimeEntryReady=false;
 void WriteRuntimeEntryObservation(bool terminal=false) {
-  static bool readyWritten=false;
-  if(!IsRuntimeCandidate() || (!terminal && readyWritten)) return;
+  if(!IsRuntimeCandidate() || (!terminal && gRuntimeEntryReady)) return;
   if(!gDisplay.display || !gDisplay.display->scene() || !gDisplay.display->Stats().framesPresented) {
     if(terminal) {
       FILE* failure=_wfopen((gAcceptanceRoot+L"\\runtime-entry-display.json").c_str(),L"wb");
@@ -78,5 +78,6 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
       gInput.latest.input.keyboardAvailable?"true":"false",static_cast<unsigned long long>(gState.total),
       gInput.authoritative?"true":"false",gInput.latest.input.ready?"true":"false");
   const int closed=std::fclose(file);
-  if(!terminal && written>0 && closed==0) readyWritten=true;
+  if(!terminal && written>0 && closed==0) gRuntimeEntryReady=true;
 }
+#include "runtime-entry-frames.h"

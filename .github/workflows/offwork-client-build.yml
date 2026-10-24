@@ -75,8 +75,11 @@ jobs:
           python scripts/prepare-windows-runtime-acceptance.py build-entry/runtime-fixtures
           if ($LASTEXITCODE -ne 0) { throw "Complex scene fixture preparation failed" }
           $env:NIUMA_ENTRY_ALLOW_SOFTWARE = '1' # Software CI functional evidence only; real-machine trials leave unset.
+          $env:NIUMA_ENTRY_CAPTURE_FRAMES = '1'
           & ./build-entry/Release/niuma-runtime-entry-check.exe (Join-Path $PWD 'build-entry/Release/niuma-runtime-entry-probe.exe') (Join-Path $PWD 'build-entry/Release/niuma-input-delivery-probe.exe') (Join-Path $PWD 'build-entry/evidence') 30 (Join-Path $PWD 'build-entry/runtime-fixtures')
           if ($LASTEXITCODE -ne 0) { throw "Full isolated entry did not deliver and persist real-hook counts" }
+          python scripts/check-windows-entry-frames.py build-entry/evidence/entry-frames.json --output build-entry/evidence/frame-review.json
+          if ($LASTEXITCODE -ne 0) { throw "Full-entry frame evidence was incomplete or internally inconsistent" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

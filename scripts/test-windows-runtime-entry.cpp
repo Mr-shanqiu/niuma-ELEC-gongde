@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "runtime-entry-frame-protocol.h"
 
 namespace {
 void Require(bool okay, const char* message) { if (!okay) throw std::runtime_error(message); }
@@ -55,7 +56,7 @@ std::uint64_t CreatedMs(const Child& child) {
 struct PrivateFailureEvidence {
   std::filesystem::path profile,evidence;
   ~PrivateFailureEvidence() {
-    for(const wchar_t* name:{L"runtime-entry-ready.json",L"runtime-entry-display.json",L"data.ini"}) {
+    for(const wchar_t* name:{L"runtime-entry-ready.json",L"runtime-entry-display.json",L"runtime-entry-frames.json",L"data.ini"}) {
       std::error_code error;
       const auto target=evidence/(std::wstring(L"private-")+name);
       if(std::filesystem::is_regular_file(profile/name,error) && !std::filesystem::exists(target,error))
@@ -114,6 +115,17 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
   Require(ready,"actual selected scene, rendered frame and ordinary hook readiness");
   std::filesystem::copy_file(readyPath,evidence/L"entry-ready.json");
   Sleep(1000);
+  wchar_t captureFlag[8]{};
+  const DWORD flagLength=GetEnvironmentVariableW(L"NIUMA_ENTRY_CAPTURE_FRAMES",captureFlag,8);
+  Require(!flagLength || (flagLength==1 && captureFlag[0]==L'1'),"invalid frame capture flag");
+  const bool captureFrames=flagLength==1;
+  const auto frameControl=[&](WPARAM action) {
+    DWORD_PTR result=0;
+    Require(SendMessageTimeoutW(window,niuma::entry_probe::kFrameControlMessage,action,0,
+        SMTO_ABORTIFHUNG|SMTO_BLOCK,5000,&result)!=0 && result==niuma::entry_probe::kFrameControlAck,
+        "private frame capture control not acknowledged");
+  };
+  if(captureFrames) frameControl(niuma::entry_probe::kStartFrames);
   const auto inputReport=evidence/L"input-delivery.json";
   Child input;input.Start(receiver,L"\""+inputReport.wstring()+L"\" "+std::to_wstring(pairs)+L" "+std::to_wstring(client.process.dwProcessId));
   {
@@ -124,11 +136,13 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
     live.close();Require(live.good(),"write live process binding");
   }
   const auto inputExit=input.Wait(pairs*100+30000);
+  if(captureFrames) frameControl(niuma::entry_probe::kStopFrames);
   Require(PostMessageW(window,WM_CLOSE,0,0)!=FALSE,"normal close of exact child window");
   const auto clientExit=client.Wait(15000);
   const auto displayReport=profile/L"runtime-entry-display.json";
   Require(std::filesystem::is_regular_file(displayReport),"final actual display observation");
   std::filesystem::copy_file(displayReport,evidence/L"entry-display.json");
+  if(captureFrames) std::filesystem::copy_file(profile/L"runtime-entry-frames.json",evidence/L"entry-frames.json");
   wchar_t total[64]{};
   const auto data=profile/L"data.ini";
   GetPrivateProfileStringW(L"state",L"total",L"missing",total,64,data.c_str());
@@ -139,7 +153,8 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
       <<",\"clientExitCode\":"<<clientExit<<",\"expectedCount\":"<<pairs<<",\"savedCount\":\"";
   for(const auto* p=total;*p;++p) report<<static_cast<char>(*p);
   report<<"\",\"privateRoot\":\""<<profile.generic_u8string()<<"\",\"realEntryUsed\":true,"
-      "\"ordinaryNoticeOmittedInSeparateProbe\":true,\"physicalTypingMeasured\":false,\"normalDeveloperCandidateChanged\":false}\n";
+      "\"ordinaryNoticeOmittedInSeparateProbe\":true,\"physicalTypingMeasured\":false,\"normalDeveloperCandidateChanged\":false,"
+      "\"frameCaptureRequested\":"<<(captureFrames?"true":"false")<<"}\n";
   report.close();Require(report.good(),"write terminal report");
   Require(okay,"delivery or actual hook persistence did not match");
   std::cout<<"PASS private full-entry lifecycle: rejected unsafe entries, independent receiver delivered "<<pairs
