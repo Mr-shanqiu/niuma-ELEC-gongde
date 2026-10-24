@@ -41,7 +41,12 @@ public static class NiuMaSetupUI {
 '@
 function Await([scriptblock]$Condition,[string]$Description,[int]$Seconds=25) {
   $deadline=[DateTime]::UtcNow.AddSeconds($Seconds)
-  do { $value=& $Condition; if($value){return $value};Start-Sleep -Milliseconds 100 } while([DateTime]::UtcNow -lt $deadline)
+  do {
+    $value=& $Condition
+    if($value -is [IntPtr]) { if($value -ne [IntPtr]::Zero){return $value} }
+    elseif($value){return $value}
+    Start-Sleep -Milliseconds 100
+  } while([DateTime]::UtcNow -lt $deadline)
   throw "Timeout: $Description"
 }
 function Snapshot-Dialog([IntPtr]$Window,[string]$Name) {
@@ -84,7 +89,7 @@ if($notice -ne [IntPtr]::Zero){[NiuMaSetupUI]::SendMessage($notice,273,[IntPtr]1
 if(-not $client.WaitForExit(15000) -or $client.ExitCode -ne 0){throw 'Installed client failed normal close'}
 $ini=Join-Path $data 'data.ini'; if(-not (Test-Path -LiteralPath $ini)){throw 'Installed client did not save its data'}
 $dataHash=(Get-FileHash -LiteralPath $ini -Algorithm SHA256).Hash
-$receipt.exactInstall=$true;$receipt.productionComposition=$true;$receipt.normalClose=$true
+$receipt.exactInstall=$true;$receipt.productionWindowSelectsComposition=$true;$receipt.normalClose=$true
 $remover=Start-Process -FilePath $installed -ArgumentList '--uninstall' -PassThru
 $confirmation=Await {[NiuMaSetupUI]::Find($remover.Id,'#32770')} 'uninstall confirmation'
 Snapshot-Dialog $confirmation 'single-file-uninstall.png'

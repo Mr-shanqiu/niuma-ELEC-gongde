@@ -45,6 +45,8 @@ if ((Get-Item $distExe).Length -ge $maximumBaseBytes -or (Get-Item $zipPath).Len
   throw 'Windows base package exceeds the 10MB product limit'
 }
 "EXE=$distExe"
+'WINDOWS_DELIVERY_KIND=SINGLE_EXE_SELF_INSTALL'
+'SIGNING_INPUT=final niuma-merit.exe only; do not wrap it in the legacy Inno installer'
 "ZIP=$zipPath"
 "WINDOWS_RELEASE_EVIDENCE=$releaseEvidenceDir"
 if ($ClientOnly) {

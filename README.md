@@ -7,7 +7,7 @@
 
 ## 当前版本
 
-- 当前客户端源码版本为 **0.9.4**，见 [VERSION](VERSION)。
+- 此分支客户端源码候选版本为 **0.9.5**，见 [VERSION](VERSION)，尚未签名或发布。Windows 正在验证单 EXE 自安装交付与新运行核心；Mac 正式版保持下述已发布版本。
 - 官网当前提供 **macOS 0.9.4 / build 904.14 / Universal 2** 和 **Windows 0.9.4**。以[官方下载页](https://gongde.zqscreen.cn/download.html)及其校验清单为准。
 - Mac 904.13 已修复异常形象包导入可能卡住的问题，并补齐英文导入错误提示；安装和异常包导入已在本机验收。
 - Mac 904.14 使用官方登录启动接口，已完成开关、状态保留和实际重启自启动验收；客户端、安装器和 DMG 均已完成 Developer ID 签名，客户端与最终 DMG 已完成苹果公证并装订票据。Windows 客户端和安装程序均已完成代码签名。
@@ -43,7 +43,7 @@ macOS：
 Windows：
 
 ```powershell
-./scripts/build-windows.ps1 -ClientOnly -ExpectedVersion 0.9.4
+./scripts/build-windows.ps1 -ClientOnly -ExpectedVersion 0.9.5
 ```
 
 通用 CMake 构建：
@@ -54,6 +54,8 @@ cmake --build build --config Release
 ```
 
 构建需要相应平台工具链。自行构建不等同于官方安装包，也不继承官方签名或公证。Apple 开发账号、证书和私钥必须由签名者自行保管。
+
+本分支 Windows 正式目标输出的 `niuma-merit.exe` 本身包含安装入口：从下载位置运行时确认安装，原样复制到用户固定目录后作为客户端运行；系统卸载也复用同一映像。计划只送签最终 EXE 一份，不再外包一层 Inno 安装器。当前开发候选仍未送签，不能据此替换官网下载包。Windows 10 22H2 为最低设计目标，尚无 Win10 环境验收结果；Win11 现有运行核心实测证据与安装入口验证分别记录。
 
 ## 许可证
 

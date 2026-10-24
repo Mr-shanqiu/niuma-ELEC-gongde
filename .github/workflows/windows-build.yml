@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       require_signed_fixtures:
-        description: Require signed importer evidence for a formal 0.9.x installer
+        description: Require signed importer evidence for a formal 0.9.x client
         type: boolean
         default: true
       run_legacy_expiry:
@@ -51,7 +51,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Reminder test configuration failed" }
           cmake --build build-reminder-tests --config Release --target niuma-reminder-activity-test --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Reminder test build failed" }
-          ctest --test-dir build-reminder-tests -C Release --output-on-failure --no-tests=error
+          ctest --test-dir build-reminder-tests -C Release -R "^niuma-reminder-activity$" --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { throw "Reminder core tests failed" }
 
       - name: Build Release package
@@ -82,36 +82,27 @@ jobs:
             throw "Client compiled, but formal 0.9.x release is blocked: supply frozen signed perpetual/expired fixtures covering both production public keys. No private signing key belongs in this workflow."
           }
 
-      - name: Build Windows installer
+      - name: Prepare the single self-install executable
         if: env.WINDOWS_PERPETUAL_STATUS == 'PASS'
         shell: powershell
         run: |
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup --no-progress -y
+          # This is the client itself, not an outer installer containing another PE.
+          $final = "dist\niuma-merit-windows-$env:VERSION.exe"
+          Copy-Item -LiteralPath 'dist\niuma-merit.exe' -Destination $final
+          if ((Get-FileHash 'dist\niuma-merit.exe' -Algorithm SHA256).Hash -ne
+              (Get-FileHash $final -Algorithm SHA256).Hash) {
+            throw 'Single-file delivery differs from the validated client'
           }
-          if (-not (Test-Path $iscc)) {
-            throw "Inno Setup compiler was not found"
-          }
-          & $iscc "/DMyAppVersion=$env:VERSION" "installer\windows\niuma-merit.iss"
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
-          if (-not $env:WINDOWS_RELEASE_EVIDENCE) {
-            throw "The client artifact binding directory is missing"
-          }
-          $artifactArguments = @{
-            ExecutablePath = "dist\niuma-merit-windows-$env:VERSION-setup.exe"
-            ExpectedVersion = $env:VERSION
-            ArtifactKind = 'installer'
-            ReceiptPath = Join-Path $env:WINDOWS_RELEASE_EVIDENCE 'installer-artifact.json'
-          }
-          & ./scripts/verify-windows-artifact.ps1 @artifactArguments
+          if (-not $env:WINDOWS_RELEASE_EVIDENCE) { throw 'Client binding directory missing' }
+          & ./scripts/verify-windows-artifact.ps1 -ExecutablePath $final -ExpectedVersion $env:VERSION `
+            -ArtifactKind client -ReceiptPath (Join-Path $env:WINDOWS_RELEASE_EVIDENCE 'single-file-artifact.json')
 
-      - name: Upload Windows installer
+      - name: Upload the one Windows executable for later signing
         if: env.WINDOWS_PERPETUAL_STATUS == 'PASS'
         uses: actions/upload-artifact@v4
         with:
-          name: niuma-merit-windows-${{ env.VERSION }}-setup
-          path: dist/niuma-merit-windows-${{ env.VERSION }}-setup.exe
+          name: niuma-merit-windows-${{ env.VERSION }}-single-file
+          path: dist/niuma-merit-windows-${{ env.VERSION }}.exe
           if-no-files-found: error
           retention-days: 14
 
