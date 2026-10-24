@@ -6,6 +6,7 @@
 #import "appearance_pack.mm"
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
+#include "../client/core/visibility_state.h"
 #include "../reminder_activity.h"
 #include "../reminder_geometry.h"
 #include "../reminder_policy.h"
@@ -322,6 +323,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 @interface MeritController : NSObject <NSApplicationDelegate, NSWindowDelegate> {
   niuma::OffworkSnapshot _offworkSnapshot;
+  niuma::client::core::VisibilityState _visibility;
   niuma::reminder::ActivitySampler _reminderActivity;
   niuma::reminder::WallClockGuard _reminderClockGuard;
   bool _reminderStorageFault;
@@ -333,6 +335,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic) BOOL readyForOpenedFiles;
 @property(nonatomic, strong) NSMutableArray<NSString *> *pendingOpenFiles;
 @property(nonatomic, strong) NSWindow *window;
+@property(nonatomic, strong) NSStatusItem *visibilityStatusItem;
+@property(nonatomic) BOOL appearanceHidden;
 @property(nonatomic, strong) MeritView *view;
 @property(nonatomic, strong) NSTimer *animationTimer;
 @property(nonatomic, strong) NSTimer *permissionPollTimer;
@@ -443,6 +447,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)countScrollGesture;
 - (void)showContextMenu:(NSEvent *)event;
 - (NSMenu *)contextMenu;
+- (void)refreshAppearanceVisibility:(id)sender;
+- (void)applyAppearanceVisibility;
+- (void)toggleAppearanceVisibility:(id)sender;
+- (void)toggleAutoHideFullscreen:(id)sender;
+- (void)showStatusMenu:(id)sender;
+
 - (void)startStrikeWithDuration:(NSTimeInterval)duration;
 - (void)animate:(NSTimer *)timer;
 - (void)showPermissionIntroIfNeeded;
@@ -1545,8 +1555,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.window.opaque = NO;
   self.window.hasShadow = NO;
   self.window.level = NSFloatingWindowLevel;
-  // Keep the existing floating-window Space behavior. There is no
-  // application-fullscreen detection or automatic hiding preference.
+  // Preserve Space behavior; the display policy can hide without stopping input.
   self.window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
       NSWindowCollectionBehaviorFullScreenAuxiliary;
   self.window.movableByWindowBackground = YES;
@@ -1577,7 +1586,23 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [self.window setFrameOrigin:NSMakePoint(NSMaxX(screen.visibleFrame) - 280 * kUiScale,
                                            NSMaxY(screen.visibleFrame) - 270 * kUiScale)];
   }
+  id<NMMeritPreferences> visibilityDefaults = MeritPreferences();
+  _visibility.autoHideFullscreen = [visibilityDefaults objectForKey:@"AutoHideFullscreen"] == nil ||
+      [visibilityDefaults boolForKey:@"AutoHideFullscreen"];
+  self.visibilityStatusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
+  if (self.visibilityStatusItem.button) {
+    self.visibilityStatusItem.button.title = @"功";
+    self.visibilityStatusItem.button.toolTip = UiText(@"牛马电子功德 · 显示或隐藏形象", @"NiuMa Merit · Show or hide appearance");
+    self.visibilityStatusItem.button.target = self;
+    self.visibilityStatusItem.button.action = @selector(showStatusMenu:);
+    [self.visibilityStatusItem.button sendActionOn:NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp];
+    _visibility.recoveryAvailable = true;
+  }
   NSNotificationCenter *workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
+  [workspaceCenter addObserver:self selector:@selector(refreshAppearanceVisibility:)
+      name:NSWorkspaceActiveSpaceDidChangeNotification object:nil];
+  [workspaceCenter addObserver:self selector:@selector(refreshAppearanceVisibility:)
+      name:NSWorkspaceDidActivateApplicationNotification object:nil];
   [workspaceCenter addObserver:self selector:@selector(offworkWillSleep:) name:NSWorkspaceWillSleepNotification object:nil];
   [workspaceCenter addObserver:self selector:@selector(offworkClockChanged:) name:NSWorkspaceDidWakeNotification object:nil];
   [workspaceCenter addObserver:self selector:@selector(reminderDidResume:) name:NSWorkspaceDidWakeNotification object:nil];
@@ -1608,6 +1633,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       name:@"com.apple.screenIsUnlocked" object:nil suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
   [self startOffworkTimer];
   [self.window orderFrontRegardless];
+  [self refreshAppearanceVisibility:nil];
   if (previousAppearanceMissing || self.appearanceLoadError) {
     NSAlert *notice = [[NMUiAlert alloc] init];
     notice.alertStyle = NSAlertStyleWarning;
@@ -1803,6 +1829,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 - (void)applicationWillTerminate:(NSNotification *)notification {
   (void)notification;
   self.eventTapStopping = YES;
+  if (self.visibilityStatusItem) [NSStatusBar.systemStatusBar removeStatusItem:self.visibilityStatusItem];
+  self.visibilityStatusItem = nil;
   [self stopPermissionPoll];
   [self removeEventTap];
   [self refreshOffworkAllowRollover:YES];
@@ -1820,7 +1848,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)startStrikeWithDuration:(NSTimeInterval)duration {
-  if (self.strikeActive) return;
+  if (_visibility.hidden() || self.strikeActive) return;
   self.strikeActive = YES;
   self.strikeStartTime = [NSDate timeIntervalSinceReferenceDate];
   self.activeStrikeDuration = duration;
@@ -1913,6 +1941,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)evaluateReminderActivity:(NSTimer *)timer {
   (void)timer;
+  [self refreshAppearanceVisibility:nil];
   const std::uint64_t nowMs = ReminderContinuousTimeMs();
   const std::int64_t nowUtc = static_cast<std::int64_t>(NSDate.date.timeIntervalSince1970);
   const auto clockTransition = _reminderClockGuard.Observe(nowUtc, nowMs);
@@ -1955,7 +1984,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)presentReminderForTrigger:(niuma::reminder::ActivitySampler::Trigger)trigger {
-  if (!_reminderStore || self.reminderPanel ||
+  if (_visibility.hidden() || !_reminderStore || self.reminderPanel ||
       (gIsolatedAcceptance && !gReminderPreviewAcceptance)) return;
   const std::int64_t nowUtc = static_cast<std::int64_t>(NSDate.date.timeIntervalSince1970);
   if (_reminderStore->SetSegmentConsumed(true, nowUtc) !=
@@ -2436,7 +2465,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSTimeInterval desiredDuration = std::clamp(
       self.smoothedInputInterval * 1.05, kMinStrikeDuration, kMaxStrikeDuration);
   [self startStrikeWithDuration:desiredDuration];
-  [self.view setNeedsDisplay:YES];
+  if (!_visibility.hidden()) [self.view setNeedsDisplay:YES];
   [self.calendarView setNeedsDisplay:YES];
 }
 
@@ -2450,6 +2479,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)animate:(NSTimer *)timer {
   (void)timer;
+  if (_visibility.hidden()) { [self stopAnimation]; self.strikeActive = NO; return; }
   NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
   NSTimeInterval age = now - self.strikeStartTime;
   [self.view setNeedsDisplay:YES];
@@ -2465,6 +2495,55 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (!self.animationTimer) return;
   [self.animationTimer invalidate];
   self.animationTimer = nil;
+}
+
+- (void)refreshAppearanceVisibility:(id)sender {
+  (void)sender;
+  _visibility.fullscreen = _visibility.autoHideFullscreen &&
+      (NSApp.currentSystemPresentationOptions & NSApplicationPresentationFullScreen) != 0;
+  if (!_visibility.fullscreen) _visibility.showDuringFullscreen = false;
+  [self applyAppearanceVisibility];
+}
+
+- (void)applyAppearanceVisibility {
+  BOOL hidden = _visibility.hidden();
+  if (!self.window || hidden == self.appearanceHidden) return;
+  self.appearanceHidden = hidden;
+  [self stopAnimation]; self.strikeActive = NO;
+  if (hidden) {
+    [self.reminderDismissTimer invalidate]; self.reminderDismissTimer = nil;
+    [self.reminderPanel orderOut:nil]; self.reminderPanel = nil;
+    [self.window orderOut:nil];
+  } else {
+    [self refreshOffworkAllowRollover:YES];
+    [self.view setNeedsDisplay:YES];
+    [self.window orderFront:nil];  // Never take the typing focus.
+  }
+}
+
+- (void)toggleAppearanceVisibility:(id)sender {
+  (void)sender;
+  if (!_visibility.recoveryAvailable) return;  // Keep a recovery path before hiding.
+  BOOL hidden = !_visibility.hidden();
+  _visibility.manualHidden = hidden;
+  _visibility.showDuringFullscreen = !hidden && _visibility.fullscreen;
+  [self refreshAppearanceVisibility:nil];
+}
+
+- (void)toggleAutoHideFullscreen:(id)sender {
+  (void)sender;
+  _visibility.autoHideFullscreen = !_visibility.autoHideFullscreen;
+  _visibility.showDuringFullscreen = false;
+  [MeritPreferences() setBool:_visibility.autoHideFullscreen forKey:@"AutoHideFullscreen"];
+  [self refreshAppearanceVisibility:nil];
+}
+
+- (void)showStatusMenu:(id)sender {
+  (void)sender;
+  // A fresh menu always reflects manual, automatic and counting state.
+  NSMenu *menu = [self contextMenu];
+  [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, 0)
+      inView:self.visibilityStatusItem.button];
 }
 
 - (NSMenu *)contextMenu {
@@ -2509,12 +2588,22 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   // The compact pet window is only 120 points wide. Keep the native menu
   // independent from that canvas size and leave room for checkmarks/padding.
   // Every command is a normal native row; separator rows would add uneven gaps.
-  NSArray<NSMenuItem *> *entries = @[appearance, calendar, offwork, launchAtLogin, about, quit];
+  NSMenuItem *visibility = [[NSMenuItem alloc] initWithTitle:_visibility.hidden() ?
+      UiText(@"显示形象（继续计数）", @"Show Appearance (Counting Continues)") :
+      UiText(@"隐藏形象（继续计数）", @"Hide Appearance (Counting Continues)")
+      action:@selector(toggleAppearanceVisibility:) keyEquivalent:@""];
+  visibility.target = self;
+  visibility.enabled = _visibility.recoveryAvailable;
+  NSMenuItem *autoHide = [[NSMenuItem alloc] initWithTitle:UiText(@"全屏时自动隐身", @"Auto-hide in Fullscreen")
+      action:@selector(toggleAutoHideFullscreen:) keyEquivalent:@""];
+  autoHide.target = self;
+  autoHide.state = _visibility.autoHideFullscreen ? NSControlStateValueOn : NSControlStateValueOff;
+  NSArray<NSMenuItem *> *entries = @[visibility, autoHide, appearance, calendar, offwork, launchAtLogin, about, quit];
   for (NSMenuItem *item in entries) [menu addItem:item];
   NSFont *menuFont = [NSFont systemFontOfSize:14];
   menu.font = menuFont;
   if (@available(macOS 11.0, *)) {
-    NSArray *symbols = @[@"person.crop.square", @"calendar", @"clock", @"power", @"info.circle", @"rectangle.portrait.and.arrow.right"];
+    NSArray *symbols = @[@"eye.slash", @"arrow.up.left.and.arrow.down.right", @"person.crop.square", @"calendar", @"clock", @"power", @"info.circle", @"rectangle.portrait.and.arrow.right"];
     for (NSUInteger index = 0; index < entries.count; ++index) {
       NSImage *image = [NSImage imageWithSystemSymbolName:symbols[index] accessibilityDescription:nil];
       image.size = NSMakeSize(16, 16); ((NSMenuItem *)entries[index]).image = image;

@@ -14,7 +14,7 @@ namespace niuma::client::core {
 // ReminderStore and are deliberately absent: a generic file snapshot must never
 // replace or acknowledge those transactions.
 enum class StorageDomain : std::size_t {
-  Counts, Window, Appearance, Autostart, Guide, OffworkSettings, OffworkDays, Count
+  Counts, Window, Appearance, Autostart, Guide, OffworkSettings, OffworkDays, Visibility, Count
 };
 using StorageVersions = std::array<std::uint64_t, static_cast<std::size_t>(StorageDomain::Count)>;
 
@@ -54,6 +54,7 @@ struct StorageFileState {
   StorageAutostart autostart;
   StorageGuide guide;
   StorageOffworkSettings offwork;
+  bool autoHideFullscreen = true;  // [state] auto_hide_fullscreen; manual hide is session-only.
   std::map<LocalDate, StorageOffworkDay> offworkDays;
 };
 
@@ -90,6 +91,7 @@ class StorageState {
   StorageUpdate UpdateAppearance(StorageAppearance value, std::uint64_t nowMs);
   StorageUpdate UpdateAutostart(StorageAutostart value, std::uint64_t nowMs);
   StorageUpdate UpdateGuide(StorageGuide value, std::uint64_t nowMs);
+  StorageUpdate UpdateAutoHideFullscreen(bool value, std::uint64_t nowMs);
   StorageUpdate UpdateOffworkSettings(StorageOffworkSettings value, std::uint64_t nowMs);
   StorageUpdate UpdateOffworkDay(LocalDate date, StorageOffworkDay value, std::uint64_t nowMs);
 

@@ -133,6 +133,13 @@ StorageUpdate StorageState::UpdateGuide(StorageGuide value, std::uint64_t nowMs)
   Changed(StorageDomain::Guide, nowMs);
   return StorageUpdate::Changed;
 }
+StorageUpdate StorageState::UpdateAutoHideFullscreen(bool value, std::uint64_t nowMs) {
+  if (current_.autoHideFullscreen == value) return StorageUpdate::Unchanged;
+  if (!CanChange(StorageDomain::Visibility)) return StorageUpdate::CapacityExceeded;
+  current_.autoHideFullscreen = value;
+  Changed(StorageDomain::Visibility, nowMs);
+  return StorageUpdate::Changed;
+}
 StorageUpdate StorageState::UpdateOffworkSettings(StorageOffworkSettings value, std::uint64_t nowMs) {
   if (!Valid(value)) return StorageUpdate::Invalid;
   const auto& old = current_.offwork;

@@ -263,6 +263,7 @@ StorageFileState LoadState(const Document& document) {
   state.autostart = {integer("state", "autostart_configured", 0) == 1,
                      integer("state", "autostart_enabled", 1) == 1};
   state.guide = {integer("state", "privacy_shown", 0) == 1, integer("state", "basic_guide_shown", 0) == 1};
+  state.autoHideFullscreen = integer("state", "auto_hide_fullscreen", 1) != 0;
   state.offwork.enabled = integer("offwork", "enabled", 0) == 1;
   const auto hour = integer("offwork", "hour", 18), minute = integer("offwork", "minute", 0);
   state.offwork.hour = hour >= 0 && hour < 24 ? static_cast<int>(hour) : 18;
@@ -301,6 +302,7 @@ Changes MakeChanges(const StorageFileState& state) {
   put("state", "autostart_enabled", state.autostart.enabled);
   put("state", "privacy_shown", state.guide.privacyShown);
   put("state", "basic_guide_shown", state.guide.basicGuideShown);
+  put("state", "auto_hide_fullscreen", state.autoHideFullscreen);
   put("offwork", "enabled", state.offwork.enabled);
   put("offwork", "hour", state.offwork.hour); put("offwork", "minute", state.offwork.minute);
   for (const auto& day : state.counts.daily) result[{"daily", DateText(day.first)}] = std::to_string(day.second);

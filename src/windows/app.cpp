@@ -13,6 +13,8 @@
 #include <gdiplus.h>
 #include <objidl.h>
 #include <bcrypt.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
 
 #include "appearance_pack.h"
 #include "render_cache.h"
@@ -26,6 +28,7 @@
 #include "self_install.h"
 #endif
 #include "../offwork_clock.h"
+#include "../client/core/visibility_state.h"
 #include "../calendar_month_range.h"
 #include "../reminder_activity.h"
 #include "../reminder_geometry.h"
@@ -107,6 +110,8 @@ constexpr UINT kInputSnapshotMessage = WM_APP + 70;
 constexpr UINT kAppearanceReadyMessage = WM_APP + 71;
 constexpr UINT kDisplayFailureMessage = WM_APP + 72;
 constexpr UINT kImportQueuedMessage = WM_APP + 32;
+constexpr UINT kTrayMessage = WM_APP + 73;
+const UINT kTaskbarCreatedMessage = RegisterWindowMessageW(L"TaskbarCreated");
 constexpr ULONG_PTR kPackFileCopyData = 0x4E4D4750;
 constexpr UINT_PTR kAnimationTimer = 1;
 constexpr UINT_PTR kDayTimer = 2;
@@ -152,6 +157,8 @@ constexpr UINT_PTR kMenuQuit = 5;
 constexpr UINT_PTR kMenuCountStatus = 6;
 constexpr UINT_PTR kMenuGuide = 7;
 constexpr UINT_PTR kMenuOffwork = 8;
+constexpr UINT_PTR kMenuVisibility = 9;
+constexpr UINT_PTR kMenuAutoHide = 10;
 constexpr wchar_t kCountStatusClass[] = L"NiuMaMeritCountStatus";
 constexpr int kStatusText = 4001;
 constexpr int kStatusStart = 4002;
@@ -241,6 +248,14 @@ struct AppState {
 };
 
 AppState gState;
+niuma::client::core::VisibilityState gVisibility;
+bool gVisibilityHidden = false;
+NOTIFYICONDATAW gTray{};
+void ShowContextMenu(HWND window, POINT screenPoint);
+void RenderLayeredWindow(ULONGLONG now);
+void ApplyWindowVisibility();
+void RefreshFullscreenVisibility();
+
 namespace input_runtime = niuma::windows::runtime;
 namespace input_core = niuma::client::core;
 
@@ -1796,6 +1811,7 @@ bool EnsureCompositionDisplay() {
 }
 
 void RenderCompositionWindow(ULONGLONG now) {
+  if (gVisibility.hidden()) return;
   try {
 #if defined(NIUMA_RUNTIME_ENTRY_PROBE)
     const auto entryFrameStarted = std::chrono::steady_clock::now();
@@ -1858,11 +1874,12 @@ void RetryCompositionDisplay() {
       FailCompositionDisplay(); return;
     }
     RenderCompositionWindow(GetTickCount64());
-    if (!gDisplay.failed) ShowWindow(gState.window, SW_SHOWNOACTIVATE);
+    if (!gDisplay.failed && !gVisibility.hidden()) ShowWindow(gState.window, SW_SHOWNOACTIVATE);
   } catch (...) { FailCompositionDisplay(); }
 }
 
 void RenderLayeredWindow(ULONGLONG now) {
+  if (gVisibility.hidden()) return;
   if (UsesCompositionRuntime()) {
     if (gState.window) RenderCompositionWindow(now);
     return;
@@ -2226,7 +2243,7 @@ void PrepareBuiltinThumbnail() {
 }
 
 void EnsureAnimationTimer() {
-  if (!gState.timerRunning && gState.window != nullptr) {
+  if (!gVisibility.hidden() && !gState.timerRunning && gState.window != nullptr) {
     SetTimer(gState.window, kAnimationTimer, 16, nullptr);
     gState.timerRunning = true;
   }
@@ -2538,7 +2555,7 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
     if (acceptanceStage != nullptr) *acceptanceStage = value;
   };
   stage("store-or-existing-window");
-  if (!gState.reminderStore || gReminderWindow != nullptr ||
+  if (gVisibility.hidden() || !gState.reminderStore || gReminderWindow != nullptr ||
       gInput.pendingReminderWindow != nullptr) return;
   const std::int64_t nowUtc = static_cast<std::int64_t>(std::time(nullptr));
   stage("segment-save");
@@ -2832,7 +2849,7 @@ void ConsumeInputSnapshot() {
   }
   if (gInput.pendingReminderWindow) {
     const auto& confirmation = gInput.latest.reminderConfirmation;
-    const bool stillValid = !gInput.controlFault &&
+    const bool stillValid = !gVisibility.hidden() && !gInput.controlFault &&
         gInput.latest.input.epoch == gInput.reminderEpoch &&
         gInput.latest.input.keyboardAvailable && gInput.latest.input.mouseAvailable &&
         gInput.latest.input.reminderSegmentConsumed && !ReminderSuspended() &&
@@ -4672,6 +4689,94 @@ void ImportOfficialMessages(HWND owner, const std::wstring& filename) {
       MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
 }
 
+bool InstallTrayIcon(HWND window) {
+  gTray = {};
+  gTray.cbSize = sizeof(gTray); gTray.hWnd = window; gTray.uID = 1;
+  gTray.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+  gTray.uCallbackMessage = kTrayMessage;
+  gTray.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(103));
+  if (!gTray.hIcon) gTray.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+  wcscpy_s(gTray.szTip, UiText(L"牛马电子功德 · 右键可显示或隐藏形象",
+      L"NiuMa Merit - right-click to show or hide"));
+  const bool installed = Shell_NotifyIconW(NIM_ADD, &gTray) != FALSE;
+  if (installed) { gTray.uVersion = NOTIFYICON_VERSION_4; Shell_NotifyIconW(NIM_SETVERSION, &gTray); }
+  gVisibility.recoveryAvailable = installed;
+  return installed;
+}
+
+bool ForegroundIsFullscreen() {
+  HWND foreground = GetForegroundWindow();
+  if (!foreground) return false;
+  DWORD pid = 0; GetWindowThreadProcessId(foreground, &pid);
+  // Opening our tray/menu/settings must not briefly unhide the pet over a game.
+  if (pid == GetCurrentProcessId()) return gVisibility.fullscreen;
+  if (!IsWindowVisible(foreground) || IsIconic(foreground) ||
+      foreground == GetDesktopWindow() || foreground == GetShellWindow()) return false;
+  wchar_t name[128]{}; GetClassNameW(foreground, name, 128);
+  for (const auto* shell : {L"Progman", L"WorkerW", L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd"})
+    if (wcscmp(name, shell) == 0) return false;
+  USERNOTIFICATIONSTATE notification{};
+  if (SUCCEEDED(SHQueryUserNotificationState(&notification)) &&
+      notification == QUNS_RUNNING_D3D_FULL_SCREEN) return true;
+  RECT bounds{}; MONITORINFO monitor{}; monitor.cbSize = sizeof(monitor);
+  if (FAILED(DwmGetWindowAttribute(foreground, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds))) &&
+      !GetWindowRect(foreground, &bounds)) return false;
+  if (!GetMonitorInfoW(MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
+  // A normal maximized title-bar window with an auto-hidden taskbar is not fullscreen.
+  if (IsZoomed(foreground) && (GetWindowLongPtrW(foreground, GWL_STYLE) & WS_CAPTION)) return false;
+  return niuma::client::core::CoversFullscreenMonitor(
+      {bounds.left,bounds.top,bounds.right,bounds.bottom},
+      {monitor.rcMonitor.left,monitor.rcMonitor.top,monitor.rcMonitor.right,monitor.rcMonitor.bottom});
+}
+
+void ApplyWindowVisibility() {
+  const bool hidden = gVisibility.hidden();
+  if (!gState.window || hidden == gVisibilityHidden) return;
+  gVisibilityHidden = hidden;
+  KillTimer(gState.window, kAnimationTimer); gState.timerRunning = false;
+  gState.striking = false; gInput.previewUntil = 0;
+  if (hidden) {
+    CancelPendingReminder();
+    if (gReminderWindow) DestroyWindow(gReminderWindow);
+    ShowWindow(gState.window, SW_HIDE);
+  } else {
+    // Render the latest totals once. Hidden input never becomes an animation backlog.
+    if (UsesCompositionRuntime() && gDisplay.display) gDisplay.display->Invalidate();
+    RenderLayeredWindow(GetTickCount64());
+    if (!gDisplay.failed) ShowWindow(gState.window, SW_SHOWNOACTIVATE);
+  }
+}
+
+void RefreshFullscreenVisibility() {
+  gVisibility.fullscreen = gVisibility.autoHideFullscreen && ForegroundIsFullscreen();
+  if (!gVisibility.fullscreen) gVisibility.showDuringFullscreen = false;
+  ApplyWindowVisibility();
+}
+
+void SetManualHidden(bool hidden) {
+  // Refuse to hide if the recovery icon could not be installed.
+  if (hidden && !gVisibility.recoveryAvailable && !InstallTrayIcon(gState.window)) {
+    niuma::ui::Message(gState.window, UiText(L"托盘入口暂不可用，形象保持显示。请稍后重试。",
+        L"The tray entry is unavailable. The appearance remains visible; try again later."),
+        WindowTitle(), MB_OK | MB_ICONWARNING);
+    return;
+  }
+  gVisibility.manualHidden = hidden;
+  gVisibility.showDuringFullscreen = !hidden && gVisibility.fullscreen;
+  RefreshFullscreenVisibility();
+}
+
+void ToggleAutoHideFullscreen() {
+  gVisibility.autoHideFullscreen = !gVisibility.autoHideFullscreen;
+  gVisibility.showDuringFullscreen = false;
+  if (gDataStorage.model) {
+    MergeDataUpdate(gDataStorage.model->UpdateAutoHideFullscreen(
+        gVisibility.autoHideFullscreen, GetTickCount64()));
+    ArmDataStorageTimer();
+  }
+  RefreshFullscreenVisibility();
+}
+
 void ShowContextMenu(HWND window, POINT screenPoint) {
   if (gDataStorage.closing) { ShowCountingStatus(window); return; }
   HMENU menu = CreatePopupMenu();
@@ -4679,13 +4784,16 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     return;
   }
   std::vector<niuma::ui::MenuItem> items;
-  items.reserve(8);
+  items.reserve(12);
   const auto append = [&](UINT_PTR id, const wchar_t* text, const wchar_t* icon,
                            bool checked = false, bool dividerBefore = false) {
     items.push_back({text, icon, checked, dividerBefore});
     AppendMenuW(menu, MF_OWNERDRAW |
         (checked ? MF_CHECKED : 0), id, reinterpret_cast<const wchar_t*>(&items.back()));
   };
+  append(kMenuVisibility, gVisibility.hidden() ? UiText(L"显示形象（继续计数）", L"Show Appearance (Counting Continues)") :
+      UiText(L"隐藏形象（继续计数）", L"Hide Appearance (Counting Continues)"), L"\xE890");
+  append(kMenuAutoHide, UiText(L"全屏时自动隐身", L"Auto-hide in Fullscreen"), L"\xE740", gVisibility.autoHideFullscreen);
   append(kMenuAppearance, UiText(L"更换形象", L"Change Appearance"), L"\xE77B");
   append(kMenuCalendar, UiText(L"功德日历…", L"Merit Calendar…"), L"\xE787");
   append(kMenuOffwork, UiText(L"下班倒计时…", L"Off-work Countdown…"), L"\xE823", gOffwork.enabled);
@@ -4706,7 +4814,11 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
       menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, screenPoint, window);
   DestroyMenu(menu);
 
-  if (command == static_cast<int>(kMenuAbout)) {
+  if (command == static_cast<int>(kMenuVisibility)) {
+    SetManualHidden(!gVisibility.hidden());
+  } else if (command == static_cast<int>(kMenuAutoHide)) {
+    ToggleAutoHideFullscreen();
+  } else if (command == static_cast<int>(kMenuAbout)) {
     ShowAboutDialog(window);
   } else if (command == static_cast<int>(kMenuLaunchAtLogin)) {
     if (gIsolatedAcceptance) return;
@@ -4869,7 +4981,22 @@ void CALLBACK OrphanStorageTimer(HWND, UINT, UINT_PTR, DWORD) {
 
 LRESULT CALLBACK WindowProcedure(
     HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+  if (message == kTaskbarCreatedMessage) {
+    InstallTrayIcon(window); ApplyWindowVisibility(); return 0;
+  }
   switch (message) {
+    case kTrayMessage: {
+      const auto event = LOWORD(lParam);
+      if (event == WM_CONTEXTMENU || event == WM_RBUTTONUP || event == NIN_KEYSELECT) {
+        POINT point{}; GetCursorPos(&point);
+        SetForegroundWindow(window);
+        ShowContextMenu(window, point);
+        PostMessageW(window, WM_NULL, 0, 0);
+      } else if (event == NIN_SELECT || event == WM_LBUTTONDBLCLK) {
+        SetManualHidden(false);
+      }
+      return 0;
+    }
 #if defined(NIUMA_RUNTIME_ENTRY_PROBE)
     case niuma::entry_probe::kFrameControlMessage:
       if ((wParam == niuma::entry_probe::kStartFrames && StartRuntimeEntryFrames()) ||
@@ -4963,6 +5090,10 @@ LRESULT CALLBACK WindowProcedure(
         return 0;
       }
       if (wParam == kReminderTimer) {
+        if (!gDataStorage.closing) {
+          if (!gVisibility.recoveryAvailable) InstallTrayIcon(window);
+          RefreshFullscreenVisibility();
+        }
         ConsumeInputSnapshot();  // Also recovers a failed coalesced PostMessage.
         PumpDataStorage();  // Recover a failed storage timer without synchronous IO.
         const ULONGLONG now = GetTickCount64();
@@ -5007,6 +5138,9 @@ LRESULT CALLBACK WindowProcedure(
         } else if (EnsureCurrentDay()) RenderLayeredWindow(GetTickCount64());
         if (gCalendar.window != nullptr) InvalidateRect(gCalendar.window, nullptr, FALSE);
         return 0;
+      }
+      if (wParam == kAnimationTimer && gVisibility.hidden()) {
+        KillTimer(window, kAnimationTimer); gState.timerRunning = false; return 0;
       }
       if (wParam != kAnimationTimer) {
         break;
@@ -5169,6 +5303,7 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case WM_DESTROY:
+      Shell_NotifyIconW(NIM_DELETE, &gTray); gVisibility.recoveryAvailable = false;
 #if defined(NIUMA_RUNTIME_ENTRY_PROBE)
       WriteRuntimeEntryObservation(true);
       WriteRuntimeEntryFrames();
@@ -5391,6 +5526,7 @@ int WINAPI wWinMain(
   }
   gState.dpi = SystemDpi();
   LoadOffworkSettings();
+  if (gDataStorage.model) gVisibility.autoHideFullscreen = gDataStorage.model->current().autoHideFullscreen;
   gState.windowWidth = ScaleDip(kWindowDipWidth, gState.dpi);
   gState.windowHeight = ScaleDip(MainWindowDipHeight(), gState.dpi);
   gState.total = ReadIniTotal();
@@ -5468,11 +5604,14 @@ int WINAPI wWinMain(
       gState.reminderStore->ClockGuard(reminderStartupUtc, reminderStartupDate.c_str());
   gState.reminderClockGuard.Start(reminderStartupUtc, reminderStartupTick,
       persistedClockGuard);
+  InstallTrayIcon(window);
+  gVisibility.fullscreen = gVisibility.autoHideFullscreen && ForegroundIsFullscreen();
   RenderLayeredWindow(GetTickCount64());
-  ShowWindow(window, SW_SHOWNOACTIVATE);
+  ShowWindow(window, gVisibility.hidden() ? SW_HIDE : SW_SHOWNOACTIVATE);
+  gVisibilityHidden = gVisibility.hidden();
   SetWindowPos(
       window, HWND_TOPMOST, 0, 0, 0, 0,
-      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | (gVisibility.hidden() ? 0 : SWP_SHOWWINDOW));
   SetTimer(window, kDayTimer, 30000, nullptr);
   SetTimer(window, kReminderTimer, 1000, nullptr);
   ArmDataStorageTimer();

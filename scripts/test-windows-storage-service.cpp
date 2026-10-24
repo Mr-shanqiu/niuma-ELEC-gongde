@@ -88,6 +88,7 @@ void AnsiHistoryAndUnknownBytes() {
   const auto start = service.Start({path});
   CHECK(start.started && start.existed && start.initial.counts.daily.size() == 3);
   CHECK(start.initial.counts.total == 41 && start.initial.window.x == -200);
+  CHECK(start.initial.autoHideFullscreen);
   CHECK(start.initial.appearance.selectedScene == 2);
   CHECK(start.initial.appearance.selectedPackId == "official.offwork-button");
   CHECK(start.initial.offworkDays.at(20261023).seconds == 600);
@@ -99,6 +100,7 @@ void AnsiHistoryAndUnknownBytes() {
   request->state.guide = {true, true};
   request->state.autostart = {true, false};
   request->state.offwork = {true, 19, 30};
+  request->state.autoHideFullscreen = false;
   request->state.offworkDays[20261023] = {};  // Explicit deletion, not 0,1080,...
   request->state.offworkDays[20261024] = {true, 120, 1170, 1792886400};
   CHECK(service.TrySubmit(request) == StorageSubmit::Accepted);
@@ -115,6 +117,7 @@ void AnsiHistoryAndUnknownBytes() {
   CHECK(Profile(path, L"state", L"x") == L"-1000");
   CHECK(Profile(path, L"state", L"autostart_enabled") == L"0");
   CHECK(Profile(path, L"state", L"basic_guide_shown") == L"1");
+  CHECK(Profile(path, L"state", L"auto_hide_fullscreen") == L"0");
   CHECK(Profile(path, L"daily", L"2026-10-22") == L"7");
   CHECK(Profile(path, L"daily", L"2026-10-25") == L"1");
   CHECK(Profile(path, L"offwork_daily", L"2026-10-23") == L"<missing>");
@@ -123,6 +126,7 @@ void AnsiHistoryAndUnknownBytes() {
   StorageService reopen;
   const auto reopened = reopen.Start({path});
   CHECK(reopened.started && reopened.initial.counts.daily.size() == 4);
+  CHECK(!reopened.initial.autoHideFullscreen);
   CHECK(reopened.initial.offworkDays.count(20261023) == 0);
   CHECK(reopened.initial.offworkDays.at(20261024).seconds == 120);
   CHECK(reopen.Stop().stopped);

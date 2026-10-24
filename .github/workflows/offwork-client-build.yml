@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-visibility]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-single-file:
-    if: ${{ inputs.mode == 'runtime-self-install' || inputs.mode == 'runtime-self-install-entry' }}
+    if: ${{ inputs.mode == 'runtime-self-install' || inputs.mode == 'runtime-self-install-entry' || inputs.mode == 'runtime-visibility' }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -33,6 +33,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Self-install configuration failed' }
           if ('${{ inputs.mode }}' -eq 'runtime-self-install-entry') {
             cmake --build build-self --config Release --target niuma-merit --parallel 2
+          } elseif ('${{ inputs.mode }}' -eq 'runtime-visibility') {
+            cmake --build build-self --config Release --target niuma-merit niuma-production-runtime-test niuma-client-visibility-test niuma-storage-state-test niuma-storage-service-test --parallel 2
           } else {
             cmake --build build-self --config Release --target niuma-merit niuma-self-install-test niuma-production-runtime-test --parallel 2
           }
@@ -46,6 +48,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Self-install contracts failed' }
           & ./build-self/Release/niuma-production-runtime-test.exe (Join-Path $env:TEMP ('niuma-production-route-' + [Guid]::NewGuid().ToString('N'))) | Tee-Object build-self/evidence/production-route.txt
           if ($LASTEXITCODE -ne 0) { throw 'Production display route failed' }
+          ./scripts/verify-windows-artifact.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -ExpectedVersion (Get-Content VERSION -Raw).Trim() -ArtifactKind client -ReceiptPath (Join-Path $PWD 'build-self/evidence/client-artifact.json')
+      - name: Validate hidden counting, no present, recovery and preference persistence
+        if: ${{ inputs.mode == 'runtime-visibility' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory build-self/evidence | Out-Null
+          foreach ($test in @('niuma-client-visibility-test', 'niuma-storage-state-test', 'niuma-storage-service-test')) {
+            & "./build-self/Release/$test.exe" | Tee-Object "build-self/evidence/$test.txt"
+            if ($LASTEXITCODE -ne 0) { throw "$test failed" }
+          }
+          & ./build-self/Release/niuma-production-runtime-test.exe (Join-Path $env:TEMP ('niuma-visibility-' + [Guid]::NewGuid().ToString('N'))) | Tee-Object build-self/evidence/visibility-runtime.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Hidden counting/display regression failed' }
           ./scripts/verify-windows-artifact.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -ExpectedVersion (Get-Content VERSION -Raw).Trim() -ArtifactKind client -ReceiptPath (Join-Path $PWD 'build-self/evidence/client-artifact.json')
       - name: Exercise the final executable install and uninstall entry in a disposable user
         if: ${{ inputs.mode == 'runtime-self-install-entry' }}
@@ -66,7 +80,9 @@ jobs:
           paths = ['VERSION', 'CMakeLists.txt', 'src/windows/app.cpp',
                    'src/windows/self_install.cpp', 'src/windows/self_install.h',
                    'src/windows/app.manifest', 'src/windows/app.rc',
-                   'scripts/test-windows-self-install.cpp', 'scripts/test-windows-production-runtime.cpp']
+                   'scripts/test-windows-self-install.cpp', 'scripts/test-windows-production-runtime.cpp',
+                   'src/client/core/visibility_state.h', 'src/client/core/storage_state.h',
+                   'src/client/core/storage_state.cpp', 'src/windows/runtime/storage_service.cpp']
           record = {'commit': os.environ['GITHUB_SHA'], 'kind': 'unsigned-single-executable-self-install-candidate',
                     'executableBytes': exe.stat().st_size, 'executableSha256': hashlib.sha256(exe.read_bytes()).hexdigest(),
                     'sourceSha256': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths},

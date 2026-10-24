@@ -91,6 +91,7 @@ void DomainsMergeWithoutRevertingUi() {
   CHECK(storage.UpdateWindow({true, 200, -80}, 101) == StorageUpdate::Changed);
   CHECK(storage.UpdateAutostart({true, true}, 102) == StorageUpdate::Changed);
   CHECK(storage.UpdateGuide({true, false}, 103) == StorageUpdate::Changed);
+  CHECK(storage.UpdateAutoHideFullscreen(false, 103) == StorageUpdate::Changed);
   CHECK(storage.UpdateOffworkSettings({false, 19, 15}, 104) == StorageUpdate::Changed);
   CHECK(storage.UpdateCounts(Ledger(1, 101, {{day - 1, 31}, {day, 70}}), 105) == StorageUpdate::Changed);
   CHECK(storage.CompleteWrite(first->id, true, 106));
@@ -99,6 +100,7 @@ void DomainsMergeWithoutRevertingUi() {
   CHECK(storage.dirty(StorageDomain::Autostart) && storage.dirty(StorageDomain::Guide));
   auto second = storage.BeginWrite(106);
   CHECK(second && second->state.appearance.selectedPackId == "official.new");
+  CHECK(!second->state.autoHideFullscreen);
   CHECK(second->state.window.x == 200 && second->state.window.y == -80);
   CHECK(second->state.autostart.enabled && !second->state.guide.basicGuideShown);
   CHECK(!second->state.offwork.enabled && second->state.offwork.hour == 19 && second->state.offwork.minute == 15);
