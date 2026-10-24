@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-entry, runtime-input-delivery, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -86,6 +86,53 @@ jobs:
             build-entry/Release/niuma-input-delivery-probe.exe
             build-entry/evidence/**
             build-entry/runtime-fixtures/**
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-runtime-legacy-entry:
+    if: ${{ inputs.mode == 'runtime-legacy-entry' }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare a hash-checked private source copy of the frozen optimized client
+        shell: pwsh
+        run: |
+          git fetch --depth 1 origin e56606506e55223934bea6224ef11a8dfc6b2c53
+          if ($LASTEXITCODE -ne 0) { throw "Frozen source fetch failed" }
+          python scripts/prepare-windows-legacy-entry.py .local-work/candidates/legacy-private-entry
+          if ($LASTEXITCODE -ne 0) { throw "Frozen entry source binding failed" }
+          cmake -S .local-work/candidates/legacy-private-entry -B build-legacy -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Legacy configuration failed" }
+          cmake --build build-legacy --config Release --target niuma-merit --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Legacy private compilation failed" }
+          Copy-Item build-legacy/Release/niuma-merit.exe build-legacy/Release/niuma-legacy-entry-probe.exe
+          cmake -S . -B build-entry -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Independent driver configuration failed" }
+          cmake --build build-entry --config Release --target niuma-runtime-entry-check niuma-input-delivery-probe --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Independent driver compilation failed" }
+      - name: Verify private legacy entry, original hooks and final saved count
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-entry/evidence | Out-Null
+          python scripts/prepare-windows-runtime-acceptance.py build-entry/runtime-fixtures
+          if ($LASTEXITCODE -ne 0) { throw "Private fixture preparation failed" }
+          & ./build-entry/Release/niuma-runtime-entry-check.exe (Join-Path $PWD 'build-legacy/Release/niuma-legacy-entry-probe.exe') (Join-Path $PWD 'build-entry/Release/niuma-input-delivery-probe.exe') (Join-Path $PWD 'build-entry/evidence') 30 (Join-Path $PWD 'build-entry/runtime-fixtures')
+          if ($LASTEXITCODE -ne 0) { throw "Private legacy full-entry contract failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-legacy-entry-${{ github.sha }}
+          path: |
+            build-legacy/Release/niuma-legacy-entry-probe.exe
+            build-entry/Release/niuma-runtime-entry-check.exe
+            build-entry/Release/niuma-input-delivery-probe.exe
+            build-entry/evidence/**
+            build-entry/runtime-fixtures/**
+            .local-work/candidates/legacy-private-entry/PRIVATE_ENTRY_BINDING.json
+            .local-work/candidates/legacy-private-entry/PRIVATE_ENTRY_DIFF.patch
+            .local-work/candidates/legacy-private-entry/src/windows/app.cpp
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
 
