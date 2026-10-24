@@ -89,7 +89,7 @@ jobs:
                     'signingPerformed': False, 'published': False,
                     'closedAcceptanceSuitesRerun': False,
                     'validationMode': '${{ inputs.mode }}',
-                    'scope': 'only selected new installation/entry checks; Windows Server CI, not Win10 or signed distribution acceptance'}
+                    'scope': 'selected affected checks (' + '${{ inputs.mode }}' + '); Windows Server CI, not Win10 or signed distribution acceptance'}
           Path('build-self/SINGLE_FILE_BINDING.json').write_text(json.dumps(record, indent=2))
       - uses: actions/upload-artifact@v4
         if: always()

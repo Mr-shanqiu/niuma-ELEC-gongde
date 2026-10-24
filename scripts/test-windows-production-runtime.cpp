@@ -10,7 +10,9 @@
 #define CHECK(x) do { if (!(x)) throw std::runtime_error("line " + std::to_string(__LINE__) + ": " #x); } while(false)
 bool sawHiddenTrayMenu = false;
 void CALLBACK CancelHiddenTrayMenu(HWND, UINT, UINT_PTR timer, DWORD) {
-  if (FindWindowW(L"#32768", nullptr)) { sawHiddenTrayMenu=true; KillTimer(nullptr,timer);EndMenu(); }
+  static unsigned attempts=0;
+  if (FindWindowW(L"#32768", nullptr)) sawHiddenTrayMenu=true;
+  if (sawHiddenTrayMenu || ++attempts >= 30) { KillTimer(nullptr,timer);EndMenu(); }
 }
 int FullscreenPeer() {
   EnableBestDpiAwareness();

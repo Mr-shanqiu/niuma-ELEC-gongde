@@ -4796,8 +4796,8 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
     AppendMenuW(menu, MF_OWNERDRAW |
         (checked ? MF_CHECKED : 0), id, reinterpret_cast<const wchar_t*>(&items.back()));
   };
-  append(kMenuVisibility, gVisibility.hidden() ? UiText(L"显示形象（继续计数）", L"Show Appearance (Counting Continues)") :
-      UiText(L"隐藏形象（继续计数）", L"Hide Appearance (Counting Continues)"), L"\xE890");
+  append(kMenuVisibility, gVisibility.hidden() ? UiText(L"显示形象（继续计数）", L"Show Appearance") :
+      UiText(L"隐藏形象（继续计数）", L"Hide (Keep Counting)"), L"\xE890");
   append(kMenuAutoHide, UiText(L"全屏时自动隐身", L"Auto-hide in Fullscreen"), L"\xE740", gVisibility.autoHideFullscreen);
   append(kMenuAppearance, UiText(L"更换形象", L"Change Appearance"), L"\xE77B");
   append(kMenuCalendar, UiText(L"功德日历…", L"Merit Calendar…"), L"\xE787");
