@@ -38,8 +38,21 @@ bool PrepareRuntimeEntryScenario() {
 
 void WriteRuntimeEntryObservation(bool terminal=false) {
   static bool readyWritten=false;
-  if(!IsRuntimeCandidate() || (!terminal && readyWritten) || !gDisplay.display ||
-      !gDisplay.display->scene() || !gDisplay.display->Stats().framesPresented) return;
+  if(!IsRuntimeCandidate() || (!terminal && readyWritten)) return;
+  if(!gDisplay.display || !gDisplay.display->scene() || !gDisplay.display->Stats().framesPresented) {
+    if(terminal) {
+      FILE* failure=_wfopen((gAcceptanceRoot+L"\\runtime-entry-display.json").c_str(),L"wb");
+      if(failure) {
+        std::fprintf(failure,"{\"scene\":null,\"displayFailed\":%s,\"scenePending\":%s,"
+            "\"inputAuthoritative\":%s,\"snapshotReady\":%s,\"keyboardAvailable\":%s,\"total\":%llu}\n",
+            gDisplay.failed?"true":"false",gAppearance.currentRequest?"true":"false",gInput.authoritative?"true":"false",
+            gInput.latest.input.ready?"true":"false",gInput.latest.input.keyboardAvailable?"true":"false",
+            static_cast<unsigned long long>(gState.total));
+        std::fclose(failure);
+      }
+    }
+    return;
+  }
   if(!terminal && (!gInput.authoritative || !gInput.latest.input.ready ||
       !gInput.latest.input.keyboardAvailable)) return;
   const auto& display=*gDisplay.display;
@@ -57,11 +70,13 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
   const int written=std::fprintf(file,
       "{\"scene\":\"%s\",\"fingerprint\":\"%s\",\"dpi\":%u,\"countdown\":%s,"
       "\"framesPresented\":%llu,\"textureUploads\":%llu,\"adapterKind\":\"%s\","
-      "\"vendorId\":%u,\"deviceId\":%u,\"keyboardAvailable\":%s,\"total\":%llu}\n",
+      "\"vendorId\":%u,\"deviceId\":%u,\"keyboardAvailable\":%s,\"total\":%llu,"
+      "\"inputAuthoritative\":%s,\"snapshotReady\":%s}\n",
       source.id.c_str(),source.contentFingerprint.c_str(),gState.dpi,gOffwork.enabled?"true":"false",
       static_cast<unsigned long long>(stats.framesPresented),static_cast<unsigned long long>(stats.textureUploads),
       display.Adapter().kind.c_str(),display.Adapter().vendorId,display.Adapter().deviceId,
-      gInput.latest.input.keyboardAvailable?"true":"false",static_cast<unsigned long long>(gState.total));
+      gInput.latest.input.keyboardAvailable?"true":"false",static_cast<unsigned long long>(gState.total),
+      gInput.authoritative?"true":"false",gInput.latest.input.ready?"true":"false");
   const int closed=std::fclose(file);
   if(!terminal && written>0 && closed==0) readyWritten=true;
 }

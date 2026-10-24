@@ -52,6 +52,17 @@ std::uint64_t CreatedMs(const Child& child) {
   ULARGE_INTEGER time{};time.LowPart=created.dwLowDateTime;time.HighPart=created.dwHighDateTime;
   return (time.QuadPart-116444736000000000ULL)/10000;
 }
+struct PrivateFailureEvidence {
+  std::filesystem::path profile,evidence;
+  ~PrivateFailureEvidence() {
+    for(const wchar_t* name:{L"runtime-entry-ready.json",L"runtime-entry-display.json",L"data.ini"}) {
+      std::error_code error;
+      const auto target=evidence/(std::wstring(L"private-")+name);
+      if(std::filesystem::is_regular_file(profile/name,error) && !std::filesystem::exists(target,error))
+        std::filesystem::copy_file(profile/name,target,error);
+    }
+  }
+};
 int Run(const std::filesystem::path& candidate,const std::filesystem::path& receiver,
         const std::filesystem::path& evidence,unsigned pairs,const std::filesystem::path& fixtures) {
   Require(std::filesystem::is_regular_file(candidate) && std::filesystem::is_regular_file(receiver),"bound executable paths required");
@@ -59,6 +70,7 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
   wchar_t temporary[MAX_PATH]{};Require(GetTempPathW(MAX_PATH,temporary)>0,"Temp root");
   const auto profile=std::filesystem::path(temporary)/(L"niuma-entry-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
   Require(CreateDirectoryW(profile.c_str(),nullptr)!=FALSE,"exclusive private Temp profile");
+  PrivateFailureEvidence preserve{profile,evidence};
   Require(SetEnvironmentVariableW(L"NIUMA_ACCEPTANCE_ROOT",profile.c_str())!=FALSE,"child private profile environment");
   { Child invalid;invalid.Start(candidate,L"");Require(invalid.Wait(5000)==2,"probe rejects implicit normal profile"); }
   Require(std::filesystem::is_empty(profile),"rejected entry must not write profile");
