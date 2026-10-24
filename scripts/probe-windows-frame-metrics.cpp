@@ -126,6 +126,7 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
     present.values.clear(); region.values.clear(); gpu.values.clear();
     regionMath.values.clear(); regionAll.values.clear(); regionStrong.values.clear();
     regionWeak.values.clear(); regionSerialize.values.clear(); regionCreate.values.clear(); regionInstall.values.clear();
+    regionCompare.values.clear(); nativeReusedFrames = 0;
     gDisplay.measuredFrames = 0;
     const auto controls = display.DiagnosticGpuTimingStats();
     const auto cpuStart = ThreadCpu();
@@ -151,6 +152,7 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
     const auto elapsed = GetTickCount64() - started;
     const auto timing = display.DiagnosticGpuTimingStats();
     CHECK(!whole.values.empty());
+    CHECK(regionCompare.values.size() == whole.values.size() && nativeReusedFrames <= whole.values.size());
     if (gpuEnabled && SUCCEEDED(timing.error)) CHECK(!gpu.values.empty());
     std::ofstream out(fixture.directory / L"frame-metrics.json");
     out << "{\"adapterKind\":\"" << display.Adapter().kind << "\",\"vendorId\":"
