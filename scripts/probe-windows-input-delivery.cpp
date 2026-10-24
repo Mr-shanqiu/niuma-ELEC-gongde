@@ -119,6 +119,7 @@ int Run(const std::filesystem::path& report, unsigned pairs, DWORD clientPid) {
   state.started = Tick();
   if (foreground) {
     sender = std::thread([&] {
+      const auto cadenceStart = std::chrono::steady_clock::now();
       for (unsigned i = 0; i < pairs && !state.stop; ++i) {
         if (GetForegroundWindow() != state.window) { state.abortReason = 1; break; }
         if (state.client && WaitForSingleObject(state.client, 0) != WAIT_TIMEOUT) { state.abortReason = 2; break; }
@@ -136,7 +137,11 @@ int Run(const std::filesystem::path& report, unsigned pairs, DWORD clientPid) {
           break;
         }
         ++state.sentPairs;
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        const auto next = cadenceStart + std::chrono::milliseconds((i + 1) * 100);
+        // Equal requested cadence across versions. A blocked chain must not
+        // lower the offered load silently or replay a burst to catch up.
+        if (std::chrono::steady_clock::now() > next) { state.abortReason = 7; break; }
+        std::this_thread::sleep_until(next);
       }
       state.finished = true;
     });
