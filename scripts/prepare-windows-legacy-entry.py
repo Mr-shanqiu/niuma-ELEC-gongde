@@ -33,8 +33,12 @@ with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(archive.extractfile(member).read())
 app = out / 'src/windows/app.cpp'
-original = app.read_bytes()
+archive_app = app.read_bytes()
+# Windows git archive may apply CRLF checkout conversion. Bind to the raw
+# immutable Git blob and accept only this known newline-only archive change.
+original = subprocess.check_output(['git', 'cat-file', 'blob', f'{COMMIT}:src/windows/app.cpp'], cwd=root)
 assert hashlib.sha256(original).hexdigest() == APP_SHA
+assert archive_app == original or archive_app.replace(b'\r\n', b'\n') == original
 source = original.decode('utf-8')
 patches = []
 def once(before, after, purpose):
@@ -81,6 +85,8 @@ helper = root / 'scripts/legacy-private-entry-observation.h'
     original.decode().splitlines(True), source.splitlines(True), 'frozen/app.cpp', 'private/app.cpp')), encoding='utf-8')
 (out / 'PRIVATE_ENTRY_BINDING.json').write_text(json.dumps({
     'sourceCommit': COMMIT, 'originalAppSha256': APP_SHA,
+    'archivedAppSha256': hashlib.sha256(archive_app).hexdigest(),
+    'archiveNewlineNormalizationOnly': archive_app != original,
     'privateAppSha256': hashlib.sha256(app.read_bytes()).hexdigest(),
     'helperSha256': hashlib.sha256(helper.read_bytes()).hexdigest(),
     'frozenExeModified': False, 'formalEntryUsed': False,
