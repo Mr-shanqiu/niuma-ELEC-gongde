@@ -406,6 +406,13 @@ struct DisplayAdapter {
 DisplayAdapter gDisplay;
 
 bool SoftwareDisplayForTest() {
+#if defined(NIUMA_RUNTIME_ENTRY_PROBE)
+  // CI explicitly opts into software for functional entry checks. Hardware
+  // trials leave this unset; normal/developer binaries do not have this gate.
+  wchar_t allowed[2]{};
+  if (GetEnvironmentVariableW(L"NIUMA_ENTRY_ALLOW_SOFTWARE",allowed,2)==1 && allowed[0]==L'1')
+    return true;
+#endif
 #if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
   return gDisplay.allowSoftwareForTest;
 #else
