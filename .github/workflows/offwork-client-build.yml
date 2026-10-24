@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-runtime-metrics:
-    if: ${{ inputs.mode == 'runtime-metrics' }}
+    if: ${{ inputs.mode == 'runtime-metrics' || inputs.mode == 'runtime-alpha-fast' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -33,10 +33,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Metrics configuration failed" }
           cmake --build build-metrics --config Release --target niuma-frame-metrics-probe niuma-runtime-candidate --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Metrics compilation failed" }
+          if ('${{ inputs.mode }}' -eq 'runtime-alpha-fast') {
+            cmake --build build-metrics --config Release --target niuma-prepared-alpha-fast-test niuma-fading-alpha-test --parallel 2
+            if ($LASTEXITCODE -ne 0) { throw "Affected alpha contracts compilation failed" }
+          }
       - name: Verify nonblocking bounded GPU queries and separated frame measurements
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force build-metrics/evidence | Out-Null
+          if ('${{ inputs.mode }}' -eq 'runtime-alpha-fast') {
+            & ./build-metrics/Release/niuma-prepared-alpha-fast-test.exe | Tee-Object build-metrics/evidence/alpha-fast.txt
+            if ($LASTEXITCODE -ne 0) { throw "Axis spans differ from original geometry" }
+            & ./build-metrics/Release/niuma-fading-alpha-test.exe | Tee-Object build-metrics/evidence/fading-alpha.txt
+            if ($LASTEXITCODE -ne 0) { throw "Affected opacity contracts failed" }
+          }
           python scripts/prepare-windows-runtime-acceptance.py build-metrics/runtime-fixtures
           if ($LASTEXITCODE -ne 0) { throw "Private fixtures failed" }
           $env:NIUMA_RUNTIME_FIXTURE_DIR = Join-Path $PWD 'build-metrics/runtime-fixtures'

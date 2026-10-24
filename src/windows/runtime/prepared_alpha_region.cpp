@@ -11,6 +11,9 @@
 #include <limits>
 #include <new>
 #include <utility>
+#ifdef NIUMA_PREPARED_ALPHA_VERIFY_SPANS
+#include <stdexcept>
+#endif
 
 namespace niuma::runtime {
 namespace {
@@ -213,7 +216,10 @@ bool ResolvePreparedAlphaTransform(const PreparedAlphaQuad& quad,
 // empty result cannot recover the visible sample. Keep subpixel geometry until
 // the destination scanline is known instead.
 namespace {
-bool SpanAtRow(const std::array<AlphaRegionPoint, 4>& points, double centerY,
+#ifdef NIUMA_PREPARED_ALPHA_VERIFY_SPANS
+std::uint64_t verifiedAxisSpans = 0;
+#endif
+bool GeneralSpanAtRow(const std::array<AlphaRegionPoint, 4>& points, double centerY,
                double allowance, double& left, double& right) {
     const double low = centerY - allowance, high = centerY + allowance;
     left = std::numeric_limits<double>::infinity();
@@ -229,6 +235,29 @@ bool SpanAtRow(const std::array<AlphaRegionPoint, 4>& points, double centerY,
         }
     }
     return left <= right;
+}
+
+bool SpanAtRow(const std::array<AlphaRegionPoint, 4>& points, double centerY,
+               double allowance, double& left, double& right) {
+    // Translation/axis scaling of prepared rectangles (including text and
+    // stationary layers) needs no edge intersections or divisions. Require
+    // exact axis alignment; rotation/shear retains the original calculation.
+    if (points[0].y == points[1].y && points[1].x == points[2].x &&
+        points[2].y == points[3].y && points[3].x == points[0].x) {
+        left = std::min(points[0].x, points[1].x);
+        right = std::max(points[0].x, points[1].x);
+        const bool hit = std::min(points[0].y, points[3].y) <= centerY + allowance &&
+            std::max(points[0].y, points[3].y) >= centerY - allowance;
+#ifdef NIUMA_PREPARED_ALPHA_VERIFY_SPANS
+        double referenceLeft = 0, referenceRight = 0;
+        const bool reference = GeneralSpanAtRow(points, centerY, allowance, referenceLeft, referenceRight);
+        if (hit != reference || (hit && (left != referenceLeft || right != referenceRight)))
+            throw std::runtime_error("axis span differs from original edge intersections");
+        ++verifiedAxisSpans;
+#endif
+        return hit;
+    }
+    return GeneralSpanAtRow(points, centerY, allowance, left, right);
 }
 }
 
