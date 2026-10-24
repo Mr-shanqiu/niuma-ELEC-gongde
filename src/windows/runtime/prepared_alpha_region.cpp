@@ -370,6 +370,24 @@ struct AlphaSampler {
     PreparedAlphaAffine transform;
     double determinant = 0;
 };
+
+// TransformSupport emits ordered, non-overlapping vertical bands, with
+// left-to-right rectangles sharing each band's top/bottom. Walk those bands
+// directly instead of expanding them into a separately allocated run list
+// for every scanline. The cursor borrows only this call's immutable result.
+struct SupportBandCursor {
+    const std::vector<AlphaRegionRect>& rectangles;
+    std::size_t begin = 0, end = 0;
+
+    void AtRow(int y) {
+        if (begin < end && y < rectangles[begin].bottom) return;
+        while (begin < rectangles.size() && rectangles[begin].bottom <= y) ++begin;
+        end = begin;
+        if (begin == rectangles.size() || rectangles[begin].top > y) return;
+        const int top = rectangles[begin].top;
+        while (end < rectangles.size() && rectangles[end].top == top) ++end;
+    }
+};
 // Evaluate only the weak-only fragments, where every contributing effective
 // texel is alpha 0 or 1. Solid shape interiors retain span operations.
 std::uint32_t WeakCoverageByte(int x, int y, const AlphaSampler& item,
@@ -434,13 +452,12 @@ AlphaRegionResult TransformPreparedAlphaRegion(
                 return fail("prepared alpha inverse transform is degenerate");
             samplers.push_back(item);
         }
-        std::vector<std::vector<Run>> weakRows(static_cast<std::size_t>(height)),strongRows(static_cast<std::size_t>(height));
-        for(const auto& r:all.rectangles) for(int y=r.top;y<r.bottom;++y) weakRows[y].emplace_back(r.left,r.right);
-        for(const auto& r:strong.rectangles) for(int y=r.top;y<r.bottom;++y) strongRows[y].emplace_back(r.left,r.right);
+        SupportBandCursor weakBands{all.rectangles}, strongBands{strong.rectangles};
         std::vector<AlphaRegionRect> filtered;std::vector<Run> previous,row;
         int bandTop=0;std::uint64_t covered=0,samples=0,sampledTexels=0;
         bool invalidWeak = false;
         for(int y=0;y<height;++y) {
+            weakBands.AtRow(y); strongBands.AtRow(y);
             row.clear();
             const auto sample=[&](int left,int right) {
                 if (invalidWeak) return;
@@ -460,17 +477,19 @@ AlphaRegionResult TransformPreparedAlphaRegion(
                 }
                 if(begin>=0) AppendRun(row,{begin,right});
             };
-            for(const auto& run:weakRows[y]) {
-                int left=run.first;
-                for(const auto& solid:strongRows[y]) {
-                    if(solid.second<=left)continue;
-                    if(solid.first>=run.second)break;
-                    if(left<solid.first)sample(left,std::min(solid.first,run.second));
-                    const int begin=std::max(left,solid.first),end=std::min(run.second,solid.second);
+            for(std::size_t w=weakBands.begin;w<weakBands.end;++w) {
+                const auto& run=all.rectangles[w];
+                int left=run.left;
+                for(std::size_t s=strongBands.begin;s<strongBands.end;++s) {
+                    const auto& solid=strong.rectangles[s];
+                    if(solid.right<=left)continue;
+                    if(solid.left>=run.right)break;
+                    if(left<solid.left)sample(left,std::min(solid.left,run.right));
+                    const int begin=std::max(left,solid.left),end=std::min(run.right,solid.right);
                     if(begin<end)AppendRun(row,{begin,end});
                     left=std::max(left,end);
                 }
-                if(left<run.second)sample(left,run.second);
+                if(left<run.right)sample(left,run.right);
             }
             if(invalidWeak) return fail("prepared weak-coverage contract/work limit");
             for(const auto& run:row)covered+=static_cast<std::uint64_t>(run.second-run.first);
