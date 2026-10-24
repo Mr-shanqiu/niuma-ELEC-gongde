@@ -270,6 +270,15 @@ if(WIN32)
   endif()
 
   # Private timing executable reuses the real application adapter.
+  add_executable(niuma-input-delivery-probe scripts/probe-windows-input-delivery.cpp)
+  target_compile_features(niuma-input-delivery-probe PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-input-delivery-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+  target_link_libraries(niuma-input-delivery-probe PRIVATE Threads::Threads user32 gdi32)
+  if(MSVC)
+    set_property(TARGET niuma-input-delivery-probe PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(niuma-input-delivery-probe PRIVATE /W4 /permissive- /utf-8)
+  endif()
+
   add_executable(niuma-frame-metrics-probe
     scripts/probe-windows-frame-metrics.cpp src/windows/runtime/input_service.cpp
     src/windows/appearance_pack.cpp third_party/miniz/miniz.c "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")

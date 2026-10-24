@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-input-delivery, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -20,6 +20,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-input-delivery:
+    if: ${{ inputs.mode == 'runtime-input-delivery' }}
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile independent synthetic input receiver
+        shell: pwsh
+        run: |
+          cmake -S . -B build-delivery -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Delivery configuration failed" }
+          cmake --build build-delivery --config Release --target niuma-input-delivery-probe --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Delivery build failed" }
+      - name: Verify only tagged F24 reaches the owned receiving window
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-delivery/evidence | Out-Null
+          & ./build-delivery/Release/niuma-input-delivery-probe.exe (Join-Path $PWD 'build-delivery/evidence/input-delivery.json') 30 | Tee-Object build-delivery/evidence/probe.txt
+          if ($LASTEXITCODE -ne 0) { throw "Owned input-delivery smoke test failed" }
+          $r = Get-Content build-delivery/evidence/input-delivery.json -Raw | ConvertFrom-Json
+          if (-not $r.executionComplete -or $r.receivedPairs -ne 30 -or $r.acceptedInjectedEvents -ne 60 -or $r.sourceToOwnedWindowKeydown.samples -ne 30) { throw "Synthetic delivery count mismatch" }
+          if ($r.physicalTypingMeasured -or $r.physicalDisplayLatencyMeasured -or $r.userInputRecorded -or $r.globalHookInstalledByProbe) { throw "Delivery evidence scope mismatch" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-input-delivery-${{ github.sha }}
+          path: |
+            build-delivery/evidence/**
+            build-delivery/Release/niuma-input-delivery-probe.exe
+          if-no-files-found: warn
+          retention-days: 14
+
   windows-runtime-metrics:
     if: ${{ inputs.mode == 'runtime-metrics' || inputs.mode == 'runtime-alpha-fast' }}
     runs-on: windows-2022
