@@ -59,6 +59,14 @@ function Snapshot-Dialog([IntPtr]$Window,[string]$Name) {
   finally {$graphics.ReleaseHdc($dc);$graphics.Dispose()}
   $bitmap.Save((Join-Path $evidence $Name),[Drawing.Imaging.ImageFormat]::Png);$bitmap.Dispose()
 }
+function Confirm-OwnedDialog([IntPtr]$Window) {
+  # The normal first-run guide is a TaskDialog; uninstall uses MessageBox.
+  # Both are restricted to an already-identified window of our child process.
+  [NiuMaSetupUI]::SendMessage($Window,1126,[IntPtr]1,[IntPtr]0) | Out-Null
+  if([NiuMaSetupUI]::IsWindowVisible($Window)) {
+    [NiuMaSetupUI]::SendMessage($Window,273,[IntPtr]1,[IntPtr]0) | Out-Null
+  }
+}
 $hash=(Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash
 $receipt=[ordered]@{kind='single-file-native-entry';source=$image;sourceSha256=$hash;installed=$installed;
   environment='disposable Windows Server Actions account';win10Tested=$false;realHardwarePerformanceTested=$false}
@@ -70,9 +78,10 @@ Snapshot-Dialog $dialog 'single-file-install.png'
 [NiuMaSetupUI]::SendMessage($dialog,1126,[IntPtr]1,[IntPtr]0) | Out-Null # TDM_CLICK_BUTTON IDOK
 if(-not $download.WaitForExit(30000) -or $download.ExitCode -ne 0){throw 'Download entry did not finish successfully'}
 $client=Await {Get-Process niuma-merit -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $installed} | Select-Object -First 1} 'installed client'
+$null=$client.Handle # Keep a handle so exit status remains observable after exit.
 $window=Await {
   $notice=[NiuMaSetupUI]::Find($client.Id,'#32770')
-  if($notice -ne [IntPtr]::Zero){[NiuMaSetupUI]::SendMessage($notice,273,[IntPtr]1,[IntPtr]0)|Out-Null}
+  if($notice -ne [IntPtr]::Zero){Confirm-OwnedDialog $notice}
   [NiuMaSetupUI]::Find($client.Id,'NiuMaMeritWindow')
 } 'production client window'
 $style=[NiuMaSetupUI]::GetWindowLongPtr($window,-20).ToInt64()
@@ -84,24 +93,26 @@ $desktopLink=Join-Path ([Environment]::GetFolderPath('Desktop')) '牛马电子�
 if(-not (Test-Path -LiteralPath $startLink) -or -not (Test-Path -LiteralPath $desktopLink)){throw 'Shortcut missing'}
 # Allow the ordinary first-run guide to close before asking the real app to save.
 $notice=[NiuMaSetupUI]::Find($client.Id,'#32770')
-if($notice -ne [IntPtr]::Zero){[NiuMaSetupUI]::SendMessage($notice,273,[IntPtr]1,[IntPtr]0)|Out-Null}
+if($notice -ne [IntPtr]::Zero){Confirm-OwnedDialog $notice}
 [NiuMaSetupUI]::SendMessage($window,16,[IntPtr]0,[IntPtr]0)|Out-Null
-if(-not $client.WaitForExit(15000) -or $client.ExitCode -ne 0){throw 'Installed client failed normal close'}
+if(-not $client.WaitForExit(15000)){throw 'Installed client did not exit after normal close'}
+if($client.ExitCode -ne 0){throw "Installed client exit code was not confirmed zero: $($client.ExitCode)"}
 $ini=Join-Path $data 'data.ini'; if(-not (Test-Path -LiteralPath $ini)){throw 'Installed client did not save its data'}
 $dataHash=(Get-FileHash -LiteralPath $ini -Algorithm SHA256).Hash
 $receipt.exactInstall=$true;$receipt.productionWindowSelectsComposition=$true;$receipt.normalClose=$true
 $remover=Start-Process -FilePath $installed -ArgumentList '--uninstall' -PassThru
 $confirmation=Await {[NiuMaSetupUI]::Find($remover.Id,'#32770')} 'uninstall confirmation'
 Snapshot-Dialog $confirmation 'single-file-uninstall.png'
-[NiuMaSetupUI]::SendMessage($confirmation,273,[IntPtr]1,[IntPtr]0)|Out-Null
+Confirm-OwnedDialog $confirmation
 if(-not $remover.WaitForExit(10000) -or $remover.ExitCode -ne 0){throw 'Uninstall parent failed'}
 Await {-not (Test-Path -LiteralPath $installed)} 'installed executable removed' | Out-Null
 $worker=Get-Process niuma-merit -ErrorAction SilentlyContinue | Where-Object {$_.Path -like (Join-Path $env:TEMP 'NiuMaMerit-remove-*\niuma-merit.exe')} | Select-Object -First 1
 if(-not $worker){throw 'Signed-copy uninstall worker identity unavailable'}
+$null=$worker.Handle
 if((Get-FileHash -LiteralPath $worker.Path -Algorithm SHA256).Hash -ne $hash){throw 'Uninstall copy bytes changed'}
 $workerDir=Split-Path $worker.Path -Parent
 $finished=Await {[NiuMaSetupUI]::Find($worker.Id,'#32770')} 'uninstall result'
-[NiuMaSetupUI]::SendMessage($finished,273,[IntPtr]1,[IntPtr]0)|Out-Null
+Confirm-OwnedDialog $finished
 if(-not $worker.WaitForExit(10000) -or $worker.ExitCode -ne 0){throw 'Uninstall worker failed'}
 if((Test-Path -LiteralPath $uninstall) -or (Test-Path -LiteralPath $startLink) -or (Test-Path -LiteralPath $desktopLink)){throw 'Owned uninstall entries remain'}
 if((Get-FileHash -LiteralPath $ini -Algorithm SHA256).Hash -ne $dataHash){throw 'Uninstall modified user records'}
