@@ -42,6 +42,9 @@ jobs:
           $r = Get-Content build-delivery/evidence/input-delivery.json -Raw | ConvertFrom-Json
           if (-not $r.executionComplete -or $r.receivedPairs -ne 30 -or $r.acceptedInjectedEvents -ne 60 -or $r.sourceToOwnedWindowKeydown.samples -ne 30) { throw "Synthetic delivery count mismatch" }
           if ($r.physicalTypingMeasured -or $r.physicalDisplayLatencyMeasured -or $r.userInputRecorded -or $r.globalHookInstalledByProbe) { throw "Delivery evidence scope mismatch" }
+          if (-not $r.externalClockAlignmentValid -or $r.captureStartUtcUnixMs -le 0 -or $r.captureEndUtcUnixMs -le $r.captureStartUtcUnixMs) { throw "External CPU sample clock alignment unavailable" }
+          $span = $r.captureEndUtcUnixMs - $r.captureStartUtcUnixMs
+          if ([Math]::Abs($span - $r.elapsedMs) -gt 100) { throw "UTC and QPC spans do not align" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

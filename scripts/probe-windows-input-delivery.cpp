@@ -34,6 +34,11 @@ struct State {
   ~State() { if (client) CloseHandle(client); }
 };
 LONGLONG Tick() { LARGE_INTEGER value{}; QueryPerformanceCounter(&value); return value.QuadPart; }
+std::uint64_t UtcUnix100ns() {
+  FILETIME value{}; GetSystemTimePreciseAsFileTime(&value);
+  ULARGE_INTEGER ticks{}; ticks.LowPart=value.dwLowDateTime; ticks.HighPart=value.dwHighDateTime;
+  return ticks.QuadPart - 116444736000000000ULL;
+}
 double Ms(LONGLONG ticks, const State& state) {
   return static_cast<double>(ticks) * 1000.0 / state.frequency.QuadPart;
 }
@@ -117,6 +122,8 @@ int Run(const std::filesystem::path& report, unsigned pairs, DWORD clientPid) {
   const bool foreground = IsWindow(state.window) && GetForegroundWindow() == state.window;
   std::thread sender;
   state.started = Tick();
+  const auto startedUtc100ns = UtcUnix100ns();
+  const auto startAnchorBoundMs = Ms(Tick() - state.started, state);
   if (foreground) {
     sender = std::thread([&] {
       const auto cadenceStart = std::chrono::steady_clock::now();
@@ -157,7 +164,12 @@ int Run(const std::filesystem::path& report, unsigned pairs, DWORD clientPid) {
   }
   state.stop = true;
   if (sender.joinable()) sender.join();
-  const auto elapsedMs = Ms(Tick() - state.started, state);
+  const auto ended = Tick();
+  const auto endedUtc100ns = UtcUnix100ns();
+  const auto endAnchorBoundMs = Ms(Tick() - ended, state);
+  const auto elapsedMs = Ms(ended - state.started, state);
+  const double utcSpanMs = (static_cast<long double>(endedUtc100ns) - startedUtc100ns) / 10000.0;
+  const auto clockDifferenceMs = utcSpanMs - elapsedMs;
   if (IsWindow(state.window)) DestroyWindow(state.window);
   UnregisterClassW(kClass, cls.hInstance);
   std::vector<double> delivery, paint, calls;
@@ -178,6 +190,15 @@ int Run(const std::filesystem::path& report, unsigned pairs, DWORD clientPid) {
       << ",\"acceptedInjectedEvents\":" << state.acceptedEvents << ",\"receivedPairs\":" << state.receivedPairs
       << ",\"paintedMarkers\":" << paint.size() << ",\"abortReason\":" << state.abortReason
       << ",\"sourceError\":" << state.sourceError << ",\"elapsedMs\":" << elapsedMs
+      // Epoch milliseconds stay within exact JSON integer range. Durations and
+      // event latencies continue to use QPC, never adjustable wall time.
+      << ",\"captureStartUtcUnixMs\":" << startedUtc100ns / 10000
+      << ",\"captureEndUtcUnixMs\":" << endedUtc100ns / 10000
+      << ",\"startAnchorBoundMs\":" << startAnchorBoundMs
+      << ",\"endAnchorBoundMs\":" << endAnchorBoundMs
+      << ",\"utcQpcSpanDifferenceMs\":" << clockDifferenceMs
+      << ",\"externalClockAlignmentValid\":" <<
+          ((clockDifferenceMs >= -100 && clockDifferenceMs <= 100) ? "true" : "false")
       << ",\"expectedClientPid\":" << clientPid << ",\"injectionCallWall\":"; WriteDistribution(out, calls);
   out << ",\"sourceToOwnedWindowKeydown\":"; WriteDistribution(out, delivery);
   out << ",\"sourceToPaintSubmission\":"; WriteDistribution(out, paint);
