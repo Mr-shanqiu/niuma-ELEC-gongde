@@ -68,6 +68,11 @@ struct WidgetTextCacheStats {
     std::uint64_t failures = 0;
     std::size_t entries = 0;
 };
+// Last Update only; disabled by default. No text or historical samples.
+struct WidgetTextTiming {
+    std::array<double, 3> buildMs{}, rasterMs{}, maskMs{};
+    std::uint8_t changedMask = 0;
+};
 
 // A single UI/render owner; no filesystem access, PNG decode, timer or growing
 // history. Keep GDI+ initialized while Update runs. At most one retained image
@@ -89,6 +94,8 @@ public:
     const WidgetTextImage* Get(WidgetTextSlot slot) const noexcept;
     bool Visible(WidgetTextSlot slot) const noexcept;
     const WidgetTextCacheStats& Stats() const noexcept;
+    void EnableDiagnosticTiming(bool enabled) noexcept;
+    const WidgetTextTiming& DiagnosticTiming() const noexcept;
     // Releases images/masks. Version ids are never reused across Clear, so a
     // compositor cannot mistake a rebuilt texture for an old GPU upload.
     void Clear() noexcept;

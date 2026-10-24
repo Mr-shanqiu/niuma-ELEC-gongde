@@ -219,6 +219,29 @@ void FailuresAreExplicitAndPreserveOldSlot() {
     const auto recovered = cache.Update(good);
     CHECK(recovered.success && recovered.changedMask == 0 && Versions(cache) == before);
 }
+void DiagnosticTimingDoesNotRetainOldMeasurements(HDC screen) {
+    WidgetTextCache cache;
+    auto input = Input(); CHECK(cache.Update(input).success);
+    CHECK(cache.DiagnosticTiming().changedMask == 0); // Ordinary client is off.
+    cache.EnableDiagnosticTiming(true);
+    input.merit = L"12346";
+    CHECK(cache.Update(input).changedMask == 1);
+    const auto merit = cache.DiagnosticTiming();
+    CHECK(merit.changedMask == 1 && merit.buildMs[0] >= merit.rasterMs[0] + merit.maskMs[0]);
+    CHECK(merit.buildMs[1] == 0 && merit.buildMs[2] == 0);
+    CompareOriginal(screen, WidgetTextSlot::Merit, input, *cache.Get(WidgetTextSlot::Merit));
+    CHECK(cache.Update(input).changedMask == 0);
+    CHECK(cache.DiagnosticTiming().changedMask == 0);
+    for (const auto value : cache.DiagnosticTiming().buildMs) CHECK(value == 0);
+    input.countdownDuration = L"08:30:58";
+    CHECK(cache.Update(input).changedMask == 4 && cache.DiagnosticTiming().changedMask == 4);
+    CHECK(cache.DiagnosticTiming().buildMs[0] == 0);
+    CompareOriginal(screen, WidgetTextSlot::Countdown, input, *cache.Get(WidgetTextSlot::Countdown));
+    cache.EnableDiagnosticTiming(false);
+    input.merit = L"12347"; CHECK(cache.Update(input).success);
+    CHECK(cache.DiagnosticTiming().changedMask == 0);
+    for (const auto value : cache.DiagnosticTiming().buildMs) CHECK(value == 0);
+}
 } // namespace
 
 int main() {
@@ -229,7 +252,8 @@ int main() {
         DpiAndRelevantStyleKeys();
         RepeatedNumbersRemainBounded();
         FailuresAreExplicitAndPreserveOldSlot();
-        std::cout << "widget text cache: 5/5 groups, " << pixelCases
+        DiagnosticTimingDoesNotRetainOldMeasurements(gdi.screen);
+        std::cout << "widget text cache: 6/6 groups, " << pixelCases + 2
             << " exact GDI reference comparisons; no client/input hooks started\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

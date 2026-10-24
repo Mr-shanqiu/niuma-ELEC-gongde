@@ -1,6 +1,7 @@
 #include "client_display.h"
 #include <cmath>
 #include <limits>
+#include <chrono>
 
 namespace niuma::windows::runtime {
 namespace {
@@ -52,6 +53,16 @@ bool ClientDisplay::SetScene(std::unique_ptr<PreparedAppearanceScene>& candidate
 bool ClientDisplay::DrawLatest(const ClientDisplayState& state,std::uint64_t now,int width,int height,
     graphics::PixelImage* diagnosticCapture) {
   if (!initialized_) { error_="Display device is not initialized"; return false; }
+  using Clock = std::chrono::steady_clock;
+  auto stageStarted = timingEnabled_ ? Clock::now() : Clock::time_point{};
+  if (timingEnabled_) timing_ = {};
+  const auto markStage = [&](double& value) {
+    if (timingEnabled_) {
+      const auto now = Clock::now();
+      value = std::chrono::duration<double,std::milli>(now-stageStarted).count();
+      stageStarted = now;
+    }
+  };
   if (width != width_ || height != height_) {
     if (!presenter_.Resize(width,height)) { error_=presenter_.LastErrorMessage(); return false; }
     width_=width; height_=height;
@@ -64,9 +75,13 @@ bool ClientDisplay::DrawLatest(const ClientDisplayState& state,std::uint64_t now
     if (!frame->valid) { error_="Shared animation evaluation failed"; return false; }
     textInput.plusVisible=frame->showPlusOne;
   } else textInput.plusVisible=false;
+  markStage(timing_.sceneMs);
   const auto textResult=text_.Update(textInput);
   if (!textResult.success) { error_=textResult.error; return false; }
+  markStage(timing_.textMs);
+  if (timingEnabled_) timing_.text = text_.DiagnosticTiming();
   if (!InstallTextures(scene_.get(),sceneVersion_)) return false;
+  markStage(timing_.texturesMs);
   std::vector<graphics::CompositionQuad> quads;
   quads.reserve(9);
   if (frame) for(std::size_t i=0;i<frame->quadCount;++i) {
@@ -95,7 +110,9 @@ bool ClientDisplay::DrawLatest(const ClientDisplayState& state,std::uint64_t now
       if (!image) { error_="Visible text has no prepared image"; return false; }
       TextQuad(*image,slot,state.text.pixelScale,plusY,quads);
     }
+  markStage(timing_.assemblyMs);
   if (!presenter_.DrawLatest(quads,diagnosticCapture)) { error_=presenter_.LastErrorMessage(); return false; }
+  markStage(timing_.presenterMs);
   if (frame) player_.MarkPresented(frame->revision);
   error_.clear(); return true;
 }

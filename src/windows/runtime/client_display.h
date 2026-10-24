@@ -8,6 +8,10 @@ struct ClientDisplayState {
   niuma::client::core::AnimationAction action;
   niuma::runtime::WidgetTextInput text;
 };
+struct ClientDisplayFrameTiming {
+  double sceneMs = 0, textMs = 0, texturesMs = 0, assemblyMs = 0, presenterMs = 0;
+  niuma::runtime::WidgetTextTiming text;
+};
 // UI-owned composition of already prepared resources. Asset verification,
 // decoding and alpha preparation happen on the asset worker, never here.
 class ClientDisplay final {
@@ -31,6 +35,10 @@ class ClientDisplay final {
     return presenter_.DiagnosticGpuTimingStats();
   }
   const niuma::runtime::WidgetTextCacheStats& TextStats() const { return text_.Stats(); }
+  void EnableDiagnosticFrameTiming(bool enabled) {
+    timingEnabled_ = enabled; timing_ = {}; text_.EnableDiagnosticTiming(enabled);
+  }
+  const ClientDisplayFrameTiming& DiagnosticFrameTiming() const { return timing_; }
   const niuma::runtime::AdapterInfo& Adapter() const { return presenter_.Adapter(); }
   const std::string& LastErrorMessage() const { return error_; }
  private:
@@ -44,5 +52,7 @@ class ClientDisplay final {
   niuma::runtime::CompositionPresenter presenter_;
   niuma::runtime::WidgetTextCache text_;
   std::string error_;
+  bool timingEnabled_ = false;
+  ClientDisplayFrameTiming timing_;
 };
 }  // namespace niuma::windows::runtime

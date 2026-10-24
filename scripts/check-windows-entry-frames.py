@@ -11,9 +11,10 @@ def validate(data, require_hardware=False, require_dpi=None):
         if not ok:
             raise ValueError(message)
 
-    check(data['schema'] == 1 and data['captureComplete'] is True, 'incomplete capture')
+    check(data['schema'] in (1, 2) and data['captureComplete'] is True, 'incomplete capture')
     check(data['overflow'] == 0 and data['identityValid'] is True, 'overflow or identity change')
-    check(data['capacity'] == 8192 and 0 < data['bufferBytes'] <= 2 * 1024 * 1024, 'buffer bound')
+    byte_limit = (3 if data['schema'] == 2 else 2) * 1024 * 1024
+    check(data['capacity'] == 8192 and 0 < data['bufferBytes'] <= byte_limit, 'buffer bound')
     check(data['scene'] in ('runtime.fixture.offwork-button', 'builtin.woodfish'), 'unknown scene')
     check(len(data['fingerprint']) == 64 and all(c in '0123456789abcdef' for c in data['fingerprint']), 'scene fingerprint')
     check(data['adapterKind'] in ('hardware', 'software'), 'unknown adapter')
@@ -31,8 +32,12 @@ def validate(data, require_hardware=False, require_dpi=None):
     fields = ['serial', 'relativeMs', 'wallMs', 'workMs', 'presentMs', 'readbackMs', 'drawMs',
               'regionMs', 'mathMs', 'supportAllMs', 'supportStrongMs', 'weakResolveMs',
               'serializeMs', 'nativeCreateMs', 'installMs', 'reuseComparisonMs', 'nativeRegionReused']
+    if data['schema'] == 2:
+        fields += ['sceneMs', 'textMs', 'texturesMs', 'assemblyMs', 'presenterMs', 'textChangedMask',
+                   'meritBuildMs', 'meritRasterMs', 'meritMaskMs', 'plusBuildMs', 'plusRasterMs', 'plusMaskMs',
+                   'clockBuildMs', 'clockRasterMs', 'clockMaskMs']
     check(data['fields'] == fields, 'unexpected sample schema')
-    distributions = {k: [] for k in fields[2:-1]}
+    distributions = {k: [] for k in fields if k.endswith('Ms') and k != 'relativeMs'}
     previous_time = 0
     for i, row in enumerate(samples):
         check(len(row) == len(fields), 'incomplete sample')
@@ -53,6 +58,17 @@ def validate(data, require_hardware=False, require_dpi=None):
         check(sum(v[k] for k in ('mathMs', 'serializeMs', 'nativeCreateMs', 'installMs', 'reuseComparisonMs'))
               <= v['regionMs'] + .05, 'region parent scope inconsistent')
         check(v['regionMs'] + v['drawMs'] <= v['workMs'] + .05, 'work parent scope inconsistent')
+        if data['schema'] == 2:
+            check(type(v['textChangedMask']) is int and 0 <= v['textChangedMask'] <= 7, 'invalid text change mask')
+            check(sum(v[k] for k in ('sceneMs', 'textMs', 'texturesMs', 'assemblyMs', 'presenterMs'))
+                  <= v['wallMs'] + .05, 'display parent scope inconsistent')
+            check(sum(v[k + 'BuildMs'] for k in ('merit', 'plus', 'clock')) <= v['textMs'] + .05,
+                  'text update parent scope inconsistent')
+            for i, slot in enumerate(('merit', 'plus', 'clock')):
+                check(v[slot + 'RasterMs'] + v[slot + 'MaskMs'] <= v[slot + 'BuildMs'] + .05,
+                      'text preparation parent scope inconsistent')
+                if not (v['textChangedMask'] & (1 << i)):
+                    check(all(v[slot + k] == 0 for k in ('BuildMs', 'RasterMs', 'MaskMs')), 'stale text timing')
     summary = {}
     for k, values in distributions.items():
         ordered = sorted(values)

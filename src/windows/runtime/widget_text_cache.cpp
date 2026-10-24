@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <limits>
 #include <new>
 #include <utility>
@@ -116,8 +117,12 @@ struct WidgetTextCache::Impl {
     std::array<bool, 3> visible{};
     WidgetTextCacheStats stats;
     std::uint64_t nextVersion = 0;
+    bool timingEnabled = false;
+    WidgetTextTiming timing;
 
     bool Build(WidgetTextSlot slot, TextKey key, std::unique_ptr<Entry>& output, std::string& error) {
+        using Clock = std::chrono::steady_clock;
+        const auto started = timingEnabled ? Clock::now() : Clock::time_point{};
         // Extra two design units retain text antialiasing without a full-window
         // text texture. The rectangle remains aligned to physical texels.
         const float top = slot == WidgetTextSlot::Countdown ? 256 : slot == WidgetTextSlot::PlusOne ? -2 : 0;
@@ -147,6 +152,7 @@ struct WidgetTextCache::Impl {
         const auto& rasterKey = replacement->key;
         image.logicalRect = {0, static_cast<float>(physicalTop / rasterKey.scale),
             static_cast<float>(width / rasterKey.scale), static_cast<float>(height / rasterKey.scale)};
+        const auto rasterStarted = timingEnabled ? Clock::now() : Clock::time_point{};
         {
             // Wrap our final premultiplied pixels; no second DIB or conversion
             // buffer is retained or copied on this path.
@@ -163,10 +169,17 @@ struct WidgetTextCache::Impl {
             graphics.Flush(Gdiplus::FlushIntentionSync);
             if (graphics.GetLastStatus() != Gdiplus::Ok) { error = "widget text flush failed"; return false; }
         }
+        if (timingEnabled) timing.rasterMs[SlotIndex(slot)] =
+            std::chrono::duration<double,std::milli>(Clock::now()-rasterStarted).count();
+        const auto maskStarted = timingEnabled ? Clock::now() : Clock::time_point{};
         image.mask = PrepareAlphaMask({image.pixels.bgraPremultiplied.data(), image.pixels.bgraPremultiplied.size(),
             image.pixels.width, image.pixels.height, image.pixels.strideBytes});
         if (!image.mask.success) { error = "widget text mask preparation failed: " + image.mask.error; return false; }
         stats.peakMaskBytes = std::max(stats.peakMaskBytes, stats.maskBytes + image.mask.storageBytes);
+        if (timingEnabled) {
+            timing.maskMs[SlotIndex(slot)] = std::chrono::duration<double,std::milli>(Clock::now()-maskStarted).count();
+            timing.buildMs[SlotIndex(slot)] = std::chrono::duration<double,std::milli>(Clock::now()-started).count();
+        }
         output = std::move(replacement);
         return true;
     }
@@ -177,6 +190,7 @@ WidgetTextCache::~WidgetTextCache() = default;
 
 WidgetTextUpdate WidgetTextCache::Update(const WidgetTextInput& input) {
     auto& state = *impl_;
+    if (state.timingEnabled) state.timing = {};
     WidgetTextUpdate result;
     const auto fail = [&](const std::string& error) {
         result.error = error; ++state.stats.failures; return std::move(result);
@@ -205,6 +219,7 @@ WidgetTextUpdate WidgetTextCache::Update(const WidgetTextInput& input) {
             entry = std::move(replacement);
             ++state.stats.redraws[i];
             result.changedMask |= static_cast<std::uint8_t>(1u << i);
+            if (state.timingEnabled) state.timing.changedMask = result.changedMask;
         }
         state.visible = {input.meritVisible, input.plusVisible, input.countdownVisible};
         result.success = true;
@@ -221,6 +236,11 @@ bool WidgetTextCache::Visible(WidgetTextSlot slot) const noexcept {
     return i < impl_->visible.size() && impl_->visible[i];
 }
 const WidgetTextCacheStats& WidgetTextCache::Stats() const noexcept { return impl_->stats; }
+void WidgetTextCache::EnableDiagnosticTiming(bool enabled) noexcept {
+    impl_->timingEnabled = enabled;
+    impl_->timing = {};
+}
+const WidgetTextTiming& WidgetTextCache::DiagnosticTiming() const noexcept { return impl_->timing; }
 void WidgetTextCache::Clear() noexcept {
     for (auto& entry : impl_->entries) entry.reset();
     impl_->visible.fill(false);
