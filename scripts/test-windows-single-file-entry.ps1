@@ -24,6 +24,8 @@ public static class NiuMaSetupUI {
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr data);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder value, int capacity);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder value, int capacity);
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hwnd, EnumProc callback, IntPtr data);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
   [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
@@ -37,6 +39,12 @@ public static class NiuMaSetupUI {
       if(pid==owner && cls.ToString()==wanted && IsWindowVisible(hwnd)){found=hwnd;return false;}
       return true;},IntPtr.Zero);return found;
   }
+  public static string[] DialogText(IntPtr dialog) {
+    var texts=new List<string>();
+    EnumChildWindows(dialog,(child,unused)=>{var text=new StringBuilder(4096);
+      GetWindowText(child,text,text.Capacity);if(text.Length>0)texts.Add(text.ToString());return true;},IntPtr.Zero);
+    return texts.ToArray();
+  }
 }
 '@
 function Await([scriptblock]$Condition,[string]$Description,[int]$Seconds=25) {
@@ -47,6 +55,15 @@ function Await([scriptblock]$Condition,[string]$Description,[int]$Seconds=25) {
     elseif($value){return $value}
     Start-Sleep -Milliseconds 100
   } while([DateTime]::UtcNow -lt $deadline)
+  $diagnostic=@()
+  foreach($owned in @(Get-Process niuma-merit -ErrorAction SilentlyContinue)) {
+    if($owned.Path -ne $image -and $owned.Path -ne $installed -and
+       $owned.Path -notlike (Join-Path $env:TEMP 'NiuMaMerit-remove-*\niuma-merit.exe')){continue}
+    $modal=[NiuMaSetupUI]::Find($owned.Id,'#32770')
+    $diagnostic += [ordered]@{pid=$owned.Id;path=$owned.Path;dialogText=$(if($modal -ne [IntPtr]::Zero){[NiuMaSetupUI]::DialogText($modal)}else{@()})}
+    if($modal -ne [IntPtr]::Zero){Snapshot-Dialog $modal ('failure-'+$owned.Id+'.png')}
+  }
+  $diagnostic | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $evidence 'entry-failure-dialogs.json') -Encoding utf8
   throw "Timeout: $Description"
 }
 function Snapshot-Dialog([IntPtr]$Window,[string]$Name) {
