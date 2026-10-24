@@ -344,17 +344,19 @@ static AlphaRegionResult TransformSupport(
                 }
             }
         }
-        std::vector<Run> previous;
+        // Alternate two per-call buffers instead of allocating a new merged
+        // row for each scanline. No storage survives this transformation.
+        std::vector<Run> previous, merged;
         int bandTop=0;
         for (int y=0;y<height;++y) {
             auto& raw=rows[static_cast<std::size_t>(y)];
             std::sort(raw.begin(),raw.end());
-            std::vector<Run> merged;
+            merged.clear();
             for (const auto& span:raw) AppendRun(merged,span);
             for (const auto& span:merged) result.stats.coveredPixels+=static_cast<std::uint64_t>(span.second-span.first);
             if (merged!=previous) {
                 if (!AppendBand(previous,bandTop,y,result.rectangles)) return finish("prepared alpha rectangle limit");
-                previous=std::move(merged); bandTop=y;
+                previous.swap(merged); bandTop=y;
             }
         }
         if (!AppendBand(previous,bandTop,height,result.rectangles)) return finish("prepared alpha rectangle limit");
@@ -435,11 +437,11 @@ AlphaRegionResult TransformPreparedAlphaRegion(
         std::vector<std::vector<Run>> weakRows(static_cast<std::size_t>(height)),strongRows(static_cast<std::size_t>(height));
         for(const auto& r:all.rectangles) for(int y=r.top;y<r.bottom;++y) weakRows[y].emplace_back(r.left,r.right);
         for(const auto& r:strong.rectangles) for(int y=r.top;y<r.bottom;++y) strongRows[y].emplace_back(r.left,r.right);
-        std::vector<AlphaRegionRect> filtered;std::vector<Run> previous;
+        std::vector<AlphaRegionRect> filtered;std::vector<Run> previous,row;
         int bandTop=0;std::uint64_t covered=0,samples=0,sampledTexels=0;
         bool invalidWeak = false;
         for(int y=0;y<height;++y) {
-            std::vector<Run> row;
+            row.clear();
             const auto sample=[&](int left,int right) {
                 if (invalidWeak) return;
                 int begin=-1;
@@ -474,7 +476,7 @@ AlphaRegionResult TransformPreparedAlphaRegion(
             for(const auto& run:row)covered+=static_cast<std::uint64_t>(run.second-run.first);
             if(row!=previous) {
                 if(!AppendBand(previous,bandTop,y,filtered)) return fail("prepared filtered rectangle limit");
-                previous=std::move(row);bandTop=y;
+                previous.swap(row);bandTop=y;
             }
         }
         if(!AppendBand(previous,bandTop,height,filtered)) return fail("prepared filtered rectangle limit");
