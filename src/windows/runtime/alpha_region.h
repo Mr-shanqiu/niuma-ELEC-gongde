@@ -43,6 +43,8 @@ struct AlphaRegionStats {
     std::uint64_t conservativePixels = 0;
     std::size_t rectangleCount = 0;
     double rasterMs = 0;
+    // Populated by the prepared path only. CPU-side elapsed time, no GPU work.
+    double supportAllMs = 0, supportStrongMs = 0, weakResolveMs = 0;
 };
 
 struct AlphaRegionResult {

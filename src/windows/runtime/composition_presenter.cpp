@@ -130,12 +130,15 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
   const auto regionStart = Clock::now();
   auto region = BuildPreparedAlphaRegion(width_, height_, masks);
   if (!region.success) return Fail(E_INVALIDARG, region.error);
+  stats_.lastRegionDetails = region.stats;
   // Region and GPU use the very same weak-edge decisions. USER owns the region
   // only after a successful call; a failed submission remains visibly failed.
+  const auto installStarted = Clock::now();
   if (!SetWindowRgn(window_, region.region, FALSE)) {
     const DWORD error = GetLastError();
     return Fail(error ? HRESULT_FROM_WIN32(error) : E_FAIL, "Composition hit region could not be installed");
   }
+  stats_.lastRegionInstallWallMs = Milliseconds(installStarted);
   region.ReleaseRegion();
   stats_.lastRegionMs = Milliseconds(regionStart);
   const auto submitStart = Clock::now();

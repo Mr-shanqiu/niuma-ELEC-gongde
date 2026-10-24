@@ -395,6 +395,8 @@ struct DisplayAdapter {
   bool allowSoftwareForTest = false;
   std::array<double, 1024> frameWorkMs{}, regionWorkMs{};
   std::array<double, 1024> frameWithoutPresentMs{}, drawSubmitMs{}, presentCallMs{};
+  std::array<niuma::runtime::PreparedAlphaRegionStats, 1024> regionDetails{};
+  std::array<double, 1024> regionInstallMs{};
   std::size_t measuredFrames = 0;
 #endif
 };
@@ -1796,6 +1798,8 @@ void RenderCompositionWindow(ULONGLONG now) {
           std::chrono::steady_clock::now()-started).count();
       gDisplay.regionWorkMs[index] = gDisplay.display->Stats().lastRegionMs;
       const auto& times = gDisplay.display->Stats();
+      gDisplay.regionDetails[index] = times.lastRegionDetails;
+      gDisplay.regionInstallMs[index] = times.lastRegionInstallWallMs;
       gDisplay.presentCallMs[index] = times.lastPresentWallMs;
       gDisplay.drawSubmitMs[index] = times.lastDrawSubmitWallMs;
       gDisplay.frameWithoutPresentMs[index] = std::max(0.0,

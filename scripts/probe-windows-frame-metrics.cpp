@@ -74,6 +74,7 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
     fixture.Start(true); // Only tagged diagnostics are accepted; no physical keys recorded.
     RefreshOffwork(false); CHECK(SyncOffworkTimer()); ResizeOffworkWindow();
     Distribution whole, work, submit, present, region, gpu;
+    Distribution regionMath, regionAll, regionStrong, regionWeak, regionSerialize, regionCreate, regionInstall;
     const auto collect = [&] {
       for (std::size_t i = 0; i < gDisplay.measuredFrames; ++i) {
         whole.Add(gDisplay.frameWorkMs[i]);
@@ -81,6 +82,17 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
         submit.Add(gDisplay.drawSubmitMs[i]);
         present.Add(gDisplay.presentCallMs[i]);
         region.Add(gDisplay.regionWorkMs[i]);
+        const auto& detail = gDisplay.regionDetails[i];
+        CHECK(detail.supportAllMs + detail.supportStrongMs + detail.weakResolveMs <= detail.mathMs + .01);
+        CHECK(detail.mathMs + detail.serializeMs + detail.nativeCreateMs + gDisplay.regionInstallMs[i] <=
+            gDisplay.regionWorkMs[i] + .01);
+        regionMath.Add(detail.mathMs);
+        regionAll.Add(detail.supportAllMs);
+        regionStrong.Add(detail.supportStrongMs);
+        regionWeak.Add(detail.weakResolveMs);
+        regionSerialize.Add(detail.serializeMs);
+        regionCreate.Add(detail.nativeCreateMs);
+        regionInstall.Add(gDisplay.regionInstallMs[i]);
       }
       gDisplay.measuredFrames = 0;
       if (!gpuEnabled) return;
@@ -109,6 +121,8 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
     }
     whole.values.clear(); work.values.clear(); submit.values.clear();
     present.values.clear(); region.values.clear(); gpu.values.clear();
+    regionMath.values.clear(); regionAll.values.clear(); regionStrong.values.clear();
+    regionWeak.values.clear(); regionSerialize.values.clear(); regionCreate.values.clear(); regionInstall.values.clear();
     gDisplay.measuredFrames = 0;
     const auto controls = display.DiagnosticGpuTimingStats();
     const auto cpuStart = ThreadCpu();
@@ -145,6 +159,13 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
     out << ",\"drawSubmissionCallWall\":"; submit.Write(out);
     out << ",\"presentCallWall\":"; present.Write(out);
     out << ",\"hitRegionCallWall\":"; region.Write(out);
+    out << ",\"regionMathWall\":"; regionMath.Write(out);
+    out << ",\"regionSupportAllWall\":"; regionAll.Write(out);
+    out << ",\"regionSupportStrongWall\":"; regionStrong.Write(out);
+    out << ",\"regionWeakResolveWall\":"; regionWeak.Write(out);
+    out << ",\"regionSerializeWall\":"; regionSerialize.Write(out);
+    out << ",\"regionNativeCreateWall\":"; regionCreate.Write(out);
+    out << ",\"regionNativeInstallWall\":"; regionInstall.Write(out);
     out << ",\"gpuDrawTimestampInterval\":"; gpu.Write(out);
     out << ",\"gpuQueriesEnabled\":" << (gpuEnabled ? "true" : "false")
         << ",\"gpuQueryError\":" << static_cast<long>(timing.error)

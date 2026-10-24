@@ -407,6 +407,8 @@ AlphaRegionResult TransformPreparedAlphaRegion(
     if(!all.success) return all;
     auto strong=TransformSupport(width,height,quads,true);
     if(!strong.success) return strong;
+    const auto weakStarted = Clock::now();
+    const double supportAllMs = all.stats.rasterMs, supportStrongMs = strong.stats.rasterMs;
     const auto fail = [&](const std::string& error) {
         all.success = false;
         all.error = error;
@@ -480,6 +482,9 @@ AlphaRegionResult TransformPreparedAlphaRegion(
         all.stats.sampledTexels=sampledTexels;
         if(weakOverrides) *weakOverrides=std::move(overrides);
     } catch(const std::bad_alloc&) { return fail("prepared weak-coverage allocation failed"); }
+    all.stats.supportAllMs = supportAllMs;
+    all.stats.supportStrongMs = supportStrongMs;
+    all.stats.weakResolveMs = Milliseconds(weakStarted);
     all.stats.rasterMs=Milliseconds(start);
     return all;
 }
@@ -536,12 +541,20 @@ PreparedAlphaRegionResult BuildPreparedAlphaRegion(
     if (width <= 0 || height <= 0 || width > 16384 || height > 16384 || quads.size() > kMaxQuads)
         return finish("prepared alpha surface/quad limit");
     try {
+        const auto mathStarted = Clock::now();
         result.raster = TransformPreparedAlphaRegion(width,height,quads,&result.weakOverrides);
+        result.stats.mathMs = Milliseconds(mathStarted);
         if (!result.raster.success) return finish(result.raster.error);
+        result.stats.supportAllMs = result.raster.stats.supportAllMs;
+        result.stats.supportStrongMs = result.raster.stats.supportStrongMs;
+        result.stats.weakResolveMs = result.raster.stats.weakResolveMs;
         auto native = MakeAlphaRegionData(result.raster);
+        result.stats.serializeMs = native.serializeMs;
         if (!native.success) return finish(native.error);
+        const auto nativeStarted = Clock::now();
         result.region = ExtCreateRegion(nullptr,native.byteCount,
             reinterpret_cast<const RGNDATA*>(native.words.data()));
+        result.stats.nativeCreateMs = Milliseconds(nativeStarted);
         if (!result.region) return finish("create destination alpha region failed");
         result.stats.coveredPixels = result.raster.stats.coveredPixels;
         result.stats.rectangleCount = result.raster.rectangles.size();

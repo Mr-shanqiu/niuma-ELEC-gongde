@@ -74,6 +74,8 @@ PreparedAlphaQuad FromRendererPreparedQuad(const Quad& quad, const PreparedAlpha
 
 struct PreparedAlphaRegionStats {
     double transformMs = 0;  // Includes span transform/clip/union and native serialization.
+    double mathMs = 0, serializeMs = 0, nativeCreateMs = 0;
+    double supportAllMs = 0, supportStrongMs = 0, weakResolveMs = 0;
     std::uint64_t coveredPixels = 0;
     std::uint64_t conservativePixels = 0;  // Reserved: span tolerance is included in coverage.
     std::size_t rectangleCount = 0;
