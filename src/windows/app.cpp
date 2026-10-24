@@ -4765,6 +4765,7 @@ void SetManualHidden(bool hidden) {
         WindowTitle(), MB_OK | MB_ICONWARNING);
     return;
   }
+  gVisibility.fullscreen = gVisibility.autoHideFullscreen && ForegroundIsFullscreen();
   gVisibility.manualHidden = hidden;
   gVisibility.showDuringFullscreen = !hidden && gVisibility.fullscreen;
   RefreshFullscreenVisibility();
@@ -4814,8 +4815,27 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   style.hbrBack = niuma::ui::WhiteBrush(); style.dwStyle = MNS_NOCHECK;
   SetMenuInfo(menu, &style);
 
+  // A hidden pet cannot become a foreground menu owner. A zero-size native
+  // tool window owns only this popup, so outside clicks can dismiss it without
+  // briefly showing the hidden appearance or stopping the message pump.
+  HWND menuOwner = window;
+  HWND temporaryOwner = nullptr;
+  if (!IsWindowVisible(window)) {
+    WNDCLASSW ownerClass{}; ownerClass.hInstance = GetModuleHandleW(nullptr);
+    ownerClass.lpszClassName = L"NiuMaMeritTrayMenuOwner";
+    ownerClass.lpfnWndProc = [](HWND hwnd, UINT message, WPARAM w, LPARAM l) -> LRESULT {
+      if (message == WM_MEASUREITEM || message == WM_DRAWITEM)
+        return SendMessageW(gState.window, message, w, l);
+      return DefWindowProcW(hwnd, message, w, l);
+    };
+    RegisterClassW(&ownerClass);
+    temporaryOwner = CreateWindowExW(WS_EX_TOOLWINDOW, ownerClass.lpszClassName, L"",
+        WS_POPUP, screenPoint.x, screenPoint.y, 0, 0, nullptr, nullptr, ownerClass.hInstance, nullptr);
+    if (temporaryOwner) { ShowWindow(temporaryOwner, SW_SHOWNOACTIVATE); menuOwner = temporaryOwner; }
+  }
   const int command = niuma::ui::TrackMenu(
-      menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, screenPoint, window);
+      menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, screenPoint, menuOwner);
+  if (temporaryOwner) DestroyWindow(temporaryOwner);
   DestroyMenu(menu);
 
   if (command == static_cast<int>(kMenuVisibility)) {

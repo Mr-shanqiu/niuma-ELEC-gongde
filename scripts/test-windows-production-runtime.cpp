@@ -8,6 +8,10 @@
 #include <iostream>
 #include <stdexcept>
 #define CHECK(x) do { if (!(x)) throw std::runtime_error("line " + std::to_string(__LINE__) + ": " #x); } while(false)
+bool sawHiddenTrayMenu = false;
+void CALLBACK CancelHiddenTrayMenu(HWND, UINT, UINT_PTR timer, DWORD) {
+  if (FindWindowW(L"#32768", nullptr)) { sawHiddenTrayMenu=true; KillTimer(nullptr,timer);EndMenu(); }
+}
 int FullscreenPeer() {
   EnableBestDpiAwareness();
   WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=GetModuleHandleW(nullptr);
@@ -73,6 +77,9 @@ int wmain(int argc,wchar_t** argv) {
     gVisibility.manualHidden=true; ApplyWindowVisibility();
     CHECK(!IsWindowVisible(window) && !gState.timerRunning);
     const auto hiddenFrames=gDisplay.display->Stats().framesPresented;
+    const UINT_PTR menuTimer=SetTimer(nullptr,0,100,CancelHiddenTrayMenu);CHECK(menuTimer);
+    ShowContextMenu(window,{50,50});KillTimer(nullptr,menuTimer);
+    CHECK(sawHiddenTrayMenu && !IsWindowVisible(window));
     gInput.diagnostic.tagMask=0xffff0000; gInput.diagnostic.tagValue=0x4e4d0000;
     gInput.diagnostic.maximumSequence=16;
     RestartGlobalListeners();
