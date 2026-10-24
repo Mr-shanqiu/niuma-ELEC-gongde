@@ -20,6 +20,8 @@ struct CompositionStats {
   double lastRegionMs = 0, lastSubmitMs = 0;
   PreparedAlphaRegionStats lastRegionDetails;
   double lastRegionInstallWallMs = 0;
+  std::uint64_t nativeRegionInstalls = 0, nativeRegionReuses = 0;
+  std::size_t retainedRegionBytes = 0;
   // CPU-side elapsed calls, not CPU execution time. Present and explicit
   // readback are separated so synchronization cannot masquerade as CPU work.
   double lastDrawSubmitWallMs = 0, lastPresentWallMs = 0, lastReadbackWallMs = 0;
@@ -31,6 +33,8 @@ class CompositionPresenter final {
  public:
   static constexpr std::size_t kMaximumTextures = 10;
   static constexpr std::size_t kMaximumQuads = 12;
+  // One installed coverage only, no historical scenes or native handles.
+  static constexpr std::size_t kInstalledRegionByteLimit = 2 * 1024 * 1024;
   static constexpr std::uint64_t kResidentTextureLimit = 26ULL * 1024 * 1024;
   // A failed replacement keeps the old set; temporary old+new uploads are bounded.
   static constexpr std::uint64_t kReplacementTextureLimit = 2 * kResidentTextureLimit;
@@ -40,7 +44,7 @@ class CompositionPresenter final {
   // A non-null capture is an explicit test-only readback before Present.
   // The normal client never supplies it; no readback is retained or automatic.
   bool DrawLatest(const std::vector<CompositionQuad>& quads, PixelImage* diagnosticCapture = nullptr);
-  void Invalidate() noexcept { frameValid_ = false; }
+  void Invalidate() noexcept;
   void Shutdown();
   const CompositionStats& Stats() const { return stats_; }
   const AdapterInfo& Adapter() const { return renderer_.Adapter(); }
@@ -63,12 +67,14 @@ class CompositionPresenter final {
   };
   bool Fail(HRESULT error, const std::string& detail);
   bool BackendFailure();
+  void ForgetInstalledRegion() noexcept;
   D3D11Renderer renderer_;
   HWND window_ = nullptr;
   int width_ = 0, height_ = 0;
   std::vector<Uploaded> uploaded_;
   std::vector<Quad> previous_;
   bool frameValid_ = false;
+  AlphaRegionResult installedRaster_;
   CompositionStats stats_;
   HRESULT error_ = S_OK;
   std::string detail_;

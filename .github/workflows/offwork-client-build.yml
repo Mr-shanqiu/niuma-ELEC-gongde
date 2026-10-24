@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-input-delivery, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-input-delivery, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -53,7 +53,7 @@ jobs:
           retention-days: 14
 
   windows-runtime-metrics:
-    if: ${{ inputs.mode == 'runtime-metrics' || inputs.mode == 'runtime-alpha-fast' }}
+    if: ${{ inputs.mode == 'runtime-metrics' || inputs.mode == 'runtime-alpha-fast' || inputs.mode == 'runtime-region-reuse' }}
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
@@ -65,6 +65,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Metrics configuration failed" }
           cmake --build build-metrics --config Release --target niuma-frame-metrics-probe niuma-runtime-candidate --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Metrics compilation failed" }
+          if ('${{ inputs.mode }}' -eq 'runtime-region-reuse') {
+            cmake --build build-metrics --config Release --target niuma-composition-presenter-test --parallel 2
+            if ($LASTEXITCODE -ne 0) { throw "Region reuse contract compilation failed" }
+          }
           if ('${{ inputs.mode }}' -eq 'runtime-alpha-fast') {
             cmake --build build-metrics --config Release --target niuma-prepared-alpha-fast-test niuma-fading-alpha-test --parallel 2
             if ($LASTEXITCODE -ne 0) { throw "Affected alpha contracts compilation failed" }
@@ -78,6 +82,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Axis spans differ from original geometry" }
             & ./build-metrics/Release/niuma-fading-alpha-test.exe | Tee-Object build-metrics/evidence/fading-alpha.txt
             if ($LASTEXITCODE -ne 0) { throw "Affected opacity contracts failed" }
+          }
+          if ('${{ inputs.mode }}' -eq 'runtime-region-reuse') {
+            & ./build-metrics/Release/niuma-composition-presenter-test.exe --region-reuse-only | Tee-Object build-metrics/evidence/region-reuse.txt
+            if ($LASTEXITCODE -ne 0) { throw "Native region reuse differs from fresh coverage or GPU pixels" }
           }
           python scripts/prepare-windows-runtime-acceptance.py build-metrics/runtime-fixtures
           if ($LASTEXITCODE -ne 0) { throw "Private fixtures failed" }

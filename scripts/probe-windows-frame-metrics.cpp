@@ -74,7 +74,8 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
     fixture.Start(true); // Only tagged diagnostics are accepted; no physical keys recorded.
     RefreshOffwork(false); CHECK(SyncOffworkTimer()); ResizeOffworkWindow();
     Distribution whole, work, submit, present, region, gpu;
-    Distribution regionMath, regionAll, regionStrong, regionWeak, regionSerialize, regionCreate, regionInstall;
+    Distribution regionMath, regionAll, regionStrong, regionWeak, regionSerialize, regionCreate, regionInstall, regionCompare;
+    std::uint64_t nativeReusedFrames = 0;
     const auto collect = [&] {
       for (std::size_t i = 0; i < gDisplay.measuredFrames; ++i) {
         whole.Add(gDisplay.frameWorkMs[i]);
@@ -84,9 +85,11 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
         region.Add(gDisplay.regionWorkMs[i]);
         const auto& detail = gDisplay.regionDetails[i];
         CHECK(detail.supportAllMs + detail.supportStrongMs + detail.weakResolveMs <= detail.mathMs + .01);
-        CHECK(detail.mathMs + detail.serializeMs + detail.nativeCreateMs + gDisplay.regionInstallMs[i] <=
+        CHECK(detail.mathMs + detail.reuseComparisonMs + detail.serializeMs + detail.nativeCreateMs + gDisplay.regionInstallMs[i] <=
             gDisplay.regionWorkMs[i] + .01);
         regionMath.Add(detail.mathMs);
+        regionCompare.Add(detail.reuseComparisonMs);
+        if (detail.nativeRegionReused) ++nativeReusedFrames;
         regionAll.Add(detail.supportAllMs);
         regionStrong.Add(detail.supportStrongMs);
         regionWeak.Add(detail.weakResolveMs);
@@ -160,6 +163,9 @@ void RunFrameMetrics(const std::filesystem::path& parent, unsigned seconds) {
     out << ",\"presentCallWall\":"; present.Write(out);
     out << ",\"hitRegionCallWall\":"; region.Write(out);
     out << ",\"regionMathWall\":"; regionMath.Write(out);
+    out << ",\"regionReuseComparisonWall\":"; regionCompare.Write(out);
+    out << ",\"nativeReusedFrames\":" << nativeReusedFrames
+        << ",\"retainedRegionBytes\":" << display.Stats().retainedRegionBytes;
     out << ",\"regionSupportAllWall\":"; regionAll.Write(out);
     out << ",\"regionSupportStrongWall\":"; regionStrong.Write(out);
     out << ",\"regionWeakResolveWall\":"; regionWeak.Write(out);

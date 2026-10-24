@@ -26,8 +26,16 @@ bool Equal(const Quad& a, const Quad& b) {
 bool CompositionPresenter::Fail(HRESULT error, const std::string& detail) {
   error_ = error; detail_ = detail; return false;
 }
-bool CompositionPresenter::BackendFailure() {
+void CompositionPresenter::ForgetInstalledRegion() noexcept {
+  installedRaster_ = AlphaRegionResult{};
+  stats_.retainedRegionBytes = 0;
+}
+void CompositionPresenter::Invalidate() noexcept {
   frameValid_ = false;
+  ForgetInstalledRegion();
+}
+bool CompositionPresenter::BackendFailure() {
+  Invalidate();
   return Fail(renderer_.LastError(), renderer_.LastErrorMessage());
 }
 bool CompositionPresenter::Initialize(HWND window, int width, int height, bool software) {
@@ -41,7 +49,7 @@ bool CompositionPresenter::Resize(int width, int height) {
   if (!window_) return Fail(E_UNEXPECTED, "Composition window is not initialized");
   if (width == width_ && height == height_) return true;
   if (!renderer_.Resize(width, height)) return BackendFailure();
-  width_ = width; height_ = height; frameValid_ = false;
+  width_ = width; height_ = height; Invalidate();
   return true;
 }
 bool CompositionPresenter::SetTextures(const std::vector<CompositionTexture>& textures) {
@@ -128,18 +136,32 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
     return true;
   }
   const auto regionStart = Clock::now();
-  auto region = BuildPreparedAlphaRegion(width_, height_, masks);
+  auto region = BuildPreparedAlphaRegion(width_, height_, masks, &installedRaster_);
   if (!region.success) return Fail(E_INVALIDARG, region.error);
   stats_.lastRegionDetails = region.stats;
   // Region and GPU use the very same weak-edge decisions. USER owns the region
   // only after a successful call; a failed submission remains visibly failed.
-  const auto installStarted = Clock::now();
-  if (!SetWindowRgn(window_, region.region, FALSE)) {
-    const DWORD error = GetLastError();
-    return Fail(error ? HRESULT_FROM_WIN32(error) : E_FAIL, "Composition hit region could not be installed");
+  stats_.lastRegionInstallWallMs = 0;
+  if (region.stats.nativeRegionReused) {
+    ++stats_.nativeRegionReuses;
+  } else {
+    const auto installStarted = Clock::now();
+    if (!SetWindowRgn(window_, region.region, FALSE)) {
+      const DWORD error = GetLastError();
+      Invalidate();
+      return Fail(error ? HRESULT_FROM_WIN32(error) : E_FAIL, "Composition hit region could not be installed");
+    }
+    stats_.lastRegionInstallWallMs = Milliseconds(installStarted);
+    region.ReleaseRegion();
+    ++stats_.nativeRegionInstalls;
+    ForgetInstalledRegion();
+    // Bound actual allocation capacity, including empty/transparent coverage.
+    const auto bytes = region.raster.rectangles.capacity() * sizeof(AlphaRegionRect);
+    if (bytes <= kInstalledRegionByteLimit) {
+      installedRaster_ = std::move(region.raster);
+      stats_.retainedRegionBytes = bytes;
+    }
   }
-  stats_.lastRegionInstallWallMs = Milliseconds(installStarted);
-  region.ReleaseRegion();
   stats_.lastRegionMs = Milliseconds(regionStart);
   const auto submitStart = Clock::now();
   if (!renderer_.Draw(quads, false, &region.weakOverrides)) return BackendFailure();
@@ -159,7 +181,7 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
 }
 void CompositionPresenter::Shutdown() {
   renderer_.Shutdown();
-  uploaded_.clear(); previous_.clear(); frameValid_ = false;
+  uploaded_.clear(); previous_.clear(); Invalidate();
   window_ = nullptr; width_ = height_ = 0;
   stats_.residentTextureBytes = 0;
 }

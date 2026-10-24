@@ -74,7 +74,8 @@ PreparedAlphaQuad FromRendererPreparedQuad(const Quad& quad, const PreparedAlpha
 
 struct PreparedAlphaRegionStats {
     double transformMs = 0;  // Includes span transform/clip/union and native serialization.
-    double mathMs = 0, serializeMs = 0, nativeCreateMs = 0;
+    double mathMs = 0, serializeMs = 0, nativeCreateMs = 0, reuseComparisonMs = 0;
+    bool nativeRegionReused = false;
     double supportAllMs = 0, supportStrongMs = 0, weakResolveMs = 0;
     std::uint64_t coveredPixels = 0;
     std::uint64_t conservativePixels = 0;  // Reserved: span tolerance is included in coverage.
@@ -104,10 +105,14 @@ struct PreparedAlphaRegionResult {
 // No full-surface CPU pixel loop and no GPU readback. Prepared contours are
 // transformed as subpixel spans; only weak-alpha fragments use sparse sampling.
 // The returned weakOverrides must accompany the same quads in Draw. Regions
-// are serialized once for USER. SetWindowRgn stays caller-owned
+// are serialized once for USER. An installedRaster may be supplied only while
+// that exact region remains installed on the same window/surface. Exact band
+// equality returns success with stats.nativeRegionReused and a null HRGN;
+// weakOverrides are still recomputed from the current quads. SetWindowRgn stays caller-owned
 // and its time must be added by the caller when reporting total region cost.
 PreparedAlphaRegionResult BuildPreparedAlphaRegion(
-    int width, int height, const std::vector<PreparedAlphaQuad>& quads);
+    int width, int height, const std::vector<PreparedAlphaQuad>& quads,
+    const AlphaRegionResult* installedRaster = nullptr);
 #endif
 
 }  // namespace niuma::runtime

@@ -522,7 +522,8 @@ PreparedAlphaRegionResult& PreparedAlphaRegionResult::operator=(PreparedAlphaReg
 HRGN PreparedAlphaRegionResult::ReleaseRegion() noexcept { return std::exchange(region, nullptr); }
 
 PreparedAlphaRegionResult BuildPreparedAlphaRegion(
-    int width, int height, const std::vector<PreparedAlphaQuad>& quads) {
+    int width, int height, const std::vector<PreparedAlphaQuad>& quads,
+    const AlphaRegionResult* installedRaster) {
     const auto start = Clock::now();
     PreparedAlphaRegionResult result;
     const auto finish = [&](const std::string& error = {}) {
@@ -548,6 +549,23 @@ PreparedAlphaRegionResult BuildPreparedAlphaRegion(
         result.stats.supportAllMs = result.raster.stats.supportAllMs;
         result.stats.supportStrongMs = result.raster.stats.supportStrongMs;
         result.stats.weakResolveMs = result.raster.stats.weakResolveMs;
+        result.stats.coveredPixels = result.raster.stats.coveredPixels;
+        result.stats.rectangleCount = result.raster.rectangles.size();
+        result.stats.transformedMasks = quads.size();
+        const auto compareStarted = Clock::now();
+        const bool unchanged = installedRaster && installedRaster->success &&
+            installedRaster->width == width && installedRaster->height == height &&
+            installedRaster->rectangles.size() == result.raster.rectangles.size() &&
+            std::equal(installedRaster->rectangles.begin(), installedRaster->rectangles.end(),
+                result.raster.rectangles.begin(), [](const auto& a, const auto& b) {
+                    return a.left == b.left && a.top == b.top &&
+                        a.right == b.right && a.bottom == b.bottom;
+                });
+        result.stats.reuseComparisonMs = Milliseconds(compareStarted);
+        if (unchanged) {
+            result.stats.nativeRegionReused = true;
+            return finish();
+        }
         auto native = MakeAlphaRegionData(result.raster);
         result.stats.serializeMs = native.serializeMs;
         if (!native.success) return finish(native.error);
@@ -556,9 +574,6 @@ PreparedAlphaRegionResult BuildPreparedAlphaRegion(
             reinterpret_cast<const RGNDATA*>(native.words.data()));
         result.stats.nativeCreateMs = Milliseconds(nativeStarted);
         if (!result.region) return finish("create destination alpha region failed");
-        result.stats.coveredPixels = result.raster.stats.coveredPixels;
-        result.stats.rectangleCount = result.raster.rectangles.size();
-        result.stats.transformedMasks = quads.size();
     } catch (const std::bad_alloc&) {
         return finish("prepared alpha frame allocation failed");
     }
