@@ -465,9 +465,17 @@ LaunchResult PrepareLaunch(HINSTANCE instance, const wchar_t* version) {
       Require(parentId != 0, L"Missing uninstall parent.");
       Handle parent(OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, parentId));
       if (parent.value) {
-        wchar_t parentImage[MAX_PATH]{}; DWORD length = MAX_PATH;
-        Require(QueryFullProcessImageNameW(parent.value, 0, parentImage, &length) &&
-            SamePath(parentImage, Executable(l)), L"Uninstall parent changed.");
+        const auto state = WaitForSingleObject(parent.value, 0);
+        Require(state == WAIT_OBJECT_0 || state == WAIT_TIMEOUT, L"Cannot observe uninstall parent.");
+        if (state == WAIT_TIMEOUT) {
+          wchar_t parentImage[MAX_PATH]{}; DWORD length = MAX_PATH;
+          const bool identityMatches = QueryFullProcessImageNameW(parent.value, 0, parentImage, &length) &&
+              SamePath(parentImage, Executable(l));
+          // It can exit between the wait and image query. An exited process no
+          // longer has to expose its image; a still-live different one is refused.
+          Require(identityMatches || WaitForSingleObject(parent.value, 0) == WAIT_OBJECT_0,
+              L"Uninstall parent changed.");
+        }
         Require(WaitForSingleObject(parent.value, 30000) == WAIT_OBJECT_0, L"Uninstall parent is still running.");
       } else Require(GetLastError() == ERROR_INVALID_PARAMETER, L"Cannot confirm uninstall parent exit.");
       // Only the already-confirmed, short-lived copy enters this branch. It
