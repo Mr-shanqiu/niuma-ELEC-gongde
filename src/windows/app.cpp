@@ -22,6 +22,9 @@
 #include "runtime/client_display.h"
 #include "runtime/embedded_scene.h"
 #include "app_version.h"
+#if defined(NIUMA_SELF_INSTALL)
+#include "self_install.h"
+#endif
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
 #include "../reminder_activity.h"
@@ -84,6 +87,17 @@ bool IsRuntimeCandidate() {
   return false;
 #endif
 }
+// Display selection is independent of private developer profile/entry behavior.
+bool UsesCompositionRuntime() {
+#if defined(NIUMA_COMPOSITION_RUNTIME)
+  return true;
+#else
+  return IsRuntimeCandidate();
+#endif
+}
+#if defined(NIUMA_SELF_INSTALL)
+std::optional<bool> gInstallStartupChoice;
+#endif
 constexpr wchar_t kRunKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr wchar_t kRunValue[] = L"NiuMaMerit";
@@ -1834,7 +1848,7 @@ void RenderCompositionWindow(ULONGLONG now) {
 }
 
 void RetryCompositionDisplay() {
-  if (!IsRuntimeCandidate() || !gState.window || gDataStorage.closing) return;
+  if (!UsesCompositionRuntime() || !gState.window || gDataStorage.closing) return;
   KillTimer(gState.window, kDisplayRetryTimer);
   if (gDisplay.recoveryAttempts >= 3) return;
   ++gDisplay.recoveryAttempts;
@@ -1849,7 +1863,7 @@ void RetryCompositionDisplay() {
 }
 
 void RenderLayeredWindow(ULONGLONG now) {
-  if (IsRuntimeCandidate()) {
+  if (UsesCompositionRuntime()) {
     if (gState.window) RenderCompositionWindow(now);
     return;
   }
@@ -2017,7 +2031,7 @@ bool RequestCurrentAppearance(const std::string& id, bool preview, bool force) {
   if (gDisplay.startupRequest) {
     gDisplay.startupRequest = 0; gDisplay.startupSelection.clear();
   }
-  if (id.empty() && !IsRuntimeCandidate()) {
+  if (id.empty() && !UsesCompositionRuntime()) {
     CancelAppearanceRequests();
     gAppearance.current.reset();
     gAppearance.currentDensity = 0;
@@ -2036,7 +2050,7 @@ bool RequestCurrentAppearance(const std::string& id, bool preview, bool force) {
     return false;
   }
   const float density = static_cast<float>(gState.windowWidth) / kDesignWidth;
-  if (!IsRuntimeCandidate() && !force && gAppearance.current && gAppearance.current->id == id &&
+  if (!UsesCompositionRuntime() && !force && gAppearance.current && gAppearance.current->id == id &&
       gAppearance.current->contentFingerprint == metadata->contentFingerprint &&
       gAppearance.currentDensity == density) {
     CancelAppearanceRequests();
@@ -2048,7 +2062,7 @@ bool RequestCurrentAppearance(const std::string& id, bool preview, bool force) {
   input_runtime::AppearanceLoadRequest request;
   request.id = ++gAppearance.nextRequest;
   request.generation = gAppearance.generation + 1;
-  request.kind = IsRuntimeCandidate() ? (id.empty() ? input_runtime::AppearanceLoadKind::Woodfish
+  request.kind = UsesCompositionRuntime() ? (id.empty() ? input_runtime::AppearanceLoadKind::Woodfish
       : input_runtime::AppearanceLoadKind::GpuCurrent) : input_runtime::AppearanceLoadKind::Current;
   if (id.empty()) {
     if (!input_runtime::EmbeddedWoodfishRequest(request.source)) {
@@ -2120,7 +2134,7 @@ void ApplyAppearanceLoadResult(input_runtime::AppearanceLoadResult result) {
       ReportAppearanceFailure(result.detail);
       return;
     }
-    if (IsRuntimeCandidate()) {
+    if (UsesCompositionRuntime()) {
       try {
         if (!EnsureCompositionDisplay() || !gDisplay.display->SetScene(result.scene)) {
           ReportAppearanceFailure(UiText(L"形象未能提交到显示设备，原有形象保持不变。请稍后再试。",
@@ -4915,7 +4929,7 @@ LRESULT CALLBACK WindowProcedure(
       return 0;
 
     case kDisplayFailureMessage:
-      if (IsRuntimeCandidate() && gDisplay.failed && !gDisplay.noticeShown && !gDataStorage.closing) {
+      if (UsesCompositionRuntime() && gDisplay.failed && !gDisplay.noticeShown && !gDataStorage.closing) {
         gDisplay.noticeShown = true;
         if (SoftwareDisplayForTest()) return 0;
         const int response = niuma::ui::Message(window,
@@ -5032,7 +5046,7 @@ LRESULT CALLBACK WindowProcedure(
       ClampWindowToWorkArea();
       const std::string requested = gAppearance.currentRequest
           ? gAppearance.currentRequest->source.id : gState.selectedPackId;
-      if (IsRuntimeCandidate())
+      if (UsesCompositionRuntime())
         RequestCurrentAppearance(requested == "builtin.woodfish" ? std::string{} : requested, false, true);
       else if (!requested.empty()) RequestCurrentAppearance(requested, false, true);
       RenderLayeredWindow(GetTickCount64());
@@ -5041,7 +5055,7 @@ LRESULT CALLBACK WindowProcedure(
     }
 
     case WM_DISPLAYCHANGE:
-      if (IsRuntimeCandidate() && gDisplay.display) gDisplay.display->Invalidate();
+      if (UsesCompositionRuntime() && gDisplay.display) gDisplay.display->Invalidate();
       gOffwork.baselineValid = false;
       RefreshOffwork(false, true);
       ClampWindowToWorkArea();
@@ -5212,6 +5226,13 @@ bool TransferImport(HWND receiver, const std::wstring& file, UINT timeout = 5000
 int WINAPI wWinMain(
     HINSTANCE instance, HINSTANCE, PWSTR, int) {
   if (!InitializeAcceptanceContext()) return 2;
+#if defined(NIUMA_SELF_INSTALL)
+  if (!gIsolatedAcceptance) {
+    const auto setup = niuma::installation::PrepareLaunch(instance, NIUMA_APP_VERSION_W);
+    if (setup.handled) return setup.exitCode;
+    gInstallStartupChoice = setup.startupChoice;
+  }
+#endif
   EnableBestDpiAwareness();
 
   const std::wstring pendingImportFile = ImportFileArgument();
@@ -5398,7 +5419,7 @@ int WINAPI wWinMain(
   }
 
   HWND window = CreateWindowExW(
-      (IsRuntimeCandidate() ? WS_EX_NOREDIRECTIONBITMAP : WS_EX_LAYERED) |
+      (UsesCompositionRuntime() ? WS_EX_NOREDIRECTIONBITMAP : WS_EX_LAYERED) |
           WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
       MainWindowClass(), WindowTitle(), WS_POPUP,
       static_cast<int>(x), static_cast<int>(y),
@@ -5419,7 +5440,7 @@ int WINAPI wWinMain(
   // that actually hosts the window, which can differ from the system DPI.
   ApplyWindowDpi(window);
   ClampWindowToWorkArea();
-  if (IsRuntimeCandidate()) {
+  if (UsesCompositionRuntime()) {
     gDisplay.startupSelection = gState.selectedPackId;
     RequestCurrentAppearance({}, false);
     if (gAppearance.currentRequest) gDisplay.startupRequest = gAppearance.currentRequest->id;
@@ -5471,7 +5492,13 @@ int WINAPI wWinMain(
     }
   }
 
-  if (!gIsolatedAcceptance) ConfigureLaunchAtLogin();
+  if (!gIsolatedAcceptance) {
+#if defined(NIUMA_SELF_INSTALL)
+    if (gInstallStartupChoice && SetLaunchAtLoginEnabled(*gInstallStartupChoice))
+      SaveLaunchAtLoginPreference(*gInstallStartupChoice);
+#endif
+    ConfigureLaunchAtLogin();
+  }
   if (!gIsolatedAcceptance || IsRuntimeCandidate()) {
 #if !defined(NIUMA_RUNTIME_ENTRY_PROBE)
     // The separate entry probe omits only this ordinary developer notice.

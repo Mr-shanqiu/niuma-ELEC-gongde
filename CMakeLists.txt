@@ -197,6 +197,7 @@ if(WIN32)
   configure_file(assets/appicon.ico "${CMAKE_CURRENT_BINARY_DIR}/appicon.ico" COPYONLY)
   add_executable(niuma-merit WIN32
     src/windows/app.cpp
+    src/windows/self_install.cpp
     src/windows/appearance_pack.cpp
     third_party/miniz/miniz.c
     "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc"
@@ -210,8 +211,29 @@ if(WIN32)
     target_link_options(niuma-presign-boundary-test PRIVATE /MANIFEST:NO)
   endif()
   target_compile_features(niuma-merit PRIVATE cxx_std_17)
-  target_compile_definitions(niuma-merit PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_compile_definitions(niuma-merit PRIVATE NIUMA_COMPOSITION_RUNTIME NIUMA_SELF_INSTALL UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
   target_link_libraries(niuma-merit PRIVATE niuma-windows-input niuma-windows-storage shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  add_executable(niuma-self-install-test scripts/test-windows-self-install.cpp src/windows/self_install.cpp)
+  target_compile_features(niuma-self-install-test PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-self-install-test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_link_libraries(niuma-self-install-test PRIVATE shell32 ole32 user32 advapi32 comctl32 uuid)
+  target_link_libraries(niuma-merit PRIVATE uuid)
+  if(MSVC)
+    target_compile_options(niuma-self-install-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+    set_property(TARGET niuma-self-install-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
+  add_executable(niuma-production-runtime-test scripts/test-windows-production-runtime.cpp
+    src/windows/runtime/input_service.cpp src/windows/appearance_pack.cpp
+    third_party/miniz/miniz.c "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")
+  target_include_directories(niuma-production-runtime-test PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(niuma-production-runtime-test PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-production-runtime-test PRIVATE NIUMA_COMPOSITION_RUNTIME NIUMA_INPUT_SERVICE_DIAGNOSTICS UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-production-runtime-test PRIVATE niuma-input-core niuma-windows-storage niuma-windows-appearance-loader shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  if(MSVC)
+    target_compile_options(niuma-production-runtime-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+    set_property(TARGET niuma-production-runtime-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_link_options(niuma-production-runtime-test PRIVATE /MANIFEST:NO)
+  endif()
   add_executable(niuma-client-display-test
     scripts/test-windows-client-display.cpp src/windows/appearance_pack.cpp third_party/miniz/miniz.c
     "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")

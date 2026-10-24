@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install]
 
 permissions:
   contents: read
@@ -20,6 +20,54 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-single-file:
+    if: ${{ inputs.mode == 'runtime-self-install' }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile only the single executable and affected entry contracts
+        shell: pwsh
+        run: |
+          cmake -S . -B build-self -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Self-install configuration failed' }
+          cmake --build build-self --config Release --target niuma-merit niuma-self-install-test niuma-production-runtime-test --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Self-install compilation failed' }
+      - name: Validate private installation transactions and production display route
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory build-self/evidence | Out-Null
+          & ./build-self/Release/niuma-self-install-test.exe | Tee-Object build-self/evidence/self-install.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Self-install contracts failed' }
+          & ./build-self/Release/niuma-production-runtime-test.exe (Join-Path $env:TEMP ('niuma-production-route-' + [Guid]::NewGuid().ToString('N'))) | Tee-Object build-self/evidence/production-route.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Production display route failed' }
+          ./scripts/verify-windows-artifact.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -ExpectedVersion (Get-Content VERSION -Raw).Trim() -ArtifactKind client -ReceiptPath (Join-Path $PWD 'build-self/evidence/client-artifact.json')
+      - name: Bind the one unsigned delivery executable
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib, json, os
+          exe = Path('build-self/Release/niuma-merit.exe')
+          paths = ['VERSION', 'CMakeLists.txt', 'src/windows/app.cpp',
+                   'src/windows/self_install.cpp', 'src/windows/self_install.h',
+                   'src/windows/app.manifest', 'src/windows/app.rc']
+          record = {'commit': os.environ['GITHUB_SHA'], 'kind': 'unsigned-single-executable-self-install-candidate',
+                    'executableBytes': exe.stat().st_size, 'executableSha256': hashlib.sha256(exe.read_bytes()).hexdigest(),
+                    'sourceSha256': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths},
+                    'signingPerformed': False, 'published': False,
+                    'closedAcceptanceSuitesRerun': False,
+                    'scope': 'private install core transactions and production display adapter; not Win10 or signed end-to-end installation'}
+          Path('build-self/SINGLE_FILE_BINDING.json').write_text(json.dumps(record, indent=2))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-single-file-${{ github.sha }}
+          path: |
+            build-self/Release/niuma-merit.exe
+            build-self/SINGLE_FILE_BINDING.json
+            build-self/evidence/**
+          if-no-files-found: warn
+          retention-days: 14
   windows-input-delivery:
     if: ${{ inputs.mode == 'runtime-input-delivery' }}
     runs-on: windows-2022
