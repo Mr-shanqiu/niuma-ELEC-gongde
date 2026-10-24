@@ -47,6 +47,17 @@ std::wstring Link(const fs::path& path, const std::wstring* set = nullptr) {
   }
   file->Release(); link->Release(); return target;
 }
+bool SameFile(const std::wstring& left,const std::wstring& right) {
+  HANDLE a=CreateFileW(left.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+      nullptr,OPEN_EXISTING,0,nullptr);
+  HANDLE b=CreateFileW(right.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+      nullptr,OPEN_EXISTING,0,nullptr);
+  BY_HANDLE_FILE_INFORMATION x{},y{};
+  const bool ok=a!=INVALID_HANDLE_VALUE && b!=INVALID_HANDLE_VALUE && GetFileInformationByHandle(a,&x) &&
+      GetFileInformationByHandle(b,&y) && x.dwVolumeSerialNumber==y.dwVolumeSerialNumber &&
+      x.nFileIndexHigh==y.nFileIndexHigh && x.nFileIndexLow==y.nFileIndexLow;
+  if(a!=INVALID_HANDLE_VALUE)CloseHandle(a);if(b!=INVALID_HANDLE_VALUE)CloseHandle(b);return ok;
+}
 int wmain() {
   fs::path root; std::wstring registryRoot;
   try {
@@ -68,8 +79,8 @@ int wmain() {
     const auto data=root/L"user-data.ini"; Put(data,"total=12345\nkeep=user records\n");
     auto result=setup::Install(locations,source.wstring(),L"0.9.5",{true,true});
     CHECK(result.success); CHECK(setup::FilesEqual(source.wstring(),setup::Executable(locations)));
-    CHECK(Link(locations.desktopLink)==setup::Executable(locations));
-    CHECK(Link(locations.startMenuLink)==setup::Executable(locations));
+    CHECK(SameFile(Link(locations.desktopLink),setup::Executable(locations)));
+    CHECK(SameFile(Link(locations.startMenuLink),setup::Executable(locations)));
     CHECK(RegText(locations.uninstallKey,L"DisplayVersion")==L"0.9.5");
     CHECK(RegText(locations.uninstallKey,L"UninstallString")==L"\""+setup::Executable(locations)+L"\" --uninstall");
     CHECK(Get(data)=="total=12345\nkeep=user records\n");
@@ -120,7 +131,7 @@ int wmain() {
     Put(fs::path(locations.directory)/L"unrelated.txt","keep");
     result=setup::Remove(locations,newer.wstring()); CHECK(result.success);
     CHECK(!fs::exists(installed) && !fs::exists(locations.startMenuLink));
-    CHECK(Link(locations.desktopLink)==foreign);
+    CHECK(SameFile(Link(locations.desktopLink),foreign));
     CHECK(RegText(locations.runKey,L"NiuMaMerit")==L"\""+foreign+L"\" --autostart");
     CHECK(RegText(classKey,L"")==L"\""+foreign+L"\" \"%1\"");
     CHECK(Get(fs::path(locations.directory)/L"unrelated.txt")=="keep");

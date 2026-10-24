@@ -51,7 +51,15 @@ std::wstring UniqueName() {
   wchar_t text[40]{}; StringFromGUID2(id, text, 40); return text;
 }
 bool SamePath(const std::wstring& a, const std::wstring& b) {
-  auto left = a, right = b;
+  const auto normalized = [](const std::wstring& value) {
+    if (value.empty()) return value;
+    wchar_t full[MAX_PATH]{}, expanded[MAX_PATH]{};
+    const auto fullLength = GetFullPathNameW(value.c_str(), MAX_PATH, full, nullptr);
+    const std::wstring absolute = fullLength && fullLength < MAX_PATH ? full : value;
+    const auto longLength = GetLongPathNameW(absolute.c_str(), expanded, MAX_PATH);
+    return longLength && longLength < MAX_PATH ? std::wstring(expanded) : absolute;
+  };
+  auto left = normalized(a), right = normalized(b);
   while (left.size() > 3 && (left.back() == L'\\' || left.back() == L'/')) left.pop_back();
   while (right.size() > 3 && (right.back() == L'\\' || right.back() == L'/')) right.pop_back();
   return CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_EQUAL;

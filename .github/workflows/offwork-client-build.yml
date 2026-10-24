@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-single-file:
-    if: ${{ inputs.mode == 'runtime-self-install' }}
+    if: ${{ inputs.mode == 'runtime-self-install' || inputs.mode == 'runtime-self-install-entry' }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -31,9 +31,14 @@ jobs:
         run: |
           cmake -S . -B build-self -G "Visual Studio 17 2022" -A x64
           if ($LASTEXITCODE -ne 0) { throw 'Self-install configuration failed' }
-          cmake --build build-self --config Release --target niuma-merit niuma-self-install-test niuma-production-runtime-test --parallel 2
+          if ('${{ inputs.mode }}' -eq 'runtime-self-install-entry') {
+            cmake --build build-self --config Release --target niuma-merit --parallel 2
+          } else {
+            cmake --build build-self --config Release --target niuma-merit niuma-self-install-test niuma-production-runtime-test --parallel 2
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Self-install compilation failed' }
       - name: Validate private installation transactions and production display route
+        if: ${{ inputs.mode == 'runtime-self-install' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory build-self/evidence | Out-Null
@@ -41,6 +46,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Self-install contracts failed' }
           & ./build-self/Release/niuma-production-runtime-test.exe (Join-Path $env:TEMP ('niuma-production-route-' + [Guid]::NewGuid().ToString('N'))) | Tee-Object build-self/evidence/production-route.txt
           if ($LASTEXITCODE -ne 0) { throw 'Production display route failed' }
+          ./scripts/verify-windows-artifact.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -ExpectedVersion (Get-Content VERSION -Raw).Trim() -ArtifactKind client -ReceiptPath (Join-Path $PWD 'build-self/evidence/client-artifact.json')
+      - name: Exercise the final executable install and uninstall entry in a disposable user
+        if: ${{ inputs.mode == 'runtime-self-install-entry' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory build-self/evidence | Out-Null
+          ./scripts/test-windows-single-file-entry.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -EvidenceDir (Join-Path $PWD 'build-self/evidence') | Tee-Object build-self/evidence/entry.txt
+          if (-not (Test-Path build-self/evidence/single-file-entry.json)) { throw 'Single-file entry receipt missing' }
+          $r = Get-Content build-self/evidence/single-file-entry.json -Raw | ConvertFrom-Json
+          if ($r.status -ne 'PASS') { throw 'Single-file entry failed' }
           ./scripts/verify-windows-artifact.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -ExpectedVersion (Get-Content VERSION -Raw).Trim() -ArtifactKind client -ReceiptPath (Join-Path $PWD 'build-self/evidence/client-artifact.json')
       - name: Bind the one unsigned delivery executable
         shell: python
@@ -50,13 +65,15 @@ jobs:
           exe = Path('build-self/Release/niuma-merit.exe')
           paths = ['VERSION', 'CMakeLists.txt', 'src/windows/app.cpp',
                    'src/windows/self_install.cpp', 'src/windows/self_install.h',
-                   'src/windows/app.manifest', 'src/windows/app.rc']
+                   'src/windows/app.manifest', 'src/windows/app.rc',
+                   'scripts/test-windows-self-install.cpp', 'scripts/test-windows-production-runtime.cpp']
           record = {'commit': os.environ['GITHUB_SHA'], 'kind': 'unsigned-single-executable-self-install-candidate',
                     'executableBytes': exe.stat().st_size, 'executableSha256': hashlib.sha256(exe.read_bytes()).hexdigest(),
                     'sourceSha256': {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths},
                     'signingPerformed': False, 'published': False,
                     'closedAcceptanceSuitesRerun': False,
-                    'scope': 'private install core transactions and production display adapter; not Win10 or signed end-to-end installation'}
+                    'validationMode': '${{ inputs.mode }}',
+                    'scope': 'only selected new installation/entry checks; Windows Server CI, not Win10 or signed distribution acceptance'}
           Path('build-self/SINGLE_FILE_BINDING.json').write_text(json.dumps(record, indent=2))
       - uses: actions/upload-artifact@v4
         if: always()
