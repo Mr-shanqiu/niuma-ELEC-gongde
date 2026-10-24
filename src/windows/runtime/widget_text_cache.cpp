@@ -9,6 +9,7 @@
 #include <limits>
 #include <new>
 #include <utility>
+#include <vector>
 
 namespace niuma::runtime {
 namespace {
@@ -70,26 +71,93 @@ bool Setup(Gdiplus::Graphics& graphics, const Gdiplus::Matrix& transform) {
         graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit) == Gdiplus::Ok &&
         graphics.SetTransform(&transform) == Gdiplus::Ok;
 }
+// Logical paths are independent of the raster transform, color and outline.
+// Reuse the current widget family/format for both counters and clock. Retain
+// only clock paths, whose labels and positional digits actually repeat;
+// ever-increasing merit strings are deliberately not a path history.
+class WidgetGlyphContext {
+    struct Entry {
+        std::wstring text;
+        Gdiplus::RectF rect;
+        float size;
+        int style;
+        std::size_t bytes;
+        std::unique_ptr<Gdiplus::GraphicsPath> path;
+    };
+    WidgetTextCacheStats& stats_;
+    std::wstring familyName_;
+    std::unique_ptr<Gdiplus::FontFamily> family_;
+    std::unique_ptr<Gdiplus::StringFormat> format_;
+    std::vector<Entry> entries_;
+    void ClearPaths() {
+        entries_.clear();
+        stats_.glyphEntries = stats_.glyphGeometryBytes = 0;
+    }
+public:
+    explicit WidgetGlyphContext(WidgetTextCacheStats& stats) : stats_(stats) {}
+    void Clear() {
+        ClearPaths(); family_.reset(); format_.reset(); familyName_.clear();
+    }
+    const Gdiplus::GraphicsPath* Resolve(const TextKey& key, const std::wstring& text,
+        const Gdiplus::RectF& rect, float size, bool retain,
+        std::unique_ptr<Gdiplus::GraphicsPath>& transient) {
+        if (!format_) {
+            auto format = std::make_unique<Gdiplus::StringFormat>();
+            if (format->SetAlignment(Gdiplus::StringAlignmentCenter) != Gdiplus::Ok ||
+                format->SetLineAlignment(Gdiplus::StringAlignmentCenter) != Gdiplus::Ok ||
+                format->SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap) != Gdiplus::Ok) return nullptr;
+            format_ = std::move(format);
+        }
+        if (!family_ || key.family != familyName_) {
+            auto family = std::make_unique<Gdiplus::FontFamily>(key.family.c_str());
+            if (family->GetLastStatus() != Gdiplus::Ok) return nullptr;
+            auto name = key.family;
+            ClearPaths(); family_ = std::move(family); familyName_ = std::move(name);
+            ++stats_.fontFamilyBuilds;
+        }
+        if (retain) for (const auto& entry : entries_) {
+            if (entry.text == text && entry.size == size && entry.style == key.fontStyle &&
+                entry.rect.X == rect.X && entry.rect.Y == rect.Y &&
+                entry.rect.Width == rect.Width && entry.rect.Height == rect.Height) {
+                ++stats_.glyphPathHits; return entry.path.get();
+            }
+        }
+        transient = std::make_unique<Gdiplus::GraphicsPath>();
+        if (transient->AddString(text.c_str(), -1, family_.get(), key.fontStyle, size, rect,
+                format_.get()) != Gdiplus::Ok) return nullptr;
+        ++stats_.glyphPathBuilds;
+        const auto points = transient->GetPointCount();
+        if (points < 0) return nullptr;
+        const auto bytes = static_cast<std::size_t>(points) * (sizeof(Gdiplus::PointF) + sizeof(BYTE));
+        if (!retain || bytes > WidgetTextCache::kGlyphGeometryByteLimit) return transient.get();
+        // Oversized valid glyphs still draw via the transient original path.
+        // Eviction changes preparation work only, never output or acceptance.
+        entries_.reserve(WidgetTextCache::kGlyphEntryLimit);
+        while (!entries_.empty() && (entries_.size() >= WidgetTextCache::kGlyphEntryLimit ||
+            bytes > WidgetTextCache::kGlyphGeometryByteLimit - stats_.glyphGeometryBytes)) {
+            stats_.glyphGeometryBytes -= entries_.front().bytes;
+            entries_.erase(entries_.begin());
+        }
+        entries_.push_back({text, rect, size, key.fontStyle, bytes, std::move(transient)});
+        stats_.glyphGeometryBytes += bytes; stats_.glyphEntries = entries_.size();
+        return entries_.back().path.get();
+    }
+};
 bool DrawWidget(Gdiplus::Graphics& graphics, const TextKey& key, const std::wstring& text,
-                const Gdiplus::RectF& rect, float fontSize, std::uint32_t color) {
-    Gdiplus::FontFamily family(key.family.c_str());
-    Gdiplus::StringFormat format;
-    if (family.GetLastStatus() != Gdiplus::Ok ||
-        format.SetAlignment(Gdiplus::StringAlignmentCenter) != Gdiplus::Ok ||
-        format.SetLineAlignment(Gdiplus::StringAlignmentCenter) != Gdiplus::Ok ||
-        format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap) != Gdiplus::Ok) return false;
-    Gdiplus::GraphicsPath path;
-    if (path.AddString(text.c_str(), -1, &family, key.fontStyle, fontSize, rect, &format) != Gdiplus::Ok)
-        return false;
+                const Gdiplus::RectF& rect, float fontSize, std::uint32_t color,
+                WidgetGlyphContext& glyphs, bool retain) {
+    std::unique_ptr<Gdiplus::GraphicsPath> transient;
+    const auto* path = glyphs.Resolve(key, text, rect, fontSize, retain, transient);
+    if (!path) return false;
     Gdiplus::Pen outline(Gdiplus::Color(key.outlineColor), key.outlineWidth);
     Gdiplus::SolidBrush fill{Gdiplus::Color(color)};
     if (outline.GetLastStatus() != Gdiplus::Ok || fill.GetLastStatus() != Gdiplus::Ok ||
         outline.SetLineJoin(Gdiplus::LineJoinRound) != Gdiplus::Ok) return false;
-    return graphics.DrawPath(&outline, &path) == Gdiplus::Ok && graphics.FillPath(&fill, &path) == Gdiplus::Ok;
+    return graphics.DrawPath(&outline, path) == Gdiplus::Ok && graphics.FillPath(&fill, path) == Gdiplus::Ok;
 }
-bool Draw(Gdiplus::Graphics& graphics, WidgetTextSlot slot, const TextKey& key) {
+bool Draw(Gdiplus::Graphics& graphics, WidgetTextSlot slot, const TextKey& key, WidgetGlyphContext& glyphs) {
     if (slot == WidgetTextSlot::Merit)
-        return DrawWidget(graphics, key, key.first, {0, 0, 240, 40}, key.firstSize, key.firstColor);
+        return DrawWidget(graphics, key, key.first, {0, 0, 240, 40}, key.firstSize, key.firstColor, glyphs, false);
     if (slot == WidgetTextSlot::PlusOne) {
         Gdiplus::Font font(key.family.c_str(), key.firstSize, key.fontStyle, Gdiplus::UnitPixel);
         Gdiplus::StringFormat format;
@@ -100,12 +168,12 @@ bool Draw(Gdiplus::Graphics& graphics, WidgetTextSlot slot, const TextKey& key) 
         return graphics.DrawString(key.first.c_str(), -1, &font, Gdiplus::RectF(0, 0, 240, 30),
             &format, &brush) == Gdiplus::Ok;
     }
-    if (!DrawWidget(graphics, key, key.first, {12, 258, 216, 28}, key.firstSize, key.firstColor)) return false;
+    if (!DrawWidget(graphics, key, key.first, {12, 258, 216, 28}, key.firstSize, key.firstColor, glyphs, true)) return false;
     constexpr float cellWidth = 17;
     const float left = (240 - cellWidth * static_cast<float>(key.second.size())) / 2;
     for (std::size_t i = 0; i < key.second.size(); ++i)
         if (!DrawWidget(graphics, key, std::wstring(1, key.second[i]),
-                {left + cellWidth * static_cast<float>(i), 286, cellWidth, 42}, key.secondSize, key.secondColor))
+                {left + cellWidth * static_cast<float>(i), 286, cellWidth, 42}, key.secondSize, key.secondColor, glyphs, true))
             return false;
     return true;
 }
@@ -116,6 +184,7 @@ struct WidgetTextCache::Impl {
     std::array<std::unique_ptr<Entry>, 3> entries;
     std::array<bool, 3> visible{};
     WidgetTextCacheStats stats;
+    WidgetGlyphContext glyphs{stats};
     std::uint64_t nextVersion = 0;
     bool timingEnabled = false;
     WidgetTextTiming timing;
@@ -163,7 +232,7 @@ struct WidgetTextCache::Impl {
             Gdiplus::Graphics graphics(&bitmap);
             Gdiplus::Matrix transform(rasterKey.scale, 0, 0, rasterKey.scale, 0, static_cast<float>(-physicalTop));
             if (graphics.GetLastStatus() != Gdiplus::Ok || graphics.Clear(Gdiplus::Color(0, 0, 0, 0)) != Gdiplus::Ok ||
-                !Setup(graphics, transform) || !Draw(graphics, slot, rasterKey)) {
+                !Setup(graphics, transform) || !Draw(graphics, slot, rasterKey, glyphs)) {
                 error = "widget text drawing failed"; return false;
             }
             graphics.Flush(Gdiplus::FlushIntentionSync);
@@ -242,6 +311,7 @@ void WidgetTextCache::EnableDiagnosticTiming(bool enabled) noexcept {
 }
 const WidgetTextTiming& WidgetTextCache::DiagnosticTiming() const noexcept { return impl_->timing; }
 void WidgetTextCache::Clear() noexcept {
+    impl_->glyphs.Clear();
     for (auto& entry : impl_->entries) entry.reset();
     impl_->visible.fill(false);
     impl_->stats.pixelBytes = impl_->stats.maskBytes = impl_->stats.entries = 0;

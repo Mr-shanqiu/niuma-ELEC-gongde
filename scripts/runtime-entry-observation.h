@@ -67,16 +67,21 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
   FILE* file=_wfopen(filename.c_str(),L"wb");
   if(!file) return;
   const auto& stats=display.Stats();
+  const auto& textStats=display.TextStats();
   const int written=std::fprintf(file,
       "{\"scene\":\"%s\",\"fingerprint\":\"%s\",\"dpi\":%u,\"countdown\":%s,"
       "\"framesPresented\":%llu,\"textureUploads\":%llu,\"adapterKind\":\"%s\","
       "\"vendorId\":%u,\"deviceId\":%u,\"keyboardAvailable\":%s,\"total\":%llu,"
-      "\"inputAuthoritative\":%s,\"snapshotReady\":%s}\n",
+      "\"inputAuthoritative\":%s,\"snapshotReady\":%s,\"glyphEntries\":%zu,\"glyphGeometryBytes\":%zu,"
+      "\"glyphPathBuilds\":%llu,\"glyphPathHits\":%llu,\"fontFamilyBuilds\":%llu}\n",
       source.id.c_str(),source.contentFingerprint.c_str(),gState.dpi,gOffwork.enabled?"true":"false",
       static_cast<unsigned long long>(stats.framesPresented),static_cast<unsigned long long>(stats.textureUploads),
       display.Adapter().kind.c_str(),display.Adapter().vendorId,display.Adapter().deviceId,
       gInput.latest.input.keyboardAvailable?"true":"false",static_cast<unsigned long long>(gState.total),
-      gInput.authoritative?"true":"false",gInput.latest.input.ready?"true":"false");
+      gInput.authoritative?"true":"false",gInput.latest.input.ready?"true":"false",
+      textStats.glyphEntries,textStats.glyphGeometryBytes,
+      static_cast<unsigned long long>(textStats.glyphPathBuilds),static_cast<unsigned long long>(textStats.glyphPathHits),
+      static_cast<unsigned long long>(textStats.fontFamilyBuilds));
   const int closed=std::fclose(file);
   if(!terminal && written>0 && closed==0) gRuntimeEntryReady=true;
 }
