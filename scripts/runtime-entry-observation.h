@@ -25,7 +25,15 @@ bool PrepareRuntimeEntryScenario() {
       !WritePrivateProfileStringW(L"offwork",L"enabled",L"1",path.c_str()) ||
       !WritePrivateProfileStringW(L"offwork",L"hour",L"18",path.c_str()) ||
       !WritePrivateProfileStringW(L"offwork",L"minute",L"0",path.c_str())) return false;
-  return WritePrivateProfileStringW(nullptr,nullptr,nullptr,path.c_str())!=FALSE;
+  // The cache-flush form can return zero even after the file is written.
+  // Confirm the values here; the ready observation additionally proves that
+  // the real storage worker and appearance loader consumed them successfully.
+  WritePrivateProfileStringW(nullptr,nullptr,nullptr,path.c_str());
+  wchar_t selected[128]{};
+  GetPrivateProfileStringW(L"state",L"selected_pack_id",L"",selected,128,path.c_str());
+  return wcscmp(selected,L"runtime.fixture.offwork-button")==0 &&
+      GetPrivateProfileIntW(L"offwork",L"enabled",0,path.c_str())==1 &&
+      GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES;
 }
 
 void WriteRuntimeEntryObservation(bool terminal=false) {

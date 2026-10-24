@@ -76,7 +76,11 @@ int Run(const std::filesystem::path& candidate,const std::filesystem::path& rece
   const auto deadline=GetTickCount64()+15000;
   HWND window=nullptr;
   while(!(window=MainWindow(client.process.dwProcessId)) && GetTickCount64()<deadline) {
-    Require(WaitForSingleObject(client.process.hProcess,0)==WAIT_TIMEOUT,"candidate exited before main window");Sleep(20);
+    if(WaitForSingleObject(client.process.hProcess,0)!=WAIT_TIMEOUT) {
+      std::cerr<<"candidate startup exit="<<client.Wait(0)<<'\n';
+      throw std::runtime_error("candidate exited before main window");
+    }
+    Sleep(20);
   }
   Require(window!=nullptr,"private main window ready");
   // Startup is excluded from input timing. Final persisted count witnesses that
