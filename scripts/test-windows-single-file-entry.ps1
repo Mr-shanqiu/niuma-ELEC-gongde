@@ -28,6 +28,7 @@ public static class NiuMaSetupUI {
   [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hwnd, EnumProc callback, IntPtr data);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
   [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr dc, uint flags);
   [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left,top,right,bottom; }
@@ -129,8 +130,11 @@ $null=$worker.Handle
 if((Get-FileHash -LiteralPath $worker.Path -Algorithm SHA256).Hash -ne $hash){throw 'Uninstall copy bytes changed'}
 $workerDir=Split-Path $worker.Path -Parent
 $finished=Await {[NiuMaSetupUI]::Find($worker.Id,'#32770')} 'uninstall result'
-Confirm-OwnedDialog $finished
-if(-not $worker.WaitForExit(10000) -or $worker.ExitCode -ne 0){throw 'Uninstall worker failed'}
+# This final informational MessageBox has only OK. Closing its window is the
+# ordinary user action; no confirmation/result is fabricated or skipped.
+if(-not [NiuMaSetupUI]::PostMessage($finished,16,[IntPtr]0,[IntPtr]0)){throw 'Could not close uninstall result'}
+Await {$worker.HasExited} 'uninstall worker exit' 10 | Out-Null
+if($worker.ExitCode -ne 0){throw "Uninstall worker exit code was not confirmed zero: $($worker.ExitCode)"}
 if((Test-Path -LiteralPath $uninstall) -or (Test-Path -LiteralPath $startLink) -or (Test-Path -LiteralPath $desktopLink)){throw 'Owned uninstall entries remain'}
 if((Get-FileHash -LiteralPath $ini -Algorithm SHA256).Hash -ne $dataHash){throw 'Uninstall modified user records'}
 $receipt.uninstallSameImage=$true;$receipt.userRecordsRetained=$true
