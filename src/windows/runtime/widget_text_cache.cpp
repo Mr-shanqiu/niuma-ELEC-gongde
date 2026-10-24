@@ -155,6 +155,81 @@ bool DrawWidget(Gdiplus::Graphics& graphics, const TextKey& key, const std::wstr
         outline.SetLineJoin(Gdiplus::LineJoinRound) != Gdiplus::Ok) return false;
     return graphics.DrawPath(&outline, path) == Gdiplus::Ok && graphics.FillPath(&fill, path) == Gdiplus::Ok;
 }
+
+struct MeritGeometry {
+    std::vector<Gdiplus::PointF> points;
+    std::vector<BYTE> types;
+    std::size_t Bytes() const { return points.capacity()*sizeof(Gdiplus::PointF)+types.capacity(); }
+    void Clear() { std::vector<Gdiplus::PointF>().swap(points); std::vector<BYTE>().swap(types); }
+    void Read(const Gdiplus::GraphicsPath& path) {
+        const auto count=path.GetPointCount();
+        if(count<=0 || count>static_cast<INT>(WidgetTextCache::kMeritPointLimit)) return;
+        points.resize(static_cast<std::size_t>(count)); types.resize(static_cast<std::size_t>(count));
+        if(Bytes()>WidgetTextCache::kMeritGeometryByteLimit ||
+            path.GetPathPoints(points.data(),count)!=Gdiplus::Ok ||
+            path.GetPathTypes(types.data(),count)!=Gdiplus::Ok) Clear();
+    }
+};
+
+bool SameRasterStyle(const TextKey& a,const TextKey& b) {
+    return a.second==b.second && a.family==b.family && a.scale==b.scale &&
+        a.firstSize==b.firstSize && a.secondSize==b.secondSize && a.outlineWidth==b.outlineWidth &&
+        a.firstColor==b.firstColor && a.secondColor==b.secondColor &&
+        a.outlineColor==b.outlineColor && a.fontStyle==b.fontStyle;
+}
+
+// Compare actual GDI path contours, not character widths or digit positions.
+// Only complete identical leading/trailing contours may keep their old pixels.
+// Changed Beziers stay within their control-point hull; round stroke radius and
+// a four-device-pixel AA guard enlarge that hull before integer clipping.
+bool MeritDirtyRect(const MeritGeometry& old,const MeritGeometry& next,
+                    const TextKey& key,int width,int height,Gdiplus::Rect& dirty) {
+    using Range=std::pair<std::size_t,std::size_t>;
+    const auto contours=[](const MeritGeometry& g,std::vector<Range>& result) {
+        if(g.points.empty() || g.points.size()!=g.types.size() ||
+            (g.types[0]&Gdiplus::PathPointTypePathTypeMask)!=Gdiplus::PathPointTypeStart) return false;
+        std::size_t start=0;
+        for(std::size_t i=0;i<g.points.size();++i) {
+            if(!std::isfinite(g.points[i].X)||!std::isfinite(g.points[i].Y)) return false;
+            if(i && (g.types[i]&Gdiplus::PathPointTypePathTypeMask)==Gdiplus::PathPointTypeStart) {
+                result.emplace_back(start,i);start=i;
+            }
+        }
+        result.emplace_back(start,g.points.size());return true;
+    };
+    std::vector<Range> a,b;
+    if(!contours(old,a)||!contours(next,b)) return false;
+    const auto equal=[&](const Range& x,const Range& y) {
+        if(x.second-x.first!=y.second-y.first)return false;
+        for(std::size_t i=0;i<x.second-x.first;++i)
+            if(old.points[x.first+i].X!=next.points[y.first+i].X ||
+               old.points[x.first+i].Y!=next.points[y.first+i].Y ||
+               old.types[x.first+i]!=next.types[y.first+i])return false;
+        return true;
+    };
+    std::size_t prefix=0,ae=a.size(),be=b.size();
+    while(prefix<ae && prefix<be && equal(a[prefix],b[prefix]))++prefix;
+    while(ae>prefix && be>prefix && equal(a[ae-1],b[be-1])){--ae;--be;}
+    if(prefix==ae && prefix==be){dirty={0,0,0,0};return true;}
+    if(!prefix && ae==a.size() && be==b.size())return false;
+    double left=std::numeric_limits<double>::infinity(),top=left,right=-left,bottom=-left;
+    const auto include=[&](const MeritGeometry& g,const std::vector<Range>& ranges,std::size_t end) {
+        for(std::size_t c=prefix;c<end;++c)for(std::size_t i=ranges[c].first;i<ranges[c].second;++i) {
+            left=std::min(left,static_cast<double>(g.points[i].X));
+            right=std::max(right,static_cast<double>(g.points[i].X));
+            top=std::min(top,static_cast<double>(g.points[i].Y));
+            bottom=std::max(bottom,static_cast<double>(g.points[i].Y));
+        }
+    };
+    include(old,a,ae);include(next,b,be);
+    const double pad=static_cast<double>(key.outlineWidth)*key.scale/2+4;
+    const int x0=static_cast<int>(std::clamp(std::floor(left*key.scale-pad),0.0,static_cast<double>(width)));
+    const int y0=static_cast<int>(std::clamp(std::floor(top*key.scale-pad),0.0,static_cast<double>(height)));
+    const int x1=static_cast<int>(std::clamp(std::ceil(right*key.scale+pad),0.0,static_cast<double>(width)));
+    const int y1=static_cast<int>(std::clamp(std::ceil(bottom*key.scale+pad),0.0,static_cast<double>(height)));
+    dirty={x0,y0,x1-x0,y1-y0};return true;
+}
+
 bool Draw(Gdiplus::Graphics& graphics, WidgetTextSlot slot, const TextKey& key, WidgetGlyphContext& glyphs) {
     if (slot == WidgetTextSlot::Merit)
         return DrawWidget(graphics, key, key.first, {0, 0, 240, 40}, key.firstSize, key.firstColor, glyphs, false);
@@ -180,7 +255,7 @@ bool Draw(Gdiplus::Graphics& graphics, WidgetTextSlot slot, const TextKey& key, 
 } // namespace
 
 struct WidgetTextCache::Impl {
-    struct Entry { TextKey key; WidgetTextImage image; };
+    struct Entry { TextKey key; WidgetTextImage image; MeritGeometry meritGeometry; };
     std::array<std::unique_ptr<Entry>, 3> entries;
     std::array<bool, 3> visible{};
     WidgetTextCacheStats stats;
@@ -189,7 +264,8 @@ struct WidgetTextCache::Impl {
     bool timingEnabled = false;
     WidgetTextTiming timing;
 
-    bool Build(WidgetTextSlot slot, TextKey key, std::unique_ptr<Entry>& output, std::string& error) {
+    bool Build(WidgetTextSlot slot, TextKey key, const Entry* previous,
+               std::unique_ptr<Entry>& output, std::string& error) {
         using Clock = std::chrono::steady_clock;
         const auto started = timingEnabled ? Clock::now() : Clock::time_point{};
         // Extra two design units retain text antialiasing without a full-window
@@ -222,19 +298,51 @@ struct WidgetTextCache::Impl {
         image.logicalRect = {0, static_cast<float>(physicalTop / rasterKey.scale),
             static_cast<float>(width / rasterKey.scale), static_cast<float>(height / rasterKey.scale)};
         const auto rasterStarted = timingEnabled ? Clock::now() : Clock::time_point{};
+        std::unique_ptr<Gdiplus::GraphicsPath> meritPath;
+        Gdiplus::Rect dirty{0,0,static_cast<INT>(width),static_cast<INT>(height)};
+        bool partial=false;
+        if(slot==WidgetTextSlot::Merit) {
+            if(!glyphs.Resolve(rasterKey,rasterKey.first,{0,0,240,40},rasterKey.firstSize,false,meritPath)) {
+                error="widget merit path creation failed";return false;
+            }
+            replacement->meritGeometry.Read(*meritPath);
+            if(previous && SameRasterStyle(previous->key,rasterKey) &&
+                previous->image.pixels.width==image.pixels.width && previous->image.pixels.height==image.pixels.height)
+                partial=MeritDirtyRect(previous->meritGeometry,replacement->meritGeometry,rasterKey,
+                    static_cast<INT>(width),static_cast<INT>(height),dirty);
+            if(partial) {
+                std::copy(previous->image.pixels.bgraPremultiplied.begin(),
+                    previous->image.pixels.bgraPremultiplied.end(),image.pixels.bgraPremultiplied.begin());
+                for(int y=dirty.Y;y<dirty.Y+dirty.Height;++y) {
+                    auto* row=image.pixels.bgraPremultiplied.data()+static_cast<std::size_t>(y)*image.pixels.strideBytes;
+                    std::fill(row+dirty.X*4,row+(dirty.X+dirty.Width)*4,0);
+                }
+            }
+        }
         {
-            // Wrap our final premultiplied pixels; no second DIB or conversion
-            // buffer is retained or copied on this path.
+            // Wrap final premultiplied pixels; partial redraw copies the one
+            // current image, without an additional DIB or conversion buffer.
             Gdiplus::Bitmap bitmap(static_cast<INT>(image.pixels.width), static_cast<INT>(image.pixels.height),
                 static_cast<INT>(image.pixels.strideBytes), PixelFormat32bppPARGB,
                 image.pixels.bgraPremultiplied.data());
             if (bitmap.GetLastStatus() != Gdiplus::Ok) { error = "widget text bitmap creation failed"; return false; }
             Gdiplus::Graphics graphics(&bitmap);
             Gdiplus::Matrix transform(rasterKey.scale, 0, 0, rasterKey.scale, 0, static_cast<float>(-physicalTop));
-            if (graphics.GetLastStatus() != Gdiplus::Ok || graphics.Clear(Gdiplus::Color(0, 0, 0, 0)) != Gdiplus::Ok ||
-                !Setup(graphics, transform) || !Draw(graphics, slot, rasterKey, glyphs)) {
+            if (graphics.GetLastStatus()!=Gdiplus::Ok ||
+                (!partial && graphics.Clear(Gdiplus::Color(0,0,0,0))!=Gdiplus::Ok) ||
+                (partial && graphics.SetClip(dirty)!=Gdiplus::Ok) || !Setup(graphics,transform)) {
                 error = "widget text drawing failed"; return false;
             }
+            bool drawn=true;
+            if(meritPath && (!partial || (dirty.Width && dirty.Height))) {
+                Gdiplus::Pen outline(Gdiplus::Color(rasterKey.outlineColor),rasterKey.outlineWidth);
+                Gdiplus::SolidBrush fill{Gdiplus::Color(rasterKey.firstColor)};
+                drawn=outline.GetLastStatus()==Gdiplus::Ok && fill.GetLastStatus()==Gdiplus::Ok &&
+                    outline.SetLineJoin(Gdiplus::LineJoinRound)==Gdiplus::Ok &&
+                    graphics.DrawPath(&outline,meritPath.get())==Gdiplus::Ok &&
+                    graphics.FillPath(&fill,meritPath.get())==Gdiplus::Ok;
+            } else if(!meritPath) drawn=Draw(graphics,slot,rasterKey,glyphs);
+            if(!drawn){error="widget text drawing failed";return false;}
             graphics.Flush(Gdiplus::FlushIntentionSync);
             if (graphics.GetLastStatus() != Gdiplus::Ok) { error = "widget text flush failed"; return false; }
         }
@@ -244,6 +352,12 @@ struct WidgetTextCache::Impl {
         image.mask = PrepareAlphaMask({image.pixels.bgraPremultiplied.data(), image.pixels.bgraPremultiplied.size(),
             image.pixels.width, image.pixels.height, image.pixels.strideBytes});
         if (!image.mask.success) { error = "widget text mask preparation failed: " + image.mask.error; return false; }
+        if(slot==WidgetTextSlot::Merit) {
+            if(partial)++stats.meritPartialRedraws;
+            stats.meritRasterPixels+=static_cast<std::uint64_t>(dirty.Width)*dirty.Height;
+            stats.peakMeritGeometryBytes=std::max(stats.peakMeritGeometryBytes,
+                stats.meritGeometryBytes+replacement->meritGeometry.Bytes());
+        }
         stats.peakMaskBytes = std::max(stats.peakMaskBytes, stats.maskBytes + image.mask.storageBytes);
         if (timingEnabled) {
             timing.maskMs[SlotIndex(slot)] = std::chrono::duration<double,std::milli>(Clock::now()-maskStarted).count();
@@ -277,7 +391,7 @@ WidgetTextUpdate WidgetTextCache::Update(const WidgetTextInput& input) {
                 return fail("widget text version exhausted");
             std::unique_ptr<Impl::Entry> replacement;
             std::string error;
-            if (!state.Build(slot, std::move(key), replacement, error)) return fail(error);
+            if (!state.Build(slot, std::move(key), entry.get(), replacement, error)) return fail(error);
             replacement->image.version = ++state.nextVersion;
             if (entry) {
                 state.stats.pixelBytes -= entry->image.pixels.bgraPremultiplied.capacity();
@@ -286,6 +400,7 @@ WidgetTextUpdate WidgetTextCache::Update(const WidgetTextInput& input) {
             state.stats.pixelBytes += replacement->image.pixels.bgraPremultiplied.capacity();
             state.stats.maskBytes += replacement->image.mask.storageBytes;
             entry = std::move(replacement);
+            if(slot==WidgetTextSlot::Merit)state.stats.meritGeometryBytes=entry->meritGeometry.Bytes();
             ++state.stats.redraws[i];
             result.changedMask |= static_cast<std::uint8_t>(1u << i);
             if (state.timingEnabled) state.timing.changedMask = result.changedMask;
@@ -315,6 +430,7 @@ void WidgetTextCache::Clear() noexcept {
     for (auto& entry : impl_->entries) entry.reset();
     impl_->visible.fill(false);
     impl_->stats.pixelBytes = impl_->stats.maskBytes = impl_->stats.entries = 0;
+    impl_->stats.meritGeometryBytes=0;
 }
 
 } // namespace niuma::runtime

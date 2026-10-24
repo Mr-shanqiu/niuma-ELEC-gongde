@@ -74,6 +74,8 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
       "\"vendorId\":%u,\"deviceId\":%u,\"keyboardAvailable\":%s,\"total\":%llu,"
       "\"inputAuthoritative\":%s,\"snapshotReady\":%s,\"glyphEntries\":%zu,\"glyphGeometryBytes\":%zu,"
       "\"glyphPathBuilds\":%llu,\"glyphPathHits\":%llu,\"fontFamilyBuilds\":%llu,"
+      "\"meritGeometryBytes\":%zu,\"peakMeritGeometryBytes\":%zu,"
+      "\"meritPartialRedraws\":%llu,\"meritRasterPixels\":%llu,"
       "\"nativeBandsCreated\":%llu,\"nativeBandsReused\":%llu,\"nativeBandFallbacks\":%llu,"
       "\"retainedBandBytes\":%zu,\"retainedBandHandles\":%zu}\n",
       source.id.c_str(),source.contentFingerprint.c_str(),gState.dpi,gOffwork.enabled?"true":"false",
@@ -84,6 +86,9 @@ void WriteRuntimeEntryObservation(bool terminal=false) {
       textStats.glyphEntries,textStats.glyphGeometryBytes,
       static_cast<unsigned long long>(textStats.glyphPathBuilds),static_cast<unsigned long long>(textStats.glyphPathHits),
       static_cast<unsigned long long>(textStats.fontFamilyBuilds),
+      textStats.meritGeometryBytes,textStats.peakMeritGeometryBytes,
+      static_cast<unsigned long long>(textStats.meritPartialRedraws),
+      static_cast<unsigned long long>(textStats.meritRasterPixels),
       static_cast<unsigned long long>(stats.nativeBandsCreated),static_cast<unsigned long long>(stats.nativeBandsReused),
       static_cast<unsigned long long>(stats.nativeBandFallbacks),stats.retainedBandBytes,stats.retainedBandHandles);
   const int closed=std::fclose(file);

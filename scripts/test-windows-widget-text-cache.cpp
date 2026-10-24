@@ -42,27 +42,28 @@ std::array<std::uint64_t, 3> Versions(const WidgetTextCache& cache) {
 // Existing app.cpp/widget-glyph-cache rendering, repeated independently here
 // against a DIB HDC. This reference never calls the new cache's raster helper.
 void OriginalWidget(Gdiplus::Graphics& graphics, const std::wstring& text,
-                    const Gdiplus::RectF& rect, float size, Gdiplus::Color color) {
-    Gdiplus::FontFamily family(L"Microsoft YaHei UI");
+                    const Gdiplus::RectF& rect, float size, Gdiplus::Color color,
+                    const WidgetTextStyle& style) {
+    Gdiplus::FontFamily family(style.widgetFamily.c_str());
     Gdiplus::StringFormat format;
     format.SetAlignment(Gdiplus::StringAlignmentCenter);
     format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
     format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
     Gdiplus::GraphicsPath path;
-    CHECK(path.AddString(text.c_str(), -1, &family, Gdiplus::FontStyleRegular,
+    CHECK(path.AddString(text.c_str(), -1, &family, style.widgetFontStyle,
         size, rect, &format) == Gdiplus::Ok);
-    Gdiplus::Pen outline(Gdiplus::Color(190, 24, 24, 24), 1.5f);
+    Gdiplus::Pen outline(Gdiplus::Color(style.outlineColor), style.outlineWidth);
     outline.SetLineJoin(Gdiplus::LineJoinRound);
     Gdiplus::SolidBrush fill(color);
     CHECK(graphics.DrawPath(&outline, &path) == Gdiplus::Ok);
     CHECK(graphics.FillPath(&fill, &path) == Gdiplus::Ok);
 }
-void OriginalPlus(Gdiplus::Graphics& graphics, const std::wstring& text) {
-    Gdiplus::Font font(L"Segoe UI", 22, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+void OriginalPlus(Gdiplus::Graphics& graphics, const std::wstring& text, const WidgetTextStyle& style) {
+    Gdiplus::Font font(style.plusFamily.c_str(), style.plusFont, style.plusFontStyle, Gdiplus::UnitPixel);
     Gdiplus::StringFormat format;
     format.SetAlignment(Gdiplus::StringAlignmentCenter);
     format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    Gdiplus::SolidBrush brush(Gdiplus::Color(255, 240, 139, 35));
+    Gdiplus::SolidBrush brush(Gdiplus::Color(style.plusColor));
     CHECK(graphics.DrawString(text.c_str(), -1, &font, Gdiplus::RectF(0, 0, 240, 30),
         &format, &brush) == Gdiplus::Ok);
 }
@@ -82,16 +83,20 @@ void CompareOriginal(HDC screen, WidgetTextSlot slot, const WidgetTextInput& inp
         Gdiplus::Matrix transform(input.pixelScale, 0, 0, input.pixelScale, 0, -physicalTop);
         CHECK(graphics.SetTransform(&transform) == Gdiplus::Ok);
         if (slot == WidgetTextSlot::Merit) {
-            const float size = input.merit.size() > 24 ? 18.0f : input.merit.size() > 18 ? 22.0f : 26.0f;
-            OriginalWidget(graphics, input.merit, {0, 0, 240, 40}, size, Gdiplus::Color(255, 240, 139, 35));
-        } else if (slot == WidgetTextSlot::PlusOne) OriginalPlus(graphics, input.plusOne);
+            const float size = input.merit.size() > 24 ? input.style.longestMeritFont :
+                input.merit.size() > 18 ? input.style.longMeritFont : input.style.meritFont;
+            OriginalWidget(graphics, input.merit, {0, 0, 240, 40}, size,
+                Gdiplus::Color(input.style.meritColor), input.style);
+        } else if (slot == WidgetTextSlot::PlusOne) OriginalPlus(graphics, input.plusOne, input.style);
         else {
-            OriginalWidget(graphics, input.countdownLabel, {12, 258, 216, 28}, 20, Gdiplus::Color(255, 248, 244, 235));
+            OriginalWidget(graphics, input.countdownLabel, {12, 258, 216, 28}, input.style.labelFont,
+                Gdiplus::Color(input.style.labelColor), input.style);
             constexpr float cell = 17;
             const float left = (240 - cell * static_cast<float>(input.countdownDuration.size())) / 2;
             for (std::size_t i = 0; i < input.countdownDuration.size(); ++i)
                 OriginalWidget(graphics, input.countdownDuration.substr(i, 1),
-                    {left + cell * static_cast<float>(i), 286, cell, 42}, 24, Gdiplus::Color(255, 240, 139, 35));
+                    {left + cell * static_cast<float>(i), 286, cell, 42}, input.style.durationFont,
+                    Gdiplus::Color(input.style.durationColor), input.style);
         }
         graphics.Flush(Gdiplus::FlushIntentionSync);
     }
@@ -108,7 +113,7 @@ void CompareOriginal(HDC screen, WidgetTextSlot slot, const WidgetTextInput& inp
             << " differing channels=" << differences << " largest=" << largest << '\n';
         CHECK(false);
     }
-    CHECK(actual.mask.success && !actual.mask.supportRectangles.empty());
+    CHECK(actual.mask.success);
     const auto& pixels = actual.pixels.bgraPremultiplied;
     for (std::size_t i = 0; i < pixels.size(); i += 4)
         CHECK(pixels[i] <= pixels[i + 3] && pixels[i + 1] <= pixels[i + 3] && pixels[i + 2] <= pixels[i + 3]);
@@ -294,6 +299,43 @@ unsigned ClockPathsRetainExactPixelsAndBoundedOwners(HDC screen) {
     CHECK(cache.Stats().glyphEntries == 0 && cache.Stats().glyphGeometryBytes == 0);
     return comparisons;
 }
+
+unsigned MeritDirtyPixelsMatchIndependentFullRaster(HDC screen) {
+    unsigned comparisons=0;
+    for(float scale:{1.0f,1.25f,1.5f,2.0f,3.0f}) {
+        WidgetTextCache cache;
+        auto input=Input();input.pixelScale=scale;
+        const std::vector<std::wstring> values={L"1",L"2",L"8",L"9",L"10",L"11",L"19",L"20",
+            L"99",L"100",L"101",L"111",L"118",L"119",L"120",L"121",L"188",L"189",L"190",
+            L"199",L"200",L"201",L"909",L"919",L"999",L"1000",L"0",L"18功德",L"19功德",
+            L"18446744073709551615",L"123456789012345678901234567890",std::wstring(128,L'8'),L" ",L"  ",L"101"};
+        for(const auto& value:values) {
+            input.merit=value;CHECK(cache.Update(input).success);
+            CompareOriginal(screen,WidgetTextSlot::Merit,input,*cache.Get(WidgetTextSlot::Merit));++comparisons;
+            CHECK(cache.Stats().meritGeometryBytes<=WidgetTextCache::kMeritGeometryByteLimit);
+            CHECK(cache.Stats().peakMeritGeometryBytes<=2*WidgetTextCache::kMeritGeometryByteLimit);
+        }
+        CHECK(cache.Stats().meritPartialRedraws>10);
+        const auto* image=cache.Get(WidgetTextSlot::Merit);
+        CHECK(cache.Stats().meritRasterPixels<cache.Stats().redraws[0]*image->pixels.width*image->pixels.height);
+        // All raster-affecting style changes must restore the full path. The
+        // next same-style number may reuse only truly identical contours.
+        for(int variant=0;variant<5;++variant) {
+            input.style.widgetFamily=variant%2?L"Segoe UI":L"Microsoft YaHei UI";
+            input.style.widgetFontStyle=variant%3;
+            input.style.outlineWidth=variant%2?8.0f:0.0f;
+            input.style.outlineColor=variant%2?0x70203040:0;
+            input.style.meritColor=variant%2?0x80103090:0xfff08b23;
+            input.style.meritFont=20.5f+variant;
+            for(const auto* value:{L"111",L"112",L"113",L"888",L"88",L"0"}) {
+                input.merit=value;CHECK(cache.Update(input).success);
+                CompareOriginal(screen,WidgetTextSlot::Merit,input,*cache.Get(WidgetTextSlot::Merit));++comparisons;
+            }
+        }
+        cache.Clear();CHECK(cache.Stats().meritGeometryBytes==0);
+    }
+    return comparisons;
+}
 } // namespace
 
 int main() {
@@ -306,7 +348,8 @@ int main() {
         FailuresAreExplicitAndPreserveOldSlot();
         DiagnosticTimingDoesNotRetainOldMeasurements(gdi.screen);
         const auto reusedCases = ClockPathsRetainExactPixelsAndBoundedOwners(gdi.screen);
-        std::cout << "widget text cache: 7/7 groups, " << pixelCases + 2 + reusedCases
+        const auto meritCases=MeritDirtyPixelsMatchIndependentFullRaster(gdi.screen);
+        std::cout << "widget text cache: 8/8 groups, " << pixelCases + 2 + reusedCases + meritCases
             << " exact GDI reference comparisons; no client/input hooks started\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

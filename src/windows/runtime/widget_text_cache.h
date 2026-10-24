@@ -71,6 +71,9 @@ struct WidgetTextCacheStats {
     // overhead is separate and bounded by the entry count, not claimed zero.
     std::size_t glyphEntries = 0, glyphGeometryBytes = 0;
     std::uint64_t glyphPathBuilds = 0, glyphPathHits = 0, fontFamilyBuilds = 0;
+    // One current merit path's CPU points/types, not a history of numbers.
+    std::size_t meritGeometryBytes = 0, peakMeritGeometryBytes = 0;
+    std::uint64_t meritPartialRedraws = 0, meritRasterPixels = 0;
 };
 // Last Update only; disabled by default. No text or historical samples.
 struct WidgetTextTiming {
@@ -81,7 +84,8 @@ struct WidgetTextTiming {
 // A single UI/render owner; no filesystem access, PNG decode, timer or growing
 // history. Keep GDI+ initialized while Update runs and until Clear/destruction.
 // The current widget font/format and a bounded clock-only logical path set are
-// retained; unique merit strings use transient paths. At most one retained image
+// retained; merit keeps only its current path's CPU points/types for exact dirty
+// coverage, without retaining native paths or prior numbers. At most one retained image
 // per slot; a temporary replacement is also charged to the 2 MiB pixel budget.
 // Visibility is outside the raster key. +1 is prepared even while hidden;
 // hidden merit/clock skip work until visible again.
@@ -90,6 +94,8 @@ public:
     static constexpr std::size_t kPixelByteLimit = 2 * 1024 * 1024;
     static constexpr std::size_t kGlyphEntryLimit = 96;
     static constexpr std::size_t kGlyphGeometryByteLimit = 256 * 1024;
+    static constexpr std::size_t kMeritPointLimit = 8192;
+    static constexpr std::size_t kMeritGeometryByteLimit = kMeritPointLimit * (2*sizeof(float)+1);
     WidgetTextCache();
     ~WidgetTextCache();
     WidgetTextCache(const WidgetTextCache&) = delete;
