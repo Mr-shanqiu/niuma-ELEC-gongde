@@ -251,6 +251,7 @@ AppState gState;
 niuma::client::core::VisibilityState gVisibility;
 bool gVisibilityHidden = false;
 NOTIFYICONDATAW gTray{};
+HWND gLastFullscreenWindow = nullptr;
 void ShowContextMenu(HWND window, POINT screenPoint);
 void RenderLayeredWindow(ULONGLONG now);
 void ApplyWindowVisibility();
@@ -4709,24 +4710,27 @@ bool ForegroundIsFullscreen() {
   if (!foreground) return false;
   DWORD pid = 0; GetWindowThreadProcessId(foreground, &pid);
   // Opening our tray/menu/settings must not briefly unhide the pet over a game.
-  if (pid == GetCurrentProcessId()) return gVisibility.fullscreen;
+  if (pid == GetCurrentProcessId()) foreground = gLastFullscreenWindow;
+  if (!foreground || !IsWindow(foreground)) return false;
   if (!IsWindowVisible(foreground) || IsIconic(foreground) ||
       foreground == GetDesktopWindow() || foreground == GetShellWindow()) return false;
   wchar_t name[128]{}; GetClassNameW(foreground, name, 128);
   for (const auto* shell : {L"Progman", L"WorkerW", L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd"})
     if (wcscmp(name, shell) == 0) return false;
-  USERNOTIFICATIONSTATE notification{};
+  QUERY_USER_NOTIFICATION_STATE notification{};
   if (SUCCEEDED(SHQueryUserNotificationState(&notification)) &&
-      notification == QUNS_RUNNING_D3D_FULL_SCREEN) return true;
+      notification == QUNS_RUNNING_D3D_FULL_SCREEN) { gLastFullscreenWindow = foreground; return true; }
   RECT bounds{}; MONITORINFO monitor{}; monitor.cbSize = sizeof(monitor);
   if (FAILED(DwmGetWindowAttribute(foreground, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds))) &&
       !GetWindowRect(foreground, &bounds)) return false;
   if (!GetMonitorInfoW(MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
   // A normal maximized title-bar window with an auto-hidden taskbar is not fullscreen.
   if (IsZoomed(foreground) && (GetWindowLongPtrW(foreground, GWL_STYLE) & WS_CAPTION)) return false;
-  return niuma::client::core::CoversFullscreenMonitor(
+  const bool fullscreen = niuma::client::core::CoversFullscreenMonitor(
       {bounds.left,bounds.top,bounds.right,bounds.bottom},
       {monitor.rcMonitor.left,monitor.rcMonitor.top,monitor.rcMonitor.right,monitor.rcMonitor.bottom});
+  if (fullscreen) gLastFullscreenWindow = foreground;
+  return fullscreen;
 }
 
 void ApplyWindowVisibility() {

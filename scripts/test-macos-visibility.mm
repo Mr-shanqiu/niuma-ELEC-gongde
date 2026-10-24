@@ -33,7 +33,7 @@ int main() { @autoreleasepool {
   window.releasedWhenClosed=NO;controller.window=window;
   [controller setTestManual:YES fullscreen:NO recovery:YES];
   assert(window.orderedOut && controller.appearanceHidden);
-  for(int i=0;i<100;++i) EventTapCallback(NULL,kCGEventKeyDown,NULL,(__bridge void*)controller);
+  for(int i=0;i<100;++i) [controller receiveGlobalEvent:kCGEventKeyDown];
   assert(controller.total==223 && controller.todayTotal==123);
   assert(controller.dailyTotals[controller.currentDayKey].longLongValue==123);
   assert(controller.dirty && !controller.animationTimer && !controller.strikeActive);
