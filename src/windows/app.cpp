@@ -5426,11 +5426,15 @@ int WINAPI wWinMain(
 
   if (!gIsolatedAcceptance) ConfigureLaunchAtLogin();
   if (!gIsolatedAcceptance || IsRuntimeCandidate()) {
+#if !defined(NIUMA_RUNTIME_ENTRY_PROBE)
+    // The separate entry probe omits only this ordinary developer notice.
+    // It still requires the candidate arguments and a validated private root.
     if (IsRuntimeCandidate())
       niuma::ui::Message(window,
           UiText(L"这是独立开发测试版。功德、日历、设置和导入素材仅保存在本次测试目录，不会更改正式版数据。\n\n确认后正常统计本机输入次数，不保存按键内容。自动启动和文件关联已禁用。",
                  L"This is an isolated development candidate. Counts, calendar, settings and imported packs stay in its test folder; installed-app data is unchanged.\n\nAfter this notice, normal input counting starts without storing key contents. Startup registration and file associations are disabled."),
           WindowTitle(), MB_OK | MB_ICONINFORMATION);
+#endif
     RestartGlobalListeners();
   }
   if ((!gIsolatedAcceptance || IsRuntimeCandidate()) &&

@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-input-delivery, runtime-integration, runtime-check]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-entry, runtime-input-delivery, runtime-integration, runtime-check]
 
 permissions:
   contents: read
@@ -52,6 +52,37 @@ jobs:
           path: |
             build-delivery/evidence/**
             build-delivery/Release/niuma-input-delivery-probe.exe
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-runtime-entry:
+    if: ${{ inputs.mode == 'runtime-entry' }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated full entry and independent receiving window
+        shell: pwsh
+        run: |
+          cmake -S . -B build-entry -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Entry configuration failed" }
+          cmake --build build-entry --config Release --target niuma-runtime-entry-probe niuma-runtime-entry-check niuma-input-delivery-probe --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Entry compilation failed" }
+      - name: Verify entry rejection, real hooks, final save and normal close
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-entry/evidence | Out-Null
+          & ./build-entry/Release/niuma-runtime-entry-check.exe (Join-Path $PWD 'build-entry/Release/niuma-runtime-entry-probe.exe') (Join-Path $PWD 'build-entry/Release/niuma-input-delivery-probe.exe') (Join-Path $PWD 'build-entry/evidence')
+          if ($LASTEXITCODE -ne 0) { throw "Full isolated entry did not deliver and persist real-hook counts" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-entry-${{ github.sha }}
+          path: |
+            build-entry/Release/niuma-runtime-entry-probe.exe
+            build-entry/Release/niuma-runtime-entry-check.exe
+            build-entry/Release/niuma-input-delivery-probe.exe
+            build-entry/evidence/**
           if-no-files-found: warn
           retention-days: 14
 
