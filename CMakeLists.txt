@@ -254,6 +254,17 @@ if(WIN32)
     set_property(TARGET niuma-production-runtime-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_link_options(niuma-production-runtime-test PRIVATE /MANIFEST:NO)
   endif()
+  add_executable(niuma-calendar-view-test scripts/test-windows-calendar-view.cpp
+    src/windows/appearance_pack.cpp third_party/miniz/miniz.c "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")
+  target_include_directories(niuma-calendar-view-test PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(niuma-calendar-view-test PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-calendar-view-test PRIVATE NIUMA_COMPOSITION_RUNTIME NIUMA_CALENDAR_DIAGNOSTICS UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-calendar-view-test PRIVATE niuma-windows-input niuma-windows-storage niuma-windows-appearance-loader shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  if(MSVC)
+    target_compile_options(niuma-calendar-view-test PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+    set_property(TARGET niuma-calendar-view-test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_link_options(niuma-calendar-view-test PRIVATE /MANIFEST:NO)
+  endif()
   add_executable(niuma-client-display-test
     scripts/test-windows-client-display.cpp src/windows/appearance_pack.cpp third_party/miniz/miniz.c
     "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")

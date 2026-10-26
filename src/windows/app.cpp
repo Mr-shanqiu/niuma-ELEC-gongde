@@ -467,6 +467,8 @@ struct CalendarState {
   HWND window = nullptr;
   int year = 0;
   int month = 0;
+  int selectedDay = 1;
+  HFONT font = nullptr;
   niuma::CalendarMonthRange range;
 };
 
@@ -3769,210 +3771,278 @@ const wchar_t* SceneTitle(MeritScene scene) {
   }
 }
 
-void DrawCalendarText(Gdiplus::Graphics& graphics, const std::wstring& text,
-                      const Gdiplus::RectF& rect, float size,
-                      const Gdiplus::Color& color, bool bold = false,
-                      const wchar_t* family = L"Microsoft YaHei UI") {
-  Gdiplus::Font font(family, size,
-      bold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+// Calendar reads only the existing in-memory ledger. Painting never creates a
+// missing overtime record, scans history files, or changes persisted values.
+constexpr int kCalendarPrevious = 4201, kCalendarNext = 4202, kCalendarToday = 4203;
+constexpr float kCalendarWidth = 760, kCalendarHeight = 704;
+constexpr float kCalendarLeft = 26, kCalendarGridTop = 234, kCalendarGridHeight = 336;
+#ifdef NIUMA_CALENDAR_DIAGNOSTICS
+SYSTEMTIME gCalendarTodayForTest{};
+int gCalendarLanguageForTest = -1;
+#endif
+SYSTEMTIME CalendarToday() {
+#ifdef NIUMA_CALENDAR_DIAGNOSTICS
+  if (gCalendarTodayForTest.wYear) return gCalendarTodayForTest;
+#endif
+  SYSTEMTIME now{}; GetLocalTime(&now); return now;
+}
+bool CalendarChinese() {
+#ifdef NIUMA_CALENDAR_DIAGNOSTICS
+  if (gCalendarLanguageForTest >= 0) return gCalendarLanguageForTest != 0;
+#endif
+  return IsChineseUi();
+}
+const wchar_t* CalendarText(const wchar_t* zh, const wchar_t* en) { return CalendarChinese() ? zh : en; }
+std::wstring CalendarNumber(std::uint64_t value) {
+  auto text = std::to_wstring(value);
+  for (int i=static_cast<int>(text.size())-3;i>0;i-=3) text.insert(static_cast<std::size_t>(i),1,L',');
+  return text;
+}
+std::wstring CalendarCompactNumber(std::uint64_t value) {
+  const std::uint64_t unit = CalendarChinese() ? (value>=1000000000000ULL ? 1000000000000ULL :
+      value>=100000000 ? 100000000 : value>=10000 ? 10000 : 1) :
+      (value>=1000000000000ULL ? 1000000000000ULL : value>=1000000000 ? 1000000000 : value>=1000000 ? 1000000 : value>=1000 ? 1000 : 1);
+  if (unit==1) return CalendarNumber(value);
+  const wchar_t* suffix = CalendarChinese() ? (unit==10000 ? L"万" : unit==100000000 ? L"亿" : L"万亿") :
+      (unit==1000 ? L"K" : unit==1000000 ? L"M" : unit==1000000000 ? L"B" : L"T");
+  return std::to_wstring(value/unit)+L"."+std::to_wstring((value%unit)/(unit/10))+suffix;
+}
+std::wstring CalendarOvertimeShort(int seconds) {
+  seconds=std::max(0,seconds);const auto h=seconds/3600,m=seconds%3600/60;
+  if (seconds>0 && seconds<60) return CalendarText(L"加班 <1分",L"OT <1m");
+  if (CalendarChinese()) return L"加班 "+(h ? std::to_wstring(h)+L"时" : L"")+std::to_wstring(m)+L"分";
+  return L"OT "+(h ? std::to_wstring(h)+L"h " : L"")+std::to_wstring(m)+L"m";
+}
+float CalendarScale(HWND window) {
+  RECT client{}; GetClientRect(window,&client);
+  return std::max(.1f,std::min(client.right/kCalendarWidth,client.bottom/kCalendarHeight));
+}
+const wchar_t* CalendarFontFamily() {
+  static const wchar_t* available=[] {
+    for (const auto* name : {L"Microsoft YaHei UI",L"Microsoft YaHei",L"Segoe UI"}) {
+      Gdiplus::FontFamily family(name);if(family.GetLastStatus()==Gdiplus::Ok)return name;
+    }
+    return L"Segoe UI";
+  }();
+  return available;
+}
+void DrawCalendarText(Gdiplus::Graphics& graphics,const std::wstring& text,
+    const Gdiplus::RectF& rect,float size,const Gdiplus::Color& color,bool bold=false,
+    Gdiplus::StringAlignment alignment=Gdiplus::StringAlignmentNear) {
   Gdiplus::StringFormat format;
-  format.SetAlignment(Gdiplus::StringAlignmentCenter);
-  format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-  format.SetTrimming(Gdiplus::StringTrimmingNone);
-  Gdiplus::SolidBrush brush(color);
-  graphics.DrawString(text.c_str(), -1, &font, rect, &format, &brush);
+  format.SetAlignment(alignment);format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+  format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+  format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+  float fitted=size;
+  while(fitted>10) {
+    Gdiplus::Font font(CalendarFontFamily(),fitted,bold?Gdiplus::FontStyleBold:Gdiplus::FontStyleRegular,Gdiplus::UnitPixel);
+    Gdiplus::RectF measured;graphics.MeasureString(text.c_str(),-1,&font,Gdiplus::PointF(0,0),&measured);
+    if(measured.Width<=rect.Width)break;fitted-=1;
+  }
+  Gdiplus::Font font(CalendarFontFamily(),fitted,bold?Gdiplus::FontStyleBold:Gdiplus::FontStyleRegular,Gdiplus::UnitPixel);
+  Gdiplus::SolidBrush brush(color);graphics.DrawString(text.c_str(),-1,&font,rect,&format,&brush);
 }
-
 void ReloadCalendarRange() {
-  SYSTEMTIME now{}; GetLocalTime(&now);
-  gCalendar.range = niuma::CalendarMonthRange(now.wYear, now.wMonth);
-  // All valid historical keys were loaded by the storage worker at startup.
-  if (gDataStorage.model) {
-    for (const auto& entry : gDataStorage.model->current().counts.daily)
-      if (entry.second > 0) gCalendar.range.IncludeRecordedDay(std::wstring_view(InputDateKey(entry.first)));
-  }
-  if (gInput.authoritative) {
-    for (const auto& entry : gInput.daily)
-      if (entry.total > 0) gCalendar.range.IncludeRecordedDay(std::wstring_view(InputDateKey(entry.date)));
-  }
-  for (const auto& entry : gState.pendingDailyTotals)
-    if (entry.second > 0) gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
-  // Include an unflushed in-memory overtime snapshot without writing any data.
-  for (const auto& entry : gOffwork.days)
-    if (entry.second.present) gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
+  const auto now=CalendarToday();gCalendar.range=niuma::CalendarMonthRange(now.wYear,now.wMonth);
+  if(gDataStorage.model)for(const auto& entry:gDataStorage.model->current().counts.daily)
+    if(entry.second>0)gCalendar.range.IncludeRecordedDay(std::wstring_view(InputDateKey(entry.first)));
+  if(gInput.authoritative)for(const auto& entry:gInput.daily)
+    if(entry.total>0)gCalendar.range.IncludeRecordedDay(std::wstring_view(InputDateKey(entry.date)));
+  for(const auto& entry:gState.pendingDailyTotals)
+    if(entry.second>0)gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
+  for(const auto& entry:gOffwork.days)
+    if(entry.second.present)gCalendar.range.IncludeRecordedDay(std::wstring_view(entry.first));
 }
-
+int CalendarLastSelectableDay() {
+  const auto now=CalendarToday();
+  return gCalendar.year==now.wYear && gCalendar.month==now.wMonth ? now.wDay : DaysInMonth(gCalendar.year,gCalendar.month);
+}
 void RefreshCalendarNavigation() {
-  SYSTEMTIME now{}; GetLocalTime(&now);
-  if (gCalendar.range.last != niuma::CalendarMonthRange::Month(now.wYear, now.wMonth))
-    ReloadCalendarRange();
-  const int selected = gCalendar.range.Clamp(
-      niuma::CalendarMonthRange::Month(gCalendar.year, gCalendar.month));
-  gCalendar.year = selected / 12; gCalendar.month = selected % 12 + 1;
+  const auto now=CalendarToday();
+  if(gCalendar.range.last!=niuma::CalendarMonthRange::Month(now.wYear,now.wMonth))ReloadCalendarRange();
+  const auto month=gCalendar.range.Clamp(niuma::CalendarMonthRange::Month(gCalendar.year,gCalendar.month));
+  gCalendar.year=month/12;gCalendar.month=month%12+1;
+  gCalendar.selectedDay=std::clamp(gCalendar.selectedDay,1,CalendarLastSelectableDay());
+  if(gCalendar.window) {
+    EnableWindow(GetDlgItem(gCalendar.window,kCalendarPrevious),gCalendar.range.CanShift(month,-1));
+    EnableWindow(GetDlgItem(gCalendar.window,kCalendarNext),gCalendar.range.CanShift(month,1));
+  }
 }
-
+std::wstring CalendarDateKey(int day) {
+  wchar_t key[16]{};swprintf_s(key,L"%04d-%02d-%02d",gCalendar.year,gCalendar.month,day);return key;
+}
+struct CalendarDayView {std::uint64_t merit=0;bool overtimeRecorded=false;int overtimeSeconds=0;};
+struct CalendarMonthView {std::array<CalendarDayView,32> days{};std::uint64_t total=0;bool totalSaturated=false;};
+CalendarMonthView ReadCalendarMonth() {
+  CalendarMonthView view;
+  const auto prefix=static_cast<input_core::LocalDate>(gCalendar.year*100+gCalendar.month);
+  // One pass over the authoritative snapshot, rather than 31 full-history searches.
+  if(gInput.authoritative) {
+    for(const auto& day:gInput.daily)if(day.date/100==prefix && day.date%100>=1 && day.date%100<=31)
+      view.days[day.date%100].merit=day.total;
+  } else if(gDataStorage.model) {
+    const auto& records=gDataStorage.model->current().counts.daily;
+    for(auto i=records.lower_bound(prefix*100+1);i!=records.end() && i->first/100==prefix;++i)
+      if(i->first%100>=1 && i->first%100<=31)view.days[i->first%100].merit=i->second;
+  }
+  for(int day=1;day<=CalendarLastSelectableDay();++day) {
+    const auto key=CalendarDateKey(day);auto& value=view.days[day];
+    const auto pending=gState.pendingDailyTotals.find(key);
+    if(pending!=gState.pendingDailyTotals.end())value.merit=pending->second;
+    if(key==gState.currentDay)value.merit=gState.todayTotal;
+    const auto overtime=gOffwork.days.find(key);
+    if(overtime!=gOffwork.days.end() && overtime->second.present) {
+      value.overtimeRecorded=true;value.overtimeSeconds=overtime->second.seconds;
+    }
+    if(value.merit>std::numeric_limits<std::uint64_t>::max()-view.total) {
+      view.total=std::numeric_limits<std::uint64_t>::max();view.totalSaturated=true;
+    } else view.total+=value.merit;
+  }
+  return view;
+}
+int CalendarRows() {return (MondayOffset(gCalendar.year,gCalendar.month)+DaysInMonth(gCalendar.year,gCalendar.month)+6)/7;}
+Gdiplus::RectF CalendarCell(int day) {
+  const int slot=MondayOffset(gCalendar.year,gCalendar.month)+day-1;
+  const float width=(kCalendarWidth-2*kCalendarLeft)/7,height=kCalendarGridHeight/CalendarRows();
+  return {kCalendarLeft+(slot%7)*width,kCalendarGridTop+(slot/7)*height,width,height};
+}
+int CalendarHitDay(float x,float y) {
+  if(x<kCalendarLeft || x>=kCalendarWidth-kCalendarLeft || y<kCalendarGridTop || y>=kCalendarGridTop+kCalendarGridHeight)return 0;
+  const int column=static_cast<int>((x-kCalendarLeft)/((kCalendarWidth-2*kCalendarLeft)/7));
+  const int row=static_cast<int>((y-kCalendarGridTop)/(kCalendarGridHeight/CalendarRows()));
+  const int day=row*7+column-MondayOffset(gCalendar.year,gCalendar.month)+1;
+  return day>=1 && day<=CalendarLastSelectableDay()?day:0;
+}
+void LayoutCalendar(HWND window) {
+  const float scale=CalendarScale(window);
+  const auto move=[&](int id,int x,int y,int w,int h){MoveWindow(GetDlgItem(window,id),
+    static_cast<int>(x*scale),static_cast<int>(y*scale),static_cast<int>(w*scale),static_cast<int>(h*scale),TRUE);};
+  move(kCalendarPrevious,26,20,30,32);move(kCalendarNext,282,20,30,32);move(kCalendarToday,332,20,100,32);
+  HFONT font=CreateFontW(-static_cast<int>(14*scale),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,
+    DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
+  if(font){for(int id:{kCalendarPrevious,kCalendarNext,kCalendarToday})SendDlgItemMessageW(window,id,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);
+    if(gCalendar.font)DeleteObject(gCalendar.font);gCalendar.font=font;}
+}
 void DrawMeritCalendar(HDC dc) {
-  RefreshCalendarNavigation();
-  Gdiplus::Graphics graphics(dc);
-  const float scale = static_cast<float>(gState.dpi) / 96.0f;
-  graphics.ScaleTransform(scale, scale);
-  graphics.Clear(Gdiplus::Color(255, 245, 245, 247));
-  graphics.TranslateTransform(0, 52);
-  graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-  Gdiplus::GraphicsPath card;
-  niuma::ui::RoundPath(card, Gdiplus::RectF(10, 94, 540, 444), 16);
-  Gdiplus::SolidBrush white(Gdiplus::Color(255, 255, 255, 255));
-  graphics.FillPath(&white, &card);
-  const Gdiplus::Color ink(255, 29, 29, 31);
-  const Gdiplus::Color accent(255, 240, 139, 35);
-
-  wchar_t monthTitle[32] = {};
-  if (IsChineseUi()) swprintf_s(monthTitle, L"%d 年 %d 月", gCalendar.year, gCalendar.month);
-  else swprintf_s(monthTitle, L"%d / %02d", gCalendar.year, gCalendar.month);
-  DrawCalendarText(graphics, monthTitle, Gdiplus::RectF(90, 18, 380, 34), 22, ink, true);
-  const int selectedMonth = niuma::CalendarMonthRange::Month(gCalendar.year, gCalendar.month);
-  const Gdiplus::Color disabled(255, 194, 194, 201);
-  DrawCalendarText(graphics, L"<", Gdiplus::RectF(22, 18, 48, 34), 20,
-      gCalendar.range.CanShift(selectedMonth, -1) ? ink : disabled, true);
-  DrawCalendarText(graphics, L">", Gdiplus::RectF(490, 18, 48, 34), 20,
-      gCalendar.range.CanShift(selectedMonth, 1) ? ink : disabled, true);
-
-  std::uint64_t monthTotal = 0;
-  for (int day = 1; day <= DaysInMonth(gCalendar.year, gCalendar.month); ++day) {
-    wchar_t key[16] = {};
-    swprintf_s(key, L"%04d-%02d-%02d", gCalendar.year, gCalendar.month, day);
-    monthTotal += key == gState.currentDay ? gState.todayTotal : ReadDailyTotal(key);
+  RefreshCalendarNavigation();const auto data=ReadCalendarMonth();const auto now=CalendarToday();
+  Gdiplus::Graphics graphics(dc);const float scale=CalendarScale(gCalendar.window);graphics.ScaleTransform(scale,scale);
+  graphics.Clear(Gdiplus::Color::White);graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+  graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+  const Gdiplus::Color ink(255,29,29,31),muted(255,110,110,115),accent(255,188,75,25),future(255,170,170,175);
+  const Gdiplus::Color rule(255,233,233,236),selection(255,255,241,231);
+  std::wstring month=std::to_wstring(gCalendar.year)+(CalendarChinese()?L"年":L" / ")+std::to_wstring(gCalendar.month)+(CalendarChinese()?L"月":L"");
+  DrawCalendarText(graphics,month,{70,15,206,42},28,ink,true);
+  DrawCalendarText(graphics,CalendarText(L"本月功德",L"This month's merit"),{26,88,420,24},13,muted);
+  DrawCalendarText(graphics,(data.totalSaturated?L"≥":L"")+CalendarNumber(data.total),{23,113,440,58},44,ink,true);
+  Gdiplus::Pen accentLine(accent,3);graphics.DrawLine(&accentLine,28.f,176.f,62.f,176.f);
+  DrawCalendarText(graphics,CalendarText(L"累计功德",L"Total merit"),{490,99,244,23},13,muted,false,Gdiplus::StringAlignmentFar);
+  DrawCalendarText(graphics,CalendarNumber(gState.total),{476,124,258,43},28,muted,true,Gdiplus::StringAlignmentFar);
+  Gdiplus::Pen line(rule,1);graphics.DrawLine(&line,26.f,194.f,734.f,194.f);
+  const wchar_t* zhWeekdays[]={L"一",L"二",L"三",L"四",L"五",L"六",L"日"};
+  const wchar_t* enWeekdays[]={L"Mon",L"Tue",L"Wed",L"Thu",L"Fri",L"Sat",L"Sun"};
+  const float cellWidth=(kCalendarWidth-52)/7;
+  for(int column=0;column<7;++column)DrawCalendarText(graphics,CalendarChinese()?zhWeekdays[column]:enWeekdays[column],
+    {26+column*cellWidth,202,cellWidth,24},13,muted,false,Gdiplus::StringAlignmentCenter);
+  const int rows=CalendarRows();const float rowHeight=kCalendarGridHeight/rows;
+  for(int row=0;row<=rows;++row)graphics.DrawLine(&line,26.f,kCalendarGridTop+row*rowHeight,734.f,kCalendarGridTop+row*rowHeight);
+  for(int column=1;column<7;++column)graphics.DrawLine(&line,26+column*cellWidth,kCalendarGridTop,26+column*cellWidth,kCalendarGridTop+kCalendarGridHeight);
+  for(int day=1;day<=DaysInMonth(gCalendar.year,gCalendar.month);++day) {
+    const auto cell=CalendarCell(day);const bool today=gCalendar.year==now.wYear && gCalendar.month==now.wMonth && day==now.wDay;
+    const bool selected=day==gCalendar.selectedDay,futureDay=day>CalendarLastSelectableDay();
+    if(selected){Gdiplus::GraphicsPath path;niuma::ui::RoundPath(path,{cell.X+1,cell.Y+1,cell.Width-2,cell.Height-2},7);
+      Gdiplus::SolidBrush fill(selection);graphics.FillPath(&fill,&path);}
+    DrawCalendarText(graphics,std::to_wstring(day),{cell.X+12,cell.Y+4,cell.Width-22,22},17,
+      futureDay?future:(selected||today?accent:ink),!futureDay);
+    if(futureDay)continue;const auto& record=data.days[day];
+    DrawCalendarText(graphics,record.merit?CalendarCompactNumber(record.merit):L"—",{cell.X+12,cell.Y+26,cell.Width-20,17},12,muted);
+    if(record.overtimeRecorded)DrawCalendarText(graphics,CalendarOvertimeShort(record.overtimeSeconds),
+      {cell.X+12,cell.Y+42,cell.Width-17,13},10.5f,accent);
   }
-  DrawCalendarText(graphics,
-      std::wstring(UiText(L"累计功德  ", L"Total Merit  ")) + std::to_wstring(gState.total),
-      Gdiplus::RectF(20, 62, 250, 30), 17, accent, true);
-  DrawCalendarText(graphics,
-      std::wstring(UiText(L"本月功德  ", L"This Month  ")) + std::to_wstring(monthTotal),
-      Gdiplus::RectF(290, 62, 250, 30), 17, accent, true);
-
-  const wchar_t* zhWeekdays[] = {L"一", L"二", L"三", L"四", L"五", L"六", L"日"};
-  const wchar_t* enWeekdays[] = {L"MON", L"TUE", L"WED", L"THU", L"FRI", L"SAT", L"SUN"};
-  const float left = 14, top = 112, cellWidth = 76, cellHeight = 72;
-  for (int column = 0; column < 7; ++column) {
-    DrawCalendarText(graphics, IsChineseUi() ? zhWeekdays[column] : enWeekdays[column],
-        Gdiplus::RectF(left + column * cellWidth, 94, cellWidth, 20), 11, ink, true);
-  }
-  SYSTEMTIME today = {};
-  GetLocalTime(&today);
-  const int offset = MondayOffset(gCalendar.year, gCalendar.month);
-  for (int day = 1; day <= DaysInMonth(gCalendar.year, gCalendar.month); ++day) {
-    const int slot = offset + day - 1, row = slot / 7, column = slot % 7;
-    const Gdiplus::RectF cell(left + column * cellWidth, top + row * cellHeight,
-                              cellWidth - 2, cellHeight - 3);
-    if (today.wYear == gCalendar.year && today.wMonth == gCalendar.month && today.wDay == day) {
-      Gdiplus::SolidBrush highlight(Gdiplus::Color(255, 226, 239, 255));
-      Gdiplus::GraphicsPath dayPath;
-      niuma::ui::RoundPath(dayPath, cell, 12);
-      graphics.FillPath(&highlight, &dayPath);
-    }
-    wchar_t key[16] = {};
-    swprintf_s(key, L"%04d-%02d-%02d", gCalendar.year, gCalendar.month, day);
-    const std::uint64_t value =
-        key == gState.currentDay ? gState.todayTotal : ReadDailyTotal(key);
-    const std::wstring meritText = std::to_wstring(value);
-    const std::wstring dateText = (day < 10 ? L"0" : L"") + std::to_wstring(day);
-    const float meritSize = meritText.size() > 10 ? 10.0f :
-        (meritText.size() > 7 ? 12.0f : 15.0f);
-    DrawCalendarText(graphics, meritText,
-        Gdiplus::RectF(cell.X + 2, cell.Y + 5, cell.Width - 4, 22),
-        meritSize, accent, true);
-    DrawCalendarText(graphics, dateText,
-        Gdiplus::RectF(cell.X + 2, cell.Y + 27, cell.Width - 4, 16),
-        10, ink, false);
-    const auto& overtime = OffworkDay(key);
-    if (overtime.present) {
-      DrawCalendarText(graphics, UiText(L"今日加班", L"Today's OT"),
-          Gdiplus::RectF(cell.X + 2, cell.Y + 42, cell.Width - 4, 11), 8, accent);
-      DrawCalendarText(graphics, OffworkTimeText(overtime.seconds),
-          Gdiplus::RectF(cell.X + 2, cell.Y + 53, cell.Width - 4, 14),
-          12, accent, true, L"Consolas");
-    }
-  }
+  Gdiplus::GraphicsPath detail;niuma::ui::RoundPath(detail,{26,590,708,90},9);
+  Gdiplus::SolidBrush detailFill(Gdiplus::Color(255,252,247,242));graphics.FillPath(&detailFill,&detail);
+  const auto& selected=data.days[gCalendar.selectedDay];const int weekday=(MondayOffset(gCalendar.year,gCalendar.month)+gCalendar.selectedDay-1)%7;
+  const wchar_t* fullWeekdays[]={L"星期一",L"星期二",L"星期三",L"星期四",L"星期五",L"星期六",L"星期日"};
+  const auto date=CalendarChinese()?std::to_wstring(gCalendar.month)+L"月"+std::to_wstring(gCalendar.selectedDay)+L"日，"+fullWeekdays[weekday]:
+    std::wstring(enWeekdays[weekday])+L", "+std::to_wstring(gCalendar.year)+L"/"+std::to_wstring(gCalendar.month)+L"/"+std::to_wstring(gCalendar.selectedDay);
+  DrawCalendarText(graphics,date,{44,603,226,28},17,ink,true);
+  if(gCalendar.year==now.wYear && gCalendar.month==now.wMonth && gCalendar.selectedDay==now.wDay)
+    DrawCalendarText(graphics,CalendarText(L"今天",L"Today"),{272,603,52,28},12,accent);
+  DrawCalendarText(graphics,CalendarText(L"仅记录操作次数，不记录输入内容",L"Counts only. No input content recorded."),{44,643,284,22},10,muted);
+  graphics.DrawLine(&line,340.f,608.f,340.f,664.f);graphics.DrawLine(&line,542.f,608.f,542.f,664.f);
+  DrawCalendarText(graphics,CalendarText(L"当日功德",L"Day's merit"),{364,601,160,24},12,muted);
+  DrawCalendarText(graphics,CalendarNumber(selected.merit),{364,629,160,40},29,ink,true);
+  DrawCalendarText(graphics,CalendarText(L"加班时长",L"Overtime"),{564,601,152,24},12,muted);
+  DrawCalendarText(graphics,selected.overtimeRecorded?OffworkTimeText(selected.overtimeSeconds):CalendarText(L"未记录",L"Not recorded"),
+    {564,629,152,40},selected.overtimeRecorded?27.f:21.f,selected.overtimeRecorded?ink:muted,selected.overtimeRecorded);
   graphics.Flush(Gdiplus::FlushIntentionSync);
 }
-
 void PaintMeritCalendar(HWND window) {
-  PAINTSTRUCT paint = {};
-  HDC dc = BeginPaint(window, &paint);
-  RECT client = {};
-  GetClientRect(window, &client);
-  const int width = client.right - client.left;
-  const int height = client.bottom - client.top;
-  if (dc == nullptr || width <= 0 || height <= 0) {
-    EndPaint(window, &paint);
-    return;
-  }
-
-  HDC bufferDc = CreateCompatibleDC(dc);
-  HBITMAP bitmap = bufferDc ? CreateCompatibleBitmap(dc, width, height) : nullptr;
-  HGDIOBJ previousBitmap = bitmap ? SelectObject(bufferDc, bitmap) : nullptr;
-  const bool buffered = previousBitmap != nullptr && previousBitmap != HGDI_ERROR;
-  if (buffered) {
-    // Publish a complete frame instead of exposing the cleared background.
-    DrawMeritCalendar(bufferDc);
-    BitBlt(dc, 0, 0, width, height, bufferDc, 0, 0, SRCCOPY);
-    SelectObject(bufferDc, previousBitmap);
-  } else {
-    // Keep the calendar usable if a backing bitmap cannot be allocated.
-    DrawMeritCalendar(dc);
-  }
-  if (bitmap) DeleteObject(bitmap);
-  if (bufferDc) DeleteDC(bufferDc);
-  EndPaint(window, &paint);
+  PAINTSTRUCT paint{};HDC dc=BeginPaint(window,&paint);RECT client{};GetClientRect(window,&client);
+  if(dc && client.right>0 && client.bottom>0)niuma::ui::PaintBuffered(dc,client,[](HDC memory){DrawMeritCalendar(memory);});
+  EndPaint(window,&paint);
 }
-
-LRESULT CALLBACK CalendarWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-  (void)wParam;
-  switch (message) {
-    case WM_ERASEBKGND: return 1;
-    case WM_PAINT: PaintMeritCalendar(window); return 0;
-    case WM_LBUTTONUP: {
-      const int x = MulDiv(GET_X_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
-      const int y = MulDiv(GET_Y_LPARAM(lParam), 96, static_cast<int>(gState.dpi));
-      if (y >= 64 && y <= 112 && (x <= 82 || x >= 478)) {
-        RefreshCalendarNavigation();
-        const int current = niuma::CalendarMonthRange::Month(gCalendar.year, gCalendar.month);
-        const int next = gCalendar.range.Shift(current, x <= 82 ? -1 : 1);
-        if (next == current) return 0;
-        gCalendar.year = next / 12; gCalendar.month = next % 12 + 1;
-        InvalidateRect(window, nullptr, FALSE);
-      }
+void CalendarShiftMonth(int delta) {
+  RefreshCalendarNavigation();const auto current=niuma::CalendarMonthRange::Month(gCalendar.year,gCalendar.month);
+  const auto next=gCalendar.range.Shift(current,delta);gCalendar.year=next/12;gCalendar.month=next%12+1;
+  RefreshCalendarNavigation();if(gCalendar.window)InvalidateRect(gCalendar.window,nullptr,FALSE);
+}
+void CalendarMoveSelection(int delta) {
+  RefreshCalendarNavigation();const int next=gCalendar.selectedDay+delta;
+  if(next>=1 && next<=CalendarLastSelectableDay())gCalendar.selectedDay=next;
+  else if(next<1){const auto oldMonth=gCalendar.month;const auto oldYear=gCalendar.year;CalendarShiftMonth(-1);
+    if(gCalendar.month!=oldMonth || gCalendar.year!=oldYear)gCalendar.selectedDay=std::max(1,DaysInMonth(gCalendar.year,gCalendar.month)+next);}
+  else if(next>DaysInMonth(gCalendar.year,gCalendar.month)){
+    const auto oldMonth=gCalendar.month;const auto oldYear=gCalendar.year;CalendarShiftMonth(1);
+    if(gCalendar.month!=oldMonth || gCalendar.year!=oldYear)gCalendar.selectedDay=std::min(CalendarLastSelectableDay(),next-DaysInMonth(oldYear,oldMonth));}
+  if(gCalendar.window)InvalidateRect(gCalendar.window,nullptr,FALSE);
+}
+LRESULT CALLBACK CalendarWindowProcedure(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
+  switch(message) {
+    case WM_ERASEBKGND:return 1;
+    case WM_PAINT:PaintMeritCalendar(window);return 0;
+    case WM_PRINTCLIENT:DrawMeritCalendar(reinterpret_cast<HDC>(wParam));return 0;
+    case WM_SIZE:LayoutCalendar(window);InvalidateRect(window,nullptr,FALSE);return 0;
+    case WM_DPICHANGED:{const auto* rect=reinterpret_cast<const RECT*>(lParam);SetWindowPos(window,nullptr,rect->left,rect->top,
+      rect->right-rect->left,rect->bottom-rect->top,SWP_NOZORDER|SWP_NOACTIVATE);return 0;}
+    case WM_GETDLGCODE:return DLGC_WANTARROWS;
+    case WM_COMMAND:{
+      if(LOWORD(wParam)==kCalendarPrevious)CalendarShiftMonth(-1);
+      else if(LOWORD(wParam)==kCalendarNext)CalendarShiftMonth(1);
+      else if(LOWORD(wParam)==kCalendarToday){const auto today=CalendarToday();gCalendar.year=today.wYear;gCalendar.month=today.wMonth;
+        gCalendar.selectedDay=today.wDay;RefreshCalendarNavigation();InvalidateRect(window,nullptr,FALSE);}
+      SetFocus(window);return 0;}
+    case WM_LBUTTONUP:{const float scale=CalendarScale(window);const int day=CalendarHitDay(GET_X_LPARAM(lParam)/scale,GET_Y_LPARAM(lParam)/scale);
+      if(day){gCalendar.selectedDay=day;SetFocus(window);InvalidateRect(window,nullptr,FALSE);}return 0;}
+    case WM_KEYDOWN:
+      if(wParam==VK_ESCAPE){DestroyWindow(window);return 0;}
+      if(wParam==VK_LEFT || wParam==VK_RIGHT || wParam==VK_UP || wParam==VK_DOWN)
+        CalendarMoveSelection(wParam==VK_LEFT?-1:wParam==VK_RIGHT?1:wParam==VK_UP?-7:7);
+      else if(wParam==VK_PRIOR || wParam==VK_NEXT)CalendarShiftMonth(wParam==VK_PRIOR?-1:1);
+      else if(wParam==VK_HOME || wParam==VK_END){gCalendar.selectedDay=wParam==VK_HOME?1:CalendarLastSelectableDay();InvalidateRect(window,nullptr,FALSE);}
       return 0;
-    }
-    case WM_CLOSE: DestroyWindow(window); return 0;
-    case WM_DESTROY: gCalendar.window = nullptr; return 0;
-    default: return DefWindowProcW(window, message, wParam, lParam);
+    case WM_CLOSE:DestroyWindow(window);return 0;
+    case WM_DESTROY:if(gCalendar.font){DeleteObject(gCalendar.font);gCalendar.font=nullptr;}gCalendar.window=nullptr;return 0;
+    default:return DefWindowProcW(window,message,wParam,lParam);
   }
 }
-
 void ShowMeritCalendar(HWND owner) {
   RequestInputLedger();
-  if (gCalendar.window == nullptr) {
-    SYSTEMTIME now = {};
-    GetLocalTime(&now);
-    gCalendar.year = now.wYear; gCalendar.month = now.wMonth;
-    RECT desired = {0, 0, ScaleDip(560, gState.dpi), ScaleDip(604, gState.dpi)};
-    AdjustWindowRectEx(&desired, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_TOOLWINDOW);
-    gCalendar.window = CreateWindowExW(
-        WS_EX_TOOLWINDOW, kCalendarClass, UiText(L"功德日历", L"Merit Calendar"),
-        WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT,
-        desired.right - desired.left, desired.bottom - desired.top,
-        owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+  if(!gCalendar.window){
+    const auto now=CalendarToday();gCalendar.year=now.wYear;gCalendar.month=now.wMonth;gCalendar.selectedDay=now.wDay;
+    RECT work{};SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0);
+    const auto style=WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN;
+    RECT desired{0,0,ScaleDip(static_cast<int>(kCalendarWidth),gState.dpi),ScaleDip(static_cast<int>(kCalendarHeight),gState.dpi)};
+    AdjustWindowRectEx(&desired,style,FALSE,WS_EX_TOOLWINDOW);
+    const int width=std::min(desired.right-desired.left,work.right-work.left),height=std::min(desired.bottom-desired.top,work.bottom-work.top);
+    gCalendar.window=CreateWindowExW(WS_EX_TOOLWINDOW,kCalendarClass,CalendarText(L"功德日历",L"Merit Calendar"),style,
+      work.left+(work.right-work.left-width)/2,work.top+(work.bottom-work.top-height)/2,width,height,owner,nullptr,GetModuleHandleW(nullptr),nullptr);
+    if(!gCalendar.window)return;
+    for(const auto id:{kCalendarPrevious,kCalendarNext,kCalendarToday})CreateWindowExW(0,L"BUTTON",
+      id==kCalendarPrevious?L"‹":id==kCalendarNext?L"›":CalendarText(L"回到今天",L"Today"),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_PUSHBUTTON,
+      0,0,1,1,gCalendar.window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),GetModuleHandleW(nullptr),nullptr);
   }
-  if (gCalendar.window != nullptr) {
-    ReloadCalendarRange();
-    RefreshCalendarNavigation();
-    niuma::ui::Apply(gCalendar.window);
-    niuma::ui::Card(gCalendar.window, UiText(L"功德日历", L"Merit Calendar"), UiText(L"关闭", L"Close"));
-    ShowWindow(gCalendar.window, SW_SHOW);
-    SetForegroundWindow(gCalendar.window);
-    InvalidateRect(gCalendar.window, nullptr, FALSE);
-  }
+  ReloadCalendarRange();RefreshCalendarNavigation();LayoutCalendar(gCalendar.window);niuma::ui::WindowChrome(gCalendar.window);
+  ShowWindow(gCalendar.window,SW_SHOW);SetForegroundWindow(gCalendar.window);SetFocus(gCalendar.window);InvalidateRect(gCalendar.window,nullptr,FALSE);
 }
 
 constexpr int kPickerDeleteButton = 1001;
@@ -5168,7 +5238,10 @@ LRESULT CALLBACK WindowProcedure(
               (current.valid && (current.overtime
                   ? previous.overtimeSeconds != current.overtimeSeconds
                   : previous.remainingSeconds != current.remainingSeconds)))
+          {
             RenderLayeredWindow(GetTickCount64());
+            if (gCalendar.window) InvalidateRect(gCalendar.window, nullptr, FALSE);
+          }
         }
         return 0;
       }
@@ -5723,6 +5796,8 @@ int WINAPI wWinMain(
     }
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
       if (gCountingCheck.window && IsDialogMessageW(gCountingCheck.window, &message)) continue;
+      if (gCalendar.window && (message.hwnd == gCalendar.window || IsChild(gCalendar.window, message.hwnd)) &&
+          IsDialogMessageW(gCalendar.window, &message)) continue;
       TranslateMessage(&message);
       DispatchMessageW(&message);
     }
