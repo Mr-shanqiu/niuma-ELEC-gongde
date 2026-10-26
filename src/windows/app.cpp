@@ -22,6 +22,7 @@
 #include "runtime/storage_service.h"
 #include "runtime/appearance_service.h"
 #include "runtime/client_display.h"
+#include "runtime/platform_compat.h"
 #include "runtime/embedded_scene.h"
 #include "app_version.h"
 #if defined(NIUMA_SELF_INSTALL)
@@ -5597,7 +5598,7 @@ int WINAPI wWinMain(
   }
 
   HWND window = CreateWindowExW(
-      (UsesCompositionRuntime() ? WS_EX_NOREDIRECTIONBITMAP : WS_EX_LAYERED) |
+      (UsesCompositionRuntime() && niuma::runtime::HasCompositionSystem() ? WS_EX_NOREDIRECTIONBITMAP : WS_EX_LAYERED) |
           WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
       MainWindowClass(), WindowTitle(), WS_POPUP,
       static_cast<int>(x), static_cast<int>(y),

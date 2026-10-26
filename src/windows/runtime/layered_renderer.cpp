@@ -23,6 +23,14 @@ bool LayeredRenderer::Ready() {
 bool LayeredRenderer::Initialize(HWND window, int width, int height) {
   Shutdown();
   if (!IsWindow(window)) return Fail(E_INVALIDARG,"Compatibility window unavailable");
+  const auto style = GetWindowLongPtrW(window,GWL_EXSTYLE);
+  if (style & WS_EX_NOREDIRECTIONBITMAP) return Fail(E_INVALIDARG,"Compatibility HWND must be created without NOREDIRECTIONBITMAP");
+  if (!(style & WS_EX_LAYERED)) {
+    SetLastError(ERROR_SUCCESS);
+    if (!SetWindowLongPtrW(window,GWL_EXSTYLE,style|WS_EX_LAYERED) && GetLastError())
+      return Fail(HRESULT_FROM_WIN32(GetLastError()),"Enable layered window style");
+  }
+  SetWindowRgn(window,nullptr,FALSE);
   window_ = window; owner_ = GetCurrentThreadId();
   if (!Resize(width,height)) { window_ = nullptr; owner_ = 0; return false; }
   return true;
@@ -153,22 +161,14 @@ void LayeredRenderer::Shutdown() {
   textures_.clear(); surface_.Reset(); window_=nullptr;owner_=0;next_=1;pending_=false;stats_={};
 }
 bool DisplayRenderer::Initialize(HWND window,int w,int h,bool softwareTest,bool layeredTest) {
-  Shutdown(); layered_ = layeredTest || !HasCompositionSystem();
-  if (!layered_) {
-    const auto style = GetWindowLongPtrW(window,GWL_EXSTYLE);
-    SetWindowLongPtrW(window,GWL_EXSTYLE,(style & ~WS_EX_LAYERED)|WS_EX_NOREDIRECTIONBITMAP);
-    if (modern_.Initialize(window,w,h,softwareTest)) return true;
-  }
-  // Software CI graphics opt-in remains an explicit modern-path test. Do not
-  // let a successful legacy fallback conceal a failed GPU contract.
-  if (!layered_ && softwareTest) return false;
-  modern_.Shutdown(); layered_ = true;
+  Shutdown();
   const auto style = GetWindowLongPtrW(window,GWL_EXSTYLE);
-  SetLastError(ERROR_SUCCESS);
-  if (!SetWindowLongPtrW(window,GWL_EXSTYLE,(style & ~WS_EX_NOREDIRECTIONBITMAP)|WS_EX_LAYERED) && GetLastError())
-    return legacy_.Initialize(nullptr,w,h);
-  SetWindowRgn(window,nullptr,FALSE); // Layered per-pixel alpha owns input transparency.
-  SetWindowPos(window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
+  layered_ = layeredTest || !(style & WS_EX_NOREDIRECTIONBITMAP);
+  if (!layered_) return modern_.Initialize(window,w,h,softwareTest);
+  // The caller selects its HWND style from the OS/component capability before
+  // creation. Windows rejects NOREDIRECTIONBITMAP -> LAYERED conversion (87).
+  // Device failures on a modern HWND keep the existing bounded recovery flow;
+  // never conceal them with a failed late conversion or a software GPU.
   compatibility_.description=L"Prepared-pixel compatibility display";
   compatibility_.kind="cpu-layered";compatibility_.hardwareAccelerated=false;
   compatibility_.classificationReason="composition-unavailable-or-compatibility-test";

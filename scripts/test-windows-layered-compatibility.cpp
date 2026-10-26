@@ -22,7 +22,7 @@ int main() {
     CHECK(Gdiplus::GdiplusStartup(&gdiplus,&startup,nullptr)==Gdiplus::Ok);
     WNDCLASSW wc{};wc.lpszClassName=L"NiuMaLayeredCompatibilityTest";
     wc.lpfnWndProc=DefWindowProcW;wc.hInstance=GetModuleHandleW(nullptr);CHECK(RegisterClassW(&wc));
-    const auto make=[&] { return CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP|WS_EX_NOACTIVATE,
+    const auto make=[&] { return CreateWindowExW(WS_EX_LAYERED|WS_EX_NOACTIVATE,
       wc.lpszClassName,L"Isolated compatibility test",WS_POPUP,20,20,80,80,nullptr,nullptr,wc.hInstance,nullptr); };
     HWND a=make(),b=make();CHECK(a && b);
     {

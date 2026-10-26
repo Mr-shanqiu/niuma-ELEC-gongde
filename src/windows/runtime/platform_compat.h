@@ -16,7 +16,13 @@ inline bool HasCompositionSystem() {
   using Version = LONG(WINAPI*)(OSVERSIONINFOW*);
   const auto read = reinterpret_cast<Version>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
   OSVERSIONINFOW v{}; v.dwOSVersionInfoSize = sizeof(v);
-  return read && read(&v) == 0 && (v.dwMajorVersion > 6 ||
-      (v.dwMajorVersion == 6 && v.dwMinorVersion >= 2));
+  if (!read || read(&v) != 0 || !(v.dwMajorVersion > 6 ||
+      (v.dwMajorVersion == 6 && v.dwMinorVersion >= 2))) return false;
+  // Decide before HWND creation: NOREDIRECTIONBITMAP cannot be converted to
+  // a layered window later. Win8 installations may lack compiler_47 entirely.
+  static HMODULE composition = LoadSystemComponent(L"dcomp.dll");
+  static HMODULE compiler = LoadSystemComponent(L"D3DCompiler_47.dll");
+  return composition && compiler && GetProcAddress(composition,"DCompositionCreateDevice") &&
+      GetProcAddress(compiler,"D3DCompile");
 }
 } // namespace niuma::runtime

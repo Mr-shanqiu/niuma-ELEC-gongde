@@ -71,7 +71,7 @@ int wmain(int argc,wchar_t** argv) {
     WNDCLASSEXW wc{};wc.cbSize=sizeof(wc);wc.lpfnWndProc=WindowProcedure;
     wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"NiuMaProductionRouteTest";
     CHECK(RegisterClassExW(&wc));
-    HWND window=CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP|WS_EX_NOACTIVATE,
+    HWND window=CreateWindowExW((layered ? WS_EX_LAYERED : WS_EX_NOREDIRECTIONBITMAP)|WS_EX_NOACTIVATE,
         wc.lpszClassName,L"Production route CI",WS_POPUP,20,20,240,250,nullptr,nullptr,wc.hInstance,nullptr);
     CHECK(window && gState.window==window);
     ShowWindow(window,SW_SHOWNOACTIVATE);
