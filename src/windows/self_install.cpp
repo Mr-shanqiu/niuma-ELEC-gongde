@@ -295,8 +295,11 @@ void WriteLink(const std::wstring& link, const std::wstring& image) {
   const auto result = persist->Save(temporary.c_str(), TRUE);
   const bool moved = SUCCEEDED(result) && MoveFileExW(temporary.c_str(), link.c_str(),
       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-  if (!moved) DeleteFileW(temporary.c_str());
-  Require(moved, L"Cannot save shortcut.");
+  if (!moved) {
+    const DWORD error = FAILED(result) ? static_cast<DWORD>(result) : GetLastError();
+    DeleteFileW(temporary.c_str());
+    FileFailure(Text(L"无法保存快捷方式", L"Cannot save shortcut"), error);
+  }
 }
 bool DeleteValue(const std::wstring& path, const wchar_t* name) {
   HKEY key = nullptr;

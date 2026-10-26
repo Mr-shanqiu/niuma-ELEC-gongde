@@ -192,7 +192,9 @@ int wmain() {
     // CopyFile inherits a read-only download attribute, making the old reopen
     // fail. The new single writable handle must preserve every payload byte.
     const auto readonly=root/L"readonly-download.exe",legacyCopy=root/L"legacy-copy.new";
-    Put(readonly,"MZ"+std::string(196731,'p')+"\0certificate-trailer"s);
+    wchar_t ownImage[MAX_PATH]{};
+    CHECK(GetModuleFileNameW(nullptr,ownImage,MAX_PATH)>0);
+    Put(readonly,Get(ownImage)+std::string(196731,'p')+"\0certificate-trailer"s);
     CHECK(SetFileAttributesW(readonly.c_str(),FILE_ATTRIBUTE_READONLY));
     CHECK(CopyFileW(readonly.c_str(),legacyCopy.c_str(),TRUE));
     HANDLE oldReopen=CreateFileW(legacyCopy.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);
