@@ -40,9 +40,9 @@ bool CompositionPresenter::BackendFailure() {
   Invalidate();
   return Fail(renderer_.LastError(), renderer_.LastErrorMessage());
 }
-bool CompositionPresenter::Initialize(HWND window, int width, int height, bool software) {
+bool CompositionPresenter::Initialize(HWND window, int width, int height, bool software, bool layered) {
   Shutdown();
-  if (!renderer_.Initialize(window, width, height, software)) return BackendFailure();
+  if (!renderer_.Initialize(window, width, height, software, layered)) return BackendFailure();
   window_ = window; width_ = width; height_ = height;
   error_ = S_OK; detail_.clear();
   return true;
@@ -182,6 +182,20 @@ bool CompositionPresenter::DrawLatest(const std::vector<CompositionQuad>& source
     ++stats_.unchangedFrames;
     error_ = S_OK; detail_.clear();
     return true;
+  }
+  if (renderer_.layered()) {
+    // UpdateLayeredWindow uses this very frame's alpha for desktop hit testing.
+    // No parallel native alpha-region reconstruction or GPU readback is needed.
+    const auto submitStart = Clock::now();
+    if (!renderer_.Draw(quads,false)) return BackendFailure();
+    stats_.lastDrawSubmitWallMs = Milliseconds(submitStart);
+    if (diagnosticCapture && !renderer_.Capture(*diagnosticCapture)) return BackendFailure();
+    const auto presentStart = Clock::now();
+    if (!renderer_.Present()) return BackendFailure();
+    stats_.lastPresentWallMs = Milliseconds(presentStart);
+    stats_.lastSubmitMs = Milliseconds(submitStart);
+    previous_ = std::move(quads); frameValid_ = true; ++stats_.framesPresented;
+    error_ = S_OK; detail_.clear(); return true;
   }
   const auto regionStart = Clock::now();
   auto region = BuildPreparedAlphaRegion(width_, height_, masks, &installedRaster_, &nativeBands_);

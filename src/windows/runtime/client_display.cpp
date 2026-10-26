@@ -20,11 +20,11 @@ void TextQuad(const graphics::WidgetTextImage& image, graphics::WidgetTextSlot s
   quads.push_back(q);
 }
 }
-bool ClientDisplay::Initialize(HWND window,int width,int height,bool software) {
-  if (!presenter_.Initialize(window,width,height,software)) {
+bool ClientDisplay::Initialize(HWND window,int width,int height,bool software,bool layered) {
+  if (!presenter_.Initialize(window,width,height,software,layered)) {
     initialized_ = false; error_ = presenter_.LastErrorMessage(); return false;
   }
-  window_ = window; width_ = width; height_ = height; softwareForTest_ = software;
+  window_ = window; width_ = width; height_ = height; softwareForTest_ = software; layeredForTest_ = layered;
   initialized_ = true; error_.clear();
   return true;
 }
@@ -119,7 +119,7 @@ bool ClientDisplay::DrawLatest(const ClientDisplayState& state,std::uint64_t now
 bool ClientDisplay::RecreateDevice() {
   if (!window_) { error_="Display window is unavailable"; return false; }
   presenter_.Shutdown(); initialized_=false;
-  if (!presenter_.Initialize(window_,width_,height_,softwareForTest_)) {
+  if (!presenter_.Initialize(window_,width_,height_,softwareForTest_,layeredForTest_)) {
     error_=presenter_.LastErrorMessage(); return false;
   }
   initialized_=true;

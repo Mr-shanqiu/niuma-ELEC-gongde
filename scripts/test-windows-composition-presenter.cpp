@@ -12,7 +12,7 @@ struct CompositionPresenterTestAccess {
     for(const auto& texture:p.spares_)if(texture.key==key)return texture.id;
     return 0;
   }
-  static D3D11Renderer& Renderer(CompositionPresenter& p){return p.renderer_;}
+  static D3D11Renderer& Renderer(CompositionPresenter& p){return p.renderer_.ModernRendererForTest();}
 };
 }
 

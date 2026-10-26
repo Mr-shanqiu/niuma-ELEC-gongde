@@ -1,4 +1,5 @@
 #include "d3d11_renderer.h"
+#include "platform_compat.h"
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -329,12 +330,18 @@ struct D3D11Renderer::Impl {
             return false;
         };
         constexpr UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
-        HRESULT result = D3DCompile(kShader, sizeof(kShader) - 1, "niuma-sprite", nullptr,
+        // Neither dcomp.dll nor D3DCompiler_47.dll is a mandatory EXE
+        // import: unpatched Win7/8 must reach the compatibility renderer.
+        static HMODULE compiler = LoadSystemComponent(L"D3DCompiler_47.dll");
+        using Compile = decltype(&D3DCompile);
+        const auto compile = compiler ? reinterpret_cast<Compile>(GetProcAddress(compiler, "D3DCompile")) : nullptr;
+        if (!compile) return Fail(HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND), "Shader compiler unavailable");
+        HRESULT result = compile(kShader, sizeof(kShader) - 1, "niuma-sprite", nullptr,
                                    nullptr, "VSMain", "vs_4_0", flags, 0,
                                    vertexCode.GetAddressOf(), errors.GetAddressOf());
         if (FAILED(result)) return shaderFailure(result, "Compile fixed sprite vertex shader");
         errors.Reset();
-        result = D3DCompile(kShader, sizeof(kShader) - 1, "niuma-sprite", nullptr,
+        result = compile(kShader, sizeof(kShader) - 1, "niuma-sprite", nullptr,
                             nullptr, "PSMain", "ps_4_0", flags, 0,
                             pixelCode.GetAddressOf(), errors.GetAddressOf());
         if (FAILED(result)) return shaderFailure(result, "Compile fixed sprite pixel shader");
@@ -488,7 +495,12 @@ bool D3D11Renderer::Initialize(HWND window, int width, int height, bool allowSof
     result = factory->CreateSwapChainForComposition(state.device.Get(), &swapDesc,
         nullptr, state.swapChain.GetAddressOf());
     if (FAILED(result)) return failed(result, "Create transparent composition swapchain");
-    result = DCompositionCreateDevice(dxgiDevice.Get(),
+    static HMODULE compositionLibrary = LoadSystemComponent(L"dcomp.dll");
+    using CreateComposition = decltype(&DCompositionCreateDevice);
+    const auto createComposition = compositionLibrary ? reinterpret_cast<CreateComposition>(
+        GetProcAddress(compositionLibrary, "DCompositionCreateDevice")) : nullptr;
+    if (!createComposition) return failed(HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND), "DirectComposition unavailable");
+    result = createComposition(dxgiDevice.Get(),
         __uuidof(IDCompositionDevice), reinterpret_cast<void**>(state.composition.GetAddressOf()));
     if (FAILED(result)) return failed(result, "Create DirectComposition device");
     result = state.composition->CreateTargetForHwnd(window, TRUE,

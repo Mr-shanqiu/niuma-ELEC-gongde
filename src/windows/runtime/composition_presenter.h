@@ -1,6 +1,6 @@
 #pragma once
 
-#include "d3d11_renderer.h"
+#include "layered_renderer.h"
 #include "prepared_alpha_region.h"
 #include "native_region_bands.h"
 
@@ -46,7 +46,7 @@ class CompositionPresenter final {
   static constexpr std::uint64_t kReplacementTextureLimit = 2 * kResidentTextureLimit;
   static constexpr std::size_t kSpareTextureCountLimit = 3;
   static constexpr std::uint64_t kSpareTextureByteLimit = 2ULL * 1024 * 1024;
-  bool Initialize(HWND window, int width, int height, bool allowSoftwareForTest = false);
+  bool Initialize(HWND window, int width, int height, bool allowSoftwareForTest = false, bool layeredForTest = false);
   bool Resize(int width, int height);
   bool SetTextures(const std::vector<CompositionTexture>& textures);
   // A non-null capture is an explicit test-only readback before Present.
@@ -55,6 +55,7 @@ class CompositionPresenter final {
   void Invalidate() noexcept;
   void Shutdown();
   const CompositionStats& Stats() const { return stats_; }
+  bool layered() const { return renderer_.layered(); }
   const AdapterInfo& Adapter() const { return renderer_.Adapter(); }
   const RendererStats& BackendStats() const { return renderer_.Stats(); }
   bool EnableDiagnosticGpuTiming() { return renderer_.EnableDiagnosticGpuTiming(); }
@@ -66,7 +67,7 @@ class CompositionPresenter final {
   const std::string& LastErrorMessage() const { return detail_; }
 #ifdef NIUMA_COMPOSITION_DIAGNOSTICS
   // Tests only: called by the same owner; never used by the product drawing path.
-  D3D11Renderer& DiagnosticRenderer() { return renderer_; }
+  D3D11Renderer& DiagnosticRenderer() { return renderer_.ModernRendererForTest(); }
 #endif
  private:
   friend struct CompositionPresenterTestAccess;
@@ -80,7 +81,7 @@ class CompositionPresenter final {
   void ForgetInstalledRegion() noexcept;
   void UpdateSpareStats() noexcept;
   void DropSpare(std::size_t index);
-  D3D11Renderer renderer_;
+  DisplayRenderer renderer_;
   HWND window_ = nullptr;
   int width_ = 0, height_ = 0;
   std::vector<Uploaded> uploaded_;

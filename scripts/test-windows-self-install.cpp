@@ -61,11 +61,15 @@ bool SameFile(const std::wstring& left,const std::wstring& right) {
 int wmain() {
   fs::path root; std::wstring registryRoot;
   try {
-    CHECK(!setup::SupportsSystemVersion(6, 7601));
-    CHECK(!setup::SupportsSystemVersion(10, 19040));
-    for (DWORD build : {19041u, 19042u, 19044u, 19045u, 22000u, 26100u})
-      CHECK(setup::SupportsSystemVersion(10, build));
-    std::cout<<"PASS Windows 10 2004 boundary and Windows 11 version policy\n";
+    CHECK(!setup::SupportsSystemVersion(6, 1, 7600));
+    CHECK(!setup::SupportsSystemVersion(6, 0, 6002));
+    CHECK(setup::SupportsSystemVersion(6, 1, 7601));
+    CHECK(setup::SupportsSystemVersion(6, 2, 9200));
+    CHECK(setup::SupportsSystemVersion(6, 3, 9600));
+    CHECK(!setup::SupportsSystemVersion(10, 0, 10239));
+    for (DWORD build : {10240u, 19040u, 19041u, 19042u, 19044u, 19045u, 22000u, 26100u})
+      CHECK(setup::SupportsSystemVersion(10, 0, build));
+    std::cout<<"PASS Windows 7 SP1 through Windows 11 target boundaries\n";
     CHECK(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
     GUID guid{}; CHECK(SUCCEEDED(CoCreateGuid(&guid))); wchar_t id[40]{}; StringFromGUID2(guid,id,40);
     wchar_t temporary[MAX_PATH]{}; CHECK(GetTempPathW(MAX_PATH,temporary));

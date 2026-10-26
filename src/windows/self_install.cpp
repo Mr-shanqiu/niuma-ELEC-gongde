@@ -350,7 +350,7 @@ bool SupportedSystem() {
   using ReadVersion = LONG(WINAPI*)(OSVERSIONINFOW*);
   const auto function = reinterpret_cast<ReadVersion>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
   OSVERSIONINFOW version{}; version.dwOSVersionInfoSize = sizeof(version);
-  return function && function(&version) == 0 && SupportsSystemVersion(version.dwMajorVersion, version.dwBuildNumber);
+  return function && function(&version) == 0 && SupportsSystemVersion(version.dwMajorVersion, version.dwMinorVersion, version.dwBuildNumber);
 }
 void CleanRetiredWorkers() {
   // No recursion: only our two known files, with a matching ownership marker.
@@ -511,7 +511,7 @@ Result Remove(const Locations& l, const std::wstring& expectedImage) {
 
 LaunchResult PrepareLaunch(HINSTANCE instance, const wchar_t* version) {
   try {
-    Require(SupportedSystem(), Text(L"此版本需要 Windows 10 2004 或更新系统。", L"This version requires Windows 10 version 2004 or later."));
+    Require(SupportedSystem(), Text(L"此版本支持64位 Windows 7 SP1、8、8.1、10和11。", L"This version supports 64-bit Windows 7 SP1, 8, 8.1, 10 and 11."));
     const auto l = CurrentUserLocations();
     const auto image = OwnImage();
     int count = 0; auto raw = CommandLineToArgvW(GetCommandLineW(), &count);

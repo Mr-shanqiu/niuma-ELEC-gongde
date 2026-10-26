@@ -50,6 +50,18 @@ TextKey KeyFor(WidgetTextSlot slot, const WidgetTextInput& input) {
         key.firstSize = s.plusFont; key.firstColor = s.plusColor; key.fontStyle = s.plusFontStyle;
     } else {
         key.family = s.widgetFamily; key.fontStyle = s.widgetFontStyle;
+        // YaHei UI was introduced after Win7. Resolve the built-in default
+        // once; explicit/custom missing fonts still fail as before.
+        if (key.family == L"Microsoft YaHei UI") {
+            static const std::wstring available = [] {
+                for (const auto* name : {L"Microsoft YaHei UI", L"Microsoft YaHei", L"Segoe UI"}) {
+                    Gdiplus::FontFamily family(name);
+                    if (family.GetLastStatus() == Gdiplus::Ok) return std::wstring(name);
+                }
+                return std::wstring(L"Microsoft YaHei UI");
+            }();
+            key.family = available;
+        }
         key.outlineColor = s.outlineColor; key.outlineWidth = s.outlineWidth;
         if (slot == WidgetTextSlot::Merit) {
             key.first = input.merit; key.firstColor = s.meritColor;

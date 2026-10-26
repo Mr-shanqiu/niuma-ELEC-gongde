@@ -51,7 +51,8 @@ int wmain(int argc,wchar_t** argv) {
   if(argc==2 && std::wstring(argv[1])==L"--fullscreen-peer") return FullscreenPeer();
   ULONG_PTR gdi=0;
   try {
-    CHECK(argc==2); CHECK(SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)));
+    const bool layered = argc==3 && std::wstring(argv[2])==L"--layered";
+    CHECK(argc==2 || layered); CHECK(SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)));
     Gdiplus::GdiplusStartupInput options;
     CHECK(Gdiplus::GdiplusStartup(&gdi,&options,nullptr)==Gdiplus::Ok);
     EnableBestDpiAwareness();
@@ -59,7 +60,7 @@ int wmain(int argc,wchar_t** argv) {
     CHECK(!std::filesystem::exists(root)); CHECK(std::filesystem::create_directory(root));
     CHECK(InitializeAcceptanceMode(true,true,false,false,root.wstring()));
     CHECK(!IsRuntimeCandidate() && UsesCompositionRuntime());
-    gReminderPreviewAcceptance=false; gDisplay.allowSoftwareForTest=true;
+    gReminderPreviewAcceptance=false; gDisplay.allowSoftwareForTest=true; gDisplay.layeredForTest=layered;
     // Reuse the existing supported INI format; verify the production display
     // route doesn't reset a pre-existing count or unrelated setting.
     CHECK(WritePrivateProfileStringW(L"state",L"total",L"12345",DataPath().c_str()));
@@ -81,6 +82,7 @@ int wmain(int argc,wchar_t** argv) {
     const auto until=GetTickCount64()+15000;
     while(gAppearance.currentRequest && GetTickCount64()<until){pump();Sleep(5);}
     CHECK(!gAppearance.currentRequest && gDisplay.display && gDisplay.display->ready() && !gDisplay.failed);
+    CHECK(gDisplay.display->layered()==layered);
     CHECK(gDisplay.display->scene() && gDisplay.display->scene()->kind==input_runtime::AppearanceSceneKind::Woodfish);
     RenderLayeredWindow(GetTickCount64());
     CHECK(gDisplay.display->Stats().framesPresented>0 && gLayeredSurface.bytes()==0);
@@ -187,7 +189,7 @@ int wmain(int argc,wchar_t** argv) {
     CHECK(std::wstring(kept)==L"original");
     CHECK(GetPrivateProfileIntW(L"state",L"auto_hide_fullscreen",1,(root/L"data.ini").c_str())==0);
     CHECK(GetPrivateProfileIntW(L"state",L"total",0,(root/L"data.ini").c_str())==12357);
-    std::cout<<"PRODUCTION_RUNTIME=PASS privateCandidate=false composition=true noGdiFallback=true "
+    std::cout<<"PRODUCTION_RUNTIME=PASS privateCandidate=false layered="<<layered<<" "
         <<"existingTotal=12345 hiddenInput=12 savedTotal=12357 hiddenNoPresent=true nativeFullscreen=true automaticTimer=true maximizedAutoHide=true overscanAutoHide=true windowedRestore=true explicitShowOverride=true restoredLatest=true autoHideSaved=true unknownIniPreserved=true idleNoPresent=true normalClose=true "
         <<"scope=CI-software-not-hardware\n";
     Gdiplus::GdiplusShutdown(gdi);CoUninitialize();return 0;

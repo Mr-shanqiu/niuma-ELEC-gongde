@@ -21,9 +21,10 @@ struct LaunchResult {
   int exitCode = 0;
   std::optional<bool> startupChoice;
 };
-// Win10 2004 and later (Win11 also reports major version 10).
-constexpr bool SupportsSystemVersion(DWORD major, DWORD build) {
-  return major == 10 && build >= 19041;
+// Explicit product targets: Win7 SP1, Win8/8.1 and Win10/11 (x64 build).
+constexpr bool SupportsSystemVersion(DWORD major, DWORD minor, DWORD build) {
+  return (major == 6 && ((minor == 1 && build >= 7601) ||
+      minor == 2 || minor == 3)) || (major == 10 && build >= 10240);
 }
 Locations CurrentUserLocations();
 std::wstring Executable(const Locations& locations);

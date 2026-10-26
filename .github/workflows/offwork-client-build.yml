@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-install-fix, runtime-raw-input, runtime-input-publish, runtime-visibility, runtime-fullscreen]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-install-fix, runtime-raw-input, runtime-input-publish, runtime-system-compat, runtime-visibility, runtime-fullscreen]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-single-file:
-    if: ${{ inputs.mode == 'runtime-self-install' || inputs.mode == 'runtime-self-install-entry' || inputs.mode == 'runtime-install-fix' || inputs.mode == 'runtime-input-publish' || inputs.mode == 'runtime-visibility' || inputs.mode == 'runtime-fullscreen' }}
+    if: ${{ inputs.mode == 'runtime-system-compat' || inputs.mode == 'runtime-self-install' || inputs.mode == 'runtime-self-install-entry' || inputs.mode == 'runtime-install-fix' || inputs.mode == 'runtime-input-publish' || inputs.mode == 'runtime-visibility' || inputs.mode == 'runtime-fullscreen' }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -31,7 +31,9 @@ jobs:
         run: |
           cmake -S . -B build-self -G "Visual Studio 17 2022" -A x64
           if ($LASTEXITCODE -ne 0) { throw 'Self-install configuration failed' }
-          if ('${{ inputs.mode }}' -eq 'runtime-input-publish') {
+          if ('${{ inputs.mode }}' -eq 'runtime-system-compat') {
+            cmake --build build-self --config Release --target niuma-merit niuma-production-runtime-test niuma-self-install-test niuma-layered-compatibility-test niuma-composition-presenter-test niuma-widget-text-cache-test --parallel 2
+          } elseif ('${{ inputs.mode }}' -eq 'runtime-input-publish') {
             cmake --build build-self --config Release --target niuma-merit niuma-production-runtime-test --parallel 2
           } elseif ('${{ inputs.mode }}' -eq 'runtime-install-fix') {
             cmake --build build-self --config Release --target niuma-merit niuma-self-install-test --parallel 2
@@ -45,6 +47,27 @@ jobs:
             cmake --build build-self --config Release --target niuma-merit niuma-self-install-test niuma-production-runtime-test --parallel 2
           }
           if ($LASTEXITCODE -ne 0) { throw 'Self-install compilation failed' }
+      - name: Validate affected modern and compatibility paths without touching user data
+        if: ${{ inputs.mode == 'runtime-system-compat' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory build-self/evidence | Out-Null
+          foreach ($test in @('niuma-self-install-test','niuma-layered-compatibility-test','niuma-composition-presenter-test','niuma-widget-text-cache-test')) {
+            & "./build-self/Release/$test.exe" | Tee-Object "build-self/evidence/$test.txt"
+            if ($LASTEXITCODE -ne 0) { throw "$test failed" }
+          }
+          foreach ($backend in @('modern','layered')) {
+            $root = Join-Path $env:TEMP ('niuma-system-' + $backend + '-' + [Guid]::NewGuid().ToString('N'))
+            if ($backend -eq 'layered') {
+              & ./build-self/Release/niuma-production-runtime-test.exe $root --layered | Tee-Object "build-self/evidence/production-$backend.txt"
+            } else {
+              & ./build-self/Release/niuma-production-runtime-test.exe $root | Tee-Object "build-self/evidence/production-$backend.txt"
+            }
+            if ($LASTEXITCODE -ne 0) { throw "Production $backend failed" }
+          }
+          ./scripts/test-windows-single-file-entry.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -EvidenceDir (Join-Path $PWD 'build-self/evidence')
+          $r = Get-Content build-self/evidence/single-file-entry.json -Raw | ConvertFrom-Json
+          if ($r.status -ne 'PASS') { throw 'Public installation entry failed' }
       - name: Validate private installation transactions and production display route
         if: ${{ inputs.mode == 'runtime-self-install' }}
         shell: pwsh
@@ -92,13 +115,19 @@ jobs:
           if ($r.status -ne 'PASS') { throw 'Single-file entry failed' }
           ./scripts/verify-windows-artifact.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -ExpectedVersion (Get-Content VERSION -Raw).Trim() -ArtifactKind client -ReceiptPath (Join-Path $PWD 'build-self/evidence/client-artifact.json')
       - name: Record actual executable imports for minimum-system review
-        if: ${{ inputs.mode == 'runtime-install-fix' }}
+        if: ${{ inputs.mode == 'runtime-install-fix' || inputs.mode == 'runtime-system-compat' }}
         shell: pwsh
         run: |
           $dumpbin = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -find 'VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe' | Select-Object -First 1
           if (-not $dumpbin) { throw 'Executable import inspector unavailable' }
           & $dumpbin /imports /headers build-self/Release/niuma-merit.exe | Out-File build-self/evidence/pe-imports.txt
           if ($LASTEXITCODE -ne 0) { throw 'Executable imports unavailable' }
+          if ('${{ inputs.mode }}' -eq 'runtime-system-compat') {
+            $imports = Get-Content build-self/evidence/pe-imports.txt -Raw
+            foreach ($forbidden in @('dcomp.dll','D3DCOMPILER_47.dll','GetUserDefaultGeoName','GetDpiForWindow','SetProcessDpiAwarenessContext','GetSystemTimePreciseAsFileTime','GetTempPath2W','WaitOnAddress')) {
+              if ($imports -match [regex]::Escape($forbidden)) { throw "Unsupported eager import: $forbidden" }
+            }
+          }
       - name: Bind the one unsigned delivery executable
         shell: python
         run: |
@@ -109,6 +138,11 @@ jobs:
                    'src/windows/self_install.cpp', 'src/windows/self_install.h',
                    'src/windows/runtime/input_service.cpp', 'src/windows/runtime/input_service.h',
                    'src/windows/app.manifest', 'src/windows/app.rc',
+                   'src/windows/runtime/platform_compat.h', 'src/windows/runtime/layered_renderer.h',
+                   'src/windows/runtime/layered_renderer.cpp', 'src/windows/runtime/d3d11_renderer.cpp',
+                   'src/windows/runtime/composition_presenter.h', 'src/windows/runtime/composition_presenter.cpp',
+                   'src/windows/runtime/client_display.h', 'src/windows/runtime/client_display.cpp',
+                   'scripts/test-windows-layered-compatibility.cpp', 'src/windows/runtime/widget_text_cache.cpp',
                    'scripts/test-windows-self-install.cpp', 'scripts/test-windows-single-file-entry.ps1',
                    'scripts/test-windows-production-runtime.cpp',
                    'src/client/core/visibility_state.h', 'src/client/core/storage_state.h',

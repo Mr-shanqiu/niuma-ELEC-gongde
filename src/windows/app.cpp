@@ -427,6 +427,7 @@ struct DisplayAdapter {
   bool failed = false, noticeShown = false;
 #if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
   bool allowSoftwareForTest = false;
+  bool layeredForTest = false;
   std::array<double, 1024> frameWorkMs{}, regionWorkMs{};
   std::array<double, 1024> frameWithoutPresentMs{}, drawSubmitMs{}, presentCallMs{};
   std::array<niuma::runtime::PreparedAlphaRegionStats, 1024> regionDetails{};
@@ -1801,12 +1802,20 @@ void FailCompositionDisplay() {
   if (!gDisplay.noticeShown) PostMessageW(gState.window, kDisplayFailureMessage, 0, 0);
 }
 
+bool LayeredDisplayForTest() {
+#if defined(NIUMA_INPUT_SERVICE_DIAGNOSTICS)
+  return gDisplay.layeredForTest;
+#else
+  return false;
+#endif
+}
+
 bool EnsureCompositionDisplay() {
   if (gDisplay.failed) return false;
   if (gDisplay.display && gDisplay.display->ready()) return true;
   if (!gDisplay.display) gDisplay.display = std::make_unique<input_runtime::ClientDisplay>();
   if (gDisplay.display->Initialize(gState.window, gState.windowWidth, gState.windowHeight,
-      SoftwareDisplayForTest())) return true;
+      SoftwareDisplayForTest(), LayeredDisplayForTest())) return true;
   FailCompositionDisplay();
   return false;
 }
@@ -2245,7 +2254,10 @@ void PrepareBuiltinThumbnail() {
 
 void EnsureAnimationTimer() {
   if (!gVisibility.hidden() && !gState.timerRunning && gState.window != nullptr) {
-    SetTimer(gState.window, kAnimationTimer, 16, nullptr);
+    // Legacy display shares authoritative input and latest-frame scheduling,
+    // but caps animation submissions at 30 Hz instead of busy CPU rendering.
+    const UINT frameInterval = gDisplay.display && gDisplay.display->layered() ? 33u : 16u;
+    SetTimer(gState.window, kAnimationTimer, frameInterval, nullptr);
     gState.timerRunning = true;
   }
 }
@@ -2572,7 +2584,7 @@ void PresentReminderForTrigger(niuma::reminder::ActivitySampler::Trigger trigger
   constexpr int geoNameBufferLength = 4;  // Two-letter ISO code plus NUL; three-digit M.49 plus NUL.
   wchar_t geo[geoNameBufferLength]{};
   char region[3] = "*";
-  if (GetUserDefaultGeoName(geo, geoNameBufferLength) == 3 &&
+  if (GetGeoInfoW(GetUserGeoID(GEOCLASS_NATION), GEO_ISO2, geo, geoNameBufferLength, 0) == 3 &&
       geo[0] >= L'A' && geo[0] <= L'Z' && geo[1] >= L'A' && geo[1] <= L'Z') {
     region[0] = static_cast<char>(geo[0]);
     region[1] = static_cast<char>(geo[1]);

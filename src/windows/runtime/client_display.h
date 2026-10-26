@@ -16,13 +16,14 @@ struct ClientDisplayFrameTiming {
 // decoding and alpha preparation happen on the asset worker, never here.
 class ClientDisplay final {
  public:
-  bool Initialize(HWND window, int width, int height, bool softwareForTest = false);
+  bool Initialize(HWND window, int width, int height, bool softwareForTest = false, bool layeredForTest = false);
   bool SetScene(std::unique_ptr<PreparedAppearanceScene>& candidate);
   bool DrawLatest(const ClientDisplayState& state, std::uint64_t now, int width, int height,
                   niuma::runtime::PixelImage* diagnosticCapture = nullptr);
   bool RecreateDevice();  // An explicit caller action; no hidden retry loop.
   void Invalidate() noexcept { presenter_.Invalidate(); player_.Invalidate(); }
   void Shutdown();
+  bool layered() const { return presenter_.layered(); }
   bool ready() const { return initialized_; }
   const PreparedAppearanceScene* scene() const { return scene_.get(); }
   const niuma::runtime::CompositionStats& Stats() const { return presenter_.Stats(); }
@@ -45,7 +46,7 @@ class ClientDisplay final {
   bool InstallTextures(const PreparedAppearanceScene* scene, std::uint64_t sceneVersion);
   HWND window_ = nullptr;
   int width_ = 0, height_ = 0;
-  bool initialized_ = false, softwareForTest_ = false;
+  bool initialized_ = false, softwareForTest_ = false, layeredForTest_ = false;
   std::uint64_t sceneVersion_ = 0;
   std::unique_ptr<PreparedAppearanceScene> scene_;
   niuma::client::core::AnimationPlayer player_;
