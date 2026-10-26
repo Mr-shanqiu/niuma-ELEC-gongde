@@ -42,6 +42,7 @@ void SelectCpuScene(Fixture& fixture,const CpuScene& scene,bool countdown=false,
   CHECK(RequestCurrentAppearance(scene.id,false));
   fixture.Await([]{return !gAppearance.currentRequest && gDisplay.display && gDisplay.display->scene();},20000);
   CHECK(!gDisplay.failed);
+  CHECK(gDisplay.display->scene()->source.id==(scene.id.empty()?"builtin.woodfish":scene.id));
   RefreshOffwork(false); CHECK(SyncOffworkTimer()); ResizeOffworkWindow();
   // Finish previous action and uploads outside the measurement interval.
   fixture.Until(GetTickCount64()+2000);
@@ -101,6 +102,7 @@ CpuStage MeasureCpu(Fixture& fixture,const CpuScene& scene,const std::string& ph
   const double mean=double(finalCpu-firstCpu)/100.0/double(stop-start)/gLogicalCpu;
   fixture.Await([&]{return gState.total==initialCount+gOperations-initialOperations;});
   const auto presented=gDisplay.display->Stats().framesPresented-firstFrames;
+  if(active && !hidden) CHECK(presented>0);
   if(hidden) CHECK(presented==0);
   PROCESS_MEMORY_COUNTERS_EX memory{};memory.cb=sizeof(memory);
   DWORD handles=0;CHECK(GetProcessHandleCount(GetCurrentProcess(),&handles));
@@ -122,7 +124,7 @@ void RunCpu(const std::filesystem::path& parent,const std::filesystem::path& pac
   {
     Fixture fixture(parent,L"appearance-cpu",true,false);
     CHECK(SetWindowPos(fixture.window,nullptr,60,60,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE));
-    gVisibility={};gVisibility.autoHideFullscreen=false;gVisibilityHidden=false;
+    gVisibility={};gVisibility.autoHideFullscreen=false;gVisibility.recoveryAvailable=true;gVisibilityHidden=false;
     gState.dpi=SystemDpi();
     gState.windowWidth=ScaleDip(kWindowDipWidth,gState.dpi);
     gState.windowHeight=ScaleDip(MainWindowDipHeight(),gState.dpi);
