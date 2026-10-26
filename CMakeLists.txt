@@ -313,6 +313,19 @@ if(WIN32)
     target_link_options(niuma-runtime-durability-probe PRIVATE /MANIFEST:NO)
   endif()
 
+  add_executable(niuma-appearance-cpu-probe
+    scripts/probe-windows-appearance-cpu.cpp src/windows/runtime/input_service.cpp
+    src/windows/appearance_pack.cpp third_party/miniz/miniz.c "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")
+  target_include_directories(niuma-appearance-cpu-probe PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(niuma-appearance-cpu-probe PRIVATE cxx_std_17)
+  target_compile_definitions(niuma-appearance-cpu-probe PRIVATE NIUMA_RUNTIME_CANDIDATE NIUMA_COMPOSITION_RUNTIME NIUMA_INPUT_SERVICE_DIAGNOSTICS UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-appearance-cpu-probe PRIVATE niuma-input-core niuma-windows-storage niuma-windows-appearance-loader Threads::Threads user32 psapi shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
+  if(MSVC)
+    set_property(TARGET niuma-appearance-cpu-probe PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(niuma-appearance-cpu-probe PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
+    target_link_options(niuma-appearance-cpu-probe PRIVATE /MANIFEST:NO)
+  endif()
+
   # Render About without running product startup or touching a user profile.
   add_executable(niuma-about-preview
     scripts/preview-windows-about.cpp src/windows/appearance_pack.cpp

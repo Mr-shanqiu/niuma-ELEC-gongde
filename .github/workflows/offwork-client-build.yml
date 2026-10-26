@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-install-fix, runtime-raw-input, runtime-input-publish, runtime-system-compat, runtime-calendar, runtime-visibility, runtime-fullscreen]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-appearance-cpu, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-install-fix, runtime-raw-input, runtime-input-publish, runtime-system-compat, runtime-calendar, runtime-visibility, runtime-fullscreen]
 
 permissions:
   contents: read
@@ -574,6 +574,43 @@ jobs:
           name: windows-runtime-composition-${{ github.sha }}
           path: build-composition/evidence/**
           if-no-files-found: warn
+          retention-days: 14
+
+  windows-appearance-cpu:
+    if: ${{ inputs.mode == 'runtime-appearance-cpu' }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated full-appearance sampler only
+        shell: pwsh
+        run: |
+          cmake -S . -B build-cpu -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'CPU probe configuration failed' }
+          cmake --build build-cpu --config Release --target niuma-appearance-cpu-probe --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'CPU probe compilation failed' }
+          python scripts/prepare-windows-runtime-acceptance.py build-cpu/runtime-fixtures --all
+          if ($LASTEXITCODE -ne 0) { throw 'Private fixtures failed' }
+          New-Item -ItemType Directory build-cpu/evidence | Out-Null
+          & ./build-cpu/Release/niuma-appearance-cpu-probe.exe (Join-Path $PWD 'build-cpu/evidence') (Join-Path $PWD 'build-cpu/runtime-fixtures') --smoke --allow-software | Tee-Object build-cpu/evidence/probe.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated sampler smoke failed' }
+      - name: Bind diagnostic executable and unchanged production sources
+        shell: python
+        run: |
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          paths = subprocess.check_output(['git','ls-files','src','scripts/probe-windows-appearance-cpu.cpp','scripts/probe-windows-runtime-durability.cpp','scripts/test-windows-runtime-app.cpp','CMakeLists.txt','scripts/prepare-windows-runtime-acceptance.py']).decode().splitlines()
+          exe = Path('build-cpu/Release/niuma-appearance-cpu-probe.exe')
+          Path('build-cpu/BINDING.json').write_text(json.dumps({'commit':os.environ['GITHUB_SHA'],'kind':'diagnostic-only-not-installer','exeSha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'exeBytes':exe.stat().st_size,'sourceSha256':{p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths},'ciIsHardwarePerformanceEvidence':False},indent=2))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-appearance-cpu-${{ github.sha }}
+          path: |
+            build-cpu/BINDING.json
+            build-cpu/evidence/**
+            build-cpu/Release/niuma-appearance-cpu-probe.exe
+            build-cpu/runtime-fixtures/**
           retention-days: 14
 
   windows-runtime-durability:

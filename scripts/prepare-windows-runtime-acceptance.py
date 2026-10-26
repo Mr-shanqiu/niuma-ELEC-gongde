@@ -15,7 +15,8 @@ root = Path(__file__).resolve().parents[1]
 output = Path(sys.argv[1]).resolve()
 output.mkdir(parents=True, exist_ok=False)
 records = []
-for slug in ('offwork-button', 'koi-bubbles'):
+slugs = sorted(p.parent.name for p in (root / 'assets/appearance-packs').glob('*/manifest.json')) if '--all' in sys.argv[2:] else ('offwork-button', 'koi-bubbles')
+for slug in slugs:
     source = root / 'assets/appearance-packs' / slug
     raw = (source / 'manifest.json').read_bytes()
     manifest = json.loads(raw)
