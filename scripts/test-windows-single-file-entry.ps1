@@ -85,6 +85,27 @@ function Confirm-OwnedDialog([IntPtr]$Window) {
     [NiuMaSetupUI]::SendMessage($Window,273,[IntPtr]1,[IntPtr]0) | Out-Null
   }
 }
+# Seed only this initially empty CI profile, representing records from an old
+# installation. Production code receives no alternate paths or test switches.
+$ini=Join-Path $data 'data.ini'
+$startOriginal=Join-Path ([Environment]::GetFolderPath('Programs')) '牛马电子功德.lnk'
+$desktopOriginal=Join-Path ([Environment]::GetFolderPath('Desktop')) '牛马电子功德.lnk'
+if((Test-Path -LiteralPath $startOriginal) -or (Test-Path -LiteralPath $desktopOriginal)) {
+  throw 'Existing shortcuts present; refuses to seed this account.'
+}
+New-Item -ItemType Directory -Path $data | Out-Null
+[IO.File]::WriteAllText($ini,"[state]`r`ntotal=12345`r`nselected_scene=0`r`n[daily]`r`n2020-01-02=321`r`n[offwork_daily]`r`n2020-01-02=3600,1080,1578000000`r`n[custom]`r`nkeep=original-user-field`r`n",[Text.Encoding]::ASCII)
+$packFolder=New-Item -ItemType Directory -Path (Join-Path $data 'Appearances\retained-user-pack')
+$packFile=Join-Path $packFolder.FullName 'retained.nmgpack'
+[IO.File]::WriteAllBytes($packFile,[byte[]](80,75,3,4,12,34,56,78))
+$packHash=(Get-FileHash -LiteralPath $packFile -Algorithm SHA256).Hash
+[IO.File]::WriteAllText($startOriginal,'unreadable legacy shortcut',[Text.Encoding]::ASCII)
+$shell=New-Object -ComObject WScript.Shell
+$oldLink=$shell.CreateShortcut($desktopOriginal)
+$oldLink.TargetPath=Join-Path $env:TEMP 'retired-custom-install\niuma-merit.exe'
+$oldLink.Save()
+$oldStartHash=(Get-FileHash -LiteralPath $startOriginal -Algorithm SHA256).Hash
+$oldDesktopHash=(Get-FileHash -LiteralPath $desktopOriginal -Algorithm SHA256).Hash
 $hash=(Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash
 $receipt=[ordered]@{kind='single-file-native-entry';source=$image;sourceSha256=$hash;installed=$installed;
   environment='disposable Windows Server Actions account';win10Tested=$false;realHardwarePerformanceTested=$false}
@@ -94,6 +115,9 @@ $dialog=Await { [NiuMaSetupUI]::Find($download.Id,'#32770') } 'first installatio
 Snapshot-Dialog $dialog 'single-file-install.png'
 [NiuMaSetupUI]::SendMessage($dialog,1137,[IntPtr]0,[IntPtr]0) | Out-Null # TDM_CLICK_VERIFICATION
 [NiuMaSetupUI]::SendMessage($dialog,1126,[IntPtr]1,[IntPtr]0) | Out-Null # TDM_CLICK_BUTTON IDOK
+$shortcutNotice=Await {[NiuMaSetupUI]::Find($download.Id,'#32770')} 'preserved shortcuts notice'
+Snapshot-Dialog $shortcutNotice 'single-file-shortcut-preserved.png'
+if(-not [NiuMaSetupUI]::PostMessage($shortcutNotice,16,[IntPtr]0,[IntPtr]0)){throw 'Could not close shortcut notice'}
 if(-not $download.WaitForExit(30000) -or $download.ExitCode -ne 0){throw 'Download entry did not finish successfully'}
 $client=Await {Get-Process niuma-merit -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $installed} | Select-Object -First 1} 'installed client'
 $null=$client.Handle # Keep a handle so exit status remains observable after exit.
@@ -106,8 +130,8 @@ $style=[NiuMaSetupUI]::GetWindowLongPtr($window,-20).ToInt64()
 if(($style -band 0x200000) -eq 0 -or ($style -band 0x80000) -ne 0){throw 'Production window did not select DirectComposition'}
 if((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -ne $hash){throw 'Installed bytes changed'}
 if(-not (Test-Path -LiteralPath $uninstall)){throw 'System uninstall entry missing'}
-$startLink=Join-Path ([Environment]::GetFolderPath('Programs')) '牛马电子功德.lnk'
-$desktopLink=Join-Path ([Environment]::GetFolderPath('Desktop')) '牛马电子功德.lnk'
+$startLink=Join-Path ([Environment]::GetFolderPath('Programs')) '牛马电子功德（新版）.lnk'
+$desktopLink=Join-Path ([Environment]::GetFolderPath('Desktop')) '牛马电子功德（新版）.lnk'
 if(-not (Test-Path -LiteralPath $startLink) -or -not (Test-Path -LiteralPath $desktopLink)){throw 'Shortcut missing'}
 # Allow the ordinary first-run guide to close before asking the real app to save.
 $notice=[NiuMaSetupUI]::Find($client.Id,'#32770')
@@ -116,6 +140,16 @@ if($notice -ne [IntPtr]::Zero){Confirm-OwnedDialog $notice}
 if(-not $client.WaitForExit(15000)){throw 'Installed client did not exit after normal close'}
 if($client.ExitCode -ne 0){throw "Installed client exit code was not confirmed zero: $($client.ExitCode)"}
 $ini=Join-Path $data 'data.ini'; if(-not (Test-Path -LiteralPath $ini)){throw 'Installed client did not save its data'}
+$saved=[IO.File]::ReadAllText($ini)
+if($saved -notmatch '(?m)^total=(\d+)' -or [UInt64]$Matches[1] -lt 12345){throw 'Old merit total was reset'}
+foreach($required in @('2020-01-02=321','2020-01-02=3600,1080,1578000000','keep=original-user-field')) {
+  if(-not $saved.Contains($required)){throw "Old user record lost: $required"}
+}
+if((Get-FileHash -LiteralPath $packFile -Algorithm SHA256).Hash -ne $packHash){throw 'Existing pack changed'}
+if((Get-FileHash -LiteralPath $startOriginal -Algorithm SHA256).Hash -ne $oldStartHash -or
+   (Get-FileHash -LiteralPath $desktopOriginal -Algorithm SHA256).Hash -ne $oldDesktopHash){throw 'Existing shortcuts overwritten'}
+$receipt.oldTotalRetained=$true;$receipt.calendarAndOvertimeRetained=$true;$receipt.unknownIniRetained=$true
+$receipt.existingPackRetained=$true;$receipt.conflictingShortcutsPreserved=$true
 $dataHash=(Get-FileHash -LiteralPath $ini -Algorithm SHA256).Hash
 $receipt.exactInstall=$true;$receipt.productionWindowSelectsComposition=$true;$receipt.normalClose=$true
 $remover=Start-Process -FilePath $installed -ArgumentList '--uninstall' -PassThru
@@ -137,6 +171,9 @@ Await {$worker.HasExited} 'uninstall worker exit' 10 | Out-Null
 if($worker.ExitCode -ne 0){throw "Uninstall worker exit code was not confirmed zero: $($worker.ExitCode)"}
 if((Test-Path -LiteralPath $uninstall) -or (Test-Path -LiteralPath $startLink) -or (Test-Path -LiteralPath $desktopLink)){throw 'Owned uninstall entries remain'}
 if((Get-FileHash -LiteralPath $ini -Algorithm SHA256).Hash -ne $dataHash){throw 'Uninstall modified user records'}
+if((Get-FileHash -LiteralPath $packFile -Algorithm SHA256).Hash -ne $packHash){throw 'Uninstall changed existing pack'}
+if((Get-FileHash -LiteralPath $startOriginal -Algorithm SHA256).Hash -ne $oldStartHash -or
+   (Get-FileHash -LiteralPath $desktopOriginal -Algorithm SHA256).Hash -ne $oldDesktopHash){throw 'Uninstall removed old shortcuts'}
 $receipt.uninstallSameImage=$true;$receipt.userRecordsRetained=$true
 # Next ordinary invocation cleans only the marked, exited temporary copy.
 $again=Start-Process -FilePath $image -PassThru
@@ -150,3 +187,4 @@ $receipt | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $evidence 'single-fi
 'SINGLE_FILE_ENTRY=PASS exact install, production window, normal close, same-image uninstall, retained data, retired helper cleanup, cancel'
 # The data directory was absent before this test. Remove only that owned CI data.
 Remove-Item -LiteralPath $data -Recurse -Force
+Remove-Item -LiteralPath $startOriginal,$desktopOriginal

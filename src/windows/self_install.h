@@ -11,12 +11,20 @@ struct Locations {
   std::wstring runKey, classesKey, uninstallKey, applicationMutex, setupMutex;
 };
 struct Options { bool startAtLogin = false; bool desktopShortcut = true; };
-struct Result { bool success = false; std::wstring error; };
+struct Result {
+  bool success = false;
+  std::wstring error;
+  std::wstring shortcutNotice;
+};
 struct LaunchResult {
   bool handled = false;
   int exitCode = 0;
   std::optional<bool> startupChoice;
 };
+// Win10 2004 and later (Win11 also reports major version 10).
+constexpr bool SupportsSystemVersion(DWORD major, DWORD build) {
+  return major == 10 && build >= 19041;
+}
 Locations CurrentUserLocations();
 std::wstring Executable(const Locations& locations);
 bool FilesEqual(const std::wstring& left, const std::wstring& right);

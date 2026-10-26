@@ -61,6 +61,11 @@ bool SameFile(const std::wstring& left,const std::wstring& right) {
 int wmain() {
   fs::path root; std::wstring registryRoot;
   try {
+    CHECK(!setup::SupportsSystemVersion(6, 7601));
+    CHECK(!setup::SupportsSystemVersion(10, 19040));
+    for (DWORD build : {19041u, 19042u, 19044u, 19045u, 22000u, 26100u})
+      CHECK(setup::SupportsSystemVersion(10, build));
+    std::cout<<"PASS Windows 10 2004 boundary and Windows 11 version policy\n";
     CHECK(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
     GUID guid{}; CHECK(SUCCEEDED(CoCreateGuid(&guid))); wchar_t id[40]{}; StringFromGUID2(guid,id,40);
     wchar_t temporary[MAX_PATH]{}; CHECK(GetTempPathW(MAX_PATH,temporary));
@@ -143,6 +148,89 @@ int wmain() {
     CHECK(!setup::Install(locations,newer.wstring(),L"0.9.6",{}).success);
     CHECK(setup::FilesEqual(source.wstring(),installed));
     std::cout<<"PASS foreign ownership marker is preserved and blocks replacement\n";
+
+
+    // Old custom-path and unreadable shortcuts are not grounds to block upgrade.
+    auto compatibility=locations;
+    compatibility.directory=(root/L"compat-app").wstring();
+    compatibility.desktopLink=(root/L"compat-desktop.lnk").wstring();
+    compatibility.startMenuLink=(root/L"compat-start.lnk").wstring();
+    compatibility.uninstallKey=registryRoot+L"\\CompatUninstall";
+    const auto retired=(root/L"old-custom-folder"/L"niuma-merit.exe").wstring();
+    Link(compatibility.desktopLink,&retired);
+    Put(compatibility.startMenuLink,"broken legacy shortcut");
+    const auto foreignDesktop=Get(compatibility.desktopLink),foreignStart=Get(compatibility.startMenuLink);
+    const auto alternativeDesktop=root/L"compat-desktop（新版）.lnk";
+    const auto alternativeStart=root/L"compat-start（新版）.lnk";
+    result=setup::Install(compatibility,source.wstring(),L"0.9.5",{true,true});
+    CHECK(result.success && !result.shortcutNotice.empty());
+    CHECK(Get(compatibility.desktopLink)==foreignDesktop && Get(compatibility.startMenuLink)==foreignStart);
+    CHECK(SameFile(Link(alternativeDesktop),setup::Executable(compatibility)));
+    CHECK(SameFile(Link(alternativeStart),setup::Executable(compatibility)));
+    result=setup::Install(compatibility,newer.wstring(),L"0.9.6",{true,true});
+    CHECK(result.success && !fs::exists(root/L"compat-desktop（新版 2）.lnk"));
+    CHECK(Get(compatibility.desktopLink)==foreignDesktop && Get(compatibility.startMenuLink)==foreignStart);
+    CHECK(setup::Remove(compatibility,newer.wstring()).success);
+    CHECK(!fs::exists(alternativeDesktop) && !fs::exists(alternativeStart));
+    CHECK(Get(compatibility.desktopLink)==foreignDesktop && Get(compatibility.startMenuLink)==foreignStart);
+    std::cout<<"PASS old custom-path and broken shortcuts preserved; deterministic replacement reused and removed\n";
+
+    // Occupying every bounded name must not prevent the executable installation.
+    for(const auto& preferred:{compatibility.desktopLink,compatibility.startMenuLink}) {
+      const fs::path path(preferred);
+      for(unsigned i=1;i<=16;++i) {
+        const std::wstring suffix=i==1 ? L"（新版）" : L"（新版 "+std::to_wstring(i)+L"）";
+        Put(path.parent_path()/(path.stem().wstring()+suffix+path.extension().wstring()),"keep occupied shortcut");
+      }
+    }
+    result=setup::Install(compatibility,source.wstring(),L"0.9.5",{});
+    CHECK(result.success && !result.shortcutNotice.empty());
+    CHECK(setup::Remove(compatibility,source.wstring()).success);
+    CHECK(Get(alternativeDesktop)=="keep occupied shortcut" && Get(alternativeStart)=="keep occupied shortcut");
+    std::cout<<"PASS all shortcut names occupied still installs; unrelated files survive uninstall\n";
+
+    // CopyFile inherits a read-only download attribute, making the old reopen
+    // fail. The new single writable handle must preserve every payload byte.
+    const auto readonly=root/L"readonly-download.exe",legacyCopy=root/L"legacy-copy.new";
+    Put(readonly,"MZ"+std::string(196731,'p')+"\0certificate-trailer"s);
+    CHECK(SetFileAttributesW(readonly.c_str(),FILE_ATTRIBUTE_READONLY));
+    CHECK(CopyFileW(readonly.c_str(),legacyCopy.c_str(),TRUE));
+    HANDLE oldReopen=CreateFileW(legacyCopy.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);
+    CHECK(oldReopen==INVALID_HANDLE_VALUE && GetLastError()==ERROR_ACCESS_DENIED);
+    auto readOnlyLocations=locations;
+    readOnlyLocations.directory=(root/L"readonly-app").wstring();
+    readOnlyLocations.startMenuLink=(root/L"readonly-start.lnk").wstring();
+    readOnlyLocations.desktopLink=(root/L"readonly-desktop.lnk").wstring();
+    result=setup::Install(readOnlyLocations,readonly.wstring(),L"0.9.5",{});
+    CHECK(result.success && setup::FilesEqual(readonly.wstring(),setup::Executable(readOnlyLocations)));
+    CHECK(!(GetFileAttributesW(setup::Executable(readOnlyLocations).c_str())&FILE_ATTRIBUTE_READONLY));
+    CHECK(setup::Remove(readOnlyLocations,readonly.wstring()).success);
+    CHECK(SetFileAttributesW(readonly.c_str(),FILE_ATTRIBUTE_NORMAL));
+    CHECK(SetFileAttributesW(legacyCopy.c_str(),FILE_ATTRIBUTE_NORMAL));
+    std::cout<<"PASS reproduced old read-only flush-reopen failure; new chunked copy is exact and writable\n";
+
+    auto environmentLocations=readOnlyLocations;
+    environmentLocations.directory=(root/L"env-app").wstring();
+    environmentLocations.startMenuLink=(root/L"env-start.lnk").wstring();
+    environmentLocations.desktopLink=(root/L"env-desktop.lnk").wstring();
+    CHECK(SetEnvironmentVariableW(L"NIUMA_SELF_INSTALL_TEST_DIR",environmentLocations.directory.c_str()));
+    const std::wstring environmentTarget=L"%NIUMA_SELF_INSTALL_TEST_DIR%\\niuma-merit.exe";
+    Link(environmentLocations.startMenuLink,&environmentTarget);
+    result=setup::Install(environmentLocations,source.wstring(),L"0.9.5",{});
+    CHECK(result.success && result.shortcutNotice.empty());
+    CHECK(SameFile(Link(environmentLocations.startMenuLink),setup::Executable(environmentLocations)));
+    CHECK(setup::Remove(environmentLocations,source.wstring()).success);
+    CHECK(SetEnvironmentVariableW(L"NIUMA_SELF_INSTALL_TEST_DIR",nullptr));
+    std::cout<<"PASS environment-variable shortcut target belongs to the same installation\n";
+
+    HANDLE blocked=CreateFileW(source.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);
+    CHECK(blocked!=INVALID_HANDLE_VALUE);
+    result=setup::Install(readOnlyLocations,source.wstring(),L"0.9.5",{});
+    CloseHandle(blocked);
+    CHECK(!result.success && result.error.find(L"32")!=std::wstring::npos);
+    CHECK(!fs::exists(setup::Executable(readOnlyLocations)));
+    CHECK(Get(data)=="total=12345\nkeep=user records\n");
+    std::cout<<"PASS copy sharing failure reports system code, cleans staging and preserves records\n";
 
     RegDeleteTreeW(HKEY_CURRENT_USER,registryRoot.c_str()); fs::remove_all(root);
     CoUninitialize(); std::cout<<"SELF_INSTALL_CONTRACTS=PASS\n"; return 0;

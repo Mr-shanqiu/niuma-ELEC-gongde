@@ -20,6 +20,10 @@ void Require(bool ok, const wchar_t* message) { if (!ok) throw Failure{message};
 const wchar_t* Text(const wchar_t* zh, const wchar_t* en) {
   return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE ? zh : en;
 }
+[[noreturn]] void FileFailure(const wchar_t* action, DWORD error) {
+  throw Failure{std::wstring(action) + Text(L"（系统错误码：", L" (Windows error: ") +
+      std::to_wstring(error) + Text(L"）。原有功德记录和素材未改动。", L"). Existing counts and packs were not changed.")};
+}
 struct Handle {
   HANDLE value = INVALID_HANDLE_VALUE;
   explicit Handle(HANDLE h = INVALID_HANDLE_VALUE) : value(h) {}
@@ -100,6 +104,46 @@ bool WriteBytes(const fs::path& path, const std::vector<char>& bytes) {
   DWORD written = 0;
   return WriteFile(file.value, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
       written == bytes.size() && FlushFileBuffers(file.value);
+}
+void CopyAndFlush(const std::wstring& source, const fs::path& stage) {
+  Handle input(CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+      OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+  if (input.value == INVALID_HANDLE_VALUE) {
+    const DWORD error = GetLastError();
+    FileFailure(Text(L"无法读取安装包", L"Cannot read the installer"), error);
+  }
+  // Keep the writable handle from creation through FlushFileBuffers. Closing a
+  // CopyFile handle and reopening it for write races scanners that open the new
+  // file with read-only sharing. Readers may inspect this file during the copy.
+  Handle output(CreateFileW(stage.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+      CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+  if (output.value == INVALID_HANDLE_VALUE) {
+    const DWORD error = GetLastError();
+    FileFailure(Text(L"无法创建安装临时文件", L"Cannot create the installation file"), error);
+  }
+  std::array<char, 65536> buffer{};
+  for (;;) {
+    DWORD read = 0;
+    if (!ReadFile(input.value, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr)) {
+      const DWORD error = GetLastError();
+      FileFailure(Text(L"读取安装包失败", L"Could not read the installer"), error);
+    }
+    if (!read) break;
+    DWORD offset = 0;
+    while (offset < read) {
+      DWORD written = 0;
+      if (!WriteFile(output.value, buffer.data() + offset, read - offset, &written, nullptr)) {
+        const DWORD error = GetLastError();
+        FileFailure(Text(L"写入安装临时文件失败", L"Could not write the installation file"), error);
+      }
+      if (!written) FileFailure(Text(L"安装文件写入不完整", L"Incomplete installation write"), ERROR_WRITE_FAULT);
+      offset += written;
+    }
+  }
+  if (!FlushFileBuffers(output.value)) {
+    const DWORD error = GetLastError();
+    FileFailure(Text(L"安装临时文件未能写入磁盘", L"Could not flush the installation file"), error);
+  }
 }
 bool OwnerMatches(const Locations& l) {
   try {
@@ -210,7 +254,34 @@ std::wstring LinkTarget(const std::wstring& link) {
       FAILED(persist->Load(link.c_str(), STGM_READ))) return {};
   wchar_t path[MAX_PATH]{};
   if (FAILED(shell->GetPath(path, MAX_PATH, nullptr, SLGP_RAWPATH))) return {};
-  return path;
+  wchar_t expanded[MAX_PATH]{};
+  const auto length = ExpandEnvironmentStringsW(path, expanded, MAX_PATH);
+  return length && length <= MAX_PATH ? std::wstring(expanded) : std::wstring(path);
+}
+std::vector<std::wstring> LinkNames(const std::wstring& preferred) {
+  std::vector<std::wstring> result{preferred};
+  const fs::path path(preferred);
+  // A finite set, shared with uninstall; no desktop scanning or user files are
+  // renamed/deleted to make room. Existing foreign or unreadable links survive.
+  for (unsigned i = 1; i <= 16; ++i) {
+    const auto suffix = i == 1 ? L"（新版）" : L"（新版 " + std::to_wstring(i) + L"）";
+    result.push_back((path.parent_path() / (path.stem().wstring() + suffix + path.extension().wstring())).wstring());
+  }
+  return result;
+}
+std::wstring ChooseLink(const std::wstring& preferred, const std::wstring& image) {
+  std::wstring vacant;
+  for (const auto& link : LinkNames(preferred)) {
+    if (!PlainPath(link)) continue;
+    std::error_code error;
+    const bool exists = fs::exists(link, error);
+    if (error) continue;
+    if (!exists) { if (vacant.empty()) vacant = link; continue; }
+    if (fs::is_regular_file(link, error) && !error && SamePath(LinkTarget(link), image)) return link;
+  }
+  // A name collision is not a failed installation. The installed executable
+  // and system uninstall entry remain available even when all links are taken.
+  return vacant;
 }
 void WriteLink(const std::wstring& link, const std::wstring& image) {
   Interface<IShellLinkW> shell; Interface<IPersistFile> persist;
@@ -276,7 +347,7 @@ bool SupportedSystem() {
   using ReadVersion = LONG(WINAPI*)(OSVERSIONINFOW*);
   const auto function = reinterpret_cast<ReadVersion>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
   OSVERSIONINFOW version{}; version.dwOSVersionInfoSize = sizeof(version);
-  return function && function(&version) == 0 && version.dwMajorVersion == 10 && version.dwBuildNumber >= 19045;
+  return function && function(&version) == 0 && SupportsSystemVersion(version.dwMajorVersion, version.dwBuildNumber);
 }
 void CleanRetiredWorkers() {
   // No recursion: only our two known files, with a matching ownership marker.
@@ -334,29 +405,32 @@ Result Install(const Locations& l, const std::wstring& source, const std::wstrin
     Require(application.held, L"Exit the running client before installing or updating.");
     Com com; Require(SUCCEEDED(com.result), L"Shortcut services unavailable.");
     Require(PlainPath(source) && PlainPath(l.directory) && PlainPath(Executable(l)) &&
-        PlainPath(fs::path(l.directory) / L"install.owner") && PlainPath(l.startMenuLink) &&
-        (!options.desktopShortcut || PlainPath(l.desktopLink)), L"Installation path contains a link or is unsupported.");
+        PlainPath(fs::path(l.directory) / L"install.owner"), L"Installation path contains a link or is unsupported.");
     Require(!SamePath(source, Executable(l)), L"The installation source must be a separate file.");
-    for (const auto& link : {l.startMenuLink, options.desktopShortcut ? l.desktopLink : std::wstring{}}) {
+    const auto image = Executable(l);
+    const auto startLink = ChooseLink(l.startMenuLink, image);
+    const auto desktopLink = options.desktopShortcut ? ChooseLink(l.desktopLink, image) : std::wstring{};
+    std::wstring shortcutNotice;
+    if (startLink != l.startMenuLink || (options.desktopShortcut && desktopLink != l.desktopLink)) {
+      shortcutNotice = Text(L"安装成功。同名旧快捷方式已保留。新版程序位置：\n",
+          L"Installation succeeded. Existing shortcuts were preserved. Installed program:\n");
+      shortcutNotice += image;
+      if (!startLink.empty()) shortcutNotice += L"\n" + startLink;
+      if (!desktopLink.empty()) shortcutNotice += L"\n" + desktopLink;
+    }
+    for (const auto& link : {startLink, desktopLink}) {
       if (link.empty()) continue;
-      if (fs::exists(link)) Require(SamePath(LinkTarget(link), Executable(l)), L"A shortcut belongs to another program.");
       fs::create_directories(fs::path(link).parent_path()); files.Save(link);
     }
     fs::create_directories(l.directory);
     const auto marker = fs::path(l.directory) / L"install.owner";
     if (fs::exists(marker)) Require(OwnerMatches(l), L"Existing installation owner is invalid.");
     files.Save(marker);
-    const auto image = Executable(l);
     stage = fs::path(l.directory) / (L".install-" + UniqueName() + L".new");
     backup = fs::path(l.directory) / (L".previous-" + UniqueName());
-    Require(CopyFileW(source.c_str(), stage.c_str(), TRUE) && FilesEqual(source, stage.wstring()),
-        L"The exact executable could not be copied.");
-    {
-      Handle copied(CreateFileW(stage.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-      Require(copied.value != INVALID_HANDLE_VALUE && FlushFileBuffers(copied.value),
-          L"The copied executable could not be flushed before installation.");
-    }
+    CopyAndFlush(source, stage);
+    Require(FilesEqual(source, stage.wstring()), Text(L"安装文件校验失败，原有客户端未替换。",
+        L"Installation file verification failed; the existing client was not replaced."));
     hadImage = fs::exists(image);
     if (hadImage) {
       const bool replaced = ReplaceFileW(image.c_str(), stage.c_str(), backup.c_str(), 0, nullptr, nullptr) != FALSE;
@@ -366,14 +440,14 @@ Result Install(const Locations& l, const std::wstring& source, const std::wstrin
     else Require(MoveFileExW(stage.c_str(), image.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE,
         L"The executable could not be installed.");
     committedImage = true;
-    WriteLink(l.startMenuLink, image);
-    if (options.desktopShortcut) WriteLink(l.desktopLink, image);
+    if (!startLink.empty()) WriteLink(startLink, image);
+    if (!desktopLink.empty()) WriteLink(desktopLink, image);
     Register(l, version, options, registry);
     Require(WriteBytes(marker, {kOwner, kOwner + sizeof(kOwner) - 1}), L"Could not record installation ownership.");
     Require(FilesEqual(source, image), L"Installed executable verification failed.");
     if (hadImage) DeleteFileW(backup.c_str());
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-    return {true, {}};
+    return {true, {}, shortcutNotice};
   } catch (const Failure& error) {
     const bool registryRestored = registry.Restore();
     bool restored = files.Restore() && registryRestored;
@@ -402,12 +476,13 @@ Result Remove(const Locations& l, const std::wstring& expectedImage) {
     Require(setup.held && application.held, L"Exit the client and any other installer before uninstalling.");
     Com com; Require(SUCCEEDED(com.result), L"Shortcut services unavailable.");
     Require(PlainPath(l.directory) && PlainPath(Executable(l)) &&
-        PlainPath(fs::path(l.directory)/L"install.owner") && PlainPath(l.desktopLink) && PlainPath(l.startMenuLink), L"Uninstall path is unsafe.");
+        PlainPath(fs::path(l.directory)/L"install.owner"), L"Uninstall path is unsafe.");
     Require(OwnerMatches(l) && FilesEqual(Executable(l), expectedImage), L"Installation identity changed; nothing was removed.");
     const auto image = Executable(l);
-    for (const auto& link : {l.desktopLink, l.startMenuLink})
-      if (fs::exists(link) && SamePath(LinkTarget(link), image))
-        Require(DeleteFileW(link.c_str()) != FALSE, L"Could not remove shortcut.");
+    for (const auto& preferred : {l.desktopLink, l.startMenuLink})
+      for (const auto& link : LinkNames(preferred))
+        if (PlainPath(link) && fs::is_regular_file(link) && SamePath(LinkTarget(link), image))
+          Require(DeleteFileW(link.c_str()) != FALSE, L"Could not remove shortcut.");
     if (SamePath(CommandImage(RegistryText(l.runKey, L"NiuMaMerit")), image))
       Require(DeleteValue(l.runKey, L"NiuMaMerit"), L"Could not remove startup entry.");
     for (const auto& association : std::array<std::pair<const wchar_t*, const wchar_t*>, 3>{{
@@ -433,7 +508,7 @@ Result Remove(const Locations& l, const std::wstring& expectedImage) {
 
 LaunchResult PrepareLaunch(HINSTANCE instance, const wchar_t* version) {
   try {
-    Require(SupportedSystem(), Text(L"此版本需要 Windows 10 22H2 或更新系统。", L"This version requires Windows 10 22H2 or later."));
+    Require(SupportedSystem(), Text(L"此版本需要 Windows 10 2004 或更新系统。", L"This version requires Windows 10 version 2004 or later."));
     const auto l = CurrentUserLocations();
     const auto image = OwnImage();
     int count = 0; auto raw = CommandLineToArgvW(GetCommandLineW(), &count);
@@ -529,6 +604,7 @@ LaunchResult PrepareLaunch(HINSTANCE instance, const wchar_t* version) {
     for (const auto& argument : args)
       if (!argument.empty() && argument[0] != L'-') forwarded += L" " + Quote(argument);
     Require(Start(Executable(l), forwarded), L"Installed successfully, but launch failed. Use the installed shortcut to retry.");
+    if (!result.shortcutNotice.empty()) inform(result.shortcutNotice, MB_OK | MB_ICONINFORMATION);
     return {true, 0, {}};
   } catch (const Failure& error) {
     MessageBoxW(nullptr, error.message.c_str(), L"牛马电子功德", MB_OK | MB_ICONERROR);
