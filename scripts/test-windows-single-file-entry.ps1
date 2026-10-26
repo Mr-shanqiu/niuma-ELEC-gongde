@@ -94,6 +94,7 @@ if((Test-Path -LiteralPath $startOriginal) -or (Test-Path -LiteralPath $desktopO
   throw 'Existing shortcuts present; refuses to seed this account.'
 }
 New-Item -ItemType Directory -Path $data | Out-Null
+New-Item -ItemType Directory -Path (Split-Path $startOriginal),(Split-Path $desktopOriginal) -Force | Out-Null
 [IO.File]::WriteAllText($ini,"[state]`r`ntotal=12345`r`nselected_scene=0`r`n[daily]`r`n2020-01-02=321`r`n[offwork_daily]`r`n2020-01-02=3600,1080,1578000000`r`n[custom]`r`nkeep=original-user-field`r`n",[Text.Encoding]::ASCII)
 $packFolder=New-Item -ItemType Directory -Path (Join-Path $data 'Appearances\retained-user-pack')
 $packFile=Join-Path $packFolder.FullName 'retained.nmgpack'
