@@ -40,9 +40,13 @@ void Snapshot(const std::wstring& path) {
   }
   // Both far corners must be painted; a partial screen capture used to leave
   // these black while the numeric scale check still passed.
+  CHECK(GdiFlush());
   const auto* pixels=static_cast<const BYTE*>(surface.pixels());
-  const auto far=(static_cast<std::size_t>(r.bottom)*r.right-1)*4;
-  CHECK(pixels[far]>=240 && pixels[far+1]>=240 && pixels[far+2]>=240);
+  const auto cornerByteOffset=(static_cast<std::size_t>(r.bottom-12)*r.right+r.right-12)*4;
+  CHECK(pixels[cornerByteOffset]>=240 && pixels[cornerByteOffset+1]>=240 && pixels[cornerByteOffset+2]>=240);
+  const auto footerByteOffset=(static_cast<std::size_t>(670*CalendarScale(gCalendar.window))*r.right+
+      static_cast<std::size_t>(700*CalendarScale(gCalendar.window)))*4;
+  CHECK(pixels[footerByteOffset]>=230 && pixels[footerByteOffset]<250);
   Gdiplus::Bitmap bitmap(r.right,r.bottom,r.right*4,PixelFormat32bppRGB,static_cast<BYTE*>(surface.pixels()));
   UINT count=0,bytes=0;CHECK(Gdiplus::GetImageEncodersSize(&count,&bytes)==Gdiplus::Ok);
   std::vector<BYTE> storage(bytes);auto* codecs=reinterpret_cast<Gdiplus::ImageCodecInfo*>(storage.data());
