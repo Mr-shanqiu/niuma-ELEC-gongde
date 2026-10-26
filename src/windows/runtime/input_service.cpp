@@ -46,6 +46,7 @@ struct InputService::Impl {
   bool shutdownRequested = false;
   bool clockGuard = false;
   bool notifyDirty = false;
+  bool viewDirty = false;  // Single input owner; flushed outside hook callbacks.
   ULONGLONG nextNotify = 0;
   ULONGLONG nextReminder = 0;
   std::uint64_t nextOpportunityId = 0;
@@ -73,6 +74,7 @@ struct InputService::Impl {
   }
 
   void Publish(ULONGLONG now) noexcept {
+    viewDirty = false;
     view.input = core.snapshot();
     snapshots.Publish(view);
     notifyDirty = true;
@@ -145,7 +147,10 @@ struct InputService::Impl {
       if (result == ObserveResult::Counted) ++check.counted;
       check.lastRelativeMs = now - check.startsMs;
     }
-    Publish(now);
+    // Return to Windows before snapshot exchange or UI wake/message work.
+    // Counts and reminder state remain authoritative on this same owner; the
+    // message loop publishes only the latest cumulative state after its drain.
+    viewDirty = true;
     return result;
   }
 
@@ -381,7 +386,7 @@ struct InputService::Impl {
       }
       nextReminder = now + 1000;
     }
-    if (oldVersion != core.snapshot().version) Publish(now);
+    if (viewDirty || oldVersion != core.snapshot().version) Publish(now);
     // A requested ledger copy is bounded by constructor capacity and happens
     // outside callbacks. Ready belongs to the slow consumer until it releases.
     if (ledger.ProduceIfRequested(core)) Publish(now);

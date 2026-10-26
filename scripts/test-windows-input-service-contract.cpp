@@ -277,6 +277,27 @@ void ConfirmationSurvivesSnapshotCoalescing() {
   fixture.Stop();
 }
 
+void BurstSurvivesPausedUiAndPublishesFinalCount() {
+  Fixture fixture;
+  fixture.Start();
+  // All source events are counted even when the UI does not consume wakes.
+  // Only the latest view may be coalesced; the authoritative ledger is exact.
+  for (unsigned batch = 0; batch < 8; ++batch) fixture.Keys(32);
+  Sleep(200);
+  fixture.Await([&] { return fixture.latest.input.total == 356; });
+  CHECK(fixture.latest.input.countedOperations == 256);
+  CHECK(fixture.latest.input.unaccountedOperations == 0);
+  CHECK(fixture.latest.input.fault == InputFault::None);
+  fixture.Stop();
+  const auto& final = fixture.service.Stop();
+  CHECK(final.snapshot.input.total == 356);
+  bool found = false;
+  for (const auto& day : final.daily) if (day.date == InputService::CaptureLocalDate()) {
+    CHECK(day.total == 266); found = true;
+  }
+  CHECK(found);
+}
+
 void CancelledOpportunityCannotConfirm() {
   Fixture fixture;
   fixture.Start(false, true);
@@ -307,6 +328,7 @@ int main() {
     {"fixed_self_check_window", FixedSelfCheckAggregatesCapturedEvents},
     {"retained_reminder_confirmation", ConfirmationSurvivesSnapshotCoalescing},
     {"cancelled_reminder_confirmation", CancelledOpportunityCannotConfirm},
+    {"burst_paused_ui_final_count", BurstSurvivesPausedUiAndPublishesFinalCount},
   };
   unsigned passed = 0;
   for (const auto& test : tests) {
@@ -316,6 +338,6 @@ int main() {
       return 1;
     }
   }
-  std::cout << passed << "/5 passed; isolated tagged input, no product persistence tested\n";
+  std::cout << passed << "/6 passed; isolated tagged input, no product persistence tested\n";
   return 0;
 }
