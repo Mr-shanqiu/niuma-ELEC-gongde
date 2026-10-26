@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-install-fix, runtime-raw-input, runtime-visibility, runtime-fullscreen]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-install-fix, runtime-raw-input, runtime-input-publish, runtime-visibility, runtime-fullscreen]
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-single-file:
-    if: ${{ inputs.mode == 'runtime-self-install' || inputs.mode == 'runtime-self-install-entry' || inputs.mode == 'runtime-install-fix' || inputs.mode == 'runtime-visibility' || inputs.mode == 'runtime-fullscreen' }}
+    if: ${{ inputs.mode == 'runtime-self-install' || inputs.mode == 'runtime-self-install-entry' || inputs.mode == 'runtime-install-fix' || inputs.mode == 'runtime-input-publish' || inputs.mode == 'runtime-visibility' || inputs.mode == 'runtime-fullscreen' }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -31,7 +31,9 @@ jobs:
         run: |
           cmake -S . -B build-self -G "Visual Studio 17 2022" -A x64
           if ($LASTEXITCODE -ne 0) { throw 'Self-install configuration failed' }
-          if ('${{ inputs.mode }}' -eq 'runtime-install-fix') {
+          if ('${{ inputs.mode }}' -eq 'runtime-input-publish') {
+            cmake --build build-self --config Release --target niuma-merit niuma-production-runtime-test --parallel 2
+          } elseif ('${{ inputs.mode }}' -eq 'runtime-install-fix') {
             cmake --build build-self --config Release --target niuma-merit niuma-self-install-test --parallel 2
           } elseif ('${{ inputs.mode }}' -eq 'runtime-self-install-entry') {
             cmake --build build-self --config Release --target niuma-merit --parallel 2
@@ -67,6 +69,14 @@ jobs:
           & ./build-self/Release/niuma-production-runtime-test.exe (Join-Path $env:TEMP ('niuma-visibility-' + [Guid]::NewGuid().ToString('N'))) | Tee-Object build-self/evidence/visibility-runtime.txt
           if ($LASTEXITCODE -ne 0) { throw 'Hidden counting/display regression failed' }
           ./scripts/verify-windows-artifact.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -ExpectedVersion (Get-Content VERSION -Raw).Trim() -ArtifactKind client -ReceiptPath (Join-Path $PWD 'build-self/evidence/client-artifact.json')
+      - name: Validate affected production input publication and retained data
+        if: ${{ inputs.mode == 'runtime-input-publish' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory build-self/evidence | Out-Null
+          & ./build-self/Release/niuma-production-runtime-test.exe (Join-Path $env:TEMP ('niuma-input-publication-' + [Guid]::NewGuid().ToString('N'))) | Tee-Object build-self/evidence/input-publication-runtime.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Production input publication regression failed' }
+          ./scripts/verify-windows-artifact.ps1 -ExecutablePath ./build-self/Release/niuma-merit.exe -ExpectedVersion (Get-Content VERSION -Raw).Trim() -ArtifactKind client -ReceiptPath (Join-Path $PWD 'build-self/evidence/client-artifact.json')
       - name: Exercise the final executable install and uninstall entry in a disposable user
         if: ${{ inputs.mode == 'runtime-self-install-entry' || inputs.mode == 'runtime-install-fix' }}
         shell: pwsh
@@ -97,6 +107,7 @@ jobs:
           exe = Path('build-self/Release/niuma-merit.exe')
           paths = ['VERSION', 'CMakeLists.txt', 'src/windows/app.cpp',
                    'src/windows/self_install.cpp', 'src/windows/self_install.h',
+                   'src/windows/runtime/input_service.cpp', 'src/windows/runtime/input_service.h',
                    'src/windows/app.manifest', 'src/windows/app.rc',
                    'scripts/test-windows-self-install.cpp', 'scripts/test-windows-single-file-entry.ps1',
                    'scripts/test-windows-production-runtime.cpp',
