@@ -4,6 +4,8 @@
 #import <mach/mach_time.h>
 #import "login_startup.h"
 #import "appearance_pack.mm"
+#import "layer_scene.mm"
+#import "thumbnail_grid.mm"
 #include "../offwork_clock.h"
 #include "../calendar_month_range.h"
 #include "../client/core/visibility_state.h"
@@ -27,6 +29,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <unordered_set>
+#import "input_runtime.mm"
 #import "ui_theme.h"
 #import "installation_paths.h"
 
@@ -34,6 +37,8 @@
 // The pack root must be an empty, private directory supplied by the runner;
 // invalid or incomplete isolation settings fail before NSApplication starts.
 static BOOL gIsolatedAcceptance = NO;
+static BOOL gAcceptancePhysicalInput = NO;
+static NSArray<NSString *> *gAcceptancePackPaths;
 static BOOL gReminderPreviewAcceptance = NO;
 static NSString *gAcceptanceRootPath;
 static int gSingleInstanceLockFd = -1;
@@ -52,16 +57,18 @@ static std::uint64_t ReminderContinuousTimeMs(void) {
 
 static BOOL AcquireSingleInstanceLock(void) {
   NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
-  if (bundleIdentifier.length > 0) {
+  if (bundleIdentifier.length > 0 && !gIsolatedAcceptance) {
     for (NSRunningApplication *application in
          [NSRunningApplication runningApplicationsWithBundleIdentifier:bundleIdentifier]) {
       if (application.processIdentifier != getpid()) return NO;
     }
   }
 
-  char path[128];
-  const int length = snprintf(path, sizeof(path), "/tmp/niuma-merit-client-%u.lock",
-                              (unsigned)geteuid());
+  char path[PATH_MAX];
+  const char *privateRoot=getenv("NIUMA_ACCEPTANCE_ROOT");
+  const int length=gIsolatedAcceptance
+      ? snprintf(path,sizeof(path),"%s/instance.lock",privateRoot)
+      : snprintf(path,sizeof(path),"/tmp/niuma-merit-client-%u.lock",(unsigned)geteuid());
   if (length <= 0 || (size_t)length >= sizeof(path)) return NO;
 
   const int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
@@ -122,12 +129,21 @@ static NMEphemeralMeritPreferences *gAcceptancePreferences;
 static BOOL InitializeAcceptanceContext(int argc, const char *argv[]) {
   BOOL requested = NO;
   BOOL reminderPreview = NO;
+  BOOL physicalInput=NO;
+  NSMutableArray<NSString *> *packs=[NSMutableArray array];
   for (int index = 1; index < argc; ++index) {
     if (strcmp(argv[index], "--isolated-acceptance") == 0) requested = YES;
     if (strcmp(argv[index], "--reminder-ui-preview") == 0) reminderPreview = YES;
+    if (strcmp(argv[index], "--physical-input-acceptance") == 0) physicalInput=YES;
+    if (strcmp(argv[index], "--acceptance-pack") == 0) {
+      if(index+1>=argc) return NO;
+      NSString *path=[NSString stringWithUTF8String:argv[++index]];
+      if(!path.isAbsolutePath || ![path.pathExtension.lowercaseString isEqual:@"nmgpack"]) return NO;
+      [packs addObject:path];
+    }
   }
   const char *rootValue = getenv("NIUMA_ACCEPTANCE_ROOT");
-  if (!requested && !rootValue && !reminderPreview) return YES;
+  if (!requested && !rootValue && !reminderPreview && !physicalInput && !packs.count) return YES;
   if (!requested || !rootValue || !rootValue[0]) return NO;
   NSString *root = [NSString stringWithUTF8String:rootValue];
   if (!root.isAbsolutePath ||
@@ -146,6 +162,7 @@ static BOOL InitializeAcceptanceContext(int argc, const char *argv[]) {
   if (!entries || error || entries.count != 0) return NO;
   gAcceptancePreferences = [[NMEphemeralMeritPreferences alloc] init];
   gIsolatedAcceptance = YES;
+  gAcceptancePhysicalInput=physicalInput;gAcceptancePackPaths=[packs copy];
   gReminderPreviewAcceptance = reminderPreview;
   gAcceptanceRootPath = [root copy];
   return YES;
@@ -212,9 +229,9 @@ static NSString *const kOffworkHour = @"offwork.hour";
 static NSString *const kOffworkMinute = @"offwork.minute";
 static NSString *const kOffworkDailySnapshots = @"offwork.dailySnapshots";
 static constexpr CGFloat kOffworkRegionHeight = 96.0;
-static constexpr CGFloat kCalendarLeft = 14.0;
-static constexpr CGFloat kCalendarTop = 112.0;
-static constexpr CGFloat kCalendarCellWidth = 76.0;
+static constexpr CGFloat kCalendarLeft = 24.0;
+static constexpr CGFloat kCalendarTop = 218.0;
+static constexpr CGFloat kCalendarCellWidth = 96.0;
 static constexpr CGFloat kCalendarCellHeight = 64.0;
 static constexpr CGFloat kArtworkTop = 170.0;
 static constexpr CGFloat kFeedbackY = 174.0;
@@ -306,6 +323,16 @@ typedef NS_ENUM(NSInteger, MeritScene) {
 static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, void *);
 
 @interface MeritView : NSView
+@property(nonatomic, strong) NMLayerScene *renderer;
+@property(nonatomic, copy) NSString *renderedIdentity;
+@property(nonatomic) NSInteger renderedScene;
+@property(nonatomic) BOOL presentationPending;
+@property(nonatomic) NSTimeInterval pendingAnimationDuration;
+@property(nonatomic) CFTimeInterval pendingAnimationStart;
+- (void)requestAnimation:(NSTimeInterval)duration atTime:(CFTimeInterval)start;
+- (void)syncPresentation;
+- (NSArray<NSDictionary *> *)sceneDescriptors;
+- (NSDictionary<NSString *, NSImage *> *)sceneImages;
 @property(nonatomic, weak) MeritController *controller;
 @property(nonatomic, strong) NSImage *woodfishImage;
 @property(nonatomic, strong) NSImage *malletImage;
@@ -324,7 +351,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @interface MeritController : NSObject <NSApplicationDelegate, NSWindowDelegate> {
   niuma::OffworkSnapshot _offworkSnapshot;
   niuma::client::core::VisibilityState _visibility;
-  niuma::reminder::ActivitySampler _reminderActivity;
+  NMSynchronizedActivity _reminderActivity;
   niuma::reminder::WallClockGuard _reminderClockGuard;
   bool _reminderStorageFault;
   std::unique_ptr<niuma::reminder::ReminderStore> _reminderStore;
@@ -337,6 +364,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSStatusItem *visibilityStatusItem;
 @property(nonatomic) BOOL appearanceHidden;
+@property(nonatomic) BOOL displaySuspended;
+@property(nonatomic) BOOL screenLocked;
+@property(nonatomic) BOOL systemSleeping;
 @property(nonatomic, strong) MeritView *view;
 @property(nonatomic, strong) NSTimer *animationTimer;
 @property(nonatomic, strong) NSTimer *permissionPollTimer;
@@ -367,6 +397,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic) NSTimeInterval offworkLastSampleUptime;
 @property(nonatomic) NSTimeInterval offworkLastFlushUptime;
 @property(nonatomic) CFMachPortRef eventTap;
+@property(nonatomic, strong) NMEventTapThread *inputThread;
+@property(nonatomic, strong) NMInputMailbox *inputMailbox;
+@property(nonatomic, strong) dispatch_source_t inputNotification;
+- (void)prepareInputDelivery;
+- (void)captureInputType:(CGEventType)type;
+- (void)drainInput;
+
 @property(nonatomic) CFRunLoopSourceRef eventSource;
 @property(nonatomic) BOOL eventTapOperationInProgress;
 @property(nonatomic) BOOL eventTapRecoveryStopped;
@@ -422,6 +459,14 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic, copy) NSSet<NSString *> *lastImportedIds;
 @property(nonatomic, strong) NSAlert *appearancePickerAlert;
 @property(nonatomic, strong) NSError *appearanceLoadError;
+@property(nonatomic) BOOL resourceLoadBusy;
+@property(nonatomic) NSUInteger resourceGeneration;
+@property(nonatomic, strong) NMAppearancePack *pendingScenePack;
+@property(nonatomic, weak) NMThumbnailGrid *thumbnailGrid;
+@property(nonatomic, strong) dispatch_source_t memoryPressure;
+- (void)discardRebuildableResources;
+- (void)pumpSceneLoad;
+
 @property(nonatomic, strong) NMLoginStartupCoordinator *loginStartup;
 @property(nonatomic, strong) NSError *loginStartupError;
 - (BOOL)hasLiveEventTap;
@@ -491,10 +536,21 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @end
 
 @implementation MeritView
+@synthesize appearancePack=_appearancePack;
+- (void)setAppearancePack:(NMAppearancePack *)pack {
+  if(_appearancePack==pack) return;
+  _appearancePack=pack;self.renderedIdentity=nil;
+  // Even a switch while hidden releases the old scene's retained CGImages.
+  [self.renderer installLayers:@[] images:@{}];
+}
 
 - (instancetype)initWithFrame:(NSRect)frameRect {
   self = [super initWithFrame:frameRect];
   if (self) {
+    self.wantsLayer = YES;
+    self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
+    self.renderer = [[NMLayerScene alloc] initWithRoot:self.layer];
+    self.renderedScene = -1;
     NSBundle *bundle = NSBundle.mainBundle;
     NSString *woodfishPath = [bundle pathForResource:@"woodfish" ofType:@"png"];
     NSString *malletPath = [bundle pathForResource:@"mallet" ofType:@"png"];
@@ -564,7 +620,85 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [text drawInRect:rect withAttributes:attributes];
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+- (void)setNeedsDisplay:(BOOL)flag {
+  if (!flag || self.presentationPending) return;
+  self.presentationPending=YES;
+  __weak MeritView *weakSelf=self;
+  dispatch_async(dispatch_get_main_queue(), ^{ MeritView *view=weakSelf; view.presentationPending=NO; [view syncPresentation]; });
+}
+- (void)viewDidChangeBackingProperties { [super viewDidChangeBackingProperties]; [self syncPresentation]; }
+- (void)setFrameSize:(NSSize)size { [super setFrameSize:size]; [self syncPresentation]; }
+- (NSDictionary<NSString *,NSImage *> *)sceneImages {
+  if (self.appearancePack) return self.appearancePack.images;
+  if (self.scene==MeritSceneLuckyCat) return @{@"base":self.luckyCatBaseImage,@"actor":self.luckyCatActorImage};
+  if (self.scene==MeritSceneSeaLionBellyPat) return @{@"base":self.seaLionBodyImage,@"actor":self.seaLionFlipperImage};
+  if (self.scene==MeritSceneHamsterWheel) return @{@"base":self.hamsterBaseImage ?: [NSImage new],@"actor":self.hamsterActorImage ?: [NSImage new]};
+  NSImage *shadow=[[NSImage alloc] initWithSize:NSMakeSize(160,16)];
+  [shadow lockFocus]; [[NSColor colorWithWhite:0 alpha:.25] setFill];
+  [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(0,0,160,16)] fill]; [shadow unlockFocus];
+  return @{@"woodfish":self.woodfishImage ?: [NSImage new],@"mallet":self.malletImage ?: [NSImage new],@"shadow":shadow};
+}
+- (NSArray<NSDictionary *> *)sceneDescriptors {
+  if (self.appearancePack) return self.appearancePack.layers;
+  NSDictionary *(^frame)(double,double,double,double,double)=^(double t,double x,double y,double r,double scale) {
+    return @{@"t":@(t),@"x":@(x),@"y":@(y),@"rotation":@(r),@"scale":@(scale),@"scale_y":@1,@"alpha":@1};
+  };
+  NSDictionary *(^layer)(NSString *,NSArray *,NSArray *,NSArray *)=^(NSString *name,NSArray *rect,NSArray *anchor,NSArray *frames) {
+    return @{@"image":name,@"frame":rect,@"anchor":anchor,@"keyframes":frames,@"interpolation":@"smoothstep"};
+  };
+  NSArray *still=@[frame(0,0,0,0,1)];
+  if (self.scene==MeritSceneLuckyCat) {
+    NSMutableDictionary *peak=[frame(.42,0,0,0,1) mutableCopy]; peak[@"scale_y"]=@.8;
+    return @[layer(@"base",@[@5,@-35,@230,@230],@[@0,@0],still),
+      layer(@"actor",@[@30,@-35,@230,@230],@[@(362.0/600),@(112.0/600)],
+            @[frame(0,0,0,0,1),peak,frame(1,0,0,0,1)])];
+  }
+  if (self.scene==MeritSceneSeaLionBellyPat) return @[layer(@"base",@[@34,@0,@172,@168],@[@0,@0],still),
+    layer(@"actor",@[@152,@44,@51,@66],@[@.15,@.9],@[frame(0,0,0,0,1),frame(.42,-3,-2,-48,1),frame(1,0,0,0,1)])];
+  if (self.scene==MeritSceneHamsterWheel) {
+    NSMutableDictionary *peak=[frame(.42,0,0,-2,1.012) mutableCopy]; peak[@"scale_y"]=@(.975/1.012);
+    return @[layer(@"base",@[@35,@0,@170,@170],@[@0,@0],still),
+      layer(@"actor",@[@41,@15,@154,@154],@[@(88.0/154),@(41.0/154)],@[frame(0,0,0,0,1),peak,frame(1,0,0,0,1)])];
+  }
+  // The two mallet slices preserve the undistorted head and extended shaft.
+  double sw=MAX(145,self.malletImage.size.width);
+  NSMutableDictionary *shaft=[layer(@"mallet",@[@(120+.88*(417-260-120)),@(.88*(180-26)),@(.88*266),@(.88*54)],
+      @[@(260.0/266),@(26.0/54)],@[frame(0,0,0,3,1),frame(.42,0,0,5.2,1),frame(1,0,0,3,1)]) mutableCopy];
+  // Both slices rotate around the same off-screen pivot, expressed in each slice's coordinates.
+  shaft[@"anchor"]=@[@(260.0/266),@(26.0/54)];
+  shaft[@"contentsRect"]=@[@(108/sw),@0,@((sw-108)/sw),@1];
+  NSMutableDictionary *head=[layer(@"mallet",@[@(120+.88*(417-309-120)),@(.88*(180-27)),@(.88*60),@(.88*54)],
+      @[@(309.0/60),@.5],@[frame(0,0,0,3,1),frame(.42,0,0,5.2,1),frame(1,0,0,3,1)]) mutableCopy];
+  head[@"contentsRect"]=@[@0,@0,@(145/sw),@1];
+  return @[layer(@"shadow",@[@(120+.88*(40-120)),@(.88*3),@(.88*160),@(.88*16)],@[@0,@0],still),
+    layer(@"woodfish",@[@(120+.88*(26-120)),@0,@(.88*214),@(.88*129)],@[@0,@0],still),shaft,head];
+}
+- (void)requestAnimation:(NSTimeInterval)duration atTime:(CFTimeInterval)start {
+  self.pendingAnimationDuration=duration;self.pendingAnimationStart=start;[self setNeedsDisplay:YES];
+}
+- (void)syncPresentation {
+  if (!self.renderer || (!self.previewOnly && self.controller.appearanceHidden)) return;
+  [CATransaction begin];[CATransaction setDisableActions:YES];
+  NSString *identity=self.appearancePack ? [NSString stringWithFormat:@"%@:%@",self.appearancePack.identifier,self.appearancePack.contentFingerprint]
+                                       : [NSString stringWithFormat:@"builtin:%ld",(long)self.scene];
+  if (![self.renderedIdentity isEqual:identity]) {
+    [self.renderer installLayers:[self sceneDescriptors] images:[self sceneImages]];
+    self.renderedIdentity=identity; self.renderedScene=self.scene;
+  }
+  CGFloat offset=(!self.previewOnly && self.controller.offworkEnabled) ? kOffworkRegionHeight : 0;
+  [self.renderer layoutWithScale:kUiScale backing:self.window.backingScaleFactor ?: 2 offset:offset preview:self.previewOnly];
+  [self.renderer setCounter:[NSString stringWithFormat:@"%lld",self.controller.todayTotal]
+                      label:self.controller.offworkDisplayLabel duration:self.controller.offworkDisplayDuration];
+  if(self.pendingAnimationDuration>0) {
+    if(CACurrentMediaTime()-self.pendingAnimationStart<self.pendingAnimationDuration)
+      [self.renderer play:self.pendingAnimationDuration atTime:self.pendingAnimationStart];
+    self.pendingAnimationDuration=0;
+  }
+  [CATransaction commit];
+}
+
+#if defined(NIUMA_MAC_REFERENCE_RENDERER)
+- (void)drawReferenceRect:(NSRect)dirtyRect {
   (void)dirtyRect;
   NSGraphicsContext *ctx = NSGraphicsContext.currentContext;
   [ctx saveGraphicsState];
@@ -582,7 +716,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   }
 
   MeritController *controller = self.controller;
-  NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+  NSTimeInterval now = CACurrentMediaTime();
   NSTimeInterval age = now - controller.strikeStartTime;
   BOOL striking = controller.strikeActive && age >= 0 &&
                   age < controller.activeStrikeDuration;
@@ -757,6 +891,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [ctx restoreGraphicsState];
 }
 
+#endif
+
 @end
 
 @interface MeritCalendarView : NSView {
@@ -767,171 +903,17 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 @property(nonatomic, weak) MeritController *controller;
 @property(nonatomic) NSInteger year;
 @property(nonatomic) NSInteger month;
+@property(nonatomic) NSInteger selectedDay;
+@property(nonatomic, copy) NSArray<NSButton *> *dayButtons;
+- (NSString *)selectedKey;
+- (void)goToday:(id)sender;
 - (void)showCurrentMonth;
 - (void)shiftMonth:(NSInteger)delta;
 - (void)reloadMonthRange;
 - (void)refreshNavigation;
 @end
 
-@implementation MeritCalendarView
-
-- (BOOL)isFlipped { return YES; }
-
-- (void)showCurrentMonth {
-  NSDateComponents *parts = [RecordCalendar()
-      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
-  self.year = parts.year;
-  self.month = parts.month;
-  [self reloadMonthRange];
-  [self refreshNavigation];
-  [self setNeedsDisplay:YES];
-}
-
-- (void)reloadMonthRange {
-  NSDateComponents *now = [RecordCalendar()
-      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
-  _monthRange = niuma::CalendarMonthRange((int)now.year, (int)now.month);
-  for (NSString *key in self.controller.dailyTotals) {
-    if ([self.controller.dailyTotals[key] longLongValue] > 0 && key.UTF8String)
-      _monthRange.IncludeRecordedDay(std::string_view(key.UTF8String));
-  }
-  for (NSString *key in self.controller.offworkDailySnapshots) {
-    if ([self.controller offworkRecordForDay:key] && key.UTF8String)
-      _monthRange.IncludeRecordedDay(std::string_view(key.UTF8String));
-  }
-}
-
-- (void)refreshNavigation {
-  NSDateComponents *now = [RecordCalendar()
-      components:NSCalendarUnitYear | NSCalendarUnitMonth fromDate:NSDate.date];
-  if (_monthRange.last != niuma::CalendarMonthRange::Month((int)now.year, (int)now.month))
-    [self reloadMonthRange];
-  const int selected = _monthRange.Clamp(
-      niuma::CalendarMonthRange::Month((int)self.year, (int)self.month));
-  self.year = selected / 12; self.month = selected % 12 + 1;
-  self.previousButton.enabled = _monthRange.CanShift(selected, -1);
-  self.nextButton.enabled = _monthRange.CanShift(selected, 1);
-}
-
-- (void)shiftMonth:(NSInteger)delta {
-  [self refreshNavigation];
-  const int current = niuma::CalendarMonthRange::Month((int)self.year, (int)self.month);
-  const int next = _monthRange.Shift(current, delta < 0 ? -1 : delta > 0 ? 1 : 0);
-  if (next == current) return;
-  self.year = next / 12; self.month = next % 12 + 1;
-  [self refreshNavigation];
-  [self setNeedsDisplay:YES];
-}
-
-- (void)drawText:(NSString *)text rect:(NSRect)rect size:(CGFloat)size
-           color:(NSColor *)color weight:(NSFontWeight)weight {
-  NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
-  paragraph.alignment = NSTextAlignmentCenter;
-  paragraph.lineBreakMode = NSLineBreakByClipping;
-  [text drawInRect:rect withAttributes:@{
-    NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:size weight:weight],
-    NSForegroundColorAttributeName: color,
-    NSParagraphStyleAttributeName: paragraph
-  }];
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-  (void)dirtyRect;
-  [NMUiCanvas() setFill];
-  NSRectFill(self.bounds);
-
-  NSColor *ink = NMUiInk();
-  NSColor *accent = NMUiMeritGold();
-  [self refreshNavigation];
-  NSString *monthTitle = IsChineseUI()
-      ? [NSString stringWithFormat:@"%ld 年 %ld 月", (long)self.year, (long)self.month]
-      : [NSString stringWithFormat:@"%ld / %02ld", (long)self.year, (long)self.month];
-  [self drawText:monthTitle rect:NSMakeRect(90, 18, 380, 32) size:22 color:ink weight:NSFontWeightSemibold];
-
-  NSString *prefix = [NSString stringWithFormat:@"%04ld-%02ld-", (long)self.year, (long)self.month];
-  unsigned long long monthTotal = 0;
-  for (NSString *key in self.controller.dailyTotals) {
-    if ([key hasPrefix:prefix]) monthTotal += self.controller.dailyTotals[key].unsignedLongLongValue;
-  }
-  NSString *allText = [NSString stringWithFormat:@"%@  %lld",
-      UiText(@"累计功德", @"Total Merit"), self.controller.total];
-  NSString *monthText = [NSString stringWithFormat:@"%@  %llu",
-      UiText(@"本月功德", @"This Month"), monthTotal];
-  [self drawText:allText rect:NSMakeRect(24, 62, 250, 28) size:17 color:accent weight:NSFontWeightBold];
-  [self drawText:monthText rect:NSMakeRect(286, 62, 250, 28) size:17 color:accent weight:NSFontWeightBold];
-
-  NSArray<NSString *> *weekdays = IsChineseUI()
-      ? @[@"一", @"二", @"三", @"四", @"五", @"六", @"日"]
-      : @[@"MON", @"TUE", @"WED", @"THU", @"FRI", @"SAT", @"SUN"];
-  const CGFloat left = kCalendarLeft, top = kCalendarTop;
-  const CGFloat cellWidth = kCalendarCellWidth, cellHeight = kCalendarCellHeight;
-  for (NSInteger column = 0; column < 7; ++column) {
-    [self drawText:weekdays[column]
-              rect:NSMakeRect(left + column * cellWidth, 94, cellWidth, 20)
-              size:11 color:ink weight:NSFontWeightMedium];
-  }
-
-  NSDateComponents *firstParts = [[NSDateComponents alloc] init];
-  firstParts.year = self.year; firstParts.month = self.month; firstParts.day = 1;
-  NSDate *firstDate = [RecordCalendar() dateFromComponents:firstParts];
-  NSInteger firstWeekday = [RecordCalendar() component:NSCalendarUnitWeekday
-                                                         fromDate:firstDate];
-  NSInteger offset = (firstWeekday + 5) % 7;
-  NSRange days = [RecordCalendar() rangeOfUnit:NSCalendarUnitDay
-                                                  inUnit:NSCalendarUnitMonth
-                                                 forDate:firstDate];
-  NSString *todayKey = DateKeyForDate(NSDate.date);
-  for (NSInteger day = 1; day <= (NSInteger)days.length; ++day) {
-    NSInteger slot = offset + day - 1;
-    NSInteger row = slot / 7, column = slot % 7;
-    NSRect cell = NSMakeRect(left + column * cellWidth, top + row * cellHeight,
-                             cellWidth - 2, cellHeight - 3);
-    NSString *key = [NSString stringWithFormat:@"%04ld-%02ld-%02ld",
-        (long)self.year, (long)self.month, (long)day];
-    if ([key isEqualToString:todayKey]) {
-      [[NSColor colorWithCalibratedRed:.89 green:.94 blue:1 alpha:1] setFill];
-      [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(cell, 2, 3) xRadius:9 yRadius:9] fill];
-    }
-    unsigned long long value = self.controller.dailyTotals[key].unsignedLongLongValue;
-    NSString *meritText = [NSString stringWithFormat:@"%llu", value];
-    NSString *dateText = [NSString stringWithFormat:@"%02ld", (long)day];
-    CGFloat meritSize = meritText.length > 10 ? 10 : (meritText.length > 7 ? 12 : 15);
-    [self drawText:meritText
-              rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 5, NSWidth(cell) - 4, 22)
-              size:meritSize color:accent weight:NSFontWeightSemibold];
-    [self drawText:dateText
-              rect:NSMakeRect(NSMinX(cell) + 2, NSMinY(cell) + 27, NSWidth(cell) - 4, 16)
-              size:10 color:ink weight:NSFontWeightMedium];
-    NSDictionary *overtime = [self.controller offworkRecordForDay:key];
-    if (overtime) {
-      NSString *text = [NSString stringWithFormat:@"%@ %@", UiText(@"加班", @"OT"),
-          OffworkDurationText([overtime[@"seconds"] longLongValue])];
-      [self drawText:text
-                rect:NSMakeRect(NSMinX(cell) + 1, NSMinY(cell) + 44, NSWidth(cell) - 2, 14)
-                size:9 color:accent weight:NSFontWeightMedium];
-    }
-  }
-}
-
-- (void)mouseDown:(NSEvent *)event {
-  NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
-  if (point.x < kCalendarLeft || point.y < kCalendarTop) return;
-  NSInteger column = (NSInteger)((point.x - kCalendarLeft) / kCalendarCellWidth);
-  NSInteger row = (NSInteger)((point.y - kCalendarTop) / kCalendarCellHeight);
-  if (column > 6 || row > 5) return;
-  NSDateComponents *parts = [[NSDateComponents alloc] init];
-  parts.year = self.year; parts.month = self.month; parts.day = 1;
-  NSDate *firstDate = [RecordCalendar() dateFromComponents:parts];
-  NSInteger weekday = [RecordCalendar() component:NSCalendarUnitWeekday fromDate:firstDate];
-  NSInteger day = row * 7 + column - (weekday + 5) % 7 + 1;
-  NSRange days = [RecordCalendar() rangeOfUnit:NSCalendarUnitDay
-      inUnit:NSCalendarUnitMonth forDate:firstDate];
-  if (day < 1 || day > (NSInteger)days.length) return;
-  [self.controller showCalendarDay:[NSString stringWithFormat:@"%04ld-%02ld-%02ld",
-      (long)self.year, (long)self.month, (long)day]];
-}
-
-@end
+#import "calendar_view.mm"
 
 @implementation MeritController
 
@@ -1045,7 +1027,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.view.accessibilityLabel = [NSString stringWithFormat:@"%@ %lld, %@ %@",
       UiText(@"今日功德", @"Today's merit"), self.todayTotal,
       self.offworkDisplayLabel, self.offworkDisplayDuration];
-  [self.view setNeedsDisplay:YES];
+  if (!self.appearanceHidden) [self.view setNeedsDisplay:YES];
   if (self.calendarWindow.isVisible) [self.calendarView setNeedsDisplay:YES];
   if (changedDay) [self flushOffwork:YES];
   else if (uptime - self.offworkLastFlushUptime >= 60) [self flushOffwork:NO];
@@ -1080,13 +1062,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [self refreshOffworkAllowRollover:YES];
   [self flushOffwork:YES];
   self.offworkSuspended = YES;
+  self.systemSleeping=YES; self.displaySuspended=YES; [self applyAppearanceVisibility];
 }
 
 - (void)offworkClockChanged:(NSNotification *)notification {
   (void)notification;
   [NSTimeZone resetSystemTimeZone];
   tzset();
+  [self.inputMailbox invalidateDate];
   self.offworkSuspended = NO;
+  if([notification.name isEqual:NSWorkspaceDidWakeNotification]) self.systemSleeping=NO;
+  if([notification.name isEqual:@"com.apple.screenIsUnlocked"] || [notification.name isEqual:NSWorkspaceSessionDidBecomeActiveNotification]) self.screenLocked=NO;
+  self.displaySuspended=self.screenLocked || self.systemSleeping; [self refreshAppearanceVisibility:nil];
   [self ensureCurrentDay];
   [self refreshOffworkAllowRollover:NO];
   [self flushOffwork:YES];
@@ -1094,11 +1081,13 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)reminderWillPause:(NSNotification *)notification {
   (void)notification;
+  self.screenLocked=YES; self.displaySuspended=YES; [self applyAppearanceVisibility];
   _reminderActivity.BeginSuspend(ReminderContinuousTimeMs());
 }
 
 - (void)reminderDidResume:(NSNotification *)notification {
   (void)notification;
+  self.displaySuspended=self.screenLocked || self.systemSleeping; [self refreshAppearanceVisibility:nil];
   const std::uint64_t nowMs = ReminderContinuousTimeMs();
   const bool paired = _reminderActivity.suspended();
   const std::uint64_t startMs = _reminderActivity.suspend_started_ms();
@@ -1228,7 +1217,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [defaults setInteger:self.offworkMinute forKey:kOffworkMinute];
   [self startOffworkTimer];
   [self flushOffwork:YES];
-  [self.calendarView setNeedsDisplay:YES];
+  if (self.calendarWindow.isVisible) [self.calendarView setNeedsDisplay:YES];
   [self.offworkSettingsWindow close];
 }
 
@@ -1280,6 +1269,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)saveState {
+  [self drainInput];
   if (!self.dirty) return;
   id<NMMeritPreferences> defaults = MeritPreferences();
   [defaults setInteger:self.total forKey:kTotal];
@@ -1292,8 +1282,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if ([today isEqualToString:self.currentDayKey]) return;
   self.currentDayKey = today;
   self.todayTotal = self.dailyTotals[today].longLongValue;
-  [self.view setNeedsDisplay:YES];
-  [self.calendarView setNeedsDisplay:YES];
+  if (!self.appearanceHidden) [self.view setNeedsDisplay:YES];
+  if (self.calendarWindow.isVisible) [self.calendarView setNeedsDisplay:YES];
 }
 
 - (NSURL *)launchAgentURL {
@@ -1511,8 +1501,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
   [self loadState];
   [self loadOffworkState];
-  if (!gIsolatedAcceptance || gReminderPreviewAcceptance) {
-    NSString *support = gReminderPreviewAcceptance ? gAcceptanceRootPath :
+  if (!gIsolatedAcceptance || gAcceptanceRootPath.length) {
+    NSString *support = gIsolatedAcceptance ? gAcceptanceRootPath :
         NSSearchPathForDirectoriesInDomains(
             NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
     if (support.length > 0) {
@@ -1550,6 +1540,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
                                             styleMask:NSWindowStyleMaskBorderless
                                               backing:NSBackingStoreBuffered
                                                 defer:NO];
+  self.window.releasedWhenClosed = NO;
   self.window.contentView = self.view;
   self.window.backgroundColor = NSColor.clearColor;
   self.window.opaque = NO;
@@ -1591,7 +1582,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       [visibilityDefaults boolForKey:@"AutoHideFullscreen"];
   self.visibilityStatusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
   if (self.visibilityStatusItem.button) {
-    self.visibilityStatusItem.button.title = @"功";
+    self.visibilityStatusItem.button.title = gIsolatedAcceptance ? @"测" : @"功";
     self.visibilityStatusItem.button.toolTip = UiText(@"牛马电子功德 · 显示或隐藏形象", @"NiuMa Merit · Show or hide appearance");
     self.visibilityStatusItem.button.target = self;
     self.visibilityStatusItem.button.action = @selector(showStatusMenu:);
@@ -1662,7 +1653,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       target:self selector:@selector(evaluateReminderActivity:) userInfo:nil repeats:YES];
   [NSRunLoop.mainRunLoop addTimer:self.reminderTimer forMode:NSRunLoopCommonModes];
   [NSRunLoop.mainRunLoop addTimer:self.reminderTimer forMode:NSModalPanelRunLoopMode];
-  if (!gIsolatedAcceptance) {
+  if (!gIsolatedAcceptance || gAcceptancePhysicalInput) {
     // Monitor tap health even on a silent autostart or after a failed installation.
     self.permissionPollTimer = [NSTimer timerWithTimeInterval:kPermissionPollInterval * 2
         target:self selector:@selector(checkPermission:) userInfo:nil repeats:YES];
@@ -1678,7 +1669,18 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [NSApp performSelector:@selector(terminate:) withObject:nil
         afterDelay:niuma::reminder::kReminderDisplayMilliseconds / 1000.0 + 4.0];
   }
+  self.memoryPressure=dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE,0,
+      DISPATCH_MEMORYPRESSURE_WARN|DISPATCH_MEMORYPRESSURE_CRITICAL,dispatch_get_main_queue());
+  __weak MeritController *memoryOwner=self;
+  dispatch_source_set_event_handler(self.memoryPressure,^{ [memoryOwner discardRebuildableResources]; });
+  dispatch_resume(self.memoryPressure);
   self.readyForOpenedFiles = YES;
+  if(gIsolatedAcceptance && gAcceptancePackPaths.count) {
+    __weak MeritController *acceptanceOwner=self;
+    dispatch_async(dispatch_get_main_queue(),^{
+      [acceptanceOwner application:NSApp openFiles:gAcceptancePackPaths];
+    });
+  }
   NSArray<NSString *> *pending = [self.pendingOpenFiles copy];
   self.pendingOpenFiles = nil;
   if (pending.count) [self application:NSApp openFiles:pending];
@@ -1741,7 +1743,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
   const BOOL importsSucceeded = failures.count == 0;
   NSError *loadError = nil;
-  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&loadError];
+  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledMetadata:&loadError];
   if (loadError) [failures addObject:loadError.localizedDescription];
   NSMutableSet<NSString *> *newIds = [NSMutableSet set];
   NSMutableSet<NSString *> *availableIds = [NSMutableSet set];
@@ -1783,7 +1785,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSAlert *alert = [[NMUiAlert alloc] init];
   alert.alertStyle = failures.count ? NSAlertStyleWarning : NSAlertStyleInformational;
   alert.messageText = singleEnabled
-      ? UiText(@"导入完成，已启用此形象", @"Imported and Enabled")
+      ? UiText(@"导入完成，正在准备形象", @"Imported; Preparing Appearance")
       : failures.count
           ? (availableIds.count ? UiText(@"部分形象已导入", @"Some Packs Imported")
                                 : UiText(@"未能导入形象", @"No Packs Imported"))
@@ -1794,6 +1796,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       (unsigned long)availableIds.count, (unsigned long)newIds.count];
   if (!singleEnabled) summary = [summary stringByAppendingString:
       UiText(@"\n只有确认选择后才会切换形象。", @"\nYour appearance changes only after you confirm a choice.")];
+  else summary=[summary stringByAppendingString:UiText(@"\n准备完成后会显示新形象；准备失败会保留原形象并提示。",@"\nThe new appearance will show when ready. If preparation fails, the previous one is kept and an error is shown.")];
   alert.informativeText = summary;
   NSMutableArray<NSString *> *details = [lines mutableCopy];
   if (failures.count) {
@@ -1826,9 +1829,14 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [self checkPermission:nil];
 }
 
+- (void)discardRebuildableResources { [self.thumbnailGrid discardCache]; }
+
 - (void)applicationWillTerminate:(NSNotification *)notification {
   (void)notification;
   self.eventTapStopping = YES;
+  ++self.resourceGeneration; self.pendingScenePack=nil;
+  if(self.memoryPressure) dispatch_source_cancel(self.memoryPressure);self.memoryPressure=nil;
+  [self stopAnimation];
   if (self.visibilityStatusItem) [NSStatusBar.systemStatusBar removeStatusItem:self.visibilityStatusItem];
   self.visibilityStatusItem = nil;
   [self stopPermissionPoll];
@@ -1838,6 +1846,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   [self.offworkTimer invalidate];
   self.offworkTimer = nil;
   [self saveState];
+  [self.saveTimer invalidate]; self.saveTimer=nil;
   [self.dayTimer invalidate];
   [self.reminderTimer invalidate];
   self.reminderTimer = nil;
@@ -1848,19 +1857,15 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)startStrikeWithDuration:(NSTimeInterval)duration {
-  if (_visibility.hidden() || self.strikeActive) return;
+  if (self.eventTapStopping || _visibility.hidden() || self.displaySuspended || self.strikeActive) return;
   self.strikeActive = YES;
-  self.strikeStartTime = [NSDate timeIntervalSinceReferenceDate];
+  self.strikeStartTime = CACurrentMediaTime();
   self.activeStrikeDuration = duration;
-  if (!self.animationTimer) {
-    self.animationTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 60.0
-                                                          target:self
-                                                        selector:@selector(animate:)
-                                                        userInfo:nil
-                                                         repeats:YES];
-    [NSRunLoop.mainRunLoop addTimer:self.animationTimer forMode:NSRunLoopCommonModes];
-    [NSRunLoop.mainRunLoop addTimer:self.animationTimer forMode:NSModalPanelRunLoopMode];
-  }
+  [self.view requestAnimation:duration atTime:self.strikeStartTime];
+  self.animationTimer = [NSTimer timerWithTimeInterval:duration target:self
+      selector:@selector(animate:) userInfo:nil repeats:NO];
+  [NSRunLoop.mainRunLoop addTimer:self.animationTimer forMode:NSRunLoopCommonModes];
+  [NSRunLoop.mainRunLoop addTimer:self.animationTimer forMode:NSModalPanelRunLoopMode];
 }
 
 - (void)showPermissionIntroIfNeeded {
@@ -1879,11 +1884,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       @"1. 按住小伙伴拖动，放到喜欢的位置。\n"
        @"2. 右键小伙伴，可以换形象、看日历和退出。\n"
        @"3. 在其他应用中计数需要允许“输入监控”；右键打开“关于”，可查看 Mac 权限帮助。\n\n"
-       @"只统计事件次数，不读取按键内容、坐标、当前应用或窗口内容；不联网，数据留在本机。",
+       @"只记录操作次数，不读取输入内容。全屏隐身仅判断窗口是否覆盖屏幕，不保存应用或窗口信息；数据留在本机。",
       @"1. Drag your companion to move it.\n"
        @"2. Right-click it to change appearance, view the calendar, or quit.\n"
        @"3. Counting in other apps requires Input Monitoring permission. Open About for Mac permissions help.\n\n"
-       @"Only event counts are used, never keys, coordinates, apps or window contents. No networking; data stays on this Mac.");
+       @"Only operation counts are recorded; typed content is never read. Fullscreen hiding checks window coverage without saving app or window information. Data stays on this Mac.");
   [alert addButtonWithTitle:UiText(@"知道了", @"Got It")];
   [alert runModal];
 }
@@ -1903,7 +1908,64 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)countPetClickIfNeeded {
+  [self drainInput];
   if (![self hasLiveEventTap]) [self count];
+}
+
+- (void)prepareInputDelivery {
+    self.inputMailbox=[[NMInputMailbox alloc] initWithTotal:self.total];
+    self.inputNotification=dispatch_source_create(DISPATCH_SOURCE_TYPE_DATA_ADD,0,0,dispatch_get_main_queue());
+    __weak MeritController *weakSelf=self;
+    dispatch_source_set_event_handler(self.inputNotification, ^{ [weakSelf drainInput]; });
+    dispatch_resume(self.inputNotification);
+}
+- (void)captureInputType:(CGEventType)type {
+  NMInputMailbox *mailbox=self.inputMailbox;
+  if (!mailbox) return;
+  if (type==kCGEventTapDisabledByTimeout || type==kCGEventTapDisabledByUserInput) {
+    [mailbox disabled:type];
+  } else if (type==kCGEventKeyUp) {
+    _reminderActivity.Observe(niuma::reminder::ActivitySampler::Event::KeyUp,ReminderContinuousTimeMs());
+    return;
+  } else {
+    auto event=type==kCGEventKeyDown ? niuma::reminder::ActivitySampler::Event::KeyDown :
+      type==kCGEventScrollWheel ? niuma::reminder::ActivitySampler::Event::ScrollPulse : niuma::reminder::ActivitySampler::Event::Click;
+    _reminderActivity.Observe(event,ReminderContinuousTimeMs());
+    [mailbox record:type wall:std::time(nullptr) uptime:NSProcessInfo.processInfo.systemUptime];
+  }
+  dispatch_source_t notification=self.inputNotification;
+  if(notification) dispatch_source_merge_data(notification,1);
+}
+- (void)drainInput {
+  if(!self.inputMailbox) return;
+  NSDictionary *snapshot=[self.inputMailbox take];
+  NSDictionary *days=snapshot[@"days"]; long long added=0;
+  for(NSString *key in days) {
+    long long count=[days[key] longLongValue]; added+=count;
+    long long old=[self.dailyTotals[key] longLongValue];
+    self.dailyTotals[key]=@(count>LLONG_MAX-old ? LLONG_MAX : old+count);
+  }
+  self.receivedEvents+=[snapshot[@"events"] unsignedIntegerValue];
+  self.receivedKeys+=[snapshot[@"keys"] unsignedIntegerValue];
+  self.receivedClicks+=[snapshot[@"clicks"] unsignedIntegerValue];
+  self.receivedScrolls+=[snapshot[@"scrolls"] unsignedIntegerValue];
+  self.selfCheckKeys+=[snapshot[@"checkKeys"] unsignedIntegerValue];
+  self.selfCheckClicks+=[snapshot[@"checkClicks"] unsignedIntegerValue];
+  self.selfCheckScrolls+=[snapshot[@"checkScrolls"] unsignedIntegerValue];
+  NSUInteger checked=[snapshot[@"checkCounted"] unsignedIntegerValue];
+  self.selfCheckExpected+=[snapshot[@"checkExpected"] unsignedIntegerValue];self.selfCheckCounted+=checked;
+  if([snapshot[@"checkKeys"] unsignedIntegerValue]+[snapshot[@"checkClicks"] unsignedIntegerValue]+[snapshot[@"checkScrolls"] unsignedIntegerValue]) self.selfCheckLastEvent=[snapshot[@"checkLast"] doubleValue];
+  if(added) {
+    self.total=added>LLONG_MAX-self.total ? LLONG_MAX : self.total+added;
+    self.currentDayKey=DateKeyForDate(NSDate.date);self.todayTotal=[self.dailyTotals[self.currentDayKey] longLongValue];
+    self.dirty=YES;self.globalCountConfirmed=YES;
+    self.smoothedInputInterval=[snapshot[@"interval"] doubleValue];self.lastInputTime=[snapshot[@"lastCount"] doubleValue];
+    [self startStrikeWithDuration:std::clamp(self.smoothedInputInterval*1.05,kMinStrikeDuration,kMaxStrikeDuration)];
+    if(!self.appearanceHidden) [self.view setNeedsDisplay:YES];
+    if(self.calendarWindow.isVisible) [self.calendarView setNeedsDisplay:YES];
+  }
+  CGEventType disabled=(CGEventType)[snapshot[@"disabled"] unsignedIntValue];
+  if(disabled) [self handleEventTapDisabled:disabled];
 }
 
 - (void)receiveGlobalEvent:(CGEventType)type {
@@ -2202,6 +2264,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.selfCheckEnds = self.selfCheckStarts + 10;
   self.selfCheckActive = YES;
   [self refreshCountStatus:nil];
+  [self.inputMailbox configureCheckFrom:self.selfCheckStarts until:self.selfCheckEnds enabled:self.selfCheckActive];
 }
 
 - (void)retryListener:(id)sender {
@@ -2272,7 +2335,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
               ceil(MAX(0.0, self.selfCheckEnds - now))];
   }
   self.countStatusText.string = [NSString stringWithFormat:
-      UiText(@"%@\n\n点击“开始”后切到其他应用，做几次按键、鼠标点击或滚动，10 秒后回来查看。程序不会读取你在哪个应用，请自行确认。\n\n%@\n\n本次收到：按键 %lu 次 / 鼠标按键 %lu 次 / 滚动事件 %lu 次\n按现有规则应增加 %lu，实际增加 %lu。连续滚动按一次手势计数。\n最后事件：开始后 %.1f 秒（无事件时为 0）。\n\n监听句柄或权限开关本身不是成功证据。输入监控未授权、授权身份变化或安全输入都可能影响监听；不绕过系统限制。\n\n自检仅在内存中保留事件次数与相对时间；不读取或保存具体键值、输入内容、坐标、应用或窗口信息。不联网。",
+      UiText(@"%@\n\n点击“开始”后切到其他应用，做几次按键、鼠标点击或滚动，10 秒后回来查看。计数自检不按应用区分，请自行确认已切换。\n\n%@\n\n本次收到：按键 %lu 次 / 鼠标按键 %lu 次 / 滚动事件 %lu 次\n按现有规则应增加 %lu，实际增加 %lu。连续滚动按一次手势计数。\n最后事件：开始后 %.1f 秒（无事件时为 0）。\n\n监听句柄或权限开关本身不是成功证据。输入监控未授权、授权身份变化或安全输入都可能影响监听；不绕过系统限制。\n\n自检仅在内存中保留事件次数与相对时间；不记录具体键值、输入内容、坐标、应用或窗口信息。不联网。",
              @"%@\n\nStart, switch to another app and type, click or scroll. Return after 10 seconds. The app does not inspect which app you used; please confirm the switch yourself.\n\n%@\n\nReceived: %lu key events / %lu mouse clicks / %lu scroll events\nExpected count increase: %lu; actual: %lu. Continuous scrolling counts as one gesture.\nLast event: %.1f seconds after start (0 if none).\n\nA handle or permission switch alone is not proof. Missing or changed Input Monitoring permission and secure input may affect listening. No system restrictions are bypassed.\n\nOnly event counts and relative times are kept in memory, never key values, contents, coordinates, apps or windows. No networking."),
       self.countStatusTitle, progress, (unsigned long)self.selfCheckKeys,
       (unsigned long)self.selfCheckClicks, (unsigned long)self.selfCheckScrolls,
@@ -2304,7 +2367,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 
 - (void)checkPermission:(NSTimer *)timer {
   (void)timer;
-  if (gIsolatedAcceptance || self.eventTapStopping || self.eventTapOperationInProgress) return;
+  if ((gIsolatedAcceptance && !gAcceptancePhysicalInput) || self.eventTapStopping || self.eventTapOperationInProgress) return;
   self.eventTapOperationInProgress = YES;
   @try {
     if (self.eventTapRecoveryStopped) {
@@ -2352,7 +2415,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)installEventTap {
-  if (gIsolatedAcceptance || self.eventTapStopping ||
+  if ((gIsolatedAcceptance && !gAcceptancePhysicalInput) || self.eventTapStopping ||
       self.eventTapOperationInProgress || self.eventTap) return;
   // Only startup or an explicit retry resets this per-session recovery budget.
   self.eventTapRecoveryAttempts = 0;
@@ -2365,7 +2428,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)createEventTapOnce {
-  if (gIsolatedAcceptance || self.eventTapStopping ||
+  if ((gIsolatedAcceptance && !gAcceptancePhysicalInput) || self.eventTapStopping ||
       self.eventTapRecoveryStopped || !self.eventTapOperationInProgress || self.eventTap) return;
   self.globalCountConfirmed = NO;
   CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) |
@@ -2384,9 +2447,8 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       [self removeEventTap];
       continue;
     }
-    CFRunLoopAddSource(CFRunLoopGetMain(), self.eventSource, kCFRunLoopCommonModes);
-    CFRunLoopAddSource(CFRunLoopGetMain(), self.eventSource,
-        (__bridge CFStringRef)NSModalPanelRunLoopMode);
+    [self prepareInputDelivery];
+    self.inputThread=[[NMEventTapThread alloc] initWithSource:self.eventSource];
     // New taps are normally enabled. Do not fight a disabled result from the OS.
     if (self.eventTapStopping || self.eventTapRecoveryStopped || self.eventTapDisabledPending ||
         !CFMachPortIsValid(self.eventTap) || !CGEventTapIsEnabled(self.eventTap)) {
@@ -2417,16 +2479,16 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.eventTapDisabledPending = NO;
   // CFRelease alone does not tear down the WindowServer registration.
   if (tap) CFMachPortInvalidate(tap);
-  if (source) {
-    CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
-    CFRunLoopRemoveSource(CFRunLoopGetMain(), source, (__bridge CFStringRef)NSModalPanelRunLoopMode);
-    CFRelease(source);
-  }
+  [self.inputThread stop]; self.inputThread=nil;
+  [self drainInput];
+  if (self.inputNotification) dispatch_source_cancel(self.inputNotification);
+  self.inputNotification=nil; self.inputMailbox=nil;
+  if(source) CFRelease(source);
   if (tap) CFRelease(tap);
 }
 
 - (void)handleEventTapDisabled:(CGEventType)type {
-  if (gIsolatedAcceptance || self.eventTapStopping || !self.eventTap) return;
+  if ((gIsolatedAcceptance && !gAcceptancePhysicalInput) || self.eventTapStopping || !self.eventTap) return;
   self.globalCountConfirmed = NO;
   self.inputMonitoringAuthorized = NO;
   if (self.selfCheckActive) self.selfCheckInterrupted = YES;
@@ -2449,7 +2511,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   if (self.todayTotal < LLONG_MAX) self.todayTotal++;
   self.dailyTotals[self.currentDayKey] = @(self.todayTotal);
   self.dirty = YES;
-  NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+  NSTimeInterval now = CACurrentMediaTime();
   if (self.lastInputTime > 0) {
     NSTimeInterval gap = now - self.lastInputTime;
     if (gap > kPauseForResetGap) {
@@ -2466,11 +2528,11 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       self.smoothedInputInterval * 1.05, kMinStrikeDuration, kMaxStrikeDuration);
   [self startStrikeWithDuration:desiredDuration];
   if (!_visibility.hidden()) [self.view setNeedsDisplay:YES];
-  [self.calendarView setNeedsDisplay:YES];
+  if (self.calendarWindow.isVisible) [self.calendarView setNeedsDisplay:YES];
 }
 
 - (void)countScrollGesture {
-  NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+  NSTimeInterval now = CACurrentMediaTime();
   BOOL beginsNewGesture = self.lastScrollEventTime <= 0 ||
                           now - self.lastScrollEventTime > kScrollGestureIdleGap;
   self.lastScrollEventTime = now;
@@ -2478,35 +2540,40 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)animate:(NSTimer *)timer {
-  (void)timer;
-  if (_visibility.hidden()) { [self stopAnimation]; self.strikeActive = NO; return; }
-  NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
-  NSTimeInterval age = now - self.strikeStartTime;
-  [self.view setNeedsDisplay:YES];
-  if (!self.strikeActive) return;
-  if (age >= self.activeStrikeDuration) {
-    self.strikeActive = NO;
-    [self.animationTimer invalidate];
-    self.animationTimer = nil;
-  }
+  (void)timer; self.strikeActive=NO;self.view.pendingAnimationDuration=0;
+  [self.animationTimer invalidate]; self.animationTimer=nil;
+  [self.view.renderer stop];
 }
-
 - (void)stopAnimation {
-  if (!self.animationTimer) return;
-  [self.animationTimer invalidate];
-  self.animationTimer = nil;
+  [self.animationTimer invalidate]; self.animationTimer=nil;
+  self.strikeActive=NO;self.view.pendingAnimationDuration=0; [self.view.renderer stop];
 }
 
 - (void)refreshAppearanceVisibility:(id)sender {
   (void)sender;
-  _visibility.fullscreen = _visibility.autoHideFullscreen &&
-      (NSApp.currentSystemPresentationOptions & NSApplicationPresentationFullScreen) != 0;
+  BOOL fullscreen=NO;
+  if(_visibility.autoHideFullscreen) {
+    pid_t active=NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
+    NSScreen *screen=self.window.screen ?: NSScreen.mainScreen;
+    CGDirectDisplayID display=[screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
+    CGRect target=CGDisplayBounds(display);
+    CFArrayRef windowInfo=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID);
+    for(NSDictionary *info in (__bridge NSArray *)windowInfo) {
+      if([info[(__bridge NSString *)kCGWindowOwnerPID] intValue]!=active ||
+         [info[(__bridge NSString *)kCGWindowLayer] intValue]!=0) continue;
+      CGRect bounds{};if(!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)info[(__bridge NSString *)kCGWindowBounds],&bounds)) continue;
+      if(CGRectGetMinX(bounds)<=CGRectGetMinX(target)+1 && CGRectGetMinY(bounds)<=CGRectGetMinY(target)+1 &&
+         CGRectGetMaxX(bounds)>=CGRectGetMaxX(target)-1 && CGRectGetMaxY(bounds)>=CGRectGetMaxY(target)-1) { fullscreen=YES;break; }
+    }
+    if(windowInfo) CFRelease(windowInfo);
+  }
+  if(!gIsolatedAcceptance || gAcceptancePhysicalInput) _visibility.fullscreen=fullscreen;
   if (!_visibility.fullscreen) _visibility.showDuringFullscreen = false;
   [self applyAppearanceVisibility];
 }
 
 - (void)applyAppearanceVisibility {
-  BOOL hidden = _visibility.hidden();
+  BOOL hidden = _visibility.hidden() || self.displaySuspended;
   if (!self.window || hidden == self.appearanceHidden) return;
   self.appearanceHidden = hidden;
   [self stopAnimation]; self.strikeActive = NO;
@@ -2692,20 +2759,22 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)sender;
   [self ensureCurrentDay];
   if (!self.calendarWindow) {
-    NSRect frame = NSMakeRect(0, 0, 560, 516);
+    NSRect frame = NSMakeRect(0, 0, 720, 724);
     self.calendarView = [[MeritCalendarView alloc] initWithFrame:frame];
     self.calendarView.controller = self;
     [self.calendarView showCurrentMonth];
-    NSButton *previous = [[NSButton alloc] initWithFrame:NSMakeRect(24, 18, 44, 28)];
+    NSButton *previous = [[NSButton alloc] initWithFrame:NSMakeRect(24, 20, 30, 28)];
     previous.title = @"<"; previous.tag = -1; previous.target = self;
     previous.action = @selector(shiftCalendarMonth:);
-    NSButton *next = [[NSButton alloc] initWithFrame:NSMakeRect(492, 18, 44, 28)];
+    NSButton *next = [[NSButton alloc] initWithFrame:NSMakeRect(275, 20, 30, 28)];
     next.title = @">"; next.tag = 1; next.target = self;
     next.action = @selector(shiftCalendarMonth:);
     previous.accessibilityLabel = UiText(@"上个月", @"Previous month");
     next.accessibilityLabel = UiText(@"下个月", @"Next month");
     self.calendarView.previousButton = previous;
     self.calendarView.nextButton = next;
+    NSButton *today=[NSButton buttonWithTitle:UiText(@"回到今天",@"Today") target:self.calendarView action:@selector(goToday:)];
+    today.frame=NSMakeRect(325,20,100,28); [self.calendarView addSubview:today];
     [self.calendarView addSubview:previous];
     [self.calendarView addSubview:next];
     self.calendarWindow = [[NSWindow alloc] initWithContentRect:frame
@@ -2716,11 +2785,12 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.calendarWindow.releasedWhenClosed = NO;
     if (gIsolatedAcceptance) self.calendarWindow.restorable = NO;
     NMUiWindow(self.calendarWindow);
+    self.calendarWindow.backgroundColor=NSColor.whiteColor;
     [self.calendarWindow center];
   }
   [self.calendarView reloadMonthRange];
   [self.calendarView refreshNavigation];
-  [self.calendarView setNeedsDisplay:YES];
+  if (self.calendarWindow.isVisible) [self.calendarView setNeedsDisplay:YES];
   [NSApp activateIgnoringOtherApps:YES];
   [self.calendarWindow makeKeyAndOrderFront:nil];
 }
@@ -2738,8 +2808,9 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)reloadAppearancePacks {
+  ++self.resourceGeneration; self.pendingScenePack=nil;
   NSError *error = nil;
-  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledPacks:&error];
+  self.installedAppearancePacks = [NMAppearancePackStore loadInstalledMetadata:&error];
   self.appearanceLoadError = error;
   if (error && self.window) {
     NSAlert *alert = [[NMUiAlert alloc] init];
@@ -2758,19 +2829,46 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
 }
 
 - (void)applyAppearanceId:(NSString *)identifier {
-  NMAppearancePack *pack = [self appearancePackWithId:identifier];
-  if (pack) {
-    self.view.appearancePack = pack;
-    self.selectedAppearanceId = pack.identifier;
-  } else {
-    self.selectedScene = MeritSceneWoodfish;
-    self.view.scene = self.selectedScene;
-    self.view.appearancePack = nil;
-    self.selectedAppearanceId = @"builtin.woodfish";
-    [MeritPreferences() setInteger:self.selectedScene forKey:kSelectedScene];
-  }
+  ++self.resourceGeneration;
+  self.pendingScenePack=[self appearancePackWithId:identifier];
+  if (self.pendingScenePack) { [self pumpSceneLoad]; return; }
+  [self stopAnimation];
+  self.selectedScene=MeritSceneWoodfish; self.view.scene=self.selectedScene;
+  self.view.appearancePack=nil; self.selectedAppearanceId=@"builtin.woodfish";
+  [MeritPreferences() setInteger:self.selectedScene forKey:kSelectedScene];
   [MeritPreferences() setObject:self.selectedAppearanceId forKey:kSelectedAppearance];
-  [self.view setNeedsDisplay:YES];
+  [self.view syncPresentation];
+}
+- (void)pumpSceneLoad {
+  if (self.resourceLoadBusy || !self.pendingScenePack || self.eventTapStopping) return;
+  NMAppearancePack *metadata=self.pendingScenePack; self.pendingScenePack=nil;
+  NSUInteger generation=self.resourceGeneration; self.resourceLoadBusy=YES;
+  __weak MeritController *weakSelf=self;
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{ @autoreleasepool {
+    NSError *failure=nil;
+    NMAppearancePack *resources=[NMAppearancePackStore loadResourcesForPack:metadata error:&failure];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      MeritController *controller=weakSelf; if (!controller) return;
+      controller.resourceLoadBusy=NO;
+      if (generation==controller.resourceGeneration && !controller.eventTapStopping) {
+        if (resources) {
+          [controller stopAnimation]; controller.view.appearancePack=resources;
+          controller.selectedAppearanceId=resources.identifier; controller.appearanceLoadError=nil;
+          [MeritPreferences() setObject:resources.identifier forKey:kSelectedAppearance];
+          [controller.view syncPresentation];
+          [controller startStrikeWithDuration:.8];
+        } else {
+          controller.appearanceLoadError=failure;
+          if (!gIsolatedAcceptance) {
+            NSAlert *alert=[NMUiAlert new]; alert.messageText=UiText(@"形象未能切换",@"Appearance Not Changed");
+            alert.informativeText=failure.localizedDescription ?: UiText(@"原形象与数据已保留。",@"The previous appearance and data were kept.");
+            [alert runModal];
+          }
+        }
+      }
+      [controller pumpSceneLoad];
+    });
+  }});
 }
 
 - (NSView *)appearanceGrid {
@@ -2784,20 +2882,26 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   self.appearanceItems = items;
   NSInteger rows = (items.count + 1) / 2;
   CGFloat gridHeight = rows * 162 - 8;
-  NSView *grid = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 324, gridHeight)];
+  NMThumbnailGrid *grid = [[NMThumbnailGrid alloc] initWithFrame:NSMakeRect(0, 0, 324, gridHeight)];
   NSMutableArray *buttons = [NSMutableArray array];
   for (NSInteger i = 0; i < (NSInteger)items.count; ++i) {
     NSDictionary *item = items[(NSUInteger)i];
     NSImage *thumbnail = nil;
     NMAppearancePack *pack = item[@"pack"];
     if (pack) {
-      thumbnail = pack.previewImage;
+      thumbnail = nil; // Prepared on demand by the visible-card worker.
     } else {
       MeritView *preview = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, 120, 125)];
       preview.previewOnly = YES;
       preview.scene = (MeritScene)[item[@"scene"] integerValue];
-      NSBitmapImageRep *rep = [preview bitmapImageRepForCachingDisplayInRect:preview.bounds];
-      [preview cacheDisplayInRect:preview.bounds toBitmapImageRep:rep];
+      [preview syncPresentation];
+      NSBitmapImageRep *rep=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:240 pixelsHigh:250
+          bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace
+          bitmapFormat:0 bytesPerRow:960 bitsPerPixel:32];
+      NSGraphicsContext *context=[NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
+      [NSGraphicsContext saveGraphicsState]; NSGraphicsContext.currentContext=context;
+      CGContextScaleCTM(context.CGContext,2,2); [preview.layer renderInContext:context.CGContext];
+      [NSGraphicsContext restoreGraphicsState];
       thumbnail = [[NSImage alloc] initWithSize:preview.bounds.size];
       [thumbnail addRepresentation:rep];
     }
@@ -2817,6 +2921,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     button.toolTip = button.title;
     button.accessibilityLabel = button.title;
     button.image = thumbnail;
+    if (!pack && thumbnail) { NSMutableDictionary *withThumbnail=[item mutableCopy]; withThumbnail[@"thumbnail"]=thumbnail; items[(NSUInteger)i]=withThumbnail; }
     button.imagePosition = NSImageAbove;
     button.imageScaling = NSImageScaleProportionallyDown;
     button.bezelStyle = NSBezelStyleRegularSquare;
@@ -2830,6 +2935,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     [buttons addObject:button];
   }
   self.appearanceButtons = buttons;
+  grid.items=items; grid.buttons=buttons; self.thumbnailGrid=grid;
   NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 324, MIN(478, gridHeight))];
   scroll.documentView = grid;
   scroll.hasVerticalScroller = gridHeight > NSHeight(scroll.bounds);
@@ -2867,11 +2973,10 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
     self.appearancePickerAlert = alert;
     NSModalResponse response = [alert runModal];
     self.appearancePickerAlert = nil;
+    self.appearanceButtons=nil; self.appearanceItems=nil;
     if (response == NSAlertFirstButtonReturn) {
       [self applyAppearanceId:self.pendingAppearanceId];
-      [self stopAnimation];
-      self.strikeActive = NO;
-      [self startStrikeWithDuration:0.800];
+      if([self.pendingAppearanceId isEqual:@"builtin.woodfish"]) [self startStrikeWithDuration:.8];
       return;
     }
     if (response == NSAlertSecondButtonReturn) return;
@@ -2907,7 +3012,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"?";
   NSString *aboutText = [NSString stringWithFormat:UiText(
       @"版本 %@\n\n"
-       @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取具体内容、鼠标位置或窗口信息。\n"
+       @"只统计按键、鼠标按键和滚轮手势发生的次数，不读取输入内容或鼠标位置。全屏隐身仅判断窗口是否覆盖屏幕，不保存应用或窗口信息。\n"
        @"本软件不包含网络请求、遥测或自动更新。\n\n"
        @"在其他应用中计数，需要允许本应用使用“输入监控”。\n"
        @"如仍未正常计数，可联系开发者或扫码进粉丝群寻求帮助。\n"
@@ -2919,7 +3024,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
        @"抖音号：1872941388",
       @"Version %@\n\n"
        @"Counts keyboard presses, mouse button presses, and scroll gestures. It does not read "
-       @"specific input, mouse positions, or window information.\n"
+       @"typed content or mouse positions. Fullscreen hiding checks window coverage without saving app or window information.\n"
        @"The app contains no network requests, telemetry, or automatic updates.\n\n"
        @"Counting in other apps requires Input Monitoring permission.\n"
        @"If input is still not being counted, contact the developer or scan the Douyin code to join the fan group for help.\n"
@@ -3016,29 +3121,21 @@ static CGEventRef EventTapCallback(CGEventTapProxy proxy,
                                    void *context) {
   (void)proxy;
   (void)event;
-  if (gIsolatedAcceptance) return event;
+  if (gIsolatedAcceptance && !gAcceptancePhysicalInput) return event;
   MeritController *controller = (__bridge MeritController *)context;
-  if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
-    [controller handleEventTapDisabled:type];
-  } else if (type == kCGEventKeyUp) {
-    [controller receiveReminderKeyUp];
-  } else if (type == kCGEventScrollWheel || type == kCGEventKeyDown ||
-             type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown ||
-             type == kCGEventOtherMouseDown) {
-    [controller receiveGlobalEvent:type];
-  }
+  @autoreleasepool { [controller captureInputType:type]; }
   return event;
 }
 
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
-    if (!AcquireSingleInstanceLock()) {
-      fprintf(stderr, "niuma_merit_already_running_or_lock_unavailable\n");
-      return 0;
-    }
     if (!InitializeAcceptanceContext(argc, argv)) {
       fprintf(stderr, "isolated_acceptance_configuration_invalid\n");
       return 2;
+    }
+    if (!AcquireSingleInstanceLock()) {
+      fprintf(stderr, "niuma_merit_already_running_or_lock_unavailable\n");
+      return 0;
     }
     NSApplication *app = NSApplication.sharedApplication;
     MeritController *controller = [[MeritController alloc] init];

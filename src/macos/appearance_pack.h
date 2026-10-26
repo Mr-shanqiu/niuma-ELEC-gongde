@@ -11,7 +11,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy) NSString *publisher;
 @property(nonatomic, copy) NSString *reviewID;
 @property(nonatomic, strong) NSURL *directoryURL;
-@property(nonatomic, strong) NSImage *previewImage;
+@property(nonatomic, strong, nullable) NSImage *previewImage;
+@property(nonatomic, copy) NSString *previewName;
+@property(nonatomic, copy) NSString *contentFingerprint;
+@property(nonatomic, copy) NSDictionary<NSString *,NSString *> *imageFingerprints;
+@property(nonatomic) BOOL metadataOnly;
 @property(nonatomic, copy) NSArray<NSDictionary *> *layers;
 @property(nonatomic, copy) NSDictionary<NSString *, NSImage *> *images;
 @property(nonatomic) CGFloat plusY;
@@ -26,6 +30,9 @@ NS_ASSUME_NONNULL_BEGIN
 // Neither mode uses the local clock as an import or offline-use gate.
 + (NSURL *)packsDirectoryURL;
 + (NSArray<NMAppearancePack *> *)loadInstalledPacks:(NSError **)error;
++ (NSArray<NMAppearancePack *> *)loadInstalledMetadata:(NSError **)error;
++ (nullable NSImage *)thumbnailForPack:(NMAppearancePack *)metadata pixels:(NSUInteger)pixels error:(NSError **)error;
++ (nullable NMAppearancePack *)loadResourcesForPack:(NMAppearancePack *)metadata error:(NSError **)error;
 + (nullable NMAppearancePack *)installArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error;
 + (nullable NSArray<NMAppearancePack *> *)installBatchArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error;
 + (BOOL)removePack:(NMAppearancePack *)pack error:(NSError **)error;

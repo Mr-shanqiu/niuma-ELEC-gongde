@@ -398,31 +398,6 @@ static NSData *NMDERSignatureFromRaw(NSData *raw) {
   return der;
 }
 
-static NSString *NMContentHash(NSURL *directoryURL, NSSet<NSString *> *names,
-                               NSError **error) {
-  CC_SHA256_CTX context;
-  CC_SHA256_Init(&context);
-  NSArray<NSString *> *sorted = [[names allObjects]
-      sortedArrayUsingSelector:@selector(compare:)];
-  for (NSString *name in sorted) {
-    if ([name isEqualToString:@"manifest.json"]) continue;
-    NSData *data = [NSData dataWithContentsOfURL:[directoryURL URLByAppendingPathComponent:name]
-                                        options:0 error:error];
-    if (!data) return nil;
-    NSData *nameData = [name dataUsingEncoding:NSUTF8StringEncoding];
-    unsigned char zero = 0;
-    uint64_t length = CFSwapInt64HostToBig((uint64_t)data.length);
-    CC_SHA256_Update(&context, nameData.bytes, (CC_LONG)nameData.length);
-    CC_SHA256_Update(&context, &zero, 1);
-    CC_SHA256_Update(&context, &length, sizeof(length));
-    CC_SHA256_Update(&context, data.bytes, (CC_LONG)data.length);
-  }
-  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-  CC_SHA256_Final(digest, &context);
-  NSMutableString *hex = [NSMutableString stringWithCapacity:64];
-  for (unsigned char byte : digest) [hex appendFormat:@"%02x", byte];
-  return hex;
-}
 
 static BOOL NMVerifyLicense(NSString *message, NSString *signatureHex) {
   NSData *rawSignature = NMDataFromHex(signatureHex);
@@ -452,27 +427,28 @@ static BOOL NMVerifyLicense(NSString *message, NSString *signatureHex) {
   return NO;
 }
 
-static NSImage *NMLoadPNG(NSURL *url, NSError **error) {
-  CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)url, NULL);
-  if (!source || CGImageSourceGetCount(source) != 1) {
-    if (source) CFRelease(source);
-    if (error) *error = NMError(20, @"PNG 文件无效");
-    return nil;
+static NSString *NMBytesHash(NSData *data) {
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
+  NSMutableString *hex=[NSMutableString stringWithCapacity:64];for(unsigned char byte:digest) [hex appendFormat:@"%02x",byte];return hex;
+}
+static NSImage *NMLoadPNGData(NSData *data,BOOL prepare,NSError **error) {
+  CGImageSourceRef source=data ? CGImageSourceCreateWithData((__bridge CFDataRef)data,NULL) : NULL;
+  if(!source || CGImageSourceGetCount(source)!=1) {
+    if(source) CFRelease(source);if(error)*error=NMError(20,nil);return nil;
   }
-  CFStringRef type = CGImageSourceGetType(source);
-  NSDictionary *properties = (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, 0, NULL);
-  size_t width = [properties[(NSString *)kCGImagePropertyPixelWidth] unsignedLongValue];
-  size_t height = [properties[(NSString *)kCGImagePropertyPixelHeight] unsignedLongValue];
-  BOOL valid = type && CFEqual(type, CFSTR("public.png")) && width > 0 && height > 0 &&
-               width <= NMMaxImageDimension && height <= NMMaxImageDimension;
-  CFRelease(source);
-  if (!valid) {
-    if (error) *error = NMError(21, @"PNG 尺寸必须在 1 到 2048 像素之间");
-    return nil;
-  }
-  NSImage *image = [[NSImage alloc] initWithContentsOfURL:url];
-  if (!image && error) *error = NMError(22, @"无法读取 PNG 文件");
-  return image;
+  CFStringRef type=CGImageSourceGetType(source);
+  NSDictionary *properties=(__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source,0,NULL);
+  size_t width=[properties[(NSString *)kCGImagePropertyPixelWidth] unsignedLongValue];
+  size_t height=[properties[(NSString *)kCGImagePropertyPixelHeight] unsignedLongValue];
+  BOOL valid=type && CFEqual(type,CFSTR("public.png")) && width>0 && height>0 && width<=NMMaxImageDimension && height<=NMMaxImageDimension;
+  if(!valid) { CFRelease(source);if(error)*error=NMError(21,nil);return nil; }
+  NSImage *image=nil;
+  if(prepare) {
+    CGImageRef pixels=CGImageSourceCreateImageAtIndex(source,0,(__bridge CFDictionaryRef)@{
+      (__bridge NSString *)kCGImageSourceShouldCacheImmediately:@YES});
+    if(pixels) { image=[[NSImage alloc] initWithCGImage:pixels size:NSMakeSize(width,height)];CGImageRelease(pixels); }
+  } else image=[[NSImage alloc] initWithData:data];
+  CFRelease(source);if(!image && error)*error=NMError(22,nil);return image;
 }
 
 @implementation NMAppearancePack
@@ -551,7 +527,13 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
 + (NMAppearancePack *)validatePackDirectory:(NSURL *)directoryURL
                       enforceImportDeadline:(BOOL)enforceImportDeadline
                                       error:(NSError **)error {
+  return [self validatePackDirectory:directoryURL metadataOnly:NO error:error];
+}
+
++ (NMAppearancePack *)validatePackDirectory:(NSURL *)directoryURL metadataOnly:(BOOL)metadataOnly
+                                      error:(NSError **)error {
   NMImportErrorScope safeError(error);
+  const BOOL enforceImportDeadline = NO;
   (void)enforceImportDeadline; // Retained for private call-site compatibility only.
   NSFileManager *fm = [NSFileManager defaultManager];
   NSArray<NSURL *> *files = [fm contentsOfDirectoryAtURL:directoryURL
@@ -650,6 +632,8 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   }
   NSMutableSet<NSString *> *expected = [NSMutableSet setWithObjects:@"manifest.json", previewName, nil];
   NSMutableDictionary<NSString *, NSImage *> *images = [NSMutableDictionary dictionary];
+  NSMutableDictionary<NSString *,NSString *> *imageFingerprints=[NSMutableDictionary dictionary];
+  NSString *validatedAssetHash=nil;
   NSSet *layerKeys = [NSSet setWithArray:@[@"image", @"frame", @"anchor", @"keyframes"]];
   NSSet *frameKeys = [NSSet setWithArray:@[@"t", @"x", @"y", @"rotation", @"scale", @"alpha"]];
   if (schemaVersion == 3) {
@@ -685,6 +669,28 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
   if (![actual isEqualToSet:expected]) {
     if (error) *error = NMError(35, @"形象包文件必须与 manifest 声明完全一致");
     return nil;
+  }
+  // Validate, hash and prepare from the same immutable byte snapshot. Metadata
+  // validation releases each image before reading the next; display loading
+  // prepares pixels on its worker before the scene reaches the main thread.
+  {
+    CC_SHA256_CTX context;CC_SHA256_Init(&context);
+    for(NSString *name in [[expected allObjects] sortedArrayUsingSelector:@selector(compare:)]) {
+      if([name isEqual:@"manifest.json"]) continue;
+      @autoreleasepool {
+        NSData *bytes=[NSData dataWithContentsOfURL:[directoryURL URLByAppendingPathComponent:name] options:0 error:error];
+        if(!bytes) return nil;
+        NSData *nameBytes=[name dataUsingEncoding:NSUTF8StringEncoding];unsigned char zero=0;
+        uint64_t length=CFSwapInt64HostToBig((uint64_t)bytes.length);
+        CC_SHA256_Update(&context,nameBytes.bytes,(CC_LONG)nameBytes.length);CC_SHA256_Update(&context,&zero,1);
+        CC_SHA256_Update(&context,&length,sizeof(length));CC_SHA256_Update(&context,bytes.bytes,(CC_LONG)bytes.length);
+        NSImage *image=NMLoadPNGData(bytes,!metadataOnly,error);if(!image) return nil;
+        imageFingerprints[name]=NMBytesHash(bytes);
+        if(!metadataOnly) images[name]=image;
+      }
+    }
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256_Final(digest,&context);
+    NSMutableString *hex=[NSMutableString stringWithCapacity:64];for(unsigned char byte:digest) [hex appendFormat:@"%02x",byte];validatedAssetHash=hex;
   }
   if (schemaVersion == 2 || (schemaVersion == 3 && json[@"license"])) {
     id licenseValue = json[@"license"];
@@ -724,7 +730,7 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
       if (error) *error = NMError(37, @"形象包授权凭证格式无效");
       return nil;
     }
-    NSString *actualHash = NMContentHash(directoryURL, expected, error);
+    NSString *actualHash = validatedAssetHash;
     if (!actualHash || ![actualHash isEqualToString:contentHash]) {
       if (error && !*error) *error = NMError(38, @"形象包内容与授权凭证不匹配");
       return nil;
@@ -740,12 +746,6 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
       return nil;
     }
   }
-  for (NSString *name in expected) {
-    if ([name isEqualToString:@"manifest.json"]) continue;
-    NSImage *image = NMLoadPNG([directoryURL URLByAppendingPathComponent:name], error);
-    if (!image) return nil;
-    images[name] = image;
-  }
   {
     NMAppearancePack *pack = [[NMAppearancePack alloc] init];
     pack.identifier = identifier;
@@ -756,6 +756,20 @@ static NSDictionary *NMFrameAtPhase(NSArray<NSDictionary *> *frames, CGFloat pha
     pack.publisher = json[@"publisher"];
     pack.reviewID = json[@"review_id"];
     pack.directoryURL = directoryURL;
+    pack.previewName = previewName;
+    pack.metadataOnly = metadataOnly;
+    pack.imageFingerprints=imageFingerprints;
+    NSString *assetHash=validatedAssetHash;
+    if (!assetHash) return nil;
+    // The license's historical asset hash intentionally excludes manifest.json.
+    // Runtime identity additionally binds its exact bytes without altering that contract.
+    CC_SHA256_CTX fingerprintContext;CC_SHA256_Init(&fingerprintContext);
+    CC_SHA256_Update(&fingerprintContext,data.bytes,(CC_LONG)data.length);
+    NSData *hashBytes=[assetHash dataUsingEncoding:NSUTF8StringEncoding];
+    CC_SHA256_Update(&fingerprintContext,hashBytes.bytes,(CC_LONG)hashBytes.length);
+    unsigned char fingerprint[CC_SHA256_DIGEST_LENGTH];CC_SHA256_Final(fingerprint,&fingerprintContext);
+    NSMutableString *hex=[NSMutableString stringWithCapacity:64];for(unsigned char byte:fingerprint) [hex appendFormat:@"%02x",byte];
+    pack.contentFingerprint=hex;
     pack.previewImage = images[previewName];
     pack.layers = layers;
     pack.images = images;
@@ -768,6 +782,47 @@ invalidLayers:
 }
 
 + (NSArray<NMAppearancePack *> *)loadInstalledPacks:(NSError **)error {
+  return [self loadInstalledPacksMetadataOnly:NO error:error];
+}
+
++ (NSArray<NMAppearancePack *> *)loadInstalledMetadata:(NSError **)error {
+  return [self loadInstalledPacksMetadataOnly:YES error:error];
+}
+
++ (NSImage *)thumbnailForPack:(NMAppearancePack *)metadata pixels:(NSUInteger)pixels error:(NSError **)error {
+  NMAppearancePack *verified=[self validatePackDirectory:metadata.directoryURL metadataOnly:YES error:error];
+  if (!verified || ![verified.contentFingerprint isEqual:metadata.contentFingerprint]) return nil;
+  NSData *data=[NSData dataWithContentsOfURL:[metadata.directoryURL URLByAppendingPathComponent:metadata.previewName] options:0 error:error];
+  if(!data || ![NMBytesHash(data) isEqual:metadata.imageFingerprints[metadata.previewName]]) { if(error)*error=NMError(38,nil);return nil; }
+  CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)data,NULL);
+  if (!source) return nil;
+  CGImageRef cg=CGImageSourceCreateThumbnailAtIndex(source,0,(__bridge CFDictionaryRef)@{
+    (__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways:@YES,
+    (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize:@(MIN(256,MAX(1,pixels))),
+    (__bridge NSString *)kCGImageSourceShouldCacheImmediately:@YES
+  });
+  CFRelease(source);
+  NSImage *image=cg ? [[NSImage alloc] initWithCGImage:cg size:NSMakeSize(CGImageGetWidth(cg),CGImageGetHeight(cg))] : nil;
+  if (cg) CGImageRelease(cg); return image;
+}
+
++ (NMAppearancePack *)loadResourcesForPack:(NMAppearancePack *)metadata error:(NSError **)error {
+  NMAppearancePack *pack = [self validatePackDirectory:metadata.directoryURL metadataOnly:NO error:error];
+  if (pack && (![pack.identifier isEqual:metadata.identifier] ||
+               ![pack.contentFingerprint isEqual:metadata.contentFingerprint])) {
+    if (error) *error = NMError(38, nil);
+    return nil;
+  }
+  if(pack) {
+    NSMutableDictionary *images=[pack.images mutableCopy];
+    BOOL used=NO;for(NSDictionary *layer in pack.layers) if([layer[@"image"] isEqual:pack.previewName]) used=YES;
+    if(!used) [images removeObjectForKey:pack.previewName];
+    pack.images=images;pack.previewImage=nil;
+  }
+  return pack;
+}
+
++ (NSArray<NMAppearancePack *> *)loadInstalledPacksMetadataOnly:(BOOL)metadataOnly error:(NSError **)error {
   NMImportErrorScope safeError(error);
   NSFileManager *fm = [NSFileManager defaultManager];
   NSURL *root = [self packsDirectoryURL];
@@ -785,7 +840,7 @@ invalidLayers:
     // Installed and newly imported packs remain usable independently of the clock.
     // This still verifies their manifest, images, content hash, and license signature.
     NMAppearancePack *pack = [self validatePackDirectory:directory
-                                enforceImportDeadline:NO error:&packError];
+                                metadataOnly:metadataOnly error:&packError];
     if (pack) {
       [packs addObject:pack];
     } else {
@@ -843,7 +898,7 @@ invalidLayers:
     [fm removeItemAtURL:stage error:nil];
     return nil;
   }
-  NMAppearancePack *pack = [self validatePackDirectory:stage enforceImportDeadline:YES error:error];
+  NMAppearancePack *pack = [self validatePackDirectory:stage metadataOnly:YES error:error];
   if (!pack) {
     [fm removeItemAtURL:stage error:nil];
     return nil;
@@ -852,7 +907,7 @@ invalidLayers:
   NSURL *backup = [root URLByAppendingPathComponent:[NSString stringWithFormat:@".backup-%@", NSUUID.UUID.UUIDString] isDirectory:YES];
   BOOL hadOld = [fm fileExistsAtPath:destination.path];
   if (hadOld) {
-    NMAppearancePack *existing = [self validatePackDirectory:destination error:nil];
+    NMAppearancePack *existing = [self validatePackDirectory:destination metadataOnly:YES error:nil];
     if (!existing || ![existing.publisher isEqualToString:pack.publisher]) {
       if (error) *error = NMError(43, @"同名形象包的来源不一致或原包无法校验，不能覆盖原有形象包");
       [fm removeItemAtURL:stage error:nil];
@@ -886,7 +941,7 @@ invalidLayers:
     return nil;
   }
   if (hadOld) [fm removeItemAtURL:backup error:nil];
-  return [self validatePackDirectory:destination error:error];
+  return [self validatePackDirectory:destination metadataOnly:YES error:error];
 }
 
 + (NSArray<NMAppearancePack *> *)installBatchArchiveAtURL:(NSURL *)archiveURL error:(NSError **)error {

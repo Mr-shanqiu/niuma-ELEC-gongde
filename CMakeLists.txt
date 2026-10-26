@@ -483,6 +483,7 @@ elseif(APPLE)
   target_compile_features(niuma-merit PRIVATE cxx_std_17)
   target_compile_options(niuma-merit PRIVATE -Wall -Wextra -fobjc-arc)
   target_link_libraries(niuma-merit PRIVATE
+    "-framework QuartzCore"
     "-framework AppKit"
     "-framework ApplicationServices"
     "-framework ServiceManagement"
@@ -499,6 +500,7 @@ elseif(APPLE)
   target_compile_features(niuma-login-startup-test PRIVATE cxx_std_17)
   target_compile_options(niuma-login-startup-test PRIVATE -Wall -Wextra -fobjc-arc -mmacosx-version-min=10.15)
   target_link_libraries(niuma-login-startup-test PRIVATE
+    "-framework QuartzCore"
     "-framework AppKit" "-framework ApplicationServices" "-framework Security"
     "-framework ServiceManagement")
   add_test(NAME niuma-login-startup COMMAND niuma-login-startup-test)

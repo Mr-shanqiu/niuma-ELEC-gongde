@@ -3,15 +3,22 @@
 #undef main
 #include <cassert>
 
+// Accounting smoke only. The unified suite separately drives the production
+// input mailbox; neither suite attaches a global tap or reads real preferences.
+static void AccountingEvent(CGEventType type, CGEventRef,void *context) {
+  MeritController *controller=(__bridge MeritController *)context;
+  if(type==kCGEventKeyUp) [controller receiveReminderKeyUp];else [controller receiveGlobalEvent:type];
+}
 static void Snapshot(NSView *view, NSString *name) {
   NSBitmapImageRep *rep = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
   [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
   NSData *data = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-  assert([data writeToFile:[@"/tmp/niuma-acceptance/" stringByAppendingString:name] atomically:YES]);
+  assert([data writeToFile:[NSProcessInfo.processInfo.environment[@"NIUMA_MAC_ACCEPTANCE_OUTPUT"] stringByAppendingPathComponent:name] atomically:YES]);
 }
 
 int main() {
   @autoreleasepool {
+    gIsolatedAcceptance=YES;gAcceptancePreferences=[NMEphemeralMeritPreferences new];
     [NSApplication sharedApplication];
     const char *expectedLanguage = getenv("NIUMA_UI_LANGUAGE");
     assert(expectedLanguage != nullptr);
@@ -19,7 +26,7 @@ int main() {
     assert(IsChineseUI() == expectChinese);
     assert([UiText(@"中文", @"English")
         isEqualToString:(expectChinese ? @"中文" : @"English")]);
-    [NSFileManager.defaultManager createDirectoryAtPath:@"/tmp/niuma-acceptance"
+    [NSFileManager.defaultManager createDirectoryAtPath:NSProcessInfo.processInfo.environment[@"NIUMA_MAC_ACCEPTANCE_OUTPUT"]
         withIntermediateDirectories:YES attributes:nil error:nil];
     MeritController *controller = [[MeritController alloc] init];
     [controller loadState];
@@ -30,23 +37,23 @@ int main() {
     controller.view = [[MeritView alloc] initWithFrame:NSMakeRect(0, 0, 120, 125)];
     controller.view.controller = controller;
     for (int i = 0; i < 100; ++i)
-      EventTapCallback(NULL, kCGEventKeyDown, NULL, (__bridge void *)controller);
+      AccountingEvent(kCGEventKeyDown, NULL, (__bridge void *)controller);
     assert(controller.total == 100);
     assert(controller.todayTotal == 100);
     assert(controller.dailyTotals[controller.currentDayKey].longLongValue == 100);
     NSTimeInterval start = controller.strikeStartTime;
-    EventTapCallback(NULL, kCGEventLeftMouseDown, NULL, (__bridge void *)controller);
-    EventTapCallback(NULL, kCGEventRightMouseDown, NULL, (__bridge void *)controller);
-    EventTapCallback(NULL, kCGEventOtherMouseDown, NULL, (__bridge void *)controller);
+    AccountingEvent(kCGEventLeftMouseDown, NULL, (__bridge void *)controller);
+    AccountingEvent(kCGEventRightMouseDown, NULL, (__bridge void *)controller);
+    AccountingEvent(kCGEventOtherMouseDown, NULL, (__bridge void *)controller);
     assert(controller.total == 103 && controller.strikeStartTime == start);
     for (int i = 0; i < 20; ++i)
-      EventTapCallback(NULL, kCGEventScrollWheel, NULL, (__bridge void *)controller);
+      AccountingEvent(kCGEventScrollWheel, NULL, (__bridge void *)controller);
     assert(controller.total == 104);
     controller.lastScrollEventTime -= .3;
-    EventTapCallback(NULL, kCGEventScrollWheel, NULL, (__bridge void *)controller);
+    AccountingEvent(kCGEventScrollWheel, NULL, (__bridge void *)controller);
     assert(controller.total == 105);
     assert(controller.todayTotal == 105);
-    EventTapCallback(NULL, kCGEventKeyUp, NULL, (__bridge void *)controller);
+    AccountingEvent(kCGEventKeyUp, NULL, (__bridge void *)controller);
     assert(controller.total == 105);
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:.35];
     while (deadline.timeIntervalSinceNow > 0)
@@ -91,6 +98,6 @@ int main() {
     assert(controller.view.seaLionBodyImage.representations.count == 0 &&
            controller.view.seaLionFlipperImage.representations.count == 0);
     assert(!controller.view.hamsterBaseImage && !controller.view.hamsterActorImage);
-    printf("PASS: %s UI localization; daily and lifetime totals; single-line calendar; 100 key events; all mouse buttons; scroll grouping; ignored key-up; no animation queue; modal timer completion; overflow guard; woodfish-only base picker and resources\n", expectedLanguage);
+    printf("PASS: %s UI localization; daily and lifetime totals; single-line calendar; 100 private accounting events; all mouse buttons; scroll grouping; ignored key-up; no animation queue; modal timer completion; overflow guard; woodfish-only base picker and resources\n", expectedLanguage);
   }
 }

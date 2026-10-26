@@ -34,7 +34,7 @@ for ARCH in $ARCHS; do
   -arch "$ARCH" \
   -I "$ROOT_DIR/src" \
   "$ROOT_DIR/src/macos/app.mm" \
-    -framework AppKit \
+    -framework QuartzCore -framework AppKit \
     -framework ApplicationServices \
     -framework ServiceManagement \
     -framework Security \

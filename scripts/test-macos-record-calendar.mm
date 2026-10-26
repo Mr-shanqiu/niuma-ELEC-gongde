@@ -41,7 +41,7 @@ int main() { @autoreleasepool {
   controller.dailyTotals=[@{@"2026-10-19":@617} mutableCopy]; controller.total=617;
   controller.offworkDailySnapshots=[@{@"2026-10-19":@{@"seconds":@3600,@"targetMinutes":@1080,@"sampledAt":@123}} mutableCopy];
   NSDictionary *originalRecords=[controller.dailyTotals copy];
-  RecordTestView *view=[[RecordTestView alloc] initWithFrame:NSMakeRect(0,0,560,516)];
+  RecordTestView *view=[[RecordTestView alloc] initWithFrame:NSMakeRect(0,0,720,724)];
   view.controller=controller; view.texts=[NSMutableArray array];
   view.previousButton=[NSButton new]; view.nextButton=[NSButton new];
   [view showCurrentMonth];
@@ -51,14 +51,12 @@ int main() { @autoreleasepool {
   assert(view.year==2026 && view.month==10 && !view.previousButton.enabled);
   NSWindow *window=[[NSWindow alloc] initWithContentRect:view.bounds styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
   window.releasedWhenClosed=NO; window.contentView=view;
+  view.selectedDay=19;
   [view drawRect:view.bounds];
   assert([view.texts containsObject:@"617"]);
-  assert(([view.texts containsObject:[NSString stringWithFormat:@"%@ %@",UiText(@"加班",@"OT"),OffworkDurationText(3600)]]));
-  // 2026-10-01 is Thursday (Monday offset 3); October 19 is Monday row 3.
-  NSPoint local=NSMakePoint(kCalendarLeft+5,kCalendarTop+3*kCalendarCellHeight+5);
-  NSPoint screen=[view convertPoint:local toView:nil];
-  NSEvent *event=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:screen modifierFlags:0 timestamp:0 windowNumber:window.windowNumber context:nil eventNumber:1 clickCount:1 pressure:1];
-  [view mouseDown:event]; assert([controller.clicked isEqualToString:@"2026-10-19"]);
+  assert([view.texts containsObject:OffworkDurationText(3600)]);
+  // Date selection is now a native accessible button and inline detail.
+  [view selectDay:view.dayButtons[18]];assert([view.selectedKey isEqual:@"2026-10-19"]);
   for(int i=0;i<30;++i) [view shiftMonth:1];
   assert(view.year==today.year && view.month==today.month && !view.nextButton.enabled);
   assert([controller.dailyTotals isEqual:originalRecords]);
