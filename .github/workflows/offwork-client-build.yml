@@ -10,7 +10,7 @@ on:
         description: Native test scope
         type: choice
         default: profile
-        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-install-fix, runtime-visibility, runtime-fullscreen]
+        options: [profile, soak, keyboard-chain, runtime-p0, runtime-p1, runtime-contract, runtime-app, runtime-resources, runtime-composition, runtime-candidate, runtime-durability, runtime-ui, runtime-build, runtime-about, runtime-metrics, runtime-alpha-fast, runtime-region-reuse, runtime-region-bands, runtime-textures, runtime-entry, runtime-legacy-entry, runtime-input-delivery, runtime-integration, runtime-check, runtime-self-install, runtime-self-install-entry, runtime-install-fix, runtime-raw-input, runtime-visibility, runtime-fullscreen]
 
 permissions:
   contents: read
@@ -120,6 +120,29 @@ jobs:
             build-self/SINGLE_FILE_BINDING.json
             build-self/evidence/**
           if-no-files-found: warn
+          retention-days: 14
+  windows-raw-input-prototype:
+    if: ${{ inputs.mode == 'runtime-raw-input' }}
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile only isolated asynchronous input probe
+        shell: pwsh
+        run: |
+          cmake -S . -B build-raw -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Raw Input configuration failed' }
+          cmake --build build-raw --config Release --target niuma-raw-input-probe --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Raw Input compilation failed' }
+          & ./build-raw/Release/niuma-raw-input-probe.exe --self-test | Tee-Object build-raw/result.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Raw Input prototype failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-raw-input-${{ github.sha }}
+          path: |
+            build-raw/Release/niuma-raw-input-probe.exe
+            build-raw/result.txt
           retention-days: 14
   windows-input-delivery:
     if: ${{ inputs.mode == 'runtime-input-delivery' }}
