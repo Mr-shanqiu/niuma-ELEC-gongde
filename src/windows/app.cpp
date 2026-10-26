@@ -4720,15 +4720,21 @@ bool ForegroundIsFullscreen() {
   QUERY_USER_NOTIFICATION_STATE notification{};
   if (SUCCEEDED(SHQueryUserNotificationState(&notification)) &&
       notification == QUNS_RUNNING_D3D_FULL_SCREEN) { gLastFullscreenWindow = foreground; return true; }
-  RECT bounds{}; MONITORINFO monitor{}; monitor.cbSize = sizeof(monitor);
-  if (FAILED(DwmGetWindowAttribute(foreground, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds))) &&
-      !GetWindowRect(foreground, &bounds)) return false;
+  MONITORINFO monitor{}; monitor.cbSize = sizeof(monitor);
   if (!GetMonitorInfoW(MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
-  // A normal maximized title-bar window with an auto-hidden taskbar is not fullscreen.
-  if (IsZoomed(foreground) && (GetWindowLongPtrW(foreground, GWL_STYLE) & WS_CAPTION)) return false;
-  const bool fullscreen = niuma::client::core::CoversFullscreenMonitor(
-      {bounds.left,bounds.top,bounds.right,bounds.bottom},
-      {monitor.rcMonitor.left,monitor.rcMonitor.top,monitor.rcMonitor.right,monitor.rcMonitor.bottom});
+  // Users expect a maximized work window to keep the pet out of the way too.
+  // Check native state rather than matching its taskbar/resize-border geometry.
+  bool fullscreen = IsZoomed(foreground) != FALSE;
+  if (!fullscreen) {
+    // Use the content area in screen coordinates: invisible resize borders and
+    // DWM shadows must neither cause a miss nor make a windowed video fullscreen.
+    RECT client{}; POINT origin{};
+    if (!GetClientRect(foreground, &client) || !ClientToScreen(foreground, &origin)) return false;
+    fullscreen = niuma::client::core::CoversFullscreenMonitor(
+        {origin.x,origin.y,static_cast<std::int64_t>(origin.x) + client.right,
+         static_cast<std::int64_t>(origin.y) + client.bottom},
+        {monitor.rcMonitor.left,monitor.rcMonitor.top,monitor.rcMonitor.right,monitor.rcMonitor.bottom});
+  }
   if (fullscreen) gLastFullscreenWindow = foreground;
   return fullscreen;
 }
@@ -4798,7 +4804,7 @@ void ShowContextMenu(HWND window, POINT screenPoint) {
   };
   append(kMenuVisibility, gVisibility.hidden() ? UiText(L"显示形象（继续计数）", L"Show Appearance") :
       UiText(L"隐藏形象（继续计数）", L"Hide (Keep Counting)"), L"\xE890");
-  append(kMenuAutoHide, UiText(L"全屏时自动隐身", L"Auto-hide in Fullscreen"), L"\xE740", gVisibility.autoHideFullscreen);
+  append(kMenuAutoHide, UiText(L"全屏或最大化时自动隐身", L"Auto-hide in Fullscreen or Maximized"), L"\xE740", gVisibility.autoHideFullscreen);
   append(kMenuAppearance, UiText(L"更换形象", L"Change Appearance"), L"\xE77B");
   append(kMenuCalendar, UiText(L"功德日历…", L"Merit Calendar…"), L"\xE787");
   append(kMenuOffwork, UiText(L"下班倒计时…", L"Off-work Countdown…"), L"\xE823", gOffwork.enabled);

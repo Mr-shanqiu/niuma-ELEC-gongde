@@ -16,6 +16,9 @@ int main() { try {
   state.manualHidden = true; CHECK(state.hidden());
   CHECK(CoversFullscreenMonitor({-1920,0,0,1080},{-1920,0,0,1080}));
   CHECK(CoversFullscreenMonitor({0,-1,1920,1081},{0,0,1920,1080}));
+  CHECK(CoversFullscreenMonitor({-8,-8,1928,1088},{0,0,1920,1080}));
+  CHECK(CoversFullscreenMonitor({-1928,-8,8,1088},{-1920,0,0,1080}));
+  CHECK(!CoversFullscreenMonitor({8,0,1920,1080},{0,0,1920,1080}));
   CHECK(!CoversFullscreenMonitor({0,0,1920,1040},{0,0,1920,1080}));
   CHECK(!CoversFullscreenMonitor({0,0,1920,1080},{-1920,0,0,1080}));
   CHECK(!CoversFullscreenMonitor({0,0,0,0},{0,0,0,0}));

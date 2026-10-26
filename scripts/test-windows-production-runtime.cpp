@@ -9,6 +9,7 @@
 #include <stdexcept>
 #define CHECK(x) do { if (!(x)) throw std::runtime_error("line " + std::to_string(__LINE__) + ": " #x); } while(false)
 bool sawHiddenTrayMenu = false;
+constexpr UINT kPeerModeMessage = WM_APP + 1;
 void CALLBACK CancelHiddenTrayMenu(HWND, UINT, UINT_PTR timer, DWORD) {
   static unsigned attempts=0;
   if (FindWindowW(L"#32768", nullptr)) sawHiddenTrayMenu=true;
@@ -16,7 +17,21 @@ void CALLBACK CancelHiddenTrayMenu(HWND, UINT, UINT_PTR timer, DWORD) {
 }
 int FullscreenPeer() {
   EnableBestDpiAwareness();
-  WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=GetModuleHandleW(nullptr);
+  WNDCLASSW wc{};wc.lpfnWndProc=[](HWND window,UINT message,WPARAM mode,LPARAM value)->LRESULT {
+    if(message!=kPeerModeMessage) return DefWindowProcW(window,message,mode,value);
+    MONITORINFO monitor{};monitor.cbSize=sizeof(monitor);
+    if(!GetMonitorInfoW(MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST),&monitor)) return 0;
+    ShowWindow(window,SW_RESTORE);
+    const bool titled=mode==1 || mode==2;
+    SetWindowLongPtrW(window,GWL_STYLE,WS_VISIBLE | (titled ? WS_OVERLAPPEDWINDOW : WS_POPUP));
+    const auto r=monitor.rcMonitor;
+    const int border=mode==3 ? 8 : 0;
+    if(titled) SetWindowPos(window,nullptr,r.left+30,r.top+30,640,480,SWP_NOZORDER|SWP_FRAMECHANGED);
+    else SetWindowPos(window,nullptr,r.left-border,r.top-border,
+        r.right-r.left+border*2,r.bottom-r.top+border*2,SWP_NOZORDER|SWP_FRAMECHANGED);
+    if(mode==2) ShowWindow(window,SW_MAXIMIZE);
+    return 1;
+  };wc.hInstance=GetModuleHandleW(nullptr);
   wc.lpszClassName=L"NiuMaVisibilityFullscreenPeer";
   if(!RegisterClassW(&wc)) return 2;
   MONITORINFO monitor{};monitor.cbSize=sizeof(monitor);
@@ -116,6 +131,15 @@ int wmain(int argc,wchar_t** argv) {
     gVisibility.manualHidden=false; ApplyWindowVisibility();
     CHECK(IsWindowVisible(window) && !gState.striking && !gState.timerRunning);
     CHECK(gDisplay.display->Stats().framesPresented>hiddenFrames);
+    // Exercise automatic WM_TIMER delivery, not a direct call to the detector.
+    gState.reminderClockGuard.Start(static_cast<std::int64_t>(std::time(nullptr)),GetTickCount64(),false);
+    CHECK(SetTimer(window,kReminderTimer,1000,nullptr));
+    const auto awaitVisibility=[&](bool hidden) {
+      const auto deadline=GetTickCount64()+3500;
+      do { pump(); if(gVisibility.fullscreen==hidden &&
+          (IsWindowVisible(window)!=FALSE)==!hidden) return; Sleep(10); } while(GetTickCount64()<deadline);
+      throw std::runtime_error(hidden ? "automatic hide timed out" : "automatic restore timed out");
+    };
     // Inspect a real foreign foreground window, not a copied detector implementation.
     wchar_t executable[32768]{};CHECK(GetModuleFileNameW(nullptr,executable,32768));
     std::wstring peerCommand=L"\""+std::wstring(executable)+L"\" --fullscreen-peer";
@@ -130,14 +154,19 @@ int wmain(int argc,wchar_t** argv) {
     const auto foregroundReady=GetTickCount64()+2000;
     while(GetForegroundWindow()!=peerWindow && GetTickCount64()<foregroundReady){pump();Sleep(10);}
     CHECK(GetForegroundWindow()==peerWindow && ForegroundIsFullscreen());
-    RefreshFullscreenVisibility(); CHECK(!IsWindowVisible(window));
+    awaitVisibility(true);
     // Explicit Show overrides just this fullscreen session, without changing the preference.
     SetManualHidden(false); CHECK(IsWindowVisible(window) && gVisibility.autoHideFullscreen);
-    ShowWindow(peerWindow,SW_MINIMIZE);RefreshFullscreenVisibility();CHECK(!gVisibility.fullscreen);
-    ShowWindow(peerWindow,SW_RESTORE);SetForegroundWindow(peerWindow);RefreshFullscreenVisibility();
-    CHECK(gVisibility.fullscreen && !IsWindowVisible(window));
-    SetWindowPos(peerWindow,nullptr,30,30,640,480,SWP_NOZORDER|SWP_NOACTIVATE);
-    RefreshFullscreenVisibility();CHECK(!gVisibility.fullscreen && IsWindowVisible(window));
+    ShowWindow(peerWindow,SW_MINIMIZE);awaitVisibility(false);
+    ShowWindow(peerWindow,SW_RESTORE);SetForegroundWindow(peerWindow);awaitVisibility(true);
+    CHECK(SendMessageW(peerWindow,kPeerModeMessage,1,0)==1);awaitVisibility(false);
+    CHECK(!ForegroundIsFullscreen());
+    CHECK(SendMessageW(peerWindow,kPeerModeMessage,2,0)==1);
+    CHECK(IsZoomed(peerWindow));awaitVisibility(true);
+    CHECK(SendMessageW(peerWindow,kPeerModeMessage,1,0)==1);awaitVisibility(false);
+    CHECK(SendMessageW(peerWindow,kPeerModeMessage,3,0)==1);awaitVisibility(true);
+    CHECK(SendMessageW(peerWindow,kPeerModeMessage,1,0)==1);awaitVisibility(false);
+    KillTimer(window,kReminderTimer);
     DWORD_PTR peerClosed=0;SendMessageTimeoutW(peerWindow,WM_CLOSE,0,0,SMTO_ABORTIFHUNG,2000,&peerClosed);
     CHECK(WaitForSingleObject(peer.hProcess,3000)==WAIT_OBJECT_0);
     CloseHandle(peer.hThread);CloseHandle(peer.hProcess);
@@ -159,7 +188,7 @@ int wmain(int argc,wchar_t** argv) {
     CHECK(GetPrivateProfileIntW(L"state",L"auto_hide_fullscreen",1,(root/L"data.ini").c_str())==0);
     CHECK(GetPrivateProfileIntW(L"state",L"total",0,(root/L"data.ini").c_str())==12357);
     std::cout<<"PRODUCTION_RUNTIME=PASS privateCandidate=false composition=true noGdiFallback=true "
-        <<"existingTotal=12345 hiddenInput=12 savedTotal=12357 hiddenNoPresent=true nativeFullscreen=true explicitShowOverride=true restoredLatest=true autoHideSaved=true unknownIniPreserved=true idleNoPresent=true normalClose=true "
+        <<"existingTotal=12345 hiddenInput=12 savedTotal=12357 hiddenNoPresent=true nativeFullscreen=true automaticTimer=true maximizedAutoHide=true overscanAutoHide=true windowedRestore=true explicitShowOverride=true restoredLatest=true autoHideSaved=true unknownIniPreserved=true idleNoPresent=true normalClose=true "
         <<"scope=CI-software-not-hardware\n";
     Gdiplus::GdiplusShutdown(gdi);CoUninitialize();return 0;
   } catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}
