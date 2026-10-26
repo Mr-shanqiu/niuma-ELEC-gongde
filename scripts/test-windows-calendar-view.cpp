@@ -61,6 +61,13 @@ int wmain(int argc,wchar_t** argv) {
     CHECK(!month.days[12].overtimeRecorded && month.days[12].merit>0);
     std::uint64_t expected=0;for(int d=1;d<=26;++d)expected+=d==26?8642:1000+d*139;
     CHECK(month.total==expected && !month.totalSaturated);
+    // Production uses the input owner's ledger, with pending/current values
+    // taking precedence exactly as before. No fake fixture-only read path.
+    const auto pending13=gState.pendingDailyTotals[L"2026-10-13"];
+    gState.pendingDailyTotals.erase(L"2026-10-13");gInput.authoritative=true;
+    gInput.daily={{20261013,777},{20261026,12}};
+    CHECK(ReadCalendarMonth().days[13].merit==777 && ReadCalendarMonth().days[26].merit==8642);
+    gInput.authoritative=false;gInput.daily.clear();gState.pendingDailyTotals[L"2026-10-13"]=pending13;
     Snapshot((output/L"calendar-zh-100.png").wstring());
     ClickDay(13);CHECK(gCalendar.selectedDay==13);CHECK(ReadCalendarMonth().days[gCalendar.selectedDay].overtimeSeconds==4818);
     Snapshot((output/L"calendar-selected-overtime.png").wstring());
@@ -102,6 +109,8 @@ int wmain(int argc,wchar_t** argv) {
     const auto oldHistory=gState.pendingDailyTotals;const auto oldOffwork=gOffwork.days;
     gState.pendingDailyTotals.clear();gOffwork.days.clear();gState.total=gState.todayTotal=0;ReloadCalendarRange();
     CHECK(gCalendar.range.first==gCalendar.range.last);CalendarShiftMonth(-1);CHECK(gCalendar.month==10);
+    gOffwork.days.emplace(L"2019-12-31",OffworkDayRecord{true,false,60,1080,1577808000});ReloadCalendarRange();
+    CHECK(gCalendar.range.first==niuma::CalendarMonthRange::Month(2019,12));gOffwork.days.clear();ReloadCalendarRange();
     Snapshot((output/L"calendar-empty.png").wstring());gState.pendingDailyTotals=oldHistory;gOffwork.days=oldOffwork;gState.total=1284530;gState.todayTotal=8642;
     CHECK(RecordSignature()==before);SendMessageW(gCalendar.window,WM_COMMAND,IDCANCEL,0);CHECK(!gCalendar.window && !gCalendar.font);
     std::ofstream report(output/L"calendar-view.json");report<<R"({"status":"PASS","scope":"real calendar window, synthetic in-memory data","readOnlyHistory":true,"noHooksOrStorageWorkers":true,"selectedOvertimeSeconds":true,"missingOvertimeDistinct":true,"monthAndYearBoundaries":true,"leapAndSixRowMonths":true,"futureSelectionRejected":true,"todayNavigation":true,"scale100and200":true,"largeCountSaturation":true,"emptyHistory":true,"userProfileAccessed":false})";
