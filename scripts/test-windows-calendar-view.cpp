@@ -19,7 +19,30 @@ void Snapshot(const std::wstring& path) {
   UpdateWindow(gCalendar.window);PumpCalendar();RECT r{};CHECK(GetClientRect(gCalendar.window,&r));
   HDC screen=GetDC(gCalendar.window);niuma::render::LayeredSurface surface;
   CHECK(surface.Ensure(screen,r.right,r.bottom));ReleaseDC(gCalendar.window,screen);
-  CHECK(PrintWindow(gCalendar.window,surface.dc(),PW_CLIENTONLY|2));
+  if(CalendarScale(gCalendar.window)<1.1f) {
+    CHECK(PrintWindow(gCalendar.window,surface.dc(),PW_CLIENTONLY|2));
+  } else {
+    // Hosted desktops clip PrintWindow outside the physical screen even with
+    // a correctly sized HWND. Exercise the very same production painting into
+    // a complete 200% backing DIB; this is not an OS-DPI/hardware acceptance.
+    DrawMeritCalendar(surface.dc());
+    for(int id:{kCalendarPrevious,kCalendarNext,kCalendarToday}) {
+      HWND button=GetDlgItem(gCalendar.window,id);RECT rect{};CHECK(GetWindowRect(button,&rect));
+      MapWindowPoints(nullptr,gCalendar.window,reinterpret_cast<POINT*>(&rect),2);
+      const int saved=SaveDC(surface.dc());CHECK(saved);
+      IntersectClipRect(surface.dc(),rect.left,rect.top,rect.right,rect.bottom);
+      SetViewportOrgEx(surface.dc(),rect.left,rect.top,nullptr);
+      DRAWITEMSTRUCT item{};item.CtlType=ODT_BUTTON;item.CtlID=id;item.hDC=surface.dc();
+      item.hwndItem=button;item.rcItem={0,0,rect.right-rect.left,rect.bottom-rect.top};
+      if(!IsWindowEnabled(button))item.itemState=ODS_DISABLED;
+      DrawCalendarButton(item);RestoreDC(surface.dc(),saved);
+    }
+  }
+  // Both far corners must be painted; a partial screen capture used to leave
+  // these black while the numeric scale check still passed.
+  const auto* pixels=static_cast<const BYTE*>(surface.pixels());
+  const auto far=(static_cast<std::size_t>(r.bottom)*r.right-1)*4;
+  CHECK(pixels[far]>=240 && pixels[far+1]>=240 && pixels[far+2]>=240);
   Gdiplus::Bitmap bitmap(r.right,r.bottom,r.right*4,PixelFormat32bppRGB,static_cast<BYTE*>(surface.pixels()));
   UINT count=0,bytes=0;CHECK(Gdiplus::GetImageEncodersSize(&count,&bytes)==Gdiplus::Ok);
   std::vector<BYTE> storage(bytes);auto* codecs=reinterpret_cast<Gdiplus::ImageCodecInfo*>(storage.data());
