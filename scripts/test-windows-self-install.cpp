@@ -202,6 +202,7 @@ int wmain() {
     readOnlyLocations.startMenuLink=(root/L"readonly-start.lnk").wstring();
     readOnlyLocations.desktopLink=(root/L"readonly-desktop.lnk").wstring();
     result=setup::Install(readOnlyLocations,readonly.wstring(),L"0.9.5",{});
+    if (!result.success) std::wcerr<<L"Read-only install: "<<result.error<<L"\n";
     CHECK(result.success && setup::FilesEqual(readonly.wstring(),setup::Executable(readOnlyLocations)));
     CHECK(!(GetFileAttributesW(setup::Executable(readOnlyLocations).c_str())&FILE_ATTRIBUTE_READONLY));
     CHECK(setup::Remove(readOnlyLocations,readonly.wstring()).success);
