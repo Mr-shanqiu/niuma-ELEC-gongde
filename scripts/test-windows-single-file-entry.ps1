@@ -101,10 +101,9 @@ $packFile=Join-Path $packFolder.FullName 'retained.nmgpack'
 [IO.File]::WriteAllBytes($packFile,[byte[]](80,75,3,4,12,34,56,78))
 $packHash=(Get-FileHash -LiteralPath $packFile -Algorithm SHA256).Hash
 [IO.File]::WriteAllText($startOriginal,'unreadable legacy shortcut',[Text.Encoding]::ASCII)
-$shell=New-Object -ComObject WScript.Shell
-$oldLink=$shell.CreateShortcut($desktopOriginal)
-$oldLink.TargetPath=Join-Path $env:TEMP 'retired-custom-install\niuma-merit.exe'
-$oldLink.Save()
+# Native contracts already cover real custom-path shell links. This public
+# entry case uses an unreadable retained link, avoiding WScript's locale adapter.
+[IO.File]::WriteAllText($desktopOriginal,'retained old desktop shortcut',[Text.Encoding]::ASCII)
 $oldStartHash=(Get-FileHash -LiteralPath $startOriginal -Algorithm SHA256).Hash
 $oldDesktopHash=(Get-FileHash -LiteralPath $desktopOriginal -Algorithm SHA256).Hash
 $hash=(Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash
