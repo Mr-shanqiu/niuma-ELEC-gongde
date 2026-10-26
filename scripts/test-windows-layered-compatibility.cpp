@@ -27,7 +27,10 @@ int main() {
     HWND a=make(),b=make();CHECK(a && b);
     {
       CompositionPresenter cached,fresh;
-      CHECK(cached.Initialize(a,80,80,false,true) && fresh.Initialize(b,80,80,false,true));
+      if (!cached.Initialize(a,80,80,false,true)) throw std::runtime_error(
+        "cached initialize: " + cached.LastErrorMessage() + " hr=" + std::to_string(cached.LastError()) +
+        " win32=" + std::to_string(GetLastError()));
+      if (!fresh.Initialize(b,80,80,false,true)) throw std::runtime_error("fresh initialize: " + fresh.LastErrorMessage());
       CHECK(cached.layered() && cached.Adapter().kind=="cpu-layered" && !cached.Adapter().hardwareAccelerated);
       CHECK((GetWindowLongPtrW(a,GWL_EXSTYLE)&WS_EX_LAYERED)!=0);
       CHECK((GetWindowLongPtrW(a,GWL_EXSTYLE)&WS_EX_NOREDIRECTIONBITMAP)==0);

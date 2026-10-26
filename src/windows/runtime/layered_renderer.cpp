@@ -42,7 +42,10 @@ std::unique_ptr<LayeredRenderer::Texture> LayeredRenderer::Prepare(const PixelIm
       p.strideBytes < std::uint64_t(p.width)*4 ||
       std::uint64_t(p.strideBytes)*p.height > p.bgraPremultiplied.size() ||
       std::uint64_t(p.strideBytes)*p.height > kTextureBytes) return nullptr;
-  auto t = std::make_unique<Texture>(); t->pixels = p; t->updatable = updatable;
+  auto t = std::make_unique<Texture>(); t->updatable = updatable;
+  t->pixels.width = p.width; t->pixels.height = p.height; t->pixels.strideBytes = p.strideBytes;
+  const auto bytes = static_cast<std::size_t>(p.strideBytes)*p.height;
+  t->pixels.bgraPremultiplied.assign(p.bgraPremultiplied.begin(),p.bgraPremultiplied.begin()+bytes);
   t->bitmap = std::make_unique<Gdiplus::Bitmap>(p.width,p.height,p.strideBytes,
       PixelFormat32bppPARGB,t->pixels.bgraPremultiplied.data());
   if (t->bitmap->GetLastStatus() != Gdiplus::Ok) return nullptr;
