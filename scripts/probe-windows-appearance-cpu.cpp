@@ -11,8 +11,8 @@ namespace {
 std::uint64_t CpuTime100ns(bool) {
   FILETIME created{},exited{},kernel{},user{};
   CHECK(GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user));
-  ULARGE_INTEGER k{},u{};k.LowPart=kernel.dwLowDateTime;k.HighPart=kernel.dwHighDateTime;
-  u.LowPart=user.dwLowDateTime;u.HighPart=user.dwHighDateTime;return k.QuadPart+u.QuadPart;
+  return ((std::uint64_t(kernel.dwHighDateTime)<<32)|kernel.dwLowDateTime) +
+      ((std::uint64_t(user.dwHighDateTime)<<32)|user.dwLowDateTime);
 }
 double Percentile(std::array<double,1024> values,std::size_t count,double fraction) {
   CHECK(count>0&&count<=values.size());std::sort(values.begin(),values.begin()+count);
@@ -21,6 +21,7 @@ double Percentile(std::array<double,1024> values,std::size_t count,double fracti
 struct CpuScene { std::string id, file; };
 struct CpuStage { std::string id, phase; double mean=0; };
 unsigned gLogicalCpu=1;
+bool gCpuClockValidated=false;
 std::vector<CpuStage> gCpuStages;
 std::uint64_t gOperations=0;
 
@@ -77,7 +78,9 @@ CpuStage MeasureCpu(Fixture& fixture,const CpuScene& scene,const std::string& ph
       const auto& backend=gDisplay.display->BackendStats();
       samples<<"{\"id\":\""<<scene.id<<"\",\"phase\":\""<<phase<<"\",\"elapsedMs\":"<<time-start
         <<",\"intervalMs\":"<<time-lastTime<<",\"cpuTime100ns\":"<<currentCpu-lastCpu
-        <<",\"cpuOneCorePercent\":"<<core<<",\"cpuWholeMachinePercent\":"<<core/gLogicalCpu
+        <<",\"cpuClockValidated\":"<<(gCpuClockValidated?"true":"false")
+        <<",\"cpuOneCorePercent\":"<<(gCpuClockValidated?std::to_string(core):"null")
+        <<",\"cpuWholeMachinePercent\":"<<(gCpuClockValidated?std::to_string(core/gLogicalCpu):"null")
         <<",\"privateBytes\":"<<memory.PrivateUsage<<",\"workingSetBytes\":"<<memory.WorkingSetSize
         <<",\"handles\":"<<handles<<",\"gdiObjects\":"<<GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS)
         <<",\"presents\":"<<stats.framesPresented<<",\"textures\":"<<backend.textureCount
@@ -108,7 +111,9 @@ CpuStage MeasureCpu(Fixture& fixture,const CpuScene& scene,const std::string& ph
   DWORD handles=0;CHECK(GetProcessHandleCount(GetCurrentProcess(),&handles));
   CHECK(GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory)));
   summary<<scene.id<<','<<phase<<','<<stop-start<<','<<gOperations-initialOperations<<','<<gLogicalCpu<<','
-    <<mean<<','<<Quantile(cpu,.95)<<','<<*std::max_element(cpu.begin(),cpu.end())<<','
+    <<(gCpuClockValidated?std::to_string(mean):"unavailable")<<','
+    <<(gCpuClockValidated?std::to_string(Quantile(cpu,.95)):"unavailable")<<','
+    <<(gCpuClockValidated?std::to_string(*std::max_element(cpu.begin(),cpu.end())):"unavailable")<<','
     <<firstMemory.PrivateUsage<<','<<memory.PrivateUsage<<','<<firstHandles<<','<<handles<<','
     <<firstGdi<<','<<GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS)<<','<<presented<<'\n';
   summary.flush();CHECK(summary.good());
@@ -117,6 +122,15 @@ CpuStage MeasureCpu(Fixture& fixture,const CpuScene& scene,const std::string& ph
 }
 void RunCpu(const std::filesystem::path& parent,const std::filesystem::path& packs,bool smoke,bool software) {
   CHECK(std::filesystem::is_directory(parent) && std::filesystem::is_directory(packs));
+  const auto calibrationBefore=CpuTime100ns(false),calibrationStart=GetTickCount64();
+  volatile std::uint64_t calibrationWork=1;
+  while(GetTickCount64()-calibrationStart<250) for(unsigned i=0;i<1000;++i)calibrationWork=calibrationWork*1664525+1013904223;
+  const auto calibrationAfter=CpuTime100ns(false);
+  gCpuClockValidated=calibrationAfter>calibrationBefore;
+  std::cout<<"CPU clock calibration before="<<calibrationBefore<<" after="<<calibrationAfter<<" valid="<<gCpuClockValidated<<std::endl;
+  // Hosted CI only validates the functional driver when accounting is unavailable.
+  // Real hardware measurements refuse an unvalidated process CPU clock.
+  if(!smoke) CHECK(gCpuClockValidated);
   CHECK(SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)));
   Gdiplus::GdiplusStartupInput startup;ULONG_PTR gdi=0;
   CHECK(Gdiplus::GdiplusStartup(&gdi,&startup,nullptr)==Gdiplus::Ok);
@@ -173,7 +187,7 @@ void RunCpu(const std::filesystem::path& parent,const std::filesystem::path& pac
     std::ofstream result(fixture.directory/L"result.json");
     result<<"{\"status\":\"PASS\",\"smokeOnly\":"<<(smoke?"true":"false")
       <<",\"testedScenes\":"<<scenes.size()<<",\"availableScenes\":"<<files.size()+1
-      <<",\"logicalCpu\":"<<gLogicalCpu<<",\"dpi\":"<<gState.dpi<<",\"width\":"<<gState.windowWidth<<",\"height\":"<<gState.windowHeight
+      <<",\"cpuClockValidated\":"<<(gCpuClockValidated?"true":"false")<<",\"logicalCpu\":"<<gLogicalCpu<<",\"dpi\":"<<gState.dpi<<",\"width\":"<<gState.windowWidth<<",\"height\":"<<gState.windowHeight
       <<",\"adapterKind\":\""<<gDisplay.display->Adapter().kind<<"\",\"vendorId\":"<<gDisplay.display->Adapter().vendorId
       <<",\"deviceId\":"<<gDisplay.display->Adapter().deviceId<<",\"commands\":"<<gOperations
       <<",\"countAndSaveCorrect\":true,\"globalInputInjected\":false,\"realProfileAccessed\":false,\"ordinaryExecutableMeasured\":false,\"physicalTypingLatencyMeasured\":false,\"scope\":\"same-source real production adapter, diagnostic private input; sampler overhead included\"}\n";
