@@ -136,6 +136,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Raw Input compilation failed' }
           & ./build-raw/Release/niuma-raw-input-probe.exe --self-test | Tee-Object build-raw/result.txt
           if ($LASTEXITCODE -ne 0) { throw 'Raw Input prototype failed' }
+          & ./build-raw/Release/niuma-raw-input-probe.exe --injection-check | Tee-Object build-raw/injection.json
+          if ($LASTEXITCODE -ne 0) { throw 'Raw Input injection observation failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -143,6 +145,7 @@ jobs:
           path: |
             build-raw/Release/niuma-raw-input-probe.exe
             build-raw/result.txt
+            build-raw/injection.json
           retention-days: 14
   windows-input-delivery:
     if: ${{ inputs.mode == 'runtime-input-delivery' }}

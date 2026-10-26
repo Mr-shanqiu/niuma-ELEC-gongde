@@ -17,7 +17,8 @@ struct Probe {
   std::uint64_t packets = 0, keys = 0, keyUps = 0, clicks = 0, wheels = 0;
   std::uint64_t ignoredMouseMoves = 0, noDevicePackets = 0, errors = 0, lateMessages = 0;
   DWORD maximumMessageDelayMs = 0;
-  bool registered = false;
+  bool registered = false, observeLegacy = false;
+  unsigned legacyKeyDowns = 0, hardwareOrigins = 0, injectedOrigins = 0, unavailableOrigins = 0;
   void Observe(const RAWINPUT& packet, ULONGLONG now) {
     ++packets;
     const auto operations = input::DecodeRawInput(packet);
@@ -32,7 +33,10 @@ struct Probe {
       SYSTEMTIME date{}; GetLocalTime(&date);
       const auto day = core::LocalDate(date.wYear * 10000u + date.wMonth * 100u + date.wDay);
       counts.AdvanceAnimation(now);
-      counts.Observe({kind, !operations.hasDevice, now, day});
+      // This is a count-only probe. Device presence cannot classify injection:
+      // precision touchpads legitimately supply a null handle. Never feed
+      // unverified activity into the reminder sampler.
+      counts.Observe({kind, true, now, day});
     }
   }
   static LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
@@ -41,6 +45,8 @@ struct Probe {
       self = static_cast<Probe*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
       SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
+    if (self && self->observeLegacy &&
+        (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && wp == VK_F24) ++self->legacyKeyDowns;
     if (self && message == WM_INPUT) {
       RAWINPUT packet{}; UINT bytes = sizeof(packet);
       const auto size = GetRawInputData(reinterpret_cast<HRAWINPUT>(lp), RID_INPUT,
@@ -49,6 +55,10 @@ struct Probe {
           (packet.header.dwType == RIM_TYPEKEYBOARD && size < offsetof(RAWINPUT, data) + sizeof(RAWKEYBOARD)) ||
           (packet.header.dwType == RIM_TYPEMOUSE && size < offsetof(RAWINPUT, data) + sizeof(RAWMOUSE))) ++self->errors;
       else {
+        INPUT_MESSAGE_SOURCE source{};
+        if (GetCurrentInputMessageSource(&source) && source.originId == IMO_HARDWARE) ++self->hardwareOrigins;
+        else if (source.originId == IMO_INJECTED) ++self->injectedOrigins;
+        else ++self->unavailableOrigins;
         const DWORD delay = static_cast<DWORD>(GetTickCount64()) - static_cast<DWORD>(GetMessageTime());
         self->maximumMessageDelayMs = std::max(self->maximumMessageDelayMs, delay);
         if (delay > 16) ++self->lateMessages;
@@ -120,9 +130,44 @@ void SelfTest() {
   std::cout << "PASS real background registration and cleanup; no low-level hooks\n";
   std::cout << "RAW_INPUT_PROTOTYPE=PASS physicalInputTested=false productionBackendChanged=false\n";
 }
+void InjectionCheck() {
+  wchar_t ci[16]{};
+  CHECK(GetEnvironmentVariableW(L"GITHUB_ACTIONS", ci, 16) && std::wstring(ci) == L"true");
+  Probe probe; probe.Start(); probe.observeLegacy = true;
+  HWND peer = CreateWindowExW(0, L"NiuMaIsolatedRawInputProbe", L"Owned F24 injection check", WS_POPUP,
+      0, 0, 160, 80, nullptr, nullptr, GetModuleHandleW(nullptr), &probe);
+  CHECK(peer); ShowWindow(peer, SW_SHOW); SetForegroundWindow(peer); SetFocus(peer);
+  CHECK(GetForegroundWindow() == peer);
+  INPUT events[6]{};
+  for (unsigned i = 0; i < 6; ++i) {
+    events[i].type = INPUT_KEYBOARD;
+    events[i].ki.wVk = VK_F24;
+    events[i].ki.dwExtraInfo = 0x4e4d5241;
+    if (i % 2) events[i].ki.dwFlags = KEYEVENTF_KEYUP;
+  }
+  CHECK(SendInput(6, events, sizeof(INPUT)) == 6);
+  const auto deadline = GetTickCount64() + 1000;
+  do {
+    MSG message{};
+    for (unsigned n = 0; n < 64 && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++n)
+      DispatchMessageW(&message);
+    Sleep(5);
+  } while (GetTickCount64() < deadline);
+  CHECK(probe.legacyKeyDowns == 3 && probe.errors == 0);
+  CHECK(DestroyWindow(peer)); probe.Stop();
+  std::cout << "{\"sentKeyDowns\":3,\"ownedWindowKeyDowns\":" << probe.legacyKeyDowns
+      << ",\"rawKeyDowns\":" << probe.keys << ",\"rawKeyUps\":" << probe.keyUps
+      << ",\"rawHardwareOrigins\":" << probe.hardwareOrigins
+      << ",\"rawInjectedOrigins\":" << probe.injectedOrigins
+      << ",\"rawUnavailableOrigins\":" << probe.unavailableOrigins
+      << ",\"readErrors\":" << probe.errors
+      << ",\"syntheticInputParity\":" << (probe.keys == 3 ? "true" : "false")
+      << ",\"physicalInputTested\":false,\"productionBackendChanged\":false}\n";
+}
 int wmain(int argc, wchar_t** argv) {
   try {
     if (argc == 2 && std::wstring(argv[1]) == L"--self-test") { SelfTest(); return 0; }
+    if (argc == 2 && std::wstring(argv[1]) == L"--injection-check") { InjectionCheck(); return 0; }
     CHECK(argc == 2);
     const std::wstring argument = argv[1]; CHECK(argument.find(L"--seconds=") == 0);
     const auto seconds = std::stoul(argument.substr(10)); CHECK(seconds >= 5 && seconds <= 120);
