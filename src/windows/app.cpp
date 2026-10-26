@@ -3923,6 +3923,25 @@ void LayoutCalendar(HWND window) {
   if(font){for(int id:{kCalendarPrevious,kCalendarNext,kCalendarToday})SendDlgItemMessageW(window,id,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);
     if(gCalendar.font)DeleteObject(gCalendar.font);gCalendar.font=font;}
 }
+void DrawCalendarButton(const DRAWITEMSTRUCT& item) {
+  const float scale=CalendarScale(gCalendar.window);
+  Gdiplus::Graphics graphics(item.hDC);graphics.ScaleTransform(scale,scale);
+  graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+  const float width=(item.rcItem.right-item.rcItem.left)/scale,height=(item.rcItem.bottom-item.rcItem.top)/scale;
+  const bool disabled=(item.itemState&ODS_DISABLED)!=0,pressed=(item.itemState&ODS_SELECTED)!=0;
+  graphics.Clear(Gdiplus::Color::White);
+  Gdiplus::GraphicsPath outline;niuma::ui::RoundPath(outline,{.5f,.5f,width-1,height-1},4);
+  Gdiplus::SolidBrush fill(pressed?Gdiplus::Color(255,242,242,244):Gdiplus::Color::White);
+  Gdiplus::Pen border(disabled?Gdiplus::Color(255,234,234,236):Gdiplus::Color(255,210,210,214),1);
+  graphics.FillPath(&fill,&outline);graphics.DrawPath(&border,&outline);
+  const Gdiplus::Color ink=disabled?Gdiplus::Color(255,194,194,199):Gdiplus::Color(255,29,29,31);
+  if(item.CtlID==kCalendarToday)DrawCalendarText(graphics,CalendarText(L"回到今天",L"Today"),{6,1,width-12,height-2},14,ink,false,Gdiplus::StringAlignmentCenter);
+  else {Gdiplus::Pen chevron(ink,1.5f);const float direction=item.CtlID==kCalendarPrevious?-1.f:1.f;
+    const Gdiplus::PointF points[]={{width/2-direction*3,height/2-5},{width/2+direction*3,height/2},{width/2-direction*3,height/2+5}};
+    graphics.DrawLines(&chevron,points,3);}
+  if(item.itemState&ODS_FOCUS){Gdiplus::Pen focus(Gdiplus::Color(255,188,75,25),1);focus.SetDashStyle(Gdiplus::DashStyleDot);
+    graphics.DrawRectangle(&focus,3.f,3.f,width-6,height-6);}
+}
 void DrawMeritCalendar(HDC dc) {
   RefreshCalendarNavigation();const auto data=ReadCalendarMonth();const auto now=CalendarToday();
   Gdiplus::Graphics graphics(dc);const float scale=CalendarScale(gCalendar.window);graphics.ScaleTransform(scale,scale);
@@ -3999,6 +4018,8 @@ void CalendarMoveSelection(int delta) {
 LRESULT CALLBACK CalendarWindowProcedure(HWND window,UINT message,WPARAM wParam,LPARAM lParam) {
   switch(message) {
     case WM_ERASEBKGND:return 1;
+    case WM_DRAWITEM:{const auto* item=reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+      if(item && item->CtlID>=kCalendarPrevious && item->CtlID<=kCalendarToday){DrawCalendarButton(*item);return TRUE;}break;}
     case WM_PAINT:PaintMeritCalendar(window);return 0;
     case WM_PRINTCLIENT:DrawMeritCalendar(reinterpret_cast<HDC>(wParam));return 0;
     case WM_SIZE:LayoutCalendar(window);InvalidateRect(window,nullptr,FALSE);return 0;
@@ -4006,6 +4027,7 @@ LRESULT CALLBACK CalendarWindowProcedure(HWND window,UINT message,WPARAM wParam,
       rect->right-rect->left,rect->bottom-rect->top,SWP_NOZORDER|SWP_NOACTIVATE);return 0;}
     case WM_GETDLGCODE:return DLGC_WANTARROWS;
     case WM_COMMAND:{
+      if(LOWORD(wParam)==IDCANCEL){DestroyWindow(window);return 0;}
       if(LOWORD(wParam)==kCalendarPrevious)CalendarShiftMonth(-1);
       else if(LOWORD(wParam)==kCalendarNext)CalendarShiftMonth(1);
       else if(LOWORD(wParam)==kCalendarToday){const auto today=CalendarToday();gCalendar.year=today.wYear;gCalendar.month=today.wMonth;
@@ -4022,8 +4044,9 @@ LRESULT CALLBACK CalendarWindowProcedure(HWND window,UINT message,WPARAM wParam,
       return 0;
     case WM_CLOSE:DestroyWindow(window);return 0;
     case WM_DESTROY:if(gCalendar.font){DeleteObject(gCalendar.font);gCalendar.font=nullptr;}gCalendar.window=nullptr;return 0;
-    default:return DefWindowProcW(window,message,wParam,lParam);
+    default:break;
   }
+  return DefWindowProcW(window,message,wParam,lParam);
 }
 void ShowMeritCalendar(HWND owner) {
   RequestInputLedger();
@@ -4038,7 +4061,7 @@ void ShowMeritCalendar(HWND owner) {
       work.left+(work.right-work.left-width)/2,work.top+(work.bottom-work.top-height)/2,width,height,owner,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!gCalendar.window)return;
     for(const auto id:{kCalendarPrevious,kCalendarNext,kCalendarToday})CreateWindowExW(0,L"BUTTON",
-      id==kCalendarPrevious?L"‹":id==kCalendarNext?L"›":CalendarText(L"回到今天",L"Today"),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_PUSHBUTTON,
+      id==kCalendarPrevious?L"‹":id==kCalendarNext?L"›":CalendarText(L"回到今天",L"Today"),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
       0,0,1,1,gCalendar.window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),GetModuleHandleW(nullptr),nullptr);
   }
   ReloadCalendarRange();RefreshCalendarNavigation();LayoutCalendar(gCalendar.window);niuma::ui::WindowChrome(gCalendar.window);

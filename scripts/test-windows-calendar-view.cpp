@@ -27,6 +27,11 @@ void Snapshot(const std::wstring& path) {
   for(UINT i=0;i<count;++i)if(std::wstring(codecs[i].MimeType)==L"image/png")png=&codecs[i].Clsid;
   CHECK(png && bitmap.Save(path.c_str(),png,nullptr)==Gdiplus::Ok);
 }
+LRESULT CALLBACK LargeBackingSurface(HWND window,UINT message,WPARAM wParam,LPARAM lParam,UINT_PTR,DWORD_PTR) {
+  if(message==WM_GETMINMAXINFO){auto* limits=reinterpret_cast<MINMAXINFO*>(lParam);
+    limits->ptMaxTrackSize={8192,8192};limits->ptMaxSize={8192,8192};return 0;}
+  return DefSubclassProc(window,message,wParam,lParam);
+}
 void ClickDay(int day) {
   const auto rect=CalendarCell(day);const float scale=CalendarScale(gCalendar.window);
   SendMessageW(gCalendar.window,WM_LBUTTONUP,0,MAKELPARAM(static_cast<int>((rect.X+20)*scale),static_cast<int>((rect.Y+16)*scale)));
@@ -79,8 +84,11 @@ int wmain(int argc,wchar_t** argv) {
     for(unsigned i=0;i<100;++i){HDC dc=GetDC(gCalendar.window);DrawMeritCalendar(dc);ReleaseDC(gCalendar.window,dc);}
     CHECK(RecordSignature()==before);CHECK(!gInput.service && !gDataStorage.service);
     // A 200% backing surface uses the same actual painting, selection and hit testing.
+    CHECK(SetWindowSubclass(gCalendar.window,LargeBackingSurface,995,0));
     RECT high{0,0,1520,1408};AdjustWindowRectEx(&high,WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN,FALSE,WS_EX_TOOLWINDOW);
     SetWindowPos(gCalendar.window,nullptr,0,0,high.right-high.left,high.bottom-high.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+    RECT highClient{};GetClientRect(gCalendar.window,&highClient);
+    std::cout<<"Backing surface="<<highClient.right<<"x"<<highClient.bottom<<" scale="<<CalendarScale(gCalendar.window)<<"\n";
     CHECK(std::abs(CalendarScale(gCalendar.window)-2.f)<.01f);ClickDay(13);CHECK(gCalendar.selectedDay==13);
     Snapshot((output/L"calendar-zh-200.png").wstring());
     gCalendarLanguageForTest=0;SendMessageW(gCalendar.window,WM_COMMAND,kCalendarToday,0);
@@ -95,7 +103,7 @@ int wmain(int argc,wchar_t** argv) {
     gState.pendingDailyTotals.clear();gOffwork.days.clear();gState.total=gState.todayTotal=0;ReloadCalendarRange();
     CHECK(gCalendar.range.first==gCalendar.range.last);CalendarShiftMonth(-1);CHECK(gCalendar.month==10);
     Snapshot((output/L"calendar-empty.png").wstring());gState.pendingDailyTotals=oldHistory;gOffwork.days=oldOffwork;gState.total=1284530;gState.todayTotal=8642;
-    CHECK(RecordSignature()==before);DestroyWindow(gCalendar.window);CHECK(!gCalendar.window && !gCalendar.font);
+    CHECK(RecordSignature()==before);SendMessageW(gCalendar.window,WM_COMMAND,IDCANCEL,0);CHECK(!gCalendar.window && !gCalendar.font);
     std::ofstream report(output/L"calendar-view.json");report<<R"({"status":"PASS","scope":"real calendar window, synthetic in-memory data","readOnlyHistory":true,"noHooksOrStorageWorkers":true,"selectedOvertimeSeconds":true,"missingOvertimeDistinct":true,"monthAndYearBoundaries":true,"leapAndSixRowMonths":true,"futureSelectionRejected":true,"todayNavigation":true,"scale100and200":true,"largeCountSaturation":true,"emptyHistory":true,"userProfileAccessed":false})";
     report.close();CoUninitialize();Gdiplus::GdiplusShutdown(token);
     std::cout<<"CALENDAR_VIEW=PASS real window, selection, overtime, month bounds, 100/200%, long counts and read-only history\n";return 0;
