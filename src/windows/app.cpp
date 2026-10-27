@@ -5731,7 +5731,9 @@ int WINAPI wWinMain(
   }
 
   HWND window = CreateWindowExW(
-      (UsesCompositionRuntime() && niuma::runtime::HasCompositionSystem() ? WS_EX_NOREDIRECTIONBITMAP : WS_EX_LAYERED) |
+      (UsesCompositionRuntime() && niuma::runtime::HasCompositionSystem() &&
+          (SoftwareDisplayForTest() || niuma::runtime::HasHardwareCompositionAdapter()) &&
+          !LayeredDisplayForTest() ? WS_EX_NOREDIRECTIONBITMAP : WS_EX_LAYERED) |
           WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
       MainWindowClass(), WindowTitle(), WS_POPUP,
       static_cast<int>(x), static_cast<int>(y),

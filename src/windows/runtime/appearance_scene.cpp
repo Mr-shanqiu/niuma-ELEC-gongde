@@ -124,7 +124,7 @@ bool ConvertPixels(const niuma::PackImage& source, PixelImage& output) {
         static_cast<size_t>(width) * 4);
   if (bitmap->UnlockBits(&data) != Gdiplus::Ok) return false;
   ComPtr<IWICImagingFactory> factory;
-  if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+  if (FAILED(CoCreateInstance(CLSID_WICImagingFactory1, nullptr, CLSCTX_INPROC_SERVER,
       IID_PPV_ARGS(factory.GetAddressOf())))) return false;
   ComPtr<IWICBitmap> input;
   if (FAILED(factory->CreateBitmapFromMemory(width, height, GUID_WICPixelFormat32bppBGRA,

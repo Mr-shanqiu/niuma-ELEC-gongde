@@ -163,6 +163,40 @@ void ClassifyAdapter(AdapterInfo& adapter) {
 }
 }  // namespace
 
+bool HasHardwareCompositionAdapter() {
+    // A HARDWARE request can still return Microsoft's Basic Render Driver.
+    // Reuse the renderer's adapter classification; do not enable WARP to make
+    // a virtual/remote session pass. All temporary COM resources die here.
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    constexpr D3D_FEATURE_LEVEL levels[] = {
+        D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
+    D3D_FEATURE_LEVEL level{};
+    AdapterInfo info;
+    info.createdDriverType = D3D_DRIVER_TYPE_HARDWARE;
+    info.hardwareCreateResult = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, 3, D3D11_SDK_VERSION,
+        device.GetAddressOf(), &level, context.GetAddressOf());
+    if (FAILED(info.hardwareCreateResult)) return false;
+    ComPtr<IDXGIDevice> dxgi;
+    ComPtr<IDXGIAdapter> adapter;
+    DXGI_ADAPTER_DESC desc{};
+    if (FAILED(device.As(&dxgi)) || FAILED(dxgi->GetAdapter(adapter.GetAddressOf())) ||
+        FAILED(adapter->GetDesc(&desc))) return false;
+    info.description = desc.Description; info.vendorId = desc.VendorId; info.deviceId = desc.DeviceId;
+    ComPtr<IDXGIAdapter1> adapter1;
+    if (SUCCEEDED(adapter.As(&adapter1))) {
+        DXGI_ADAPTER_DESC1 desc1{};
+        if (SUCCEEDED(adapter1->GetDesc1(&desc1))) {
+            info.descriptor1Available = true; info.descriptor1Flags = desc1.Flags;
+            info.descriptor1Description = desc1.Description;
+            info.descriptor1VendorId = desc1.VendorId; info.descriptor1DeviceId = desc1.DeviceId;
+        }
+    }
+    ClassifyAdapter(info);
+    return !info.software;
+}
+
 struct D3D11Renderer::Impl {
     struct Texture {
         ComPtr<ID3D11ShaderResourceView> view;

@@ -73,6 +73,10 @@ struct AdapterInfo {
     std::uint32_t descriptor1DeviceId = 0;
 };
 
+// Startup-only capability probe; never creates a software device or a window.
+// Select the compatible HWND before creation when hardware composition is unavailable.
+bool HasHardwareCompositionAdapter();
+
 struct RendererStats {
     std::uint64_t drawCalls = 0;
     std::uint64_t quads = 0;

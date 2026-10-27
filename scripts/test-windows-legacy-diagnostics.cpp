@@ -37,7 +37,7 @@ int wmain(int argc,wchar_t** argv) {
       assert(!niuma::windows::runtime::DiagnosticDecodeForTest(id));
       const auto log=Log(p);assert(log.find("\"stage\":\""+stage+"\"")!=std::string::npos);
       assert(log.find("\"resourceId\":"+std::to_string(id))!=std::string::npos);
-      assert(log.find("\"requestedClsid\":\"00000000-")==std::string::npos);
+      assert(log.find("CACAF262-9370-4615-A13B-9F5539DA4C0A")!=std::string::npos);
       assert(log.size()<2048 && diag::count==1);++cases;
     }
   }

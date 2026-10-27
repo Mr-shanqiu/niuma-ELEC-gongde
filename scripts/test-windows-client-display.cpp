@@ -6,13 +6,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
+#include <cstring>
+#include "../src/windows/runtime/platform_compat.h"
 
 namespace {
 void Check(bool okay,const char* name) {
   if(!okay) { std::fprintf(stderr,"FAIL %s\n",name); std::exit(1); }
 }
 }
-int main() {
+int main(int argc,char** argv) {
+  const bool automatic=argc>1 && std::strcmp(argv[1],"--auto")==0;
+  const bool layered=(argc>1 && std::strcmp(argv[1],"--layered")==0) ||
+      (automatic && (!niuma::runtime::HasCompositionSystem() || !niuma::runtime::HasHardwareCompositionAdapter()));
   using namespace niuma::windows::runtime;
   namespace graphics=niuma::runtime;
   Check(SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)),"COM startup");
@@ -21,12 +26,12 @@ int main() {
   WNDCLASSW cls{}; cls.hInstance=GetModuleHandleW(nullptr); cls.lpfnWndProc=DefWindowProcW;
   cls.lpszClassName=L"NiuMaCompleteDisplayTest";
   Check(RegisterClassW(&cls)!=0,"private display class");
-  HWND window=CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
+  HWND window=CreateWindowExW((layered ? WS_EX_LAYERED : WS_EX_NOREDIRECTIONBITMAP)|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
       cls.lpszClassName,L"NiuMa owned display test",WS_POPUP,30,30,240,334,nullptr,nullptr,cls.hInstance,nullptr);
   Check(window!=nullptr,"private display window");
   {
     ClientDisplay display;
-    Check(display.Initialize(window,240,334,true),"composition initialization (CI software allowed)");
+    Check(display.Initialize(window,240,334,!automatic,layered),"composition initialization (CI software allowed)");
     ClientDisplayState view;
     view.text.merit=L"120"; view.text.countdownVisible=true;
     view.text.countdownLabel=L"距下班"; view.text.countdownDuration=L"01:00:00";

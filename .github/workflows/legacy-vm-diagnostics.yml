@@ -1,7 +1,7 @@
-name: Legacy VM bounded diagnostic
+name: Legacy Windows compatibility candidate
 on:
   push:
-    branches: [codex/legacy-vm-diagnostics-20261028-c]
+    branches: [codex/windows-legacy-compat-20261028]
 permissions:
   contents: read
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - name: Configure existing MSVC x64 path
         run: cmake -S . -B build-legacy-diagnostic -G "Visual Studio 17 2022" -A x64
       - name: Compile diagnostic and unchanged ordinary target
-        run: cmake --build build-legacy-diagnostic --config Release --target niuma-legacy-diagnostic niuma-legacy-diagnostic-test niuma-merit --parallel 2
+        run: cmake --build build-legacy-diagnostic --config Release --target niuma-legacy-diagnostic niuma-legacy-diagnostic-test niuma-merit niuma-client-display-test niuma-layered-compatibility-test niuma-production-runtime-test niuma-calendar-view-test niuma-pack-test --parallel 2
       - name: Directed WIC failure and bounded-log checks
         shell: pwsh
         run: |
@@ -28,6 +28,17 @@ jobs:
           $env:NIUMA_ACCEPTANCE_ROOT="$env:RUNNER_TEMP/does-not-exist-niuma-diagnostic"
           $p=Start-Process -FilePath $app -ArgumentList '--runtime-candidate' -WindowStyle Hidden -PassThru -Wait
           if ($p.ExitCode -ne 2) { throw 'Missing private profile gate failed' }
+      - name: Validate prepared displays and data preservation
+        shell: pwsh
+        run: |
+          & build-legacy-diagnostic/Release/niuma-client-display-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Modern prepared scene test failed' }
+          & build-legacy-diagnostic/Release/niuma-client-display-test.exe --auto
+          if ($LASTEXITCODE -ne 0) { throw 'Automatic backend selection test failed' }
+          & build-legacy-diagnostic/Release/niuma-layered-compatibility-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Layered cache/resource test failed' }
+          & build-legacy-diagnostic/Release/niuma-production-runtime-test.exe "$env:RUNNER_TEMP/niuma-compat-storage" --layered
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility input/visibility/storage test failed' }
       - name: Package diagnostic only
         shell: pwsh
         run: |
@@ -35,8 +46,12 @@ jobs:
           Copy-Item build-legacy-diagnostic/Release/niuma-legacy-diagnostic.exe legacy-diagnostic-package/
           Copy-Item scripts/start-legacy-diagnostics.cmd legacy-diagnostic-package/
           Copy-Item diagnostic-unit-result.json legacy-diagnostic-package/
+          foreach ($name in @('niuma-client-display-test','niuma-production-runtime-test','niuma-calendar-view-test','niuma-layered-compatibility-test','niuma-pack-test')) {
+            Copy-Item "build-legacy-diagnostic/Release/$name.exe" legacy-diagnostic-package/
+          }
+          Copy-Item build-legacy-diagnostic/Release/niuma-merit.exe legacy-diagnostic-package/niuma-merit-unsigned-compat.exe
           $exe=Get-Item legacy-diagnostic-package/niuma-legacy-diagnostic.exe
-          @{ taskId='NIUMA-WIN-LEGACY-VM-20261028-C'; sourceCommit=$env:GITHUB_SHA; baseCommit='3a390a0419e2a662722840a4d15159fc973e2ce1'; kind='diagnostic-only-not-installer'; unsigned=$true; bytes=$exe.Length; sha256=(Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); maxFailureRecords=32; maxFailureBytes=65536; logsOnlyFailures=$true; realProfileAllowed=$false; globalInputInjection=$false } | ConvertTo-Json | Set-Content legacy-diagnostic-package/BINDING.json -Encoding utf8
+          @{ taskId='NIUMA-WIN-LEGACY-COMPAT-20261028'; sourceCommit=$env:GITHUB_SHA; baseCommit='3a390a0419e2a662722840a4d15159fc973e2ce1'; kind='diagnostic-only-not-installer'; unsigned=$true; bytes=$exe.Length; sha256=(Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); maxFailureRecords=32; maxFailureBytes=65536; logsOnlyFailures=$true; realProfileAllowed=$false; globalInputInjection=$false } | ConvertTo-Json | Set-Content legacy-diagnostic-package/BINDING.json -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: legacy-diagnostic-${{ github.sha }}

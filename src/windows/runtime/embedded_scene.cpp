@@ -51,11 +51,11 @@ bool Decode(const Resource& r,niuma::runtime::PixelImage& image,std::size_t rema
 #if defined(NIUMA_LEGACY_DIAGNOSTICS)
   using Microsoft::WRL::ComPtr;
   using namespace niuma::legacy_diag;
-  Context c; c.resource=r.id;c.budget=remaining;c.clsid=CLSID_WICImagingFactory;
+  Context c; c.resource=r.id;c.budget=remaining;c.clsid=CLSID_WICImagingFactory1;
   ComPtr<IWICImagingFactory> factory; ComPtr<IWICStream> stream;
   ComPtr<IWICBitmapDecoder> decoder; ComPtr<IWICBitmapFrameDecode> frame;
   ComPtr<IWICFormatConverter> converter;
-  if(!Hr(c,"CoCreateInstance",CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory)))) return false;
+  if(!Hr(c,"CoCreateInstance",CoCreateInstance(CLSID_WICImagingFactory1,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory)))) return false;
   if(!Hr(c,"CreateStream",factory->CreateStream(&stream))) return false;
   if(!Hr(c,"InitializeFromMemory",stream->InitializeFromMemory(const_cast<BYTE*>(r.bytes),r.size))) return false;
   if(!Hr(c,"CreateDecoderFromStream",factory->CreateDecoderFromStream(stream.Get(),nullptr,WICDecodeMetadataCacheOnLoad,&decoder))) return false;
@@ -81,7 +81,7 @@ bool Decode(const Resource& r,niuma::runtime::PixelImage& image,std::size_t rema
   ComPtr<IWICBitmapFrameDecode> frame;
   ComPtr<IWICFormatConverter> converter;
   GUID format{}; UINT frames=0,width=0,height=0;
-  if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory))) ||
+  if(FAILED(CoCreateInstance(CLSID_WICImagingFactory1,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory))) ||
       FAILED(factory->CreateStream(&stream)) ||
       FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(r.bytes),r.size)) ||
       FAILED(factory->CreateDecoderFromStream(stream.Get(),nullptr,WICDecodeMetadataCacheOnLoad,&decoder)) ||
