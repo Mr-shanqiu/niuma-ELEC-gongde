@@ -37,7 +37,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Automatic backend selection test failed' }
           & build-legacy-diagnostic/Release/niuma-layered-compatibility-test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Layered cache/resource test failed' }
-          & build-legacy-diagnostic/Release/niuma-production-runtime-test.exe "$env:RUNNER_TEMP/niuma-compat-storage" --layered
+          & build-legacy-diagnostic/Release/niuma-production-runtime-test.exe "$env:TEMP/niuma-compat-storage" --layered
           if ($LASTEXITCODE -ne 0) { throw 'Compatibility input/visibility/storage test failed' }
       - name: Package diagnostic only
         shell: pwsh
