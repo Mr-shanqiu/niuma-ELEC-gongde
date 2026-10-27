@@ -39,6 +39,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Layered cache/resource test failed' }
           & build-legacy-diagnostic/Release/niuma-production-runtime-test.exe "$env:TEMP/niuma-compat-storage" --layered
           if ($LASTEXITCODE -ne 0) { throw 'Compatibility input/visibility/storage test failed' }
+          & build-legacy-diagnostic/Release/niuma-calendar-view-test.exe "$env:TEMP/niuma-compat-calendar"
+          if ($LASTEXITCODE -ne 0) { throw 'Native calendar render/navigation test failed' }
       - name: Package diagnostic only
         shell: pwsh
         run: |

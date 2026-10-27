@@ -20,7 +20,9 @@ void Snapshot(const std::wstring& path) {
   HDC screen=GetDC(gCalendar.window);niuma::render::LayeredSurface surface;
   CHECK(surface.Ensure(screen,r.right,r.bottom));ReleaseDC(gCalendar.window,screen);
   if(CalendarScale(gCalendar.window)<1.1f) {
-    CHECK(PrintWindow(gCalendar.window,surface.dc(),PW_CLIENTONLY|2));
+    // The calendar implements WM_PRINTCLIENT itself. The undocumented flag2
+    // is rejected on Windows7; the documented client capture works on all targets.
+    CHECK(PrintWindow(gCalendar.window,surface.dc(),PW_CLIENTONLY));
   } else {
     // Hosted desktops clip PrintWindow outside the physical screen even with
     // a correctly sized HWND. Exercise the very same production painting into
