@@ -1821,13 +1821,13 @@ bool EnsureCompositionDisplay() {
   if (gDisplay.display->Initialize(gState.window, gState.windowWidth, gState.windowHeight,
       SoftwareDisplayForTest(), LayeredDisplayForTest())) return true;
 #if defined(NIUMA_LEGACY_DIAGNOSTICS)
-  niuma::legacy_diag::Failure("display","Initialize",
-      gDisplay.display->DiagnosticLastError(),{},gDisplay.display->LastErrorMessage().c_str());
   const auto& adapter=gDisplay.display->Adapter();
   niuma::legacy_diag::Context adapterContext;
   adapterContext.vendorId=adapter.vendorId;adapterContext.deviceId=adapter.deviceId;adapterContext.featureLevel=adapter.featureLevel;
   niuma::legacy_diag::Failure("adapter","HardwareCreateResult",adapter.hardwareCreateResult,adapterContext,
       "adapter state at initialization failure; hr is hardwareCreateResult");
+  niuma::legacy_diag::Failure("display","Initialize",
+      gDisplay.display->DiagnosticLastError(),{},gDisplay.display->LastErrorMessage().c_str());
 #endif
   FailCompositionDisplay();
   return false;

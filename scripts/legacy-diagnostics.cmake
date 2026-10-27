@@ -38,6 +38,7 @@ if(WIN32)
       target_compile_options(${t} PRIVATE /W4 /permissive- /utf-8 /UNDEBUG)
     endforeach()
     target_link_options(niuma-legacy-diagnostic PRIVATE /MANIFEST:NO)
+    target_link_options(niuma-legacy-diagnostic-test PRIVATE /MANIFEST:NO)
   endif()
 endif()
 
