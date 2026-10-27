@@ -1243,6 +1243,19 @@ bool AppearanceCatalog::Install(const std::wstring& sourcePath,
     SetError(error, L"无法把形象保存到本机。请检查磁盘空间和保存目录的写入权限后重试。");
     return false;
   }
+  // CopyFile preserves READONLY from optical/removable source media. Only our
+  // newly created managed copy becomes writable; source bytes/attributes and
+  // the previously installed pack remain untouched until verified replacement.
+  const DWORD copiedAttributes = GetFileAttributesW(temporary.c_str());
+  if (copiedAttributes == INVALID_FILE_ATTRIBUTES ||
+      ((copiedAttributes & FILE_ATTRIBUTE_READONLY) &&
+       !SetFileAttributesW(temporary.c_str(),
+           (copiedAttributes & ~FILE_ATTRIBUTE_READONLY) ?
+               (copiedAttributes & ~FILE_ATTRIBUTE_READONLY) : FILE_ATTRIBUTE_NORMAL))) {
+    DeleteFileW(temporary.c_str());
+    SetError(error, L"无法准备可写的形象副本，原形象保持不变。请检查保存目录权限后重试。");
+    return false;
+  }
   std::unique_ptr<AppearancePack> copied;
   if (!LoadAppearancePackFile(temporary, true, &copied, error, PackLoadMode::Metadata) ||
       copied->id != validated->id || copied->publisher != validated->publisher ||
