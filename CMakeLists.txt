@@ -492,3 +492,5 @@ elseif(APPLE)
 else()
   message(FATAL_ERROR "This product supports Windows and macOS only")
 endif()
+
+include(scripts/legacy-diagnostics.cmake)

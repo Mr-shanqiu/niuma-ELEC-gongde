@@ -42,6 +42,9 @@ class ClientDisplay final {
   const ClientDisplayFrameTiming& DiagnosticFrameTiming() const { return timing_; }
   const niuma::runtime::AdapterInfo& Adapter() const { return presenter_.Adapter(); }
   const std::string& LastErrorMessage() const { return error_; }
+#if defined(NIUMA_LEGACY_DIAGNOSTICS)
+  HRESULT DiagnosticLastError() const { return presenter_.LastError(); }
+#endif
  private:
   bool InstallTextures(const PreparedAppearanceScene* scene, std::uint64_t sceneVersion);
   HWND window_ = nullptr;

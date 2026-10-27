@@ -25,6 +25,7 @@
 #include "runtime/platform_compat.h"
 #include "runtime/embedded_scene.h"
 #include "app_version.h"
+#include "runtime/legacy_diagnostics.h"
 #if defined(NIUMA_SELF_INSTALL)
 #include "self_install.h"
 #endif
@@ -1819,6 +1820,15 @@ bool EnsureCompositionDisplay() {
   if (!gDisplay.display) gDisplay.display = std::make_unique<input_runtime::ClientDisplay>();
   if (gDisplay.display->Initialize(gState.window, gState.windowWidth, gState.windowHeight,
       SoftwareDisplayForTest(), LayeredDisplayForTest())) return true;
+#if defined(NIUMA_LEGACY_DIAGNOSTICS)
+  niuma::legacy_diag::Failure("display","Initialize",
+      gDisplay.display->DiagnosticLastError(),{},gDisplay.display->LastErrorMessage().c_str());
+  const auto& adapter=gDisplay.display->Adapter();
+  niuma::legacy_diag::Context adapterContext;
+  adapterContext.vendorId=adapter.vendorId;adapterContext.deviceId=adapter.deviceId;adapterContext.featureLevel=adapter.featureLevel;
+  niuma::legacy_diag::Failure("adapter","HardwareCreateResult",adapter.hardwareCreateResult,adapterContext,
+      "adapter state at initialization failure; hr is hardwareCreateResult");
+#endif
   FailCompositionDisplay();
   return false;
 }
@@ -2020,6 +2030,15 @@ void ReportAppearanceFailure(const std::wstring& detail) {
       ? UiText(L"形象未能准备完成，原有形象保持不变。请重新选择或导入原包。",
                L"The appearance could not be prepared. The previous appearance is unchanged; select it again or import the original pack.")
       : detail;
+#if defined(NIUMA_LEGACY_DIAGNOSTICS)
+  const auto diagnostic=niuma::legacy_diag::TakeNotice();
+  static unsigned lastNotice=0;
+  if(diagnostic && diagnostic==lastNotice) return;
+  if(diagnostic) {
+    lastNotice=diagnostic;
+    gAppearance.error+=L" [D"+std::to_wstring(diagnostic)+L"]";
+  }
+#endif
   if (gState.window && (!gIsolatedAcceptance || IsRuntimeCandidate()) && !SoftwareDisplayForTest())
     niuma::ui::Message(gState.window, gAppearance.error.c_str(),
         UiText(L"形象未切换", L"Appearance Unchanged"), MB_OK | MB_ICONWARNING);
@@ -2166,11 +2185,26 @@ void ApplyAppearanceLoadResult(input_runtime::AppearanceLoadResult result) {
     }
     if (UsesCompositionRuntime()) {
       try {
+#if defined(NIUMA_LEGACY_DIAGNOSTICS)
+        if (!EnsureCompositionDisplay()) {
+          ReportAppearanceFailure(UiText(L"显示设备初始化失败，原有形象保持不变。",
+              L"Display initialization failed. The previous appearance is unchanged."));
+          return;
+        }
+        if (!gDisplay.display->SetScene(result.scene)) {
+          niuma::legacy_diag::Failure("display","SetScene",gDisplay.display->DiagnosticLastError(),
+              {},gDisplay.display->LastErrorMessage().c_str());
+          ReportAppearanceFailure(UiText(L"形象纹理提交失败，原有形象保持不变。",
+              L"Appearance texture submission failed. The previous appearance is unchanged."));
+          return;
+        }
+#else
         if (!EnsureCompositionDisplay() || !gDisplay.display->SetScene(result.scene)) {
           ReportAppearanceFailure(UiText(L"形象未能提交到显示设备，原有形象保持不变。请稍后再试。",
               L"The appearance could not be installed on the display device. The previous appearance is unchanged."));
           return;
         }
+#endif
       } catch (...) {
         ReportAppearanceFailure(UiText(L"准备形象时内存不足，原有形象保持不变。",
             L"Appearance preparation ran out of memory. The previous appearance is unchanged."));
@@ -5500,6 +5534,9 @@ bool TransferImport(HWND receiver, const std::wstring& file, UINT timeout = 5000
 int WINAPI wWinMain(
     HINSTANCE instance, HINSTANCE, PWSTR, int) {
   if (!InitializeAcceptanceContext()) return 2;
+#if defined(NIUMA_LEGACY_DIAGNOSTICS)
+  if (!IsRuntimeCandidate() || !niuma::legacy_diag::Configure(gAcceptanceRoot)) return 2;
+#endif
 #if defined(NIUMA_SELF_INSTALL)
   if (!gIsolatedAcceptance) {
     const auto setup = niuma::installation::PrepareLaunch(instance, NIUMA_APP_VERSION_W);

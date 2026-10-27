@@ -1,0 +1,45 @@
+name: Legacy VM bounded diagnostic
+on:
+  push:
+    branches: [codex/legacy-vm-diagnostics-20261028-c]
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure existing MSVC x64 path
+        run: cmake -S . -B build-legacy-diagnostic -G "Visual Studio 17 2022" -A x64
+      - name: Compile diagnostic and unchanged ordinary target
+        run: cmake --build build-legacy-diagnostic --config Release --target niuma-legacy-diagnostic niuma-legacy-diagnostic-test niuma-merit --parallel 2
+      - name: Directed WIC failure and bounded-log checks
+        shell: pwsh
+        run: |
+          $testOutput = & build-legacy-diagnostic/Release/niuma-legacy-diagnostic-test.exe "$env:RUNNER_TEMP/niuma-legacy-diagnostic-unit"
+          $testOutput | Set-Content diagnostic-unit-result.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic directed tests failed' }
+          $ordinary=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Resolve-Path build-legacy-diagnostic/Release/niuma-merit.exe)))
+          if ($ordinary.Contains('requestedClsid')) { throw 'Ordinary target contains diagnostic logger' }
+          $app=(Resolve-Path build-legacy-diagnostic/Release/niuma-legacy-diagnostic.exe).Path
+          $p=Start-Process -FilePath $app -WindowStyle Hidden -PassThru -Wait
+          if ($p.ExitCode -ne 2) { throw 'No-argument private entry gate failed' }
+          $env:NIUMA_ACCEPTANCE_ROOT="$env:RUNNER_TEMP/does-not-exist-niuma-diagnostic"
+          $p=Start-Process -FilePath $app -ArgumentList '--runtime-candidate' -WindowStyle Hidden -PassThru -Wait
+          if ($p.ExitCode -ne 2) { throw 'Missing private profile gate failed' }
+      - name: Package diagnostic only
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path legacy-diagnostic-package | Out-Null
+          Copy-Item build-legacy-diagnostic/Release/niuma-legacy-diagnostic.exe legacy-diagnostic-package/
+          Copy-Item scripts/start-legacy-diagnostics.cmd legacy-diagnostic-package/
+          Copy-Item diagnostic-unit-result.json legacy-diagnostic-package/
+          $exe=Get-Item legacy-diagnostic-package/niuma-legacy-diagnostic.exe
+          @{ taskId='NIUMA-WIN-LEGACY-VM-20261028-C'; sourceCommit=$env:GITHUB_SHA; baseCommit='3a390a0419e2a662722840a4d15159fc973e2ce1'; kind='diagnostic-only-not-installer'; unsigned=$true; bytes=$exe.Length; sha256=(Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); maxFailureRecords=32; maxFailureBytes=65536; logsOnlyFailures=$true; realProfileAllowed=$false; globalInputInjection=$false } | ConvertTo-Json | Set-Content legacy-diagnostic-package/BINDING.json -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: legacy-diagnostic-${{ github.sha }}
+          path: legacy-diagnostic-package/*
+          retention-days: 14
+

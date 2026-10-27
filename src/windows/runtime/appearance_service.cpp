@@ -1,4 +1,5 @@
 #include "appearance_service.h"
+#include "legacy_diagnostics.h"
 #include "embedded_scene.h"
 
 #include <objbase.h>
@@ -108,6 +109,9 @@ struct AppearanceService::Impl {
       AppearanceLoadResult output;
       try {
         if (FAILED(com)) {
+#if defined(NIUMA_LEGACY_DIAGNOSTICS)
+          niuma::legacy_diag::Failure("worker","CoInitializeEx",com);
+#endif
           output.error = static_cast<DWORD>(com);
           output.detail = L"Appearance worker COM initialization failed.";
         } else {
