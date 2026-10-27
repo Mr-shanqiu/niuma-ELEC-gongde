@@ -2193,7 +2193,7 @@ void ApplyAppearanceLoadResult(input_runtime::AppearanceLoadResult result) {
         }
         if (!gDisplay.display->SetScene(result.scene)) {
           niuma::legacy_diag::Failure("display","SetScene",gDisplay.display->DiagnosticLastError(),
-              {},gDisplay.display->LastErrorMessage().c_str());
+              {},gDisplay.display->LastErrorMessage().c_str(),SUCCEEDED(gDisplay.display->DiagnosticLastError()));
           ReportAppearanceFailure(UiText(L"形象纹理提交失败，原有形象保持不变。",
               L"Appearance texture submission failed. The previous appearance is unchanged."));
           return;

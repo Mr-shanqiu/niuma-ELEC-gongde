@@ -26,12 +26,13 @@ if(WIN32)
   target_link_libraries(niuma-legacy-diagnostic PRIVATE niuma-windows-input niuma-windows-storage
     niuma-legacy-loader shell32 gdiplus ole32 bcrypt comdlg32 comctl32 uxtheme)
   add_executable(niuma-legacy-diagnostic-test scripts/test-windows-legacy-diagnostics.cpp
+    src/windows/appearance_pack.cpp third_party/miniz/miniz.c
     src/windows/runtime/embedded_scene.cpp "${CMAKE_CURRENT_BINARY_DIR}/niuma-app.rc")
-  target_include_directories(niuma-legacy-diagnostic-test PRIVATE src/windows "${CMAKE_CURRENT_BINARY_DIR}")
+  target_include_directories(niuma-legacy-diagnostic-test PRIVATE src/windows third_party/miniz "${CMAKE_CURRENT_BINARY_DIR}")
   target_compile_features(niuma-legacy-diagnostic-test PRIVATE cxx_std_17)
   target_compile_definitions(niuma-legacy-diagnostic-test PRIVATE NIUMA_LEGACY_DIAGNOSTICS NIUMA_LEGACY_DIAGNOSTICS_TEST
-    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-  target_link_libraries(niuma-legacy-diagnostic-test PRIVATE niuma-windows-scenes ole32 bcrypt)
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX MINIZ_NO_ARCHIVE_WRITING_APIS)
+  target_link_libraries(niuma-legacy-diagnostic-test PRIVATE niuma-windows-scenes ole32 shell32 bcrypt)
   if(MSVC)
     foreach(t niuma-legacy-diagnostic niuma-legacy-diagnostic-test)
       set_property(TARGET ${t} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

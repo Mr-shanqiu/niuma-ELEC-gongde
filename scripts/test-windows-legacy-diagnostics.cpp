@@ -1,5 +1,6 @@
 #include "../src/windows/runtime/legacy_diagnostics.h"
 #include "../src/windows/runtime/appearance_scene.h"
+#include "../src/windows/runtime/client_display.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -52,6 +53,7 @@ int wmain(int argc,wchar_t** argv) {
   const auto first=diag::Failure("test","one",E_FAIL);
   for(int i=0;i<100;++i) assert(diag::Failure("test","one",E_FAIL)==first);
   assert(diag::count==1);
+  assert(diag::TakeNotice()==first && diag::TakeNotice()==0);
   for(int i=0;i<100;++i) diag::Failure("test",("unique"+std::to_string(i)).c_str(),E_FAIL);
   assert(diag::count==32 && Log(bounded).size()<=65536);++cases;
   auto cap=Fresh(root,++caseIndex);assert(diag::Configure(cap.wstring()));
@@ -60,6 +62,17 @@ int wmain(int argc,wchar_t** argv) {
   auto redacted=Fresh(root,++caseIndex);assert(diag::Configure(redacted.wstring()));
   SetLastError(1234);diag::Failure("test","safe",E_FAIL,{},"quote\" slash/ back\\\n");
   assert(GetLastError()==1234);assert(Log(redacted).find("quote_ slash_ back__")!=std::string::npos);++cases;
+  auto display=Fresh(root,++caseIndex);assert(diag::Configure(display.wstring()));
+  niuma::windows::runtime::ClientDisplay invalidWindow;
+  assert(!invalidWindow.Initialize(nullptr,240,250));
+  assert(invalidWindow.DiagnosticLastError()==E_INVALIDARG);
+  diag::Failure("display","Initialize",invalidWindow.DiagnosticLastError(),{},invalidWindow.LastErrorMessage().c_str());
+  assert(Log(display).find("0x80070057")!=std::string::npos);++cases;
+  niuma::windows::runtime::ClientDisplay invalidScene;
+  std::unique_ptr<niuma::windows::runtime::PreparedAppearanceScene> none;
+  assert(!invalidScene.SetScene(none));
+  diag::Failure("display","SetScene",invalidScene.DiagnosticLastError(),{},invalidScene.LastErrorMessage().c_str(),true);
+  assert(Log(display).find("\"kind\":\"check\"")!=std::string::npos);++cases;
   CoUninitialize();
   std::cout<<"{\"status\":\"PASS\",\"cases\":"<<cases
     <<",\"actualWicResourceDecode\":true,\"failureInjectionTestOnly\":true,\"maxRecords\":32,\"maxBytes\":65536,\"globalInputInjected\":false}\n";
