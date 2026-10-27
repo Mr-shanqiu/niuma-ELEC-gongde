@@ -18,6 +18,7 @@ void CALLBACK CancelHiddenTrayMenu(HWND, UINT, UINT_PTR timer, DWORD) {
 int FullscreenPeer() {
   EnableBestDpiAwareness();
   WNDCLASSW wc{};wc.lpfnWndProc=[](HWND window,UINT message,WPARAM mode,LPARAM value)->LRESULT {
+    if(message==WM_DESTROY) { PostQuitMessage(0); return 0; }
     if(message!=kPeerModeMessage) return DefWindowProcW(window,message,mode,value);
     MONITORINFO monitor{};monitor.cbSize=sizeof(monitor);
     if(!GetMonitorInfoW(MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST),&monitor)) return 0;
