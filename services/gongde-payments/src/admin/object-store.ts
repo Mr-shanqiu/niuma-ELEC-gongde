@@ -646,6 +646,21 @@ export class AdminObjectStore {
     });
   }
 
+  /** Read only; used by the fixed migration/import tool, never by public routes. */
+  async downloadEventsForImport(): Promise<Array<{ key: string; fileName: string; platform: string | null; downloadedAt: Date }>> {
+    const prefix = `${prefixes.installer}.download-events/`;
+    return (await this.#listObjects(prefix)).flatMap(item => {
+      const key = item.Key ?? "";
+      if (!key.startsWith(prefix)) return [];
+      const match = key.slice(prefix.length).match(/^(\d+)-[a-f0-9]+-(.+)$/u);
+      if (!match) return [];
+      const downloadedAt = new Date(Number(match[1]));
+      if (!Number.isFinite(downloadedAt.getTime())) return [];
+      const platform = /\.dmg$/iu.test(match[2]) ? "macos" : /\.exe$/iu.test(match[2]) ? "windows" : null;
+      return [{ key, fileName: match[2], downloadedAt, platform }];
+    });
+  }
+
   async summarizeDownloads(
     createdFrom: Date,
     createdTo: Date,

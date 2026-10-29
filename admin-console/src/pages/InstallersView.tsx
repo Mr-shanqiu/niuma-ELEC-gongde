@@ -218,7 +218,7 @@ export function InstallersView() {
         </ReadGate>
         <div className="panel-foot">
           <Typography.Text type="secondary">
-            统计区间 {registryRead ? `${range.start} 至 ${range.end}（北京时间）` : "未读取"} · 显示已记录的请求，不是安装人数或独立用户；防刷限流可能省略部分请求。
+            统计区间 {registryRead ? `${range.start} 至 ${range.end}（北京时间）` : "未读取"} · 显示已记录的请求，不是安装人数或独立用户；防刷限流可能省略部分请求。明细保留90天，每日汇总保留730天，累计数量单独保留。
           </Typography.Text>
         </div>
       </Card>

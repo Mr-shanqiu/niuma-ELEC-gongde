@@ -24,3 +24,41 @@ jobs:
           cache-dependency-path: services/gongde-payments/package-lock.json
       - run: npm ci
       - run: npm test
+  download-counters-mysql:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: synthetic-ci-download-counter-root
+          MYSQL_DATABASE: gongde_download_acceptance
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    defaults:
+      run:
+        working-directory: services/gongde-payments
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/gongde-payments/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Write isolated database test password
+        run: node --input-type=module -e "import fs from 'node:fs';fs.writeFileSync('/tmp/gongde-download-ci-password','synthetic-ci-download-counter-root',{mode:0o600})"
+      - name: Verify counters against MySQL transactions
+        env:
+          GONGDE_DOWNLOAD_TEST_MYSQL_PORT: '3306'
+          GONGDE_DOWNLOAD_TEST_MYSQL_PASSWORD_FILE: /tmp/gongde-download-ci-password
+        run: |
+          node tests/download-counters.mysql.local.mjs
+          node --experimental-test-module-mocks tests/download-counters-http.mysql.local.mjs
+      - if: always()
+        run: rm -f /tmp/gongde-download-ci-password

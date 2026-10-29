@@ -64,6 +64,18 @@ const downloadCountRateLimit = new DownloadCountRateLimit();
 const adminAndDownloadTrustedProxies = parseCreatorTrustedProxies(process.env.GONGDE_CREATOR_TRUSTED_PROXY_ADDRESSES);
 const adminObjectStoreConfiguration = loadAdminObjectStoreConfiguration();
 const adminObjectStore = adminObjectStoreConfiguration ? new AdminObjectStore(adminObjectStoreConfiguration) : null;
+const downloadCoverage = loadDownloadCoverage();
+const mysqlDownloadCounters = store instanceof MySqlPaymentStore && downloadCoverage.startedAt
+  ? store.downloadCounters(new Date(downloadCoverage.startedAt)) : null;
+const downloadCounters = mysqlConfiguration ? mysqlDownloadCounters : adminObjectStore;
+let downloadPruneRunning = false;
+const downloadPruneTimer = mysqlDownloadCounters ? setInterval(() => {
+  if (downloadPruneRunning) return;
+  downloadPruneRunning = true;
+  void mysqlDownloadCounters.prune().catch(() => audit("download_counter_prune_failed"))
+    .finally(() => { downloadPruneRunning = false; });
+}, 60000).unref() : null;
+
 // The publication object is the only place where two administrators can lose
 // each other's write, so its lock exists whenever the object store does.
 const publicationLockHandle = adminObjectStoreConfiguration
@@ -559,13 +571,13 @@ export const server = createServer(async (request, response) => {
         },
         range: { from: from.toISOString(), to: to.toISOString() }
       };
-      if (!adminObjectStore) {
+      if (!downloadCounters) {
         // Not counting is a distinct state from counting zero. Saying "0" here
         // would read as "nobody downloaded".
         return json(response, 200, { ...base, status: "unavailable", error: "download_store_not_enabled", summary: null }, { "cache-control": "private, no-store" });
       }
       try {
-        const summary = await adminObjectStore.summarizeDownloads(from, to, {
+        const summary = await downloadCounters.summarizeDownloads(from, to, {
           countedSince,
           registeredNames: registry.items.map((item) => item.name)
         });
@@ -583,8 +595,8 @@ export const server = createServer(async (request, response) => {
         store.summarizeOrders(new Date(0), new Date()),
         // Never substitute a zero object here: a missing store or a failed read
         // must reach the page as "unavailable", not as "nobody downloaded".
-        adminObjectStore
-          ? adminObjectStore.summarizeDownloads(from, to, {
+        downloadCounters
+          ? downloadCounters.summarizeDownloads(from, to, {
               countedSince: (() => { const startedAt = loadDownloadCoverage().startedAt; return startedAt ? new Date(startedAt) : null; })(),
               registeredNames: loadInstallerRegistry().items.map((item) => item.name)
             }).then((summary) => ({ status: "available" as const, summary }))
@@ -741,9 +753,10 @@ export const server = createServer(async (request, response) => {
         if (kind !== "appearance" && kind !== "installer") return json(response, 400, { error: "admin_file_kind_invalid" });
         const [files, downloads] = await Promise.all([
           adminObjectStore.list(kind),
-          adminObjectStore.summarizeDownloads(new Date(0), new Date())
+          mysqlDownloadCounters ? mysqlDownloadCounters.cumulativeFileTotals()
+            : adminObjectStore.summarizeDownloads(new Date(0), new Date()).then(summary => summary.byFile)
         ]);
-        const countByName = new Map(downloads.byFile.map((item) => [item.fileName, item.total]));
+        const countByName = new Map(downloads.map((item) => [item.fileName, item.total]));
         const data = files.map((file) => ({ ...file, downloads: countByName.get(file.name) ?? 0 }));
         return json(response, 200, { data, total: data.length });
       }
@@ -782,7 +795,6 @@ export const server = createServer(async (request, response) => {
     }
     const publicDownloadMatch = url.pathname.match(/^\/api\/gongde\/downloads\/([A-Za-z0-9][A-Za-z0-9._-]{0,119})$/u);
     if (request.method === "GET" && publicDownloadMatch) {
-      if (!adminObjectStore) return json(response, 503, { error: "download_store_not_enabled" });
       const name = publicDownloadMatch[1];
       // Only a file that is currently registered can be counted or forwarded.
       // The old check accepted any .dmg/.exe name, so an unregistered file was
@@ -794,10 +806,13 @@ export const server = createServer(async (request, response) => {
       if (!entry) return json(response, 404, { error: "download_not_found" }, { "cache-control": "no-store" });
       let countStatus: "counted" | "limited" | "failed" = "counted";
       try {
-        // Bound optional COS writes without ever blocking the installer itself.
+        // Bound optional statistics writes without blocking the installer itself.
         // A hashed client key is accepted only through the configured trusted proxy.
         if (!downloadCountRateLimit.allow(creatorClientKey(request, adminAndDownloadTrustedProxies))) countStatus = "limited";
-        else await adminObjectStore.recordDownload(entry.name, entry.platform, new Date());
+        else {
+          if (!downloadCounters) throw new Error("download_counters_unavailable");
+          await downloadCounters.recordDownload(entry.name, entry.platform, new Date());
+        }
       } catch (error) { countStatus = "failed"; audit("download_count_failed", { name: entry.name }); }
       // A counting failure must not block the download itself. The redirect is
       // no-store in both cases so no cache can skip the next count.
@@ -1078,4 +1093,5 @@ server.listen(port, host, () => {
 });
 
 server.on("close", () => {
+  if (downloadPruneTimer) clearInterval(downloadPruneTimer);
   void checkoutRequests.close(); void freeDistributionRuntime.close(); void creatorRuntime.close(); void store.close(); void appearanceNumbers?.close(); void publicationLockHandle?.close(); });
