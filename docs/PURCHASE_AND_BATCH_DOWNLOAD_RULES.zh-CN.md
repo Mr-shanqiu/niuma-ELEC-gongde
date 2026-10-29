@@ -4,9 +4,9 @@
 
 ## 当前规则与启用状态
 
-1. 当前正式客户端为 macOS 0.9.4 / build 904.14（Developer ID 签名并公证）和 Windows 0.9.4（已代码签名）。免费领取服务已上线启用。
+1. 当前正式客户端为 macOS 0.9.5 / build 905.1（Developer ID 签名、公证并装订）和 Windows 0.9.5（已代码签名）；0.9.4 签名文件留作内部历史材料，下载页只展示当前版。免费领取服务已上线启用。
 2. 基础木鱼和公开安装包免费，无需码、注册、手机号、关注或入群。
-3. 扩展形象每个 1 元，每批最多 10 个不同形象，不设套餐或封顶价；也可以使用当期有效官方群码免费领取。群码为 GD 加 6 位数字，不区分大小写，当前周期 72 小时，可重复领取且不扣共享额度。
+3. 扩展形象每个 1 元，每批最多 10 个不同形象，不设套餐或封顶价；也可以使用当期有效官方群码免费领取。群码为 GD 加 6 位数字，不区分大小写，当前周期七天，可重复领取且不扣共享额度。
 4. 每批只交付一个文件：选择 1 个时为 `.nmgpack`，多个时为 `.nmgpacks`；双击导入，无需手动解压。
 5. 新交付为签名永久包，没有 24 小时首次导入限制。文件保存后可永久导入、永久离线使用；0.9.0 也兼容校验历史 timed 包，不因旧首次导入日期已过而拒绝导入。
 6. 同批次在服务器签发后 7 日内可重新下载；7 日到期只结束服务器重下窗口，不使已保存的文件或已导入形象失效。该窗口不等于面向用户的历史订单重新下载权益。
@@ -19,7 +19,7 @@
 - [macOS 国内 DMG](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.0.dmg)：`3143825` 字节，SHA-256 `46abb7293592e24b1630d539825ef69f636e66f2e678e920c6e5e4d70b314ddc`；Apple Development 签名，非 Developer ID，未公证，仍可能出现 Gatekeeper 提示。
 - [Windows 国内安装程序](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.0-setup.exe)：`3229050` 字节，SHA-256 `10203fe1e71c54ce19f4e24980dbefd14aafba0d10b8f5135c213dfa6184f4af`；未签名，仍可能出现未知发布者、SmartScreen 或安全软件提示。
 
-当前正式下载请以[官网下载页](https://gongde.zqscreen.cn/download.html)和 [GitHub v0.9.4](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.4) 为准。
+当前正式下载请以[官网下载页](https://gongde.zqscreen.cn/download.html)或 [GitHub v0.9.5](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.5) 为准。
 
 ## 历史公开按次收费规则（已替代，仅用于既有订单）
 
