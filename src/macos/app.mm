@@ -3,6 +3,7 @@
 #import <CoreServices/CoreServices.h>
 #import <mach/mach_time.h>
 #import "login_startup.h"
+#include "fullscreen_detection.h"
 #import "appearance_pack.mm"
 #import "layer_scene.mm"
 #import "thumbnail_grid.mm"
@@ -2553,19 +2554,31 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
   (void)sender;
   BOOL fullscreen=NO;
   if(_visibility.autoHideFullscreen) {
-    pid_t active=NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
     NSScreen *screen=self.window.screen ?: NSScreen.mainScreen;
     CGDirectDisplayID display=[screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
     CGRect target=CGDisplayBounds(display);
     CFArrayRef windowInfo=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID);
+    std::vector<niuma::macos::FullscreenRect> visible;
     for(NSDictionary *info in (__bridge NSArray *)windowInfo) {
-      if([info[(__bridge NSString *)kCGWindowOwnerPID] intValue]!=active ||
-         [info[(__bridge NSString *)kCGWindowLayer] intValue]!=0) continue;
+      if([info[(__bridge NSString *)kCGWindowLayer] intValue]!=0) continue;
       CGRect bounds{};if(!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)info[(__bridge NSString *)kCGWindowBounds],&bounds)) continue;
-      if(CGRectGetMinX(bounds)<=CGRectGetMinX(target)+1 && CGRectGetMinY(bounds)<=CGRectGetMinY(target)+1 &&
-         CGRectGetMaxX(bounds)>=CGRectGetMaxX(target)-1 && CGRectGetMaxY(bounds)>=CGRectGetMaxY(target)-1) { fullscreen=YES;break; }
+      visible.push_back({bounds.origin.x,bounds.origin.y,bounds.size.width,bounds.size.height,
+                         [info[(__bridge NSString *)kCGWindowOwnerPID] intValue]});
     }
     if(windowInfo) CFRelease(windowInfo);
+    // NSScreen uses bottom-left coordinates; window-server bounds use top-left.
+    // Convert usable-frame margins into the display's coordinate space.
+    NSRect frame=screen.frame, usable=screen.visibleFrame;
+    const double sx=frame.size.width>0 ? target.size.width/frame.size.width : 1;
+    const double sy=frame.size.height>0 ? target.size.height/frame.size.height : 1;
+    const double left=(NSMinX(usable)-NSMinX(frame))*sx;
+    const double top=(NSMaxY(frame)-NSMaxY(usable))*sy;
+    const double right=(NSMaxX(frame)-NSMaxX(usable))*sx;
+    const double bottom=(NSMinY(usable)-NSMinY(frame))*sy;
+    fullscreen=niuma::macos::FullscreenOnDisplay(
+        {target.origin.x,target.origin.y,target.size.width,target.size.height,0},
+        {target.origin.x+left,target.origin.y+top,target.size.width-left-right,target.size.height-top-bottom,0},
+        visible,getpid());
   }
   if(!gIsolatedAcceptance || gAcceptancePhysicalInput) _visibility.fullscreen=fullscreen;
   if (!_visibility.fullscreen) _visibility.showDuringFullscreen = false;
@@ -2661,7 +2674,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy, CGEventType, CGEventRef, voi
       action:@selector(toggleAppearanceVisibility:) keyEquivalent:@""];
   visibility.target = self;
   visibility.enabled = _visibility.recoveryAvailable;
-  NSMenuItem *autoHide = [[NSMenuItem alloc] initWithTitle:UiText(@"全屏时自动隐身", @"Auto-hide in Fullscreen")
+  NSMenuItem *autoHide = [[NSMenuItem alloc] initWithTitle:UiText(@"全屏或最大化时自动隐身", @"Auto-hide when Fullscreen or Maximized")
       action:@selector(toggleAutoHideFullscreen:) keyEquivalent:@""];
   autoHide.target = self;
   autoHide.state = _visibility.autoHideFullscreen ? NSControlStateValueOn : NSControlStateValueOff;
