@@ -6,6 +6,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, access } from 'node:fs/promise
 import { join, resolve } from 'node:path';
 const digest = b => createHash('sha256').update(b).digest('hex');
 test('two retained runtimes keep their own index and preview dependencies; older generation retires', async () => {
+  await mkdir(resolve('.local-work/acceptance'), { recursive: true });
   const root=await mkdtemp(resolve('.local-work/acceptance/runtime-dependencies-'));
   const revisions=[],indexes=[],art=[];
   let previous;
@@ -38,6 +39,7 @@ test('two retained runtimes keep their own index and preview dependencies; older
 
 test('an overlay retains the active previous admin entry and removes unrelated inherited assets', async () => {
   const { cp } = await import('node:fs/promises');
+  await mkdir(resolve('.local-work/acceptance'), { recursive: true });
   const root = await mkdtemp(resolve('.local-work/acceptance/admin-overlay-'));
   try {
     const old = join(root, 'old'), next = join(root, 'next');
