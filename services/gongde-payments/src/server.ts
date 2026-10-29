@@ -1,5 +1,7 @@
 import { ORDER_STATES } from "./domain/store.js";
 import { createFreeCreatorRuntime } from "./creators/runtime.js";
+import { creatorClientKey, parseCreatorTrustedProxies } from "./creators/client-key.js";
+import { DownloadCountRateLimit } from "./downloads/count-rate-limit.js";
 import { createFreeDistributionRuntime } from "./free-distribution/runtime.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
@@ -58,6 +60,8 @@ const port = Number(process.env.PORT ?? "8787");
 const host = process.env.HOST ?? "127.0.0.1";
 const adminConfiguration = loadAdminAuthConfiguration();
 const adminAuth = adminConfiguration ? new AdminAuthService(adminConfiguration) : null;
+const downloadCountRateLimit = new DownloadCountRateLimit();
+const adminAndDownloadTrustedProxies = parseCreatorTrustedProxies(process.env.GONGDE_CREATOR_TRUSTED_PROXY_ADDRESSES);
 const adminObjectStoreConfiguration = loadAdminObjectStoreConfiguration();
 const adminObjectStore = adminObjectStoreConfiguration ? new AdminObjectStore(adminObjectStoreConfiguration) : null;
 // The publication object is the only place where two administrators can lose
@@ -498,7 +502,7 @@ export const server = createServer(async (request, response) => {
         return json(response, 400, { error: "invalid_login_request" });
       }
       try {
-        const token = adminAuth.login(body.username, body.password, request.socket.remoteAddress ?? "unknown");
+        const token = adminAuth.login(body.username, body.password, creatorClientKey(request, adminAndDownloadTrustedProxies));
         audit("login_succeeded");
         return json(response, 200, { username: adminConfiguration!.username }, { "set-cookie": adminAuth.sessionCookie(token) });
       } catch (error) {
@@ -787,15 +791,19 @@ export const server = createServer(async (request, response) => {
       if (registry.status !== "available") return json(response, 503, { error: "download_registry_unavailable" }, { "cache-control": "no-store" });
       const entry = registry.items.find((item) => item.name === name);
       if (!entry) return json(response, 404, { error: "download_not_found" }, { "cache-control": "no-store" });
-      let counted = true;
-      try { await adminObjectStore.recordDownload(entry.name, entry.platform, new Date()); }
-      catch (error) { counted = false; audit("download_count_failed", { name: entry.name }); }
+      let countStatus: "counted" | "limited" | "failed" = "counted";
+      try {
+        // Bound optional COS writes without ever blocking the installer itself.
+        // A hashed client key is accepted only through the configured trusted proxy.
+        if (!downloadCountRateLimit.allow(creatorClientKey(request, adminAndDownloadTrustedProxies))) countStatus = "limited";
+        else await adminObjectStore.recordDownload(entry.name, entry.platform, new Date());
+      } catch (error) { countStatus = "failed"; audit("download_count_failed", { name: entry.name }); }
       // A counting failure must not block the download itself. The redirect is
       // no-store in both cases so no cache can skip the next count.
       response.writeHead(302, {
         location: entry.publicDownloadUrl,
         "cache-control": "no-store",
-        ...(counted ? {} : { "x-gongde-count": "failed" })
+        ...(countStatus === "counted" ? {} : { "x-gongde-count": countStatus })
       });
       return response.end();
     }
