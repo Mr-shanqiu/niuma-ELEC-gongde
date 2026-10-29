@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "id": "zqscreen.golden-toad-coin",
+  "version": "1.1.0",
+  "name_zh": "金蟾吐钱",
+  "name_en": "Coin Toad",
+  "author": "zqscreen",
+  "publisher": "zqscreen",
+  "review_id": "community-toad-001-v2",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "body.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    },
+    {
+      "image": "coin.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.5,
+        0.3353
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 12,
+          "rotation": 0,
+          "scale": 0.22,
+          "alpha": 0
+        },
+        {
+          "t": 0.12,
+          "x": 0,
+          "y": 8,
+          "rotation": 0,
+          "scale": 0.4,
+          "alpha": 1
+        },
+        {
+          "t": 0.32,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.68,
+          "alpha": 1
+        },
+        {
+          "t": 0.55,
+          "x": 0,
+          "y": -9,
+          "rotation": 0,
+          "scale": 0.84,
+          "alpha": 1
+        },
+        {
+          "t": 0.75,
+          "x": 0,
+          "y": -18,
+          "rotation": 0,
+          "scale": 0.9,
+          "alpha": 0.9
+        },
+        {
+          "t": 0.94,
+          "x": 0,
+          "y": -28,
+          "rotation": 0,
+          "scale": 0.94,
+          "alpha": 0
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": -28,
+          "rotation": 0,
+          "scale": 0.94,
+          "alpha": 0
+        }
+      ]
+    },
+    {
+      "image": "sparkle.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.5,
+        0.1588
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.5,
+          "alpha": 0
+        },
+        {
+          "t": 0.5,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.6,
+          "alpha": 0
+        },
+        {
+          "t": 0.62,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.9,
+          "alpha": 1
+        },
+        {
+          "t": 0.8,
+          "x": 0,
+          "y": -3,
+          "rotation": 0,
+          "scale": 1.16,
+          "alpha": 0.45
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": -6,
+          "rotation": 0,
+          "scale": 1.3,
+          "alpha": 0
+        }
+      ]
+    }
+  ]
+}

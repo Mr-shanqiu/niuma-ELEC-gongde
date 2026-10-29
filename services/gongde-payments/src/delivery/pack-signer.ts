@@ -1,8 +1,10 @@
 import { createHash, createPrivateKey, createSign } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { zipSync } from "fflate";
 import { validateCreatorSourcePack } from "../creators/pack-validation.js";
+
+import { isRetiredOfficialAsset } from "../domain/catalog.js";
 
 const MAX_PACK_BYTES = 50 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -189,11 +191,18 @@ export class AppearancePackSigner {
     return this.#revisionsAt(this.sourceRoot());
   }
 
+  #assetPath(root: string, assetId: string, directory: string): string {
+    // Old frozen releases keep their original layout. New source trees keep
+    // retired bytes outside the active library, solely for historical delivery.
+    const archived = join(root, "..", "retired-appearance-packs", directory);
+    return isRetiredOfficialAsset(assetId) && existsSync(archived) ? archived : join(root, directory);
+  }
+
   #revisionsAt(root: string): Readonly<Record<string, string>> {
     if (root === this.#revisionRoot) return this.#revisions;
     const revisions: Record<string, string> = {};
     for (const [id, directory] of Object.entries(ALLOWED_ASSETS)) {
-      const path = join(root, directory);
+      const path = this.#assetPath(root, id, directory);
       const names = readdirSync(path).sort();
       if (names.length < 2 || names.length > 8) throw new Error("pack_file_count_invalid");
       const lines = names.map((name) => {
@@ -231,7 +240,7 @@ export class AppearancePackSigner {
     }
     const cached = this.#sources.get(assetId);
     if (cached) return cached;
-    const root = join(releaseRoot, directoryName);
+    const root = this.#assetPath(releaseRoot, assetId, directoryName);
     const entries = readdirSync(root, { withFileTypes: true });
     if (entries.length < 2 || entries.length > 8 || entries.some((entry) => !entry.isFile() || entry.isSymbolicLink())) {
       throw new Error("pack_source_files_invalid");
@@ -270,6 +279,7 @@ export class AppearancePackSigner {
     const revisions = this.#revisionsAt(root);
     const catalog: Record<string, OfficialCatalogEntry> = {};
     for (const [assetId, directory] of Object.entries(ALLOWED_ASSETS)) {
+      if (isRetiredOfficialAsset(assetId)) continue;
       const source = this.#source(assetId, root);
       // Exact upper envelope for build({ licenseMode: "perpetual" }): same pretty
       // JSON, trailing LF, PNG bytes, stored ZIP entries, timestamps and ZIP

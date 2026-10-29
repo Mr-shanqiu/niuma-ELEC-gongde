@@ -87,3 +87,9 @@ export function appearanceBatchPriceFen(count: number): number {
   if (!Number.isInteger(count) || count < 1 || count > MAX_ASSETS_PER_DELIVERY) throw new Error("asset_selection_limit_exceeded");
   return count * 100;
 }
+
+// Removed from new selections; IDs remain valid for existing delivery records.
+export const RETIRED_OFFICIAL_ASSET_IDS: ReadonlySet<string> = new Set(["zqscreen.frog-puff", "official.hamster-wheel", "zqscreen.little-jiangshi-hop", "zqscreen.golden-toad-coin", "zqscreen.orange-cat-wave", "zqscreen.redpanda-wave", "zqscreen.raccoon-cheer", "zqscreen.bee-flap", "zqscreen.zhuan-yun-bead", "zqscreen.koi-bubbles"]);
+export function isRetiredOfficialAsset(assetId: string): boolean {
+  return RETIRED_OFFICIAL_ASSET_IDS.has(assetId);
+}

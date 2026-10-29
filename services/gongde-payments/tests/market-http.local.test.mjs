@@ -118,7 +118,7 @@ test('actual HTTP checkout gates a mixed batch, freezes source identity and sign
   assert.notEqual(free.status, 200);
   assert.equal(free.headers.get('content-disposition'), null);
   const officialId = 'official.chick-pecking';
-  const secondOfficialId = 'official.hamster-wheel';
+  const secondOfficialId = 'official.wealth-button';
   const officialRevisions = signer.revisions();
 
   // Public co-creation is paused, so a batch may only contain catalogue assets.

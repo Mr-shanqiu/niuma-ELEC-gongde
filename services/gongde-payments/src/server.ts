@@ -27,7 +27,7 @@ import { AdminObjectStore, PublicationBusy, PublicationConflict, PublicationUnav
 import { createPublicationLock } from "./admin/publication-lock.js";
 import { loadDownloadCoverage, loadInstallerRegistry } from "./downloads/installer-registry.js";
 import type { GongdeEntitlement, GongdeOrder, OrderState } from "./domain/types.js";
-import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH } from "./domain/catalog.js";
+import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH, isRetiredOfficialAsset } from "./domain/catalog.js";
 import { AppearanceNumberError, AppearanceNumberRepository } from "./domain/appearance-numbers.js";
 import { queryAppearanceNumber, type OfficialAppearanceState } from "./domain/appearance-number-query.js";
 import { GROUP_BENEFIT_PERIOD_DAYS, GROUP_BENEFIT_TIME_ZONE, loadGroupBenefitCodeService } from "./domain/group-benefit-code.js";
@@ -99,7 +99,7 @@ async function availableAppearanceRevisions(): Promise<Record<string, string>> {
   if (!packSigner) return {};
   const revisions = packSigner.revisions();
   const publishedIds = adminObjectStore ? await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS) : [...OFFICIAL_ASSET_IDS];
-  return Object.fromEntries(publishedIds.flatMap((assetId) => revisions[assetId] ? [[assetId, revisions[assetId]]] : []));
+  return Object.fromEntries(publishedIds.flatMap((assetId) => !isRetiredOfficialAsset(assetId) && revisions[assetId] ? [[assetId, revisions[assetId]]] : []));
 }
 
 function json(response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -430,7 +430,7 @@ async function numberedOfficialStates(): Promise<Record<string, OfficialAppearan
     return Object.fromEntries(OFFICIAL_ASSET_IDS.map(assetId => [assetId, {
       revision: revisions[assetId] ?? null,
       firstPublishedAt: publication.firstPublishedAt[assetId] ?? null,
-      state: !revisions[assetId] ? "MISSING" : published.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
+      state: !revisions[assetId] ? "MISSING" : !isRetiredOfficialAsset(assetId) && published.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
     }]));
   } catch { throw new AppearanceNumberError("appearance_numbers_unavailable", 503); }
 }
@@ -676,13 +676,13 @@ export const server = createServer(async (request, response) => {
       }
       const publishedIds = new Set(publication.publishedAssetIds);
       const numbers = await optionalOfficialNumbers();
-      const data = OFFICIAL_ASSET_IDS.map((assetId) => ({
+      const data = OFFICIAL_ASSET_IDS.filter(assetId => !isRetiredOfficialAsset(assetId)).map((assetId) => ({
         id: assetId,
         assetId,
         appearanceNumber: numbers[assetId] ?? null,
         name: OFFICIAL_ASSET_NAMES_ZH[assetId] ?? assetId,
         revision: revisions[assetId] ?? null,
-        state: !revisions[assetId] ? "MISSING" : publishedIds.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
+        state: !revisions[assetId] ? "MISSING" : !isRetiredOfficialAsset(assetId) && publishedIds.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
       }));
       // `publicationRevision` versions the whole published set. Every write must
       // send it back; it is deliberately not named `revision`, which already
@@ -698,6 +698,7 @@ export const server = createServer(async (request, response) => {
       const assetId = adminAppearanceMatch[1];
       if (!OFFICIAL_ASSET_IDS.includes(assetId as typeof OFFICIAL_ASSET_IDS[number])) return json(response, 404, { error: "appearance_not_found" });
       const body = await readJson(request);
+      if (isRetiredOfficialAsset(assetId)) return json(response, 409, { error: "appearance_retired" });
       if (typeof body.published !== "boolean") return json(response, 400, { error: "invalid_appearance_state" });
       if (!Number.isSafeInteger(body.publicationRevision) || (body.publicationRevision as number) < 0) {
         // Refusing an unversioned write is the point: without it the write would

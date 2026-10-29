@@ -14,6 +14,7 @@ const built = (name) => process.env.GONGDE_TEST_BUILD_ROOT
 const { AppearancePackSigner } = await import(built("delivery/pack-signer.js"));
 const { validateCreatorSourcePack } = await import(built("creators/pack-validation.js"));
 const assetRoot = join(project, "assets/appearance-packs");
+const { RETIRED_OFFICIAL_ASSET_IDS: retired } = await import(built("domain/catalog.js"));
 const sourcePNG = await readFile(join(assetRoot, "chick-pecking/body.png"));
 
 // Independent protocol oracle: LF separators, no BOM and no trailing LF.
@@ -140,7 +141,7 @@ test("internal officialCatalog clones real manifests and exactly budgets the lar
   const { signer, publicKey } = await fixture(t);
   assert.equal(signer.sourceRoot(), await realpath(assetRoot));
   const catalog = signer.officialCatalog();
-  assert.deepEqual(Object.keys(catalog).sort(), Object.keys(signer.revisions()).sort());
+  assert.deepEqual(Object.keys(catalog).sort(), Object.keys(signer.revisions()).filter(id => !retired.has(id)).sort());
   assert.ok(Object.keys(catalog).length > 0);
   for (const [assetId, entry] of Object.entries(catalog)) {
     assert.deepEqual(Object.keys(entry).sort(),
@@ -171,9 +172,11 @@ test("internal officialCatalog clones real manifests and exactly budgets the lar
 
 test("real sourceRoot freezes old releases across an ordinary current-symlink update", async (t) => {
   const { root, privateKeyFile } = await fixture(t);
-  const releaseA = join(root, "release-a"), releaseB = join(root, "release-b");
+  const releaseA = join(root, "release-a/appearance-packs"), releaseB = join(root, "release-b/appearance-packs");
   await cp(assetRoot, releaseA, { recursive: true });
   await cp(assetRoot, releaseB, { recursive: true });
+  await cp(join(project, "assets/retired-appearance-packs"), join(root, "release-a/retired-appearance-packs"), { recursive: true });
+  await cp(join(project, "assets/retired-appearance-packs"), join(root, "release-b/retired-appearance-packs"), { recursive: true });
   const changedManifestPath = join(releaseB, "chick-pecking/manifest.json");
   const changed = JSON.parse(await readFile(changedManifestPath, "utf8"));
   changed.version = "2.0.0";
