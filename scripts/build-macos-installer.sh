@@ -34,7 +34,7 @@ info = {
     'CFBundleDisplayName': '安装牛马电子功德' + (' · ' + revision if revision else ''),
     'CFBundleExecutable': 'niuma-installer',
     'CFBundlePackageType': 'APPL',
-    'CFBundleShortVersionString': '0.9.4',
+    'CFBundleShortVersionString': client_info['CFBundleShortVersionString'],
     'CFBundleVersion': client_info['CFBundleVersion'],
     'CFBundleIconFile': 'appicon',
     'LSMinimumSystemVersion': '10.15',
