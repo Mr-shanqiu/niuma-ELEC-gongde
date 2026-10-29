@@ -114,6 +114,10 @@ test("download counting and report", { timeout: 20000 }, async (t) => {
   assert.equal(login.status, 200);
   const cookie = login.headers.get("set-cookie").split(";")[0];
 
+  const v2Unauthorized = await get('/api/gongde/v2/admin/group-code');
+  assert.equal(v2Unauthorized.status, 401);
+  assert.equal((await v2Unauthorized.json()).error, 'admin_auth_required');
+
   /* ---- an unregistered name is not counted and is not forwarded ---- */
   const unknown = await get("/api/gongde/downloads/niuma-merit-macos-9.9.9.dmg");
   assert.equal(unknown.status, 404);
@@ -232,4 +236,17 @@ test("download counting and report", { timeout: 20000 }, async (t) => {
   await registry([entry(MAC, "macos", "0.9.4")]);
   const restored = await get(`/api/gongde/downloads/${MAC}`);
   assert.equal(restored.status, 302);
+
+  // Bursts do not create unbounded COS writes and do not block downloads.
+  const beforeBurst = [...cos.objects.keys()].filter(key => key.startsWith(EVENTS)).length;
+  let limited = 0;
+  for (let i = 0; i < 25; i++) {
+    const response = await get(`/api/gongde/downloads/${MAC}`);
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('location'), `https://download.gongde.zqscreen.cn/${MAC}`);
+    if (response.headers.get('x-gongde-count') === 'limited') limited++;
+  }
+  const writes = [...cos.objects.keys()].filter(key => key.startsWith(EVENTS)).length - beforeBurst;
+  assert.ok(limited > 0, 'burst requests must eventually stop writing');
+  assert.ok(writes <= 20, 'per-client COS writes remain bounded');
 });

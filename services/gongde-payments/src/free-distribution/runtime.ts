@@ -877,6 +877,13 @@ export function createFreeDistributionRuntime(deps: DistributionDependencies) {
         }
         throw new FreeDistributionError("not_found",404);
       } catch(error) {
+        // The shared admin authenticator throws plain Errors. Map its exact
+        // authentication failures here before this router handles other errors.
+        if (error instanceof Error && (error.message === "admin_auth_required" || error.message === "admin_not_enabled")) {
+          const unavailable = error.message === "admin_not_enabled";
+          response.writeHead(unavailable ? 503 : 401, {"content-type":"application/json; charset=utf-8","cache-control":"private, no-store"});
+          response.end(JSON.stringify({error: error.message, requestId})); return true;
+        }
         const code=error instanceof FreeDistributionError?error.code:
           typeof (error as {code?:unknown})?.code==="string" && /^(?:creator|access|claim)_[a-z_]+$/u.test(String((error as {code:string}).code)) ?
           (error as {code:string}).code:"service_unavailable";
