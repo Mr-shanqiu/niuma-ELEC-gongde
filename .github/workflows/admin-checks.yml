@@ -5,9 +5,6 @@ on:
       - 'admin-console/**'
       - '.github/workflows/admin-checks.yml'
   pull_request:
-    paths:
-      - 'admin-console/**'
-      - '.github/workflows/admin-checks.yml'
   workflow_dispatch:
 permissions:
   contents: read

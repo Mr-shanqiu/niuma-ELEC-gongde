@@ -7,11 +7,6 @@ on:
       - 'scripts/version-website-assets.test.mjs'
       - '.github/workflows/website-checks.yml'
   pull_request:
-    paths:
-      - 'website/**'
-      - 'scripts/version-website-assets.mjs'
-      - 'scripts/version-website-assets.test.mjs'
-      - '.github/workflows/website-checks.yml'
   workflow_dispatch:
 permissions:
   contents: read

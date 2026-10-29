@@ -1,9 +1,8 @@
 name: Windows Build
 
 on:
-  push:
-    branches:
-      - main
+  # Published 0.9.5 client sources are bound on their platform release branches.
+  # This historical main-branch packaging flow is deliberate and manual.
   workflow_dispatch:
     inputs:
       require_signed_fixtures:
