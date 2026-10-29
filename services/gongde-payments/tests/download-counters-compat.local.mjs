@@ -17,7 +17,7 @@ try {
  if(!server.listening)await once(server,'listening');const origin=`http://127.0.0.1:${server.address().port}`;
  const login=await fetch(origin+'/api/gongde/admin/login',{method:'POST',headers:{origin,'sec-fetch-site':'same-origin','content-type':'application/json'},body:JSON.stringify({username:'test-admin',password})});assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];
  const report=await (await fetch(origin+'/api/gongde/admin/download-report',{headers:{cookie}})).json();assert.equal(report.status,'error');assert.equal(report.summary,null);
- const overview=await (await fetch(origin+'/api/gongde/admin/overview',{headers:{cookie}})).json();assert.equal(overview.data.downloads.status,'error');assert.equal(overview.data.downloads.summary,null);
+ const overview=await (await fetch(origin+'/api/gongde/admin/overview',{headers:{cookie}})).json();assert.equal(overview.downloads.status,'error');assert.equal(overview.downloads.summary,null);
  const download=await fetch(origin+'/api/gongde/downloads/'+name,{redirect:'manual'});assert.equal(download.status,302);assert.equal(download.headers.get('location'),target);assert.equal(download.headers.get('x-gongde-count'),null);assert.equal(writes,1);
  assert.equal((await fetch(origin+'/api/gongde/admin/files?kind=installer',{headers:{cookie}})).status,503);
  console.log('PASS compatibility runtime: explicit unavailable statistics, continued COS counting and unchanged installer redirects');
