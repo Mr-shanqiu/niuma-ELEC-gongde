@@ -18,6 +18,11 @@ try {
   events.sort((a, b) => a.key.localeCompare(b.key));
   const digest = createHash('sha256').update(JSON.stringify(events.map(event => event.key))).digest('hex');
   const imported = await counter.importLegacy(events);
-  if (process.argv[2] === '--ready') await counter.finishImport();
+  if (process.argv[2] === '--ready') {
+    await counter.finishImport();
+    const now = Date.now();
+    const summary = await counter.summarizeDownloads(new Date(now - 1), new Date(now + 1));
+    if (summary.total + summary.legacyCount !== events.length) throw new Error('initial_import_count_mismatch');
+  }
   console.log(JSON.stringify({ sourceEventCount: events.length, sourceKeyDigest: digest, imported, deduplicated: events.length - imported, ready: process.argv[2] === '--ready', cosObjectsDeleted: 0 }));
 } finally { await store.close(); }
