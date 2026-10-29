@@ -15,6 +15,7 @@
   // as if it were the latest, so a future format cannot be misread silently.
   const nativeRenderers = new Set(['native-woodfish-v1', 'native-woodfish-v2']);
   const cache = new Map();
+  const webAssets = new Map();
   let indexPromise;
   let requestScheduler = operation => operation();
   function setRequestScheduler(schedule) {
@@ -26,45 +27,114 @@
     return Array.from(new Uint8Array(hash), (value) => value.toString(16).padStart(2, '0')).join('');
   }
 
-  async function checkedFetch(url, hash) {
+  // One request plus at most one retry, with the deadline covering the body read
+  // as well. A server that sends headers and then stalls is the same failure as
+  // one that never answers, and must not hang a card forever. A cancelled task,
+  // a 4xx or a digest mismatch are definite answers and are never retried:
+  // re-fetching a release mismatch would only download the same wrong file.
+  const attemptTimeout = 10000;
+  function transientFailure(error) {
+    if (error?.name === 'AbortError') return false;
+    if (typeof error?.status === 'number') return error.status >= 500 && error.status !== 501;
+    // A timeout or a network-level TypeError is worth one more try; anything
+    // else (a parse or contract error) is this release's own answer.
+    return error?.name === 'TimeoutError' || error?.name === 'TypeError';
+  }
+  async function readWithRetry(target, init) {
+    const started = Date.now();
+    for (let attempt = 0; ; attempt++) {
+      const remaining = 16000 - (Date.now() - started);
+      if (remaining <= 0) throw new DOMException('Preview timed out', 'TimeoutError');
+      try {
+        // Each attempt owns its deadline, including the response body.
+        const response = await fetch(target, { ...init,
+          signal: AbortSignal.timeout(Math.min(attemptTimeout, remaining)) });
+        if (!response.ok) {
+          const error = new Error('preview_resource_unavailable');
+          error.status = response.status;
+          throw error;
+        }
+        return await response.arrayBuffer();
+      } catch (error) {
+        if (attempt >= 1 || !transientFailure(error)) throw error;
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+  }
+
+  async function checkedFetch(url, hash, options = {}) {
     return requestScheduler(async () => {
-      const response = await fetch(`${url}?sha256=${hash}`, { cache: 'force-cache', signal: AbortSignal.timeout(10000) });
-      if (!response.ok) throw new Error('preview_resource_unavailable');
-      const bytes = await response.arrayBuffer();
+      // A derivative lives in a directory already named after its own contents,
+      // so the query string would only make the URL unique for no benefit.
+      const target = options.contentAddressed ? url : `${url}?sha256=${hash}`;
+      const bytes = await readWithRetry(target, { cache: 'force-cache' });
+      // Content-addressed paths do not replace verification of received bytes.
       if (await digest(bytes) !== hash) throw new Error('preview_release_mismatch');
       return bytes;
     }, { priority: 0 });
   }
 
-  async function resources(slug) {
-    if (!cache.has(slug)) cache.set(slug, (async () => {
-      indexPromise ||= requestScheduler(async () => {
-        const hash = document.querySelector('meta[name="gongde-preview-index"]')?.content;
-        const versioned = /^[a-f0-9]{64}$/.test(hash || '');
-        const response = await fetch('/assets/previews/source-map.json' + (versioned ? '?sha256=' + hash : ''),
-          { cache: versioned ? 'force-cache' : 'no-store', signal: AbortSignal.timeout(10000) });
-        if (!response.ok) throw new Error('preview_index_unavailable');
-        const bytes = await response.arrayBuffer();
-        if (versioned && await digest(bytes) !== hash) throw new Error('preview_release_mismatch');
-        return JSON.parse(new TextDecoder().decode(bytes));
-      }, { priority: 0 });
-      const index = await indexPromise;
+  /** The generated preview index: one hash-checked read shared by every caller. */
+  function previewIndex() {
+    indexPromise ||= requestScheduler(async () => {
+      const hash = document.querySelector('meta[name="gongde-preview-index"]')?.content;
+      const versioned = /^[a-f0-9]{64}$/.test(hash || '');
+      const bytes = await readWithRetry((versioned ? `/assets/previews/index/${hash}.json` : '/assets/previews/source-map.json'),
+        { cache: versioned ? 'force-cache' : 'no-store' });
+      if (versioned && await digest(bytes) !== hash) throw new Error('preview_release_mismatch');
+      try { return JSON.parse(new TextDecoder().decode(bytes)); }
+      catch { throw new Error('preview_index_invalid'); }
+    }, { priority: 0 }).catch(error => {
+      // A failed index must not poison the page forever: clearing it makes the
+      // next cover or retry ask again, while every card already painted keeps
+      // its bytes.
+      indexPromise = undefined;
+      throw error;
+    });
+    return indexPromise;
+  }
+
+  function checkIdentity(entry, identity) {
+    if (identity && (entry?.id !== identity.assetId || entry?.assetSha256 !== identity.previewRevision)) {
+      throw new Error('preview_release_mismatch');
+    }
+  }
+  async function resources(slug, identity) {
+    const index = await previewIndex();
+    checkIdentity(index.packs?.[slug], identity);
+    if (!cache.has(slug)) {
+      const pending = (async () => {
+      const index = await previewIndex();
       if (index.schemaVersion !== 3 || !index.packs[slug]) throw new Error('preview_contract_missing');
       const entry = index.packs[slug];
       const base = `/assets/previews/packs/${slug}/`;
-      const bytes = await checkedFetch(`${base}manifest.json`, entry.manifestSha256);
+      const bytes = await checkedFetch(entry.files['manifest.json']?.publicPath || `${base}manifest.json`, entry.manifestSha256);
       const manifest = JSON.parse(new TextDecoder().decode(bytes));
       if (manifest.renderer && !nativeRenderers.has(manifest.renderer)) throw new Error('preview_contract_unsupported');
       const names = manifest.renderer ? ['body.png', 'mallet.png'] : [...new Set(manifest.layers.map((layer) => layer.image))];
+      // A web derivative is optional: an older index has no `web` entry. When
+      // it is missing, the content-addressed public copy of the delivery art is
+      // the fallback, so a card can still animate rather than show nothing.
+      // Derivative bytes are verified against the hash in the checked index.
+      const web = entry.web;
+      const url = (name) => (web?.files?.[name] && web.layers?.[name] !== undefined)
+        ? `${web.basePath}${encodeURIComponent(String(web.layers[name]))}`
+        : (entry.files[name]?.publicPath || `${base}${name}`);
       const images = new Map();
       await Promise.all(names.map(async (name) => {
         const file = entry.files[name];
         if (!file || file.sourceSha256 !== file.projectedSha256) throw new Error('preview_asset_not_exact');
-        const data = await checkedFetch(file.publicPath || `${base}${name}`, file.sourceSha256);
-        images.set(name, await createImageBitmap(new Blob([data], { type: 'image/png' })));
+        const derived = Boolean(web?.files?.[name]);
+        const bytes = await checkedFetch(url(name), derived ? web.files[name].sha256 : file.sourceSha256, { contentAddressed: derived });
+        images.set(name, await createImageBitmap(new Blob([bytes], { type: 'image/png' })));
       }));
-      return { manifest, images, fingerprint: entry.manifestSha256 };
-    })());
+      return { manifest, images, fingerprint: entry.manifestSha256, web: Boolean(web?.files) };
+      })();
+      // A failed load must not be remembered as this pack's answer: the retry
+      // button would then fail instantly without asking the network again.
+      pending.catch(() => { if (cache.get(slug) === pending) cache.delete(slug); });
+      cache.set(slug, pending);
+    }
     return cache.get(slug);
   }
 
@@ -155,8 +225,12 @@
       drawImage(ctx, body, spec.body);
       ctx.translate(...spec.pivot);
       ctx.rotate((spec.angle[0] + spec.angle[1] * amount) * Math.PI / 180);
-      drawImage(ctx, mallet, spec.shaft, [spec.shaftSourceX, 0, mallet.width - spec.shaftSourceX, mallet.height]);
-      drawImage(ctx, mallet, spec.head, [0, 0, Math.min(spec.headSourceWidth, mallet.width), mallet.height]);
+      // Source crops are native pixel coordinates, while web layers may be smaller.
+      const sourceWidth = manifest.sourceDimensions?.['mallet.png']?.width;
+      const sourceScale = sourceWidth ? mallet.width / sourceWidth : 1;
+      const shaftX = spec.shaftSourceX * sourceScale;
+      drawImage(ctx, mallet, spec.shaft, [shaftX, 0, mallet.width - shaftX, mallet.height]);
+      drawImage(ctx, mallet, spec.head, [0, 0, Math.min(spec.headSourceWidth * sourceScale, mallet.width), mallet.height]);
     } else {
       // Native Windows uses top-left window coordinates. Fit the complete artwork
       // and mallet sweep into this preview instead of cropping the top 80px.
@@ -174,9 +248,35 @@
     }
   }
 
-  async function load(container) {
+  /**
+   * Read one pack's web derivative as a blob, without loading its layers.
+   *
+   * The gallery paints covers from these and only calls `load` (which decodes
+   * every animation layer) once the visitor hovers, focuses or asks for the
+   * preview. Resolves null when this release published no derivative, so the
+   * caller can fall back to the delivery art instead of showing nothing.
+   */
+  async function webAsset(slug, name, identity) {
+    const index = await previewIndex();
+    checkIdentity(index.packs?.[slug], identity);
+    const web = index.packs[slug]?.web;
+    if (name === 'cover.png') name = web?.cover || name;
+    if (!web?.files?.[name]) return null;
+    const target = `${web.basePath}${encodeURIComponent(String(web.layers?.[name] ?? name))}`;
+    // Several cards can ask for the same still in one frame — a first row that
+    // enters the viewport together, a retry landing next to a scroll. One
+    // promise per address keeps that to one request.
+    if (!webAssets.has(target)) {
+      const pending = checkedFetch(target, web.files[name].sha256, { contentAddressed: true })
+        .then(bytes => new Blob([bytes], { type: name.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }))
+        .catch(error => { webAssets.delete(target); throw error; });
+      webAssets.set(target, pending);
+    }
+    return webAssets.get(target);
+  }
+  async function load(container, identity) {
     container.dataset.previewState = 'loading';
-    const { manifest, images, fingerprint } = await resources(container.dataset.packPreview);
+    const { manifest, images, fingerprint } = await resources(container.dataset.packPreview, identity);
     const canvas = document.createElement('canvas');
     const ratio = Math.min(devicePixelRatio || 1, 3);
     canvas.width = width * ratio; canvas.height = height * ratio;
@@ -226,9 +326,6 @@
       card.addEventListener('pointerleave', () => { if (!card.contains(document.activeElement)) stop(); });
       card.addEventListener('focusin', play);
       card.addEventListener('focusout', (event) => { if (!card.contains(event.relatedTarget)) stop(); });
-      new ResizeObserver(() => {
-        container.style.transform = `scale(${Math.min(.84, (card.clientWidth - 30) / width)})`;
-      }).observe(card);
     }
     document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
     reducedMotion.addEventListener('change', stop);
@@ -241,7 +338,7 @@
     return player;
   }
   async function revisions(assetIds) {
-    const index = await indexPromise;
+    const index = await previewIndex();
     if (!index) throw new Error('appearance_preview_not_ready');
     const entries = Object.values(index.packs);
     return Object.fromEntries(assetIds.map((id) => {
@@ -250,5 +347,14 @@
       return [id, entry.assetSha256];
     }));
   }
-  window.NiuMaAppearance = Object.freeze({ load, sample, duration, revisions, setRequestScheduler });
+  /** Whether this release published web derivatives for a slug. */
+  async function hasWebAssets(slug) {
+    try {
+      const index = await previewIndex();
+      const web = index.packs[slug]?.web;
+      return Boolean(web?.files?.[web.cover || 'cover.png']);
+    } catch { return false; }
+  }
+  window.NiuMaAppearance = Object.freeze({ load, cover: (slug, identity) => webAsset(slug, 'cover.png', identity), webAsset, hasWebAssets,
+    sample, duration, revisions, setRequestScheduler });
 })();

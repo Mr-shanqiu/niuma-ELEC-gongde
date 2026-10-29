@@ -25,7 +25,7 @@
 .library-card .flow-actions { margin-top: auto; }
 .library-preview { display: grid; place-items: center; min-height: 170px; overflow: hidden; margin-bottom: 14px; }
 .library-preview img { max-width: 100%; height: 170px; object-fit: contain; }
-.library-preview canvas { max-width: 100%; width: 240px; height: auto; }
+.library-preview > img, .library-preview canvas { display: block; max-width: 100%; width: 240px; height: 170px; object-fit: contain; }
 .library-pager { display: flex; gap: 16px; justify-content: flex-end; align-items: center; margin-top: 24px; }
 .library-author { padding: 0; border: 0; background: transparent; color: var(--forest); cursor: pointer; text-align: left; }
 .library-selection { display: flex; gap: 20px; justify-content: space-between; flex-wrap: wrap; padding: 20px; margin-top: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper-deep); }

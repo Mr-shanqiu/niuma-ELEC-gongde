@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "id": "zqscreen.baodan-charm",
+  "version": "1.1.0",
+  "name_zh": "爆单符",
+  "name_en": "Order Charm",
+  "author": "zqscreen",
+  "publisher": "zqscreen",
+  "review_id": "community-baodan-001-v2",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "body.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 1,
+          "rotation": -2,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.22,
+          "x": 0,
+          "y": -2,
+          "rotation": 1.5,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.46,
+          "x": 0,
+          "y": 0,
+          "rotation": -1,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.7,
+          "x": 0,
+          "y": -1,
+          "rotation": 1,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 1,
+          "rotation": -2,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    },
+    {
+      "image": "glow.png",
+      "frame": [
+        35,
+        0,
+        170,
+        170
+      ],
+      "anchor": [
+        0.5,
+        0.3483
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.86,
+          "alpha": 0.22
+        },
+        {
+          "t": 0.18,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1.04,
+          "alpha": 0.9
+        },
+        {
+          "t": 0.42,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1.18,
+          "alpha": 0.45
+        },
+        {
+          "t": 0.66,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1.04,
+          "alpha": 0.25
+        },
+        {
+          "t": 0.84,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.94,
+          "alpha": 0.78
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 0,
+          "rotation": 0,
+          "scale": 0.86,
+          "alpha": 0.22
+        }
+      ]
+    }
+  ]
+}

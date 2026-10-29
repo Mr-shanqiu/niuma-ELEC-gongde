@@ -1,0 +1,17 @@
+# 牛马电子功德
+
+> 牛马电子功德是 Windows 和 macOS 桌面客户端，提供键鼠次数统计、功德日历、下班倒计时和桌面形象。客户端在本机统计次数，不记录具体输入内容。
+
+## 产品与帮助
+
+- [产品资料](https://gongde.zqscreen.cn/assets/product.html)：功能、隐私、价格与使用说明。
+- [版本记录](https://gongde.zqscreen.cn/assets/updates.html)：官网客户端版本与更新。
+- [官方下载](https://gongde.zqscreen.cn/download.html)：当前安装包与校验信息。
+- [安装帮助](https://gongde.zqscreen.cn/install.html)：安装和权限说明。
+- [常见问题](https://gongde.zqscreen.cn/faq.html)：常见使用问题。
+- [隐私说明](https://gongde.zqscreen.cn/privacy.html)：数据与隐私说明。
+- [联系与反馈](https://gongde.zqscreen.cn/contact.html)：官方联系渠道。
+- [GitHub 项目仓库](https://github.com/Mr-shanqiu/niuma-ELEC-gongde)：项目源码；发行版本以官网为准。
+
+- [形象创作 Skill](https://github.com/Mr-shanqiu/gongde-appearance-pack)：制作规范、模板、预览、检查与打包工具。
+- [制作与人工投稿](https://gongde.zqscreen.cn/support.html#creation)：Skill 下载及免费投稿协议。

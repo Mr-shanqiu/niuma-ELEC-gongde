@@ -1,0 +1,105 @@
+{
+  "renderer": "native-woodfish-v2",
+  "provenance": {
+    "macOS": "5d129ff81fb1a01a04d67cd52556a755abb543e111c14a506c49412a18a465e2",
+    "Windows": "348ca1a2464c05831c489c04068707607a7602c6c50e9637962b421cf7dac9a8"
+  },
+  "macOS": {
+    "scale": 0.88,
+    "center": [
+      120,
+      0
+    ],
+    "shadow": [
+      40,
+      3,
+      160,
+      16
+    ],
+    "body": [
+      26,
+      0,
+      214,
+      129
+    ],
+    "shaft": [
+      -260,
+      -26,
+      266,
+      54
+    ],
+    "head": [
+      -309,
+      -27,
+      60,
+      54
+    ],
+    "pivot": [
+      417,
+      180
+    ],
+    "angle": [
+      3,
+      2.2
+    ],
+    "shaftSourceX": 108,
+    "headSourceWidth": 145
+  },
+  "Windows": {
+    "clip": [
+      0,
+      80,
+      240,
+      170
+    ],
+    "scale": 0.88,
+    "center": [
+      120,
+      250
+    ],
+    "shadow": [
+      40,
+      231,
+      160,
+      16
+    ],
+    "body": [
+      26,
+      121,
+      214,
+      129
+    ],
+    "shaft": [
+      -260,
+      -28,
+      266,
+      54
+    ],
+    "head": [
+      -309,
+      -27,
+      60,
+      54
+    ],
+    "pivot": [
+      417,
+      70
+    ],
+    "angle": [
+      3,
+      2.2
+    ],
+    "shaftSourceX": 108,
+    "headSourceWidth": 145
+  },
+  "sourceDimensions": {
+    "body.png": {
+      "width": 600,
+      "height": 500
+    },
+    "mallet.png": {
+      "width": 600,
+      "height": 150
+    }
+  }
+}

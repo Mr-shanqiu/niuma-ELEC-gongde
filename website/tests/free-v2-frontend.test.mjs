@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const api = await import('data:text/javascript;base64,' + Buffer.from(read('../free-api.js')).toString('base64'));
@@ -46,10 +45,12 @@ test('confirmation persists the same idempotency key on refresh and network retr
   const storage = memory(); let counter = 0; const id = () => `key-${++counter}`;
   const first = api.confirmation([item()], storage, id); first.sent = true; storage.setItem(api.CONFIRMATION_KEY, JSON.stringify(first));
   assert.deepEqual(api.confirmation([item()], storage, id), first);
-  assert.notEqual(api.confirmation([item(100002)], storage, id).key, first.key);
+  assert.equal(api.confirmation([item(100002)], storage, id).key, first.key, 'sent requests keep the same key');
+  api.clearConfirmation(storage);
+  assert.notEqual(api.confirmation([item(100002)], storage, id).key, first.key, 'explicitly finishing permits a new key');
 });
 test('code authorization is not a balance, expires at the boundary, and is bounded', () => {
-  const value = { kind: 'CREATOR', maxItems: 3, expiresAt: '2026-10-10T00:00:00Z' };
+  const value = { kind: 'GROUP', maxItems: 3, expiresAt: '2026-10-10T00:00:00Z' };
   assert.equal(api.validAccess(value, Date.parse('2026-10-09T00:00:00Z')), true);
   assert.equal(api.validAccess(value, Date.parse(value.expiresAt)), false);
   assert.equal(api.validAccess({ ...value, maxItems: 15 }, 0), false);
@@ -75,12 +76,12 @@ test('HTTPS downloads reject credentials, javascript, and HTTP', () => {
   assert.equal(api.safeDownloadUrl('https://example.test/file.zip'), 'https://example.test/file.zip');
   for (const value of ['http://example.test/a', 'javascript:alert(1)', 'https://user:password@example.test/a']) assert.equal(api.safeDownloadUrl(value), null);
 });
-test('unified library, explicit 24 pagination, selection and creator metadata have no paid tabs', () => {
+test('unified library supports the paid and group-code paths while preserving selection', () => {
   const html = read('../index.html'), flow = read('../free-flow.js'), creator = read('../creator.html');
   assert.match(html, /library-previous/); assert.match(html, /library-next/); assert.match(flow, /result.items.length > 24/);
   assert.match(flow, /300/); assert.match(html, /popular7d/); assert.match(flow, /catalogRevision/);
-  assert.doesNotMatch(html, /官方付费包|data-channel|payment-modal|support-open|¥/);
-  assert.match(creator, /creatorDouyinNumber/); assert.match(creator, /0\/20/); assert.match(creator, /0\/40/);
+  assert.match(html, /¥1|1 元/); assert.match(html, /群码/);
+  assert.match(creator, /抖音群/); assert.match(creator, /在线上传暂时停用/);
   assert.doesNotMatch(creator, /name="displayName"|id="creator-register"|统一价格收费|24 小时/);
 });
 test('download page contains no access form and direct published links are independent of access', () => {
@@ -94,33 +95,26 @@ test('delivery is server-state driven with one main file, 7 day retention and bo
   assert.equal((html.match(/id="delivery-download"/g) || []).length, 1);
   for (const state of ['PREPARING', 'READY', 'FAILED', 'EXPIRED', 'BLOCKED']) assert.ok(flow.includes(state));
   assert.match(flow, /90000/); assert.match(flow, /1000, 2000, 3000, 5000/);
-  assert.match(flow, /downloadRetentionSeconds === 604800/); assert.match(flow, /importExpiresAt === null/);
-  assert.match(html, /永久离线使用/); assert.match(html, /7 天/); assert.doesNotMatch(html, /首次导入截止/);
+  assert.match(read('../../services/gongde-payments/src/free-distribution/runtime.ts'), /downloadRetentionSeconds:604800/); assert.match(flow, /importExpiresAt !== null/);
+  assert.match(html, /永久离线使用/); assert.doesNotMatch(html, /首次导入截止/);
 });
-test('legacy restoration retains the original read and package verification but cannot create orders', () => {
-  const checkout = read('../checkout.js'), support = read('../support.js');
-  assert.match(checkout, /niuma-pack-order-receipts-v1/); assert.match(checkout, /niuma-pack-pending-checkout/);
-  assert.match(checkout, /x-gongde-access-code/); assert.match(checkout, /package\?format=batch/);
-  assert.doesNotMatch(checkout + support + read('../app.js') + read('../community.js'), /\/api\/gongde\/checkout|qrDataUrl|redirectUrl/);
-  assert.doesNotMatch(checkout, /removeItem|24 \* 60/);
+test('the current checkout uses the payment flow and preserves request identity', () => {
+  const checkout = read('../checkout.js'), flow = read('../free-flow.js'), payment = read('../payment-flow.js');
+  assert.match(checkout, /free-flow\.js/); assert.match(flow, /mountPayment/);
+  assert.match(payment, /Idempotency-Key/); assert.match(payment, /buyerToken/);
 });
-test('guide ZIP and webpage share free instructions, five required entries, and original QR', () => {
-  const require = createRequire(new URL('../../services/gongde-payments/package.json', import.meta.url));
-  const { unzipSync } = require('fflate'); const zip = unzipSync(readFileSync(new URL('../assets/creator-guide.zip', import.meta.url)));
-  assert.deepEqual(Object.keys(zip).sort(), ['AI-PROMPT.txt', 'README.txt', 'example.nmgpack', 'manifest.json', 'sample.png'].sort());
-  const text = new TextDecoder().decode(zip['README.txt']); const prompt = new TextDecoder().decode(zip['AI-PROMPT.txt']); const page = read('../creator-guide.html');
-  for (const word of ['20', '40', '3', 'creatorDouyinNumber', '免费分发', '永久离线']) assert.ok(text.includes(word));
-  assert.doesNotMatch(text + prompt, /0\.2 元|平台收费分发|24 小时/);
-  assert.ok(page.includes(text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')));
-  assert.match(page, /assets\/developer-douyin\.png/); assert.match(page, /1872941388/);
-  const manifest = JSON.parse(new TextDecoder().decode(zip['manifest.json'])); assert.equal(manifest.id, 'creator.template'); assert.equal(manifest.creatorDouyinNumber, undefined);
+test('creator guidance distinguishes paused online upload from group submissions', () => {
+  const page = read('../creator-guide.html'), support = read('../support.html');
+  assert.match(page, /在线上传暂时停用/); assert.match(page, /抖音群/);
+  assert.match(page, /support\.html#creation/); assert.match(support, /创作 Skill/);
 });
 test('pending recovery keeps the original key and exact request; explicit new batch changes the key', () => {
   const storage = memory(), items = [item()];
   const original = api.confirmation(items, storage, () => 'original-key'); original.sent = true;
   storage.setItem(api.CONFIRMATION_KEY, JSON.stringify(original));
   assert.equal(api.pendingConfirmation(items, storage).key, 'original-key');
-  assert.equal(api.pendingConfirmation([{ ...item(), catalogRevision: 'new-version' }], storage), null);
+  const resumed = api.pendingConfirmation([{ ...item(), catalogRevision: 'new-version' }], storage);
+  assert.equal(resumed.key, 'original-key'); assert.equal(resumed.items[0].catalogRevision, 'opaque-revision');
   api.clearConfirmation(storage);
   assert.equal(api.pendingConfirmation(items, storage), null);
   assert.equal(api.confirmation(items, storage, () => 'next-batch-key').key, 'next-batch-key');
@@ -175,6 +169,7 @@ async function withFlow(page, mocks, operation) {
     constructor() { this.children = []; this.dataset = {}; this.listeners = new Map(); this.disabled = false; this.hidden = false; this.elements = { code: { value: '', focus() {}, setAttribute() {} } }; this.textContent = ''; }
     append(...values) { this.children.push(...values); }
     replaceChildren(...values) { this.children = values; }
+    after(value) { if (value.id) elements.set(value.id, value); }
     addEventListener(event, operation) { this.listeners.set(event, operation); }
     querySelector() { return this.button ||= new DomNode(); }
     querySelectorAll() { return []; }
@@ -190,8 +185,8 @@ async function withFlow(page, mocks, operation) {
     }
   }
   for (const match of read(page).matchAll(/id="([^"]+)"/g)) elements.set(match[1], new DomNode());
-  const doc = { body: new DomNode(), getElementById: id => elements.get(id) || null,
-    createElement: () => new DomNode(), querySelectorAll: () => [], addEventListener() {} };
+  const doc = { body: new DomNode(), documentElement: { lang: 'zh-CN' }, getElementById: id => elements.get(id) || null,
+    createElement: () => new DomNode(), querySelectorAll: () => [], addEventListener() {}, dispatchEvent() {} };
   doc.body.dataset.flow = '';
   const assignments = { document: doc, window: {}, location: { search: mocks.search || '', href: 'https://local.test/', origin: 'https://local.test', assign: path => navigation.push(path) },
     sessionStorage: storage, addEventListener() {}, setTimeout: (operation, delay) => { timers.push({ operation, delay }); return timers.length; }, clearTimeout() {},
@@ -215,7 +210,7 @@ async function withFlow(page, mocks, operation) {
     // import form as it actually appears instead of failing to resolve it.
     source = source.replace(/^import \{ officialMappings[\s\S]*?from '\.\/payment-flow\.js(?:\?[^']*)?';/m, `const {officialMappings,paymentItem,currentPayment,mountPayment,downloadFile,paymentError,ACTIVE_CLAIM_KEY}=globalThis.__paymentFlow;`);
     source = source.replace(/^import \{ mountCreatorPreview[\s\S]*?from '\.\/community-preview\.js';/m, "const mountCreatorPreview=async()=>{throw new Error('unused-preview');};const mountPublicPreview=async()=>{throw new Error('unused-preview');};const schedulePreviewRequest=operation=>Promise.resolve().then(operation);");
-    source += `\nexport {claim,delivery};\n// isolated-local-test-${++domModule}`;
+    source += `\nexport {claim,delivery,installers};\n// isolated-local-test-${++domModule}`;
     const flow = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
     await operation({ flow, elements, timers, navigation, storage });
   } finally {
@@ -240,7 +235,7 @@ test('lost creation response restores original claim after code expiry without v
     }
   }, async ({ flow, elements, navigation }) => {
     await flow.claim(); const before = calls.length;
-    assert.equal(elements.get('claim-create').disabled, false); assert.equal(elements.get('claim-create').textContent, '恢复本次领取结果');
+    assert.equal(elements.get('claim-create').disabled, false); assert.equal(elements.get('claim-create').textContent, '继续本次领取请求');
     await elements.get('claim-create').click();
     assert.deepEqual(calls.slice(before), ['/claims/appearances']);
     assert.deepEqual(navigation, ['delivery.html?claim=existing-claim']);
@@ -256,20 +251,38 @@ test('original-key recovery remains available if config cannot be read', async (
     await elements.get('claim-create').click(); assert.deepEqual(navigation, ['delivery.html?claim=restored']);
   });
 });
-test('READY again starts a new confirmation key without deleting the original delivery', async () => {
+test('READY preserves the active confirmation until the delivery is finished', async () => {
   const storage = memory(); const old = api.confirmation([item()], storage, () => 'old-ready-key');
+  storage.setItem('niuma-current-group-claim-v1', JSON.stringify({claimId:'original-ready',retryKey:'retry-key'}));
   await withFlow('../delivery.html', { storage, search: '?claim=original-ready', request: async path => {
     assert.equal(path, '/claims/original-ready'); return { state: 'READY', items: [{ number: 100001, title: '豆' }], bytes: 100, sha256: 'a'.repeat(64), issuedAt: new Date().toISOString(), downloadExpiresAt: new Date(Date.now() + 604800000).toISOString(), licenseMode: 'perpetual', importExpiresAt: null };
   } }, async ({ flow, elements }) => {
     await flow.delivery(); assert.equal(elements.get('delivery-download').hidden, false);
     await elements.get('claim-again').click();
-    assert.notEqual(api.confirmation([item()], storage, () => 'new-ready-key').key, old.key);
+    assert.equal(api.confirmation([item()], storage, () => 'new-ready-key').key, old.key);
+    assert.match(elements.get('flow-status').textContent, /先完成当前交付/);
     assert.equal(elements.get('delivery-id').textContent, 'original-ready');
   });
 });
 test('PREPARING has no download and schedules its first bounded status poll at one second', async () => {
-  await withFlow('../delivery.html', { search: '?claim=preparing', request: async () => ({ state: 'PREPARING', items: [], issuedAt: null, downloadExpiresAt: null }) }, async ({ flow, elements, timers }) => {
+  const storage = memory(); storage.setItem('niuma-current-group-claim-v1', JSON.stringify({claimId:'preparing',retryKey:'retry-key'}));
+  await withFlow('../delivery.html', { storage, search: '?claim=preparing', request: async () => ({ state: 'PREPARING', items: [], issuedAt: null, downloadExpiresAt: null }) }, async ({ flow, elements, timers }) => {
     await flow.delivery(); assert.equal(elements.get('delivery-download').hidden, true);
-    assert.equal(timers[0].delay, 1000); assert.match(elements.get('delivery-retention').textContent, /尚未开始/);
+    assert.equal(timers[0].delay, 1000); assert.match(elements.get('flow-status').textContent, /正在准备/);
+  });
+});
+
+
+test('download page shows only the latest registered version for each platform', async () => {
+  const install = (platform, version) => ({ platform, format: platform === 'macos' ? 'dmg' : 'exe',
+    version, releaseId: `${platform}-${version}`, bytes: 1024, sha256: 'a'.repeat(64),
+    publicDownloadUrl: `https://download.example.test/${platform}-${version}.bin`, perpetualCompatible: true });
+  const items = [install('macos','0.9.4'), install('windows','0.9.5'), install('macos','0.9.5'), install('windows','0.9.3')];
+  await withFlow('../download.html', { request: async path => path === '/installers' ? { items } : {} }, async ({ flow, elements }) => {
+    await flow.installers();
+    const cards = elements.get('installer-list').children;
+    assert.equal(cards.length, 2);
+    assert.ok(cards.every(card => card.children.some(child => child.textContent?.startsWith('0.9.5'))));
+    assert.equal(elements.has('installer-history'), false);
   });
 });
