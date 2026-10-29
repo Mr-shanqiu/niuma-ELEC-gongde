@@ -1,0 +1,29 @@
+name: Admin checks
+on:
+  push:
+    paths:
+      - 'admin-console/**'
+      - '.github/workflows/admin-checks.yml'
+  pull_request:
+    paths:
+      - 'admin-console/**'
+      - '.github/workflows/admin-checks.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  admin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: admin-console/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build

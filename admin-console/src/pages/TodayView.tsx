@@ -156,7 +156,7 @@ export function TodayView() {
           unit="次"
           sub={
             downloadCell.note === "ready" ? (
-              <Tooltip title="安装包下载入口收到的请求次数；重复下载会重复计数，不代表安装人数。">
+              <Tooltip title="已记录的安装包下载请求；防刷限流可能省略部分请求，不代表安装人数。">
                 <span className="stat-hint">
                   Windows {windows!.period.toLocaleString("zh-CN")}
                   <span className="sep">·</span>
@@ -402,7 +402,7 @@ function DownloadCard({ state, cell, onRetry }: {
                     <p>
                       {coverage?.scopeNote ?? "只统计官网下载入口的请求。"}
                       这些请求来自计数接入前的记录，覆盖范围不明，不能代表官网全部下载。
-                      同一动作重复点击会重复计数；已保存的文件离线使用不产生请求。
+                      重复请求可能因防刷限流而未计入；已保存的文件离线使用不产生请求。
                     </p>
                   </details>
                 </div>
@@ -424,12 +424,12 @@ function DownloadCard({ state, cell, onRetry }: {
             <PlatformRow label="macOS" icon="" today={cell.summary.byPlatform.macos.period} total={cell.summary.byPlatform.macos.total} />
           </div>
           <div className="dl-note">
-            <span>按官网安装包入口的请求计数，不是安装人数或独立用户。</span>
+            <span>按官网安装包入口已记录的请求计数；防刷限流可能省略部分请求，不是安装人数或独立用户。</span>
             <details>
               <summary>口径、覆盖范围与限制</summary>
               <p>
                 {coverage?.scopeNote ?? "只统计官网下载入口的请求。"}
-                同一动作重复点击会重复计数；已保存的文件离线使用不产生请求，因此这里也不能反推安装或导入人数。
+                重复请求可能因防刷限流而未计入；已保存的文件离线使用不产生请求，因此这里也不能反推安装或导入人数。
                 累计只从统计起点开始；更早的有效记录如保留，会在下方单列，不并入累计，也不补造。
                 {cell.summary.legacyCount > 0
                   ? ` 历史已记录请求 ${cell.summary.legacyCount.toLocaleString("zh-CN")} 条，覆盖不完整，未计入上方累计。`

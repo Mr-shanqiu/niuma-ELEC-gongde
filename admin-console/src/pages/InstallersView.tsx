@@ -218,7 +218,7 @@ export function InstallersView() {
         </ReadGate>
         <div className="panel-foot">
           <Typography.Text type="secondary">
-            统计区间 {registryRead ? `${range.start} 至 ${range.end}（北京时间）` : "未读取"} · 请求次数按请求计，不是安装人数或独立用户；重复下载会重复计数。
+            统计区间 {registryRead ? `${range.start} 至 ${range.end}（北京时间）` : "未读取"} · 显示已记录的请求，不是安装人数或独立用户；防刷限流可能省略部分请求。
           </Typography.Text>
         </div>
       </Card>
