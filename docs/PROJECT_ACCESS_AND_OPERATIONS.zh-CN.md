@@ -7,7 +7,7 @@
 这是本项目服务器、Git、AI 和 COS 访问的统一导航，不是密钥库、授权升级凭证、发布器替代品或新的任务检查点。
 
 - 正式项目根目录：`/Users/yue/Desktop/牛马电子功德`。开始工作先读 `PROJECT_HOME.md`、本文件和 `WORK_PLAN.md` 最新检查点。
-- 产品规则由 `docs/PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md` 决定；任务状态仍使用官方目标及 `WORK_PLAN.md`。
+- 产品规则以 `docs/WORK_PLAN_BASIC_FREE_PAID_PACKS.zh-CN.md` 及用户后续确认、实际发布回执为准；旧全免费PRD不覆盖现行规则；任务状态仍使用官方目标及 `WORK_PLAN.md`。
 - 本文只记录入口、角色、范围、凭据文件引用和证据位置，不保存 SecretId、SecretKey、API key、密码、cookie、验证码或签名下载 URL。
 - 已有凭据和权限应优先复用。一次失败不能推导为用户没有授权，也不能据此反复要求用户提供密钥、登录或重建账户。
 - 人类授权、云端策略、凭据挂载、应用可读性、功能开关和真实操作成功是不同层次，必须分别判断。

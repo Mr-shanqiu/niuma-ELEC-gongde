@@ -179,6 +179,14 @@ test("download counting and report", { timeout: 20000 }, async (t) => {
   seed(OLD, "2026-10-21T10:00:00.000Z"); // registered, but not the current version
   seed("niuma-merit-macos-0.7.0-retired.dmg", "2026-10-21T11:00:00.000Z"); // no longer registered
 
+  cos.objects.set(`${EVENTS}invalid-name`, Buffer.from("{}"));
+  cos.objects.set(`${EVENTS}${"9".repeat(30)}-abc-invalid.exe`, Buffer.from("{}"));
+  const { AdminObjectStore, loadAdminObjectStoreConfiguration } = await import("../dist/admin/object-store.js");
+  const importedEvents = await new AdminObjectStore(loadAdminObjectStoreConfiguration()).downloadEventsForImport();
+  assert.equal(importedEvents.length, 5);
+  assert.equal(new Set(importedEvents.map(event => event.key)).size, 5);
+  assert.ok(importedEvents.every(event => event.key.startsWith(EVENTS) && Number.isFinite(event.downloadedAt.getTime())));
+
   const unauthorized = await get("/api/gongde/admin/download-report");
   assert.equal(unauthorized.status, 401);
 

@@ -1,3 +1,4 @@
+import { MySqlDownloadCounters } from "../downloads/mysql-counters.js";
 import { ORDER_STATES } from "../domain/store.js";
 import { lstatSync, readFileSync } from "node:fs";
 import mysql from "mysql2/promise";
@@ -170,6 +171,11 @@ export class MySqlPaymentStore implements PaymentStore {
       multipleStatements: false
     });
     return new MySqlPaymentStore(pool, pool);
+  }
+
+  downloadCounters(coverageSince: Date): MySqlDownloadCounters {
+    if (!this.pool) throw new Error("download_counter_pool_required");
+    return new MySqlDownloadCounters(this.pool, coverageSince);
   }
 
   async insertAccessAccount(account: GongdeAccessAccount): Promise<void> {
