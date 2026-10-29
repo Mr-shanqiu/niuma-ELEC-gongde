@@ -138,13 +138,11 @@ for (const file of htmlFiles) {
 }
 
 const adminPattern = /^admin\/assets\/[A-Za-z0-9][A-Za-z0-9_-]*-[A-Za-z0-9_-]{8,64}\.(?:js|css)$/;
+const adminReferences = html => [...new Set([...html.matchAll(/(?:src|href)=["'](\/admin\/assets\/[^"']+)["']/g)]
+  .map(match => match[1].slice(1)).filter(name => adminPattern.test(name)))].sort();
 let currentAdmin = [];
-try {
-  currentAdmin = (await readdir(join(stage, 'admin', 'assets')))
-    .map(name => `admin/assets/${name}`).filter(name => adminPattern.test(name)).sort();
-} catch (error) {
-  if (error.code !== 'ENOENT') throw error;
-}
+try { currentAdmin = adminReferences(await readFile(join(stage, 'admin/index.html'), 'utf8')); }
+catch (error) { if (error.code !== 'ENOENT') throw error; }
 let runtimeVersions = [revision];
 let adminBundles = currentAdmin.length ? [currentAdmin] : [];
 let retainedFiles = 0;
@@ -167,16 +165,20 @@ if (previousArchive) {
     }
     runtimeVersions = [...new Set([revision, ...previous.runtimeVersions])].slice(0, 3);
   }
-  const previousAdmin = previous?.adminBundles || [members.map(name => name.replace(/^\.\//, '')).filter(name => adminPattern.test(name))];
+  const previousAdmin = previous?.adminBundles || [];
   for (const bundle of previousAdmin) {
     if (!Array.isArray(bundle) || !bundle.every(name => adminPattern.test(name))) throw new Error('Previous admin bundle manifest is invalid');
+  }
+  const previousAdminIndex = members.find(name => name.replace(/^\.\//, '') === 'admin/index.html');
+  const activePreviousAdmin = previousAdminIndex ? adminReferences(execFileSync('tar', ['-xzOf', previousArchive, previousAdminIndex], { encoding: 'utf8', maxBuffer: 512 * 1024 })) : [];
+  if (activePreviousAdmin.some(name => !members.some(member => member.replace(/^\.\//, '') === name))) throw new Error('Previous active admin assets are missing');
+  const previousCandidates = [activePreviousAdmin, ...previousAdmin.filter(bundle =>
+    !activePreviousAdmin.length || !activePreviousAdmin.every(name => bundle.includes(name)))];
+  for (const bundle of previousCandidates) {
     if (bundle.length && !adminBundles.some(existing => JSON.stringify(existing) === JSON.stringify(bundle))) adminBundles.push(bundle);
   }
-  // Two admin bundles, not three: the deployer accepts at most 20 MiB and the
-  // site is already within a few hundred KiB of that. Each admin bundle is
-  // ~1.3 MB of JS, so a third generation is the difference between a release
-  // the deployer accepts and one it rejects. Two is the depth the live archive
-  // already carries, so nothing the current release guarantees is lost.
+  // Keep the current admin entry and one previous entry, without treating every
+  // asset already present in an overlay as part of the active bundle.
   adminBundles = adminBundles.slice(0, 2);
   const keepAdmin = new Set(adminBundles.flat());
   const keepRuntime = new Set(runtimeVersions.slice(1));
@@ -219,6 +221,21 @@ if (previousArchive) {
     }
   }
 }
+
+// An overlay can already contain older assets. Apply the declared retention
+// policy to those files too, rather than only limiting files imported above.
+try {
+  for (const name of await readdir(join(stage, 'assets/runtime'))) {
+    if (hex.test(name) && !runtimeVersions.includes(name)) await rm(join(stage, 'assets/runtime', name), { recursive: true, force: true });
+  }
+} catch (error) { if (error.code !== 'ENOENT') throw error; }
+const retainedAdminAssets = new Set(adminBundles.flat());
+try {
+  for (const name of await readdir(join(stage, 'admin/assets'))) {
+    const relative = `admin/assets/${name}`;
+    if (adminPattern.test(relative) && !retainedAdminAssets.has(relative)) await rm(join(stage, relative));
+  }
+} catch (error) { if (error.code !== 'ENOENT') throw error; }
 
 await mkdir(join(stage, 'assets', 'build'), { recursive: true });
 await writeFile(join(stage, 'assets', 'build', 'runtime-assets.json'), `${JSON.stringify({

@@ -4,11 +4,13 @@ on:
     paths:
       - 'website/**'
       - 'scripts/version-website-assets.mjs'
+      - 'scripts/version-website-assets.test.mjs'
       - '.github/workflows/website-checks.yml'
   pull_request:
     paths:
       - 'website/**'
       - 'scripts/version-website-assets.mjs'
+      - 'scripts/version-website-assets.test.mjs'
       - '.github/workflows/website-checks.yml'
   workflow_dispatch:
 permissions:
@@ -22,4 +24,4 @@ jobs:
         with:
           node-version: '22'
       - name: Check current download and group flows
-        run: node --test website/tests/free-v2-frontend.test.mjs website/tests/installer-click.test.mjs
+        run: node --test website/tests/free-v2-frontend.test.mjs website/tests/installer-click.test.mjs scripts/version-website-assets.test.mjs
