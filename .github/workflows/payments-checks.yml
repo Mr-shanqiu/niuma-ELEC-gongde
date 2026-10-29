@@ -3,10 +3,12 @@ on:
   push:
     paths:
       - 'services/gongde-payments/**'
+      - 'scripts/package-website-overlay.sh'
       - '.github/workflows/payments-checks.yml'
   pull_request:
     paths:
       - 'services/gongde-payments/**'
+      - 'scripts/package-website-overlay.sh'
       - '.github/workflows/payments-checks.yml'
   workflow_dispatch:
 permissions:
