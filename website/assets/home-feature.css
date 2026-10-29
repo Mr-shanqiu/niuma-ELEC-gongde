@@ -151,3 +151,12 @@ html:lang(en) .hero-feature .v4-hero-inner{grid-template-columns:minmax(0,1fr) m
 .easter-hint{margin:10px 0 0;font-size:11px;color:#9aa98d}
 .easter-content[hidden]{display:none}
 .feature-easter-body p{max-width:520px;margin:14px auto 0;font-size:12px;line-height:1.8;color:#7c8972}
+
+/* 0.9.5 visibility illustration; no extra animation loop. */
+.visibility-demo{flex-direction:column;gap:10px;padding:18px;background:#f2f4ee}
+.visibility-caption,.visibility-status{margin:0;color:#64705d;font-size:12px;text-align:center}
+.visibility-demo output{font:32px/1.1 var(--font-num);color:#aa6d3f}
+.visibility-art{object-fit:contain;max-height:150px;max-width:100%}
+.visibility-art.is-concealed{visibility:hidden}
+.visibility-actions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.visibility-actions button{padding:8px 12px;border:1px solid #cbd7bf;border-radius:999px;background:#fff;color:#42513a;font-size:12px;cursor:pointer}

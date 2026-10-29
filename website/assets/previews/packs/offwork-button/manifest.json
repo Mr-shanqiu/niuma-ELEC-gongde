@@ -1,0 +1,165 @@
+{
+  "id": "official.offwork-button",
+  "author": "Personal DIY / AI-assisted",
+  "layers": [
+    {
+      "frame": [
+        22,
+        22.910685805422645,
+        182.30303030303028,
+        147.08931419457736
+      ],
+      "image": "base.png",
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 6.778309409888357,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        }
+      ]
+    },
+    {
+      "frame": [
+        24.098883572567782,
+        9.354066985645945,
+        177.6555023923445,
+        160.64593301435406
+      ],
+      "image": "cap.png",
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 10.303030303030305,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 0.25,
+          "x": 0,
+          "y": 10.303030303030305,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 0.43,
+          "x": 0,
+          "y": 6.236044657097288,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 0.6,
+          "x": 0,
+          "y": 6.236044657097288,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 0.78,
+          "x": 0,
+          "y": 10.303030303030305,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 1,
+          "x": 0,
+          "y": 10.303030303030305,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        }
+      ]
+    },
+    {
+      "frame": [
+        22,
+        0,
+        187.99999999999997,
+        170
+      ],
+      "image": "hand.png",
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 5.247208931419458,
+          "y": -13.556618819776714,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 0.25,
+          "x": 0,
+          "y": 0,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 0.43,
+          "x": 0,
+          "y": -4.0669856459330145,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 0.6,
+          "x": 0,
+          "y": -4.0669856459330145,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 0.78,
+          "x": 0,
+          "y": 0,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        },
+        {
+          "t": 1,
+          "x": 5.247208931419458,
+          "y": -13.556618819776714,
+          "alpha": 1,
+          "scale": 1,
+          "rotation": 0
+        }
+      ]
+    }
+  ],
+  "plus_y": 174,
+  "name_en": "Clock-Out Button",
+  "name_zh": "下班按钮",
+  "preview": "preview.png",
+  "version": "1.0.0",
+  "publisher": "NiuMa Merit",
+  "review_id": "developer-approved-20261017",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "schema_version": 1
+}

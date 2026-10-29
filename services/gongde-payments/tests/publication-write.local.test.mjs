@@ -3,8 +3,8 @@ import test, { mock } from "node:test";
 import { once } from "node:events";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { join, resolve } from "node:path";
 
 /**
  * Publication writes against the real server.
@@ -15,7 +15,7 @@ import { join } from "node:path";
  * COS bucket serializes two writers — the lock is the thing that does that,
  * and a real multi-instance race needs a real shared bucket to reproduce.
  */
-for (const key of Object.keys(process.env)) if (key.startsWith("GONGDE_")) delete process.env[key];
+for (const key of Object.keys(process.env)) if (key.startsWith("GONGDE_") && key !== "GONGDE_TEST_BUILD_ROOT") delete process.env[key];
 
 class MemoryCos {
   objects = new Map();
@@ -96,7 +96,8 @@ Object.assign(process.env, {
   GONGDE_COS_SECRET_ID: "synthetic-id", GONGDE_COS_SECRET_KEY: "synthetic-key"
 });
 
-const { server } = await import("../dist/server.js");
+const { server } = await import(process.env.GONGDE_TEST_BUILD_ROOT
+  ? pathToFileURL(resolve(process.env.GONGDE_TEST_BUILD_ROOT, "server.js")) : "../dist/server.js");
 if (!server.listening) await once(server, "listening");
 const origin = `http://127.0.0.1:${server.address().port}`;
 
@@ -135,6 +136,20 @@ test("publication writes are fenced by the publication revision", { timeout: 200
   // write whose only possible outcome is a 503.
   const noObject = await list();
   assert.equal(noObject.publicationRevision, 0);
+  const { RETIRED_OFFICIAL_ASSET_IDS: retired } = await import(process.env.GONGDE_TEST_BUILD_ROOT
+    ? pathToFileURL(resolve(process.env.GONGDE_TEST_BUILD_ROOT, "domain/catalog.js")) : "../dist/domain/catalog.js");
+  assert.equal(noObject.data.length, 11);
+  assert.ok(noObject.data.every(item => !retired.has(item.assetId)));
+  const publicRevisions = await (await call("/api/gongde/appearance-revisions")).json();
+  for (const id of retired) {
+    assert.equal(publicRevisions.revisions[id], undefined);
+    const rejected = await call(`/api/gongde/admin/appearances/${encodeURIComponent(id)}`, {
+      method: "PATCH", body: JSON.stringify({ published: true, publicationRevision: 0 })
+    });
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).error, "appearance_retired");
+  }
+  assert.equal(cos.objects.has(STATE_KEY), false, "retired writes must not create publication state");
   assert.ok(noObject.data.every((item) => item.state !== "UNPUBLISHED"),
     "with no object the documented default is that everything is published");
   cos.failRead = true;

@@ -42,34 +42,96 @@ function discardImage(key, entry) {
   if (imageCache.get(key) !== entry) return;
   imageCache.delete(key); cachedBytes -= entry.bytes;
 }
+function previewFailure(kind, status) {
+  const error = new Error('creator_preview_unavailable');
+  error.kind = kind;
+  if (status) error.status = status;
+  return error;
+}
+// One request plus at most one retry, under a per-attempt deadline and a total
+// budget that also covers reading the body. A server that sends headers and
+// then stalls mid-body is the same failure as one that never answers, so the
+// read runs under the same signal and is retried the same way. Definite
+// answers — 4xx, a malformed PNG, a cancelled request — are never retried.
+const previewAttemptTimeout = 10000;
+const previewTotalTimeout = 16000;
+function transientKind(error) {
+  return error?.name === 'TimeoutError' ? 'timeout' : error?.name === 'AbortError' ? 'aborted' : 'network';
+}
+// The caller's cancellation and this attempt's deadline must both stop the
+// fetch. AbortSignal.any is newer than some browsers still in use, so fall back
+// to forwarding the caller's abort into a controller of our own. The deadline
+// keeps its TimeoutError name on the way through, because a timed-out attempt is
+// retried while an explicit cancellation is not.
+function attemptSignal(timeout, external) {
+  const deadline = AbortSignal.timeout(timeout);
+  if (!external) return deadline;
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([deadline, external]);
+  const controller = new AbortController();
+  const reason = new DOMException('Preview attempt timed out', 'TimeoutError');
+  const stop = () => controller.abort(external.reason ?? new DOMException('Preview cancelled', 'AbortError'));
+  if (external.aborted) stop();
+  else {
+    external.addEventListener('abort', stop, { once: true });
+    deadline.addEventListener('abort', () => controller.abort(reason), { once: true });
+    const settle = () => external.removeEventListener('abort', stop);
+    controller.signal.addEventListener('abort', settle, { once: true });
+  }
+  return controller.signal;
+}
 async function readPreviewBlob(path, options) {
   return schedulePreviewRequest(async () => {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const response = await fetch(path, {
-        credentials: options.public ? 'omit' : 'same-origin',
-        cache: options.immutable ? 'force-cache' : 'no-store',
-        signal: AbortSignal.timeout(10000),
-      });
+    const started = Date.now();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const remaining = previewTotalTimeout - (Date.now() - started);
+      const timeout = attempt === 0 ? previewAttemptTimeout : Math.max(1000, remaining);
+      let response;
+      try {
+        response = await fetch(path, {
+          credentials: options.public ? 'omit' : 'same-origin',
+          // Private previews stay out of every cache. A public one is an ordinary
+          // artwork file: when it is content-addressed it is immutable, and when
+          // it is not, the server's own headers decide how it may be reused.
+          cache: options.immutable ? 'force-cache' : options.public ? 'default' : 'no-store',
+          signal: attemptSignal(timeout, options.signal),
+        });
+      } catch (error) {
+        // A dropped connection or a stalled request is usually transient: retry
+        // once with a short wait before reporting the image unavailable. The
+        // kind is recorded so callers can tell a network failure from a 4xx.
+        const kind = transientKind(error);
+        if (kind === 'aborted' || attempt === 1) throw previewFailure(kind);
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
       if (response.ok) {
         const length = Number(response.headers.get('content-length'));
         if (length > maximumImageBytes) throw new Error('creator_preview_invalid');
-        const blob = await response.blob();
+        let blob;
+        try {
+          blob = await response.blob();
+        } catch (error) {
+          const kind = transientKind(error);
+          if (kind === 'aborted' || attempt === 1) throw previewFailure(kind);
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+          continue;
+        }
         if (!blob.size || blob.size > maximumImageBytes || blob.type.split(';')[0] !== 'image/png') throw new Error('creator_preview_invalid');
         return blob;
       }
-      if (response.status !== 503) throw new Error('creator_preview_unavailable');
+      if (response.status !== 503) throw previewFailure('http', response.status);
       const problem = await response.json().catch(() => null);
-      if (!['creator_storage_busy', 'creator_service_unavailable'].includes(problem?.error) || attempt === 2) throw new Error('creator_preview_unavailable');
+      if (!['creator_storage_busy', 'creator_service_unavailable'].includes(problem?.error) || attempt === 1) throw previewFailure('busy', response.status);
       let delay = 250 * (attempt + 1);
       const retryAfter = response.headers.get('retry-after');
       if (retryAfter !== null) {
         const seconds = Number(retryAfter);
-        if (!Number.isFinite(seconds) || seconds < 0 || seconds > 1) throw new Error('creator_preview_unavailable');
+        if (!Number.isFinite(seconds) || seconds < 0 || seconds > 1) throw previewFailure('busy', response.status);
         delay = Math.max(delay, seconds * 1000);
       }
       await new Promise(resolve => setTimeout(resolve, delay));
     }
-    throw new Error('creator_preview_unavailable');
+    throw previewFailure('busy');
   }, options);
 }
 async function cachedPreviewBlob(path, revision, options = {}) {

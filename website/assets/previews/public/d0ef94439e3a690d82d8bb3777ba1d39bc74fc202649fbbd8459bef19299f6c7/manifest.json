@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "id": "zqscreen.kiss-couple",
+  "version": "1.2.0",
+  "name_zh": "甜蜜亲亲",
+  "name_en": "Sweet Kiss",
+  "author": "zqscreen",
+  "publisher": "zqscreen",
+  "review_id": "motion-repair-20260923-sweet-kiss",
+  "canvas_width": 240,
+  "canvas_height": 250,
+  "preview": "preview.png",
+  "plus_y": 174,
+  "layers": [
+    {
+      "image": "head.png",
+      "frame": [
+        38,
+        3,
+        164,
+        164
+      ],
+      "anchor": [
+        0.28,
+        0.025
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": -9,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.42,
+          "x": -9,
+          "y": 0,
+          "rotation": -3,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.62,
+          "x": -9,
+          "y": 0,
+          "rotation": -3,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 1,
+          "x": -9,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    },
+    {
+      "image": "body.png",
+      "frame": [
+        38,
+        3,
+        164,
+        164
+      ],
+      "anchor": [
+        0.76,
+        0.025
+      ],
+      "keyframes": [
+        {
+          "t": 0,
+          "x": 9,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.42,
+          "x": 9,
+          "y": 0,
+          "rotation": 3,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 0.62,
+          "x": 9,
+          "y": 0,
+          "rotation": 3,
+          "scale": 1,
+          "alpha": 1
+        },
+        {
+          "t": 1,
+          "x": 9,
+          "y": 0,
+          "rotation": 0,
+          "scale": 1,
+          "alpha": 1
+        }
+      ]
+    }
+  ]
+}

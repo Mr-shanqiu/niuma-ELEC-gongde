@@ -3,15 +3,14 @@
 一个无音效、低干扰、纯本地运行的桌面小伙伴。你打字、点鼠标，它动一下，把日常忙碌攒成一点「功德」。支持 macOS 和 Windows。
 
 **官网：[gongde.zqscreen.cn](https://gongde.zqscreen.cn/)**
-**下载：[官网客户端下载](https://gongde.zqscreen.cn/download.html) · [GitHub 历史发行版](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases)**
+**下载：[官网客户端下载](https://gongde.zqscreen.cn/download.html) · [GitHub 发行版](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases)**
 
 ## 当前版本
 
-- 当前客户端源码版本为 **0.9.4**，见 [VERSION](VERSION)。
-- 官网当前提供 **macOS 0.9.4 / build 904.14 / Universal 2** 和 **Windows 0.9.4**。以[官方下载页](https://gongde.zqscreen.cn/download.html)及其校验清单为准。
-- Mac 904.13 已修复异常形象包导入可能卡住的问题，并补齐英文导入错误提示；安装和异常包导入已在本机验收。
-- Mac 904.14 使用官方登录启动接口，已完成开关、状态保留和实际重启自启动验收；客户端、安装器和 DMG 均已完成 Developer ID 签名，客户端与最终 DMG 已完成苹果公证并装订票据。Windows 客户端和安装程序均已完成代码签名。
-- Mac 904.11 送签原包（SHA-256 `2f2f8e77…`）是历史交接材料，已被 904.14 取代，并非当前官网下载包。当前正式下载以[官网](https://gongde.zqscreen.cn/download.html)和 [GitHub v0.9.4](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.4) 为准。源码中的后续修改不会自动改变已发布安装包。
+- 官网和 [GitHub v0.9.5](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.5) 提供 macOS 0.9.5／905.1（Universal 2，Developer ID 签名、Apple 公证并装订）和 Windows 0.9.5（Authenticode 签名）。文件摘要以官方下载清单为准。
+- 已发布 Windows 源码为 `3630053a950ef33ae2fd4f9e7b20b5395c373d4c`，位于 `codex/windows-legacy-compat-20261028`；已发布 Mac 源码在 `codex/macos-runtime-unified-20261026`，原始未提交差异于 `96b2690` 事后归档，安装器配方后续归档为 `74548a0`。
+- 两个平台的安装包分别构建。仓库默认分支中的旧客户端入口及 `VERSION` 不能替代上述平台源码绑定；本分支整理的是官网、后台与发布追溯。
+- 下载页只展示当前客户端。历史发行记录保留，源码中的后续修改不会自动改变已签安装包。
 
 ## 本地功能
 
@@ -33,17 +32,19 @@
 
 ## 从源码构建
 
-macOS：
+macOS（先切换到对应平台源码分支）：
 
 ```bash
+git switch codex/macos-runtime-unified-20261026
 ./scripts/build-macos.sh
 ./scripts/build-macos-installer.sh
 ```
 
-Windows：
+Windows（先切换到对应平台源码分支）：
 
 ```powershell
-./scripts/build-windows.ps1 -ClientOnly -ExpectedVersion 0.9.4
+git switch codex/windows-legacy-compat-20261028
+./scripts/build-windows.ps1 -ClientOnly -ExpectedVersion 0.9.5
 ```
 
 通用 CMake 构建：

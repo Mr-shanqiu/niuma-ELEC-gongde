@@ -7,6 +7,11 @@ window.NiuMaAppearance?.setRequestScheduler?.(schedulePreviewRequest);
 
 const $ = id => document.getElementById(id);
 const GALLERY_CACHE_KEY = 'niuma-public-gallery-v1';
+// Asking the catalogue for static previews is what this build's renderer
+// expects: it paints covers from the release's own derivatives. It is a single
+// constant rather than a runtime probe so a deployment either ships matching
+// page and API or keeps the previous behaviour on both sides.
+const STATIC_PREVIEWS = true;
 const GALLERY_CACHE_TTL = 10 * 60 * 1000;
 // A snapshot this old is only used to paint something while the network
 // answers; it is never treated as the current catalogue.
@@ -80,6 +85,58 @@ function action(label, operation) {
   button.addEventListener('click', async () => { button.disabled = true; try { await operation(button); } catch (error) { status(errorText(error), true); } finally { button.disabled = false; } });
   return button;
 }
+// The gallery shows one still per card and only pays for the animation when the
+// visitor asks. Two different sources can supply that still: the public preview
+// a creator's artwork was reviewed through, or a web derivative generated for a
+// catalogue pack. Both are ordinary cached images, never a JSON spec.
+function isStillSource(item) {
+  return Boolean(item?.preview?.publicPreview) || Boolean(stillSlug(item));
+}
+// Catalogue packs identify themselves by the directory their preview URL points
+// at; that slug is also how the native player and the derivative index find
+// them. A creator work has no slug and must not be guessed into one.
+function stillSlug(item) {
+  const value = item?.previewUrl;
+  if (typeof value !== 'string') return null;
+  const match = value.match(/\/assets\/previews\/packs\/([a-z0-9_-]+)\//);
+  return match ? match[1] : null;
+}
+async function packStill(slug, identity) {
+  if (!window.NiuMaAppearance?.cover) return null;
+  return await window.NiuMaAppearance.cover(slug, identity);
+}
+async function still(container, item, options = {}) {
+  const settings = { ...options, public: true, revision: item.catalogRevision, label: `${item.title}的真实预览` };
+  if (item.preview?.publicPreview) return await mountPublicPreview(container, item.preview.publicPreview, settings);
+  if (item.builtin === true) {
+    // The free woodfish is drawn natively; its still comes from the same
+    // derivative set so the free card costs no more than any other.
+    container.dataset.packPreview = 'woodfish';
+    const blob = await packStill('woodfish');
+    if (!blob) return await window.NiuMaAppearance.load(container);
+    const image = node('img'), objectUrl = URL.createObjectURL(blob);
+    image.alt = settings.label; image.src = objectUrl; image.decoding = 'async';
+    try { await image.decode(); } catch (error) { URL.revokeObjectURL(objectUrl); throw error; }
+    container.replaceChildren(image);
+    return { still: true, strike: () => {}, stop: () => {}, destroy: () => URL.revokeObjectURL(objectUrl) };
+  }
+  const slug = stillSlug(item);
+  if (!slug) return null;
+  container.dataset.packPreview = slug;
+  let blob;
+  try { blob = await packStill(slug, item); }
+  catch (error) {
+    if (error.message !== 'preview_release_mismatch') throw error;
+    return await preview(container, { ...item, previewUrl: item.previewUrl, preview: null },
+      { ...options, rawCover: true });
+  }
+  if (!blob) return null;
+  const image = node('img'), objectUrl = URL.createObjectURL(blob);
+  image.alt = settings.label; image.src = objectUrl; image.decoding = 'async';
+  try { await image.decode(); } catch (error) { URL.revokeObjectURL(objectUrl); throw error; }
+  container.replaceChildren(image);
+  return { still: true, strike: () => {}, stop: () => {}, destroy: () => URL.revokeObjectURL(objectUrl) };
+}
 async function preview(container, item, options = {}) {
   try {
     if (item.builtin === true) {
@@ -88,15 +145,61 @@ async function preview(container, item, options = {}) {
     }
     const settings = { ...options, public: true, revision: item.catalogRevision, label: `${item.title}的真实预览` };
     if (item.preview?.publicPreview) return await mountPublicPreview(container, item.preview.publicPreview, settings);
+    // A catalogue pack still reaches this branch when the page asked for static
+    // previews: the server omits the reviewed preview but the slug is known.
+    // Its animation must come from the release's own derivative index, not from
+    // a re-download of the full-size delivery art through the manifest branch.
+    const slug = stillSlug(item);
+    if (slug && window.NiuMaAppearance && !options.rawCover) {
+      container.dataset.packPreview = slug;
+      try { return await window.NiuMaAppearance.load(container, item); }
+      catch (error) {
+        if (error.message !== 'preview_release_mismatch' || !item.preview?.manifest || !item.preview?.images) throw error;
+        return await mountCreatorPreview(container, item.preview, settings);
+      }
+    }
     if (item.preview?.manifest && item.preview?.images) return await mountCreatorPreview(container, item.preview, settings);
     if (!item.previewUrl) throw new Error('preview_missing');
     const url = new URL(item.previewUrl, location.href);
     if (url.origin !== location.origin && url.protocol !== 'https:') throw new Error('preview_invalid');
     const resource = await schedulePreviewRequest(async () => {
-      const response = await fetch(url.href, { credentials: url.origin === location.origin ? 'same-origin' : 'omit', cache: 'no-store', signal: AbortSignal.timeout(8000) });
-      if (!response.ok) throw new Error('preview_unavailable');
-      const type = response.headers.get('content-type') || '';
-      return type.startsWith('image/') ? { image: await response.blob() } : { spec: await response.json() };
+      // A single dropped request must not surface as "封面暂未载入": retry once
+      // with a short wait, but never retry a definite client error. The deadline
+      // covers the body read as well, so a stalled download cannot hang a card.
+      // This address is stable, not content-addressed, so it is left to the
+      // normal HTTP cache: the server marks it `no-cache`, which revalidates
+      // instead of forcing a full re-download on every visit.
+      const started = Date.now();
+      for (let attempt = 0; ; attempt++) {
+        const timeout = attempt === 0 ? 8000 : Math.max(1000, 14000 - (Date.now() - started));
+        let response;
+        try {
+          response = await fetch(url.href, { credentials: url.origin === location.origin ? 'same-origin' : 'omit', signal: AbortSignal.timeout(timeout) });
+        } catch (error) {
+          const kind = error?.name === 'TimeoutError' ? 'timeout' : error?.name === 'AbortError' ? 'aborted' : 'network';
+          if (kind === 'aborted' || attempt >= 1) { const failure = new Error('preview_unavailable'); failure.kind = kind; throw failure; }
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+          continue;
+        }
+        if (response.ok) {
+          const type = response.headers.get('content-type') || '';
+          try {
+            return type.startsWith('image/') ? { image: await response.blob() } : { spec: await response.json() };
+          } catch (error) {
+            const kind = error?.name === 'TimeoutError' ? 'timeout' : error?.name === 'AbortError' ? 'aborted' : 'network';
+            if (kind === 'aborted' || attempt >= 1) { const failure = new Error('preview_unavailable'); failure.kind = kind; throw failure; }
+            await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+            continue;
+          }
+        }
+        if ([500, 502, 503, 504].includes(response.status) && attempt < 1) {
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+          continue;
+        }
+        const failure = new Error('preview_unavailable');
+        failure.kind = 'http'; failure.status = response.status;
+        throw failure;
+      }
     }, options);
     if (resource.image) {
       const image = node('img'), objectUrl = URL.createObjectURL(resource.image);
@@ -119,9 +222,12 @@ async function preview(container, item, options = {}) {
     }
     return await mountCreatorPreview(container, spec.manifest ? spec : { manifest: spec,
       images: Object.fromEntries(spec.layers.map(layer => [layer.image, new URL(layer.image, url).pathname])) }, settings);
-  } catch {
-    container.replaceChildren(node('p', '封面暂未载入，仍可选择或查看作品。', 'flow-meta'));
-    throw new Error('预览暂时无法加载，请重试。');
+  } catch (error) {
+    container.dataset.previewError = error?.kind || 'unavailable';
+    if (!container.childNodes.length) container.replaceChildren(node('p', '封面暂未载入，仍可选择或查看作品。', 'flow-meta'));
+    const wrapped = new Error('预览暂时无法加载，请重试。');
+    wrapped.kind = error?.kind || 'unavailable';
+    throw wrapped;
   }
 }
 function summary(items, access = null) {
@@ -145,38 +251,64 @@ export async function library() {
     if (state.disposed || !state.active || !state.visible || document.hidden || reducedMotion.matches || (!state.hovered && !focused)) {
       stopAnimation(state); return;
     }
-    if (!state.player) { if (!state.coverFailed) void mount(state); return; }
+    if (!state.player) { if (!state.animationFailed) void mount(state); return; }
     if (state.animationTimer) return;
     state.player.strike(); state.animationTimer = setInterval(() => state.player?.strike(), 1100);
   }
+  async function mountCover(state) {
+    if (state.disposed || !state.active || state.coverLoaded || state.coverLoading) return;
+    state.coverLoading = true;
+    try {
+      const player = await still(state.picture, state.item, { priority: () => priority(state) });
+      if (state.disposed) { player?.destroy?.(); return; }
+      if (!player) return;
+      state.coverLoaded = true; delete state.picture.dataset.previewError;
+      state.hint.textContent = reducedMotion.matches
+        ? '已按系统设置减少动态效果'
+        : state.item.builtin === true ? '悬停或键盘聚焦，看它动一下' : '悬停或键盘聚焦，看它动一下';
+      state.hint.hidden = true;
+    } catch (error) {
+      if (state.disposed) return;
+      state.coverFailed = true;
+      state.picture.dataset.previewError = error?.kind || 'unavailable';
+      state.picture.replaceChildren(node('p', '封面暂未载入，仍可选择或查看作品。', 'flow-meta'));
+      state.hint.textContent = '封面未载入，不影响选择。';
+      state.hint.hidden = false;
+    } finally { state.coverLoading = false; }
+  }
+  /** Load the animation layers for one card. Called from intent only. */
   async function mount(state) {
-    if (state.disposed || state.loading || state.player || !state.active) return;
-    state.loading = true; state.coverFailed = false;
+    if (state.disposed || state.loading || state.player || state.animationFailed || !state.active) return;
+    state.loading = true;
     state.picture.setAttribute('aria-busy', 'true');
     try {
       const player = await preview(state.picture, state.item, {
         priority: () => priority(state),
-        onAnimationError: () => {
+        onAnimationError: error => {
           if (state.disposed) return;
           clearInterval(state.animationTimer); state.animationTimer = 0;
-          state.hint.textContent = '封面可用，动作暂未载入。'; state.retry.hidden = false;
-          state.hint.hidden = false;
+          state.animationFailed = true; state.retry.hidden = false;
+          state.hint.textContent = '封面可用，动作暂未载入。';
+          state.hint.hidden = false; state.picture.dataset.previewError = error?.kind || 'animation';
         },
         onAnimationReady: () => {
           state.retry.hidden = true; state.hint.textContent = '悬停或键盘聚焦，看它动一下';
-          state.hint.hidden = !reducedMotion.matches;
+          state.hint.hidden = !reducedMotion.matches; delete state.picture.dataset.previewError;
         },
       });
       if (state.disposed) { player.destroy?.(); return; }
-      state.player = player; state.retry.hidden = true;
+      state.player = player; state.retry.hidden = true; delete state.picture.dataset.previewError;
       state.hint.textContent = reducedMotion.matches ? '已按系统设置减少动态效果' : '悬停或键盘聚焦，看它动一下';
       state.hint.hidden = !reducedMotion.matches;
       animate(state);
     } catch {
       if (!state.disposed) {
-        state.coverFailed = true; state.retry.hidden = false;
-        state.hint.textContent = '预览未载入，不影响选择。';
+        state.animationFailed = true; state.retry.hidden = false;
+        state.hint.textContent = '动作暂未载入，不影响选择。';
         state.hint.hidden = false;
+        // A failed animation must leave the still alone: re-paint it only when
+        // this attempt had already replaced the cover with an error message.
+        if (!state.coverLoaded) void mountCover(state);
       }
     } finally { state.loading = false; state.picture.removeAttribute('aria-busy'); }
   }
@@ -185,7 +317,9 @@ export async function library() {
       const state = observed.get(entry.target);
       if (!state || !state.active) continue;
       state.visible = entry.isIntersecting;
-      if (state.visible && !state.player && !state.coverFailed) void mount(state);
+      // Visibility buys a still, never the animation. The animation is only
+      // fetched from a hover, a focus or an explicit retry.
+      if (state.visible && !state.coverLoaded && !state.coverFailed) void mountCover(state);
       animate(state);
     }
   }, { rootMargin: '0px 0px -110px 0px' });
@@ -194,7 +328,8 @@ export async function library() {
       const state = observed.get(entry.target);
       if (!state || !state.active) continue;
       state.near = entry.isIntersecting;
-      if (state.near && !state.player && !state.coverFailed) void mount(state);
+      // Neighbouring rows warm their covers so a short scroll shows no gaps.
+      if (state.near && !state.coverLoaded && !state.coverFailed) void mountCover(state);
     }
   }, { rootMargin: '220px 0px' });
   function detach(state) {
@@ -262,7 +397,8 @@ export async function library() {
     const hint = node('p', '悬停或键盘聚焦，看它动一下', 'flow-meta library-preview-hint');
     hint.hidden = !reducedMotion.matches;
     const state = { card, picture, link, item, description, hint, player: null, hovered: false, visible: false, near: false,
-      active: true, disposed: false, animationTimer: 0, loading: false, coverFailed: false };
+      active: true, disposed: false, animationTimer: 0, loading: false,
+      coverLoading: false, coverLoaded: false, coverFailed: false, animationFailed: false };
     const author = action(item.authorPublicNumber || item.authorDisplayName || '官方作品', async () => {
       if (!state.item.authorPublicNumber) return;
       form.elements.author.value = state.item.authorPublicNumber; $('library-more-filters').open = true;
@@ -279,8 +415,12 @@ export async function library() {
       download.href = 'download.html'; controls.append(download);
     } else controls.append(label);
     const retry = action('重试预览', async () => {
-      if (state.player?.retry) { state.retry.hidden = true; state.player.retry(); }
-      else await mount(state);
+      if (state.player?.retry) { state.retry.hidden = true; state.player.retry(); return; }
+      // A retry is an explicit request for the animation, so it also restores
+      // a cover that failed earlier instead of leaving the fallback text.
+      state.animationFailed = false; state.coverFailed = false;
+      if (!state.coverLoaded) await mountCover(state);
+      if (!state.player) await mount(state);
     }); retry.hidden = true;
     controls.append(retry);
     const share = action('复制形象链接', button => shareWork(state.item.number, button));
@@ -305,10 +445,10 @@ export async function library() {
       save(); status('选择已保留，翻页不会清除。');
     });
     card.addEventListener('pointerenter', event => {
-      if (event.pointerType !== 'touch') { state.hovered = true; if (!state.coverFailed) void mount(state); animate(state); }
+      if (event.pointerType !== 'touch') { state.hovered = true; void mount(state); animate(state); }
     });
     card.addEventListener('pointerleave', () => { state.hovered = false; animate(state); });
-    card.addEventListener('focusin', () => { if (!state.coverFailed) void mount(state); animate(state); });
+    card.addEventListener('focusin', () => { void mount(state); animate(state); });
     card.addEventListener('focusout', event => { if (!card.contains(event.relatedTarget) && !state.hovered) stopAnimation(state); });
     observed.set(card, state); updateChoice(state); return state;
   }
@@ -337,9 +477,9 @@ export async function library() {
       for (const [key, state] of cards) if (!nextCards.has(key)) detach(state);
       cards = nextCards; gallery.replaceChildren(fragment); gallery.classList.remove('library-is-loading');
       for (const state of cards.values()) { observer.observe(state.card); nearbyObserver.observe(state.card); }
-      // Only four first-row covers start eagerly. Animation layers start on
-      // intent, never as part of the catalogue or neighboring-row prefetch.
-      for (const state of [...cards.values()].slice(0, 4)) if (!state.coverFailed) void mount(state);
+      // Four first-row stills start eagerly so the fold is complete without
+      // waiting for the observer. Animation layers always wait for intent.
+      for (const state of [...cards.values()].slice(0, 4)) if (!state.coverLoaded && !state.coverFailed) void mountCover(state);
       for (const [key, state] of retained) {
         if (retained.size <= 48) break;
         if (!state.active) { dispose(state); retained.delete(key); }
@@ -353,6 +493,12 @@ export async function library() {
     if (codePoints(q) > 80) { status('搜索最多 80 个字。', true); return; }
     const catalogueQuery = window.NiuMaLocale?.searchQuery(q) ?? q;
     const params = new URLSearchParams({ sort: form.elements.sort.value });
+    // This page paints covers from the release's own static derivatives, so it
+    // tells the catalogue that explicitly instead of asking the server to
+    // resolve a reviewed preview for every card. The response still carries
+    // the revision, publication state and claim rules; caching is never treated
+    // as permission to select.
+    if (STATIC_PREVIEWS) params.set('previews', 'static');
     for (const [key, value] of [['q', catalogueQuery], ['tag', normalizeText(form.elements.tag.value)], ['author', form.elements.author.value], ['cursor', cursor]]) if (value) params.set(key, value);
     const key = params.toString();
     // Paint the last known list immediately, even when it is past its freshness
@@ -364,9 +510,18 @@ export async function library() {
     $('library-previous').disabled = true; $('library-next').disabled = true;
     gallery.setAttribute('aria-busy', 'true');
     try {
-      const [result, official] = await Promise.all([request('/appearances?' + params), officialMappings()]);
+      // The catalogue itself paints as soon as it arrives; the payment mapping
+      // runs alongside it and confirms every card in place. Selection stays
+      // locked ("正在确认…") until that answer, so an unconfirmed revision can
+      // never be picked or paid for.
+      const mappings = officialMappings();
+      mappings.catch(() => {});
+      const result = await request('/appearances?' + params);
       if (stamp !== generation) return;
       if (!Array.isArray(result.items) || result.items.length > 24) throw new Error('response_invalid');
+      displayGallery(result, true);
+      const official = await mappings;
+      if (stamp !== generation) return;
       result.items = result.items.map(item => paymentItem(item, official)).filter(Boolean);
       items = items.map(selected => { const latest = result.items.find(item => String(item.number) === String(selected.number));
         return latest && latest.catalogRevision === selected.catalogRevision && !selected.paymentPreviewRevision ? { ...selected, paymentAssetId: latest.paymentAssetId, paymentPreviewRevision: latest.paymentPreviewRevision } : selected; });
@@ -418,8 +573,8 @@ async function appearance() {
   const number = new URLSearchParams(location.search).get('number');
   if (!validNumber(number)) { status('请输入完整的 100001 至 999999999 形象编号。', true); return; }
   try {
-    const original = await request('/appearances/' + encodeURIComponent(number));
-    const item = paymentItem(original, await officialMappings());
+    const [original, official] = await Promise.all([request('/appearances/' + encodeURIComponent(number)), officialMappings()]);
+    const item = paymentItem(original, official);
     if (!item) { status('公开共创暂停，仅开放官方扩展形象；基础木鱼直接免费。', true); return; }
     $('appearance-title').textContent = item.title;
     $('appearance-description').textContent = item.description;
@@ -448,9 +603,11 @@ async function appearance() {
       mounting = true;
       try {
         player?.destroy?.(); player = await preview(stage, item, {
-          priority: 0, onAnimationError: () => { $('appearance-preview-retry').hidden = false; status('封面可用，动作暂未载入。仍可加入选择。'); },
+          priority: 0,
+          onAnimationError: error => { $('appearance-preview-retry').hidden = false; stage.dataset.previewError = error?.kind || 'animation'; status('封面可用，动作暂未载入。仍可加入选择。'); },
+          onAnimationReady: () => { delete stage.dataset.previewError; },
         });
-        $('appearance-play').disabled = false; $('appearance-preview-retry').hidden = true;
+        $('appearance-play').disabled = false; $('appearance-preview-retry').hidden = true; delete stage.dataset.previewError;
         $('appearance-play').onclick = () => player?.strike();
         status('封面与公开版本一致；点击播放或移入预览查看动作。');
       } finally { mounting = false; }
@@ -799,7 +956,7 @@ async function installers() {
   try {
     const result = await request('/installers');
     if (!Array.isArray(result.items)) throw new Error('response_invalid');
-    $('installer-list').replaceChildren(); $('installer-history-list').replaceChildren();
+    $('installer-list').replaceChildren();
     const approved = result.items.filter(item => safeDownloadUrl(item.publicDownloadUrl) && typeof item.platform === 'string' && /^\d+\.\d+\.\d+$/.test(item.version || '') && item.releaseId && Number.isSafeInteger(item.bytes) && /^[a-f0-9]{64}$/i.test(item.sha256 || ''));
     const platformKey = item => /mac/i.test(item.platform) ? 'Mac' : /win/i.test(item.platform) ? 'Windows' : item.platform;
     const compare = (a, b) => {
@@ -812,6 +969,7 @@ async function installers() {
     for (const item of approved.sort((a, b) => compare(b, a))) {
       const url = safeDownloadUrl(item.publicDownloadUrl);
       const platform = platformKey(item), current = compare(item, latest.get(platform)) === 0;
+      if (!current) continue;
       const card = node('section', undefined, `flow-panel installer-card${current && platform === recommended ? ' is-recommended' : ''}`);
       if (current) card.append(node('p', platform === recommended ? '适合这台电脑 · 当前版本' : '当前版本', 'installer-badge'));
       card.append(node('h2', platform), node('p', `${item.version} · ${item.format} · ${bytes(item.bytes)}`));
@@ -826,9 +984,8 @@ async function installers() {
       const details = node('details', undefined, 'installer-details');
       details.append(node('summary', '文件详情与校验信息'), node('p', `SHA-256：${item.sha256}`, 'flow-meta'), node('p', `发布编号：${item.releaseId}`, 'flow-meta'), node('p', item.perpetualCompatible === true ? '支持永久离线形象包。' : '扩展形象的兼容性请查看最低版本说明。', 'flow-meta'));
       card.append(details);
-      $(current ? 'installer-list' : 'installer-history-list').append(card);
+      $('installer-list').append(card);
     }
-    $('installer-history').hidden = !$('installer-history-list').children.length;
     status($('installer-list').children.length ? '选择你的电脑系统即可下载。基础木鱼内置，不需要登录或领取码。' : '暂无可确认的正式安装包，请稍后重试。', !$('installer-list').children.length);
   } catch (error) { status(errorText(error), true); }
   // Config failure must never disable already available public installer links.

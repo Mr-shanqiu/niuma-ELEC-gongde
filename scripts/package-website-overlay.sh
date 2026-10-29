@@ -372,7 +372,7 @@ if test -e "$ARCHIVE"; then
 fi
 COPYFILE_DISABLE=1 tar -C "$STAGE" -czf "$ARCHIVE" .
 (cd "$OUT" && shasum -a 256 "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
-SIZE=$(stat -f '%z' "$ARCHIVE")
+SIZE=$(wc -c < "$ARCHIVE" | tr -d '[:space:]')
 if test "$SIZE" -gt 20971520; then
   echo "Archive exceeds the 20MiB static deployment limit" >&2
   exit 65

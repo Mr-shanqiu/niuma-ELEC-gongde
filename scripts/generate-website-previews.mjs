@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 
-// Published previews copy reviewed delivery inputs byte-for-byte.
+// Publish web-sized derivatives for new pages and retain exact original layers
+// for the existing catalogue API and pages opened before the optimization.
+// Only the requested derivative is downloaded by the current gallery.
 
 import { createHash } from "node:crypto";
 import { copyFile, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { COVER_HEIGHT, COVER_WIDTH, DERIVATION_RULE, LAYER_HEIGHT, LAYER_WIDTH, derivePack, derivedRevision, quantize } from "./lib/preview-derive.mjs";
+import { stillSVG } from "./lib/preview-still.mjs";
+import { decode, encode, resize } from "./lib/preview-png.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = join(root, "website", "assets", "previews");
@@ -17,24 +22,19 @@ const stagingDirectory = join(root, "dist", ".previews-staging");
 const artworkHeight = 170;
 const packDefinitions = [
   ["lucky-cat", "assets/appearance-packs/lucky-cat"],
-  ["hamster-wheel", "assets/appearance-packs/hamster-wheel"],
   ["sea-lion-belly-pat", "assets/appearance-packs/sea-lion-belly-pat"],
   ["chick-pecking", "assets/appearance-packs/chick-pecking"],
   ["caishen-ingot", "assets/appearance-packs/caishen-ingot"],
-  ["red-panda-wave", "assets/appearance-packs/red-panda-wave"],
   ["shiba-tilt", "assets/appearance-packs/shiba-tilt"],
-  ["orange-cat-wave", "assets/appearance-packs/orange-cat-wave"],
-  ["raccoon-cheer", "assets/appearance-packs/raccoon-cheer"],
-  ["golden-toad-coin", "assets/appearance-packs/golden-toad-coin"],
-  ["little-jiangshi-hop", "assets/appearance-packs/little-jiangshi-hop"],
-  ["frog-puff", "assets/appearance-packs/frog-puff"],
-  ["bee-flap", "assets/appearance-packs/bee-flap"],
-  ["koi-bubbles", "assets/appearance-packs/koi-bubbles"],
   ["sweet-kiss", "assets/appearance-packs/sweet-kiss"],
   ["baodan-charm", "assets/appearance-packs/baodan-charm"],
   ["woodpecker-peck", "assets/appearance-packs/woodpecker-peck"],
-  ["fortune-bead", "assets/appearance-packs/fortune-bead"],
   ["treasure-basin", "assets/appearance-packs/treasure-basin"],
+  // The two button packs were catalogued and served by the API long before they
+  // were listed here, so their preview images 404'd on the site. Keep this list
+  // in step with every catalogued official pack.
+  ["wealth-button", "assets/appearance-packs/wealth-button"],
+  ["offwork-button", "assets/appearance-packs/offwork-button"],
 ];
 
 function sha256(buffer) {
@@ -106,19 +106,13 @@ for (const [slug, sourceDirectoryName] of packDefinitions) {
     manifest.preview,
     ...manifest.layers.map((layer) => layer.image),
   ])];
+  // Keep exact delivery images reachable for the unchanged catalogue contract.
   const files = {};
   for (const name of declaredFiles) {
-    const sourcePath = join(sourceDirectory, name);
-    const destinationPath = join(destinationDirectory, name);
-    const source = await readFile(sourcePath);
-    await copyFile(sourcePath, destinationPath);
-    const projected = await readFile(destinationPath);
-    files[name] = {
-      source: `${sourceDirectoryName}/${name}`,
-      sourceSha256: sha256(source),
-      projectedSha256: sha256(projected),
-      projection: "exact-copy",
-    };
+    const source = await readFile(join(sourceDirectory, name));
+    await writeFile(join(destinationDirectory, name), source);
+    files[name] = { source: `${sourceDirectoryName}/${name}`,
+      sourceSha256: sha256(source), projectedSha256: sha256(source), projection: "exact-copy" };
   }
 
   sourceMap.packs[slug] = {
@@ -127,6 +121,35 @@ for (const [slug, sourceDirectoryName] of packDefinitions) {
     manifestSha256: sha256(manifestBuffer),
     assetSha256: sha256(Buffer.from(Object.keys(files).sort().map((name) => `${name}\0${files[name].sourceSha256}\n`).join(""))),
     files,
+  };
+
+  const published = Object.fromEntries(await Promise.all(declaredFiles.map(async name =>
+    [name, await readFile(join(destinationDirectory, name))])));
+  const derived = derivePack({ slug, manifest, files: published });
+  const revision = derivedRevision({
+    assetId: manifest.id,
+    previewRevision: sourceMap.packs[slug].assetSha256,
+    cover: derived.cover,
+    layers: derived.layers,
+  });
+  const webDirectory = join(stagingDirectory, "packs-web", slug, revision);
+  await mkdir(webDirectory, { recursive: true });
+  await writeFile(join(webDirectory, "cover.svg"), derived.cover);
+  const webFiles = { "cover.svg": { bytes: derived.cover.length, sha256: sha256(derived.cover) } };
+  for (const [name, bytes] of Object.entries(derived.layers)) {
+    await writeFile(join(webDirectory, name), bytes);
+    webFiles[name] = { bytes: bytes.length, sha256: sha256(bytes) };
+  }
+  sourceMap.packs[slug].web = {
+    rule: DERIVATION_RULE,
+    revision,
+    previewRevision: sourceMap.packs[slug].assetSha256,
+    basePath: `/assets/previews/packs-web/${slug}/${revision}/`,
+    cover: "cover.svg",
+    // The renderer looks each layer up by the name its manifest already uses,
+    // so a page can swap the image source without rewriting the manifest.
+    layers: Object.fromEntries(Object.keys(derived.layers).map((name) => [name, name])),
+    files: webFiles,
   };
 }
 
@@ -227,25 +250,86 @@ await mkdir(nativeDirectory, { recursive: true });
 const nativeFiles = {};
 for (const [name, sourceName] of [["body.png", "woodfish.png"], ["mallet.png", "mallet.png"]]) {
   const source = await readFile(join(root, "assets", sourceName));
-  await writeFile(join(nativeDirectory, name), source);
-  // Also publish the same bytes at a content-addressed public path. That path
-  // already sits under the site's immutable rule, so a returning visitor finds
-  // the artwork in cache instead of re-downloading 552 KB through the origin.
-  // The stable packs/ copy stays: pages opened before this release still ask
-  // for it, and their index has no publicPath to follow.
+  // The full-size artwork stays reachable for exactly one consumer: the
+  // hash-checked index of a page opened before this release, which follows the
+  // content-addressed publicPath. A current index points its animation at the
+  // downscaled web derivative, and the full-size file is never served under
+  // packs/woodfish/ itself, so that copy costs the archive nothing.
   const hash = sha256(source);
   const publicDirectory = join(stagingDirectory, "public", hash);
   await mkdir(publicDirectory, { recursive: true });
   await writeFile(join(publicDirectory, name), source);
+  await writeFile(join(nativeDirectory, name), source);
   nativeFiles[name] = { source: `assets/${sourceName}`, sourceSha256: hash, projectedSha256: hash,
-    projection: "exact-copy", publicPath: `/assets/previews/public/${hash}/${name}` };
+    projection: "delivery-only", publicPath: `/assets/previews/public/${hash}/${name}` };
 }
+native.sourceDimensions = Object.fromEntries(await Promise.all(
+  [["body.png", "woodfish.png"], ["mallet.png", "mallet.png"]].map(async ([name, sourceName]) => {
+    const image = decode(await readFile(join(root, "assets", sourceName)));
+    return [name, { width: image.width, height: image.height }];
+  })));
 const nativeManifest = Buffer.from(`${JSON.stringify(native, null, 2)}\n`);
 await writeFile(join(nativeDirectory, "manifest.json"), nativeManifest);
 nativeFiles["manifest.json"] = { sourceSha256: sha256(nativeManifest), projectedSha256: sha256(nativeManifest), projection: "native-code-extraction" };
 sourceMap.packs.woodfish = { id: "builtin.woodfish", manifestSha256: sha256(nativeManifest), files: nativeFiles };
 
-await writeFile(join(stagingDirectory, "source-map.json"), `${JSON.stringify(sourceMap, null, 2)}\n`);
+// The native renderer draws its two artwork files into the same 240x170 band as
+// every manifest-driven pack. Derive them at the same display resolution so the
+// free card costs the same as the others instead of shipping 552 KB of art.
+const nativeLayers = Object.fromEntries(await Promise.all(
+  [["body.png", "woodfish.png"], ["mallet.png", "mallet.png"]].map(async ([name, sourceName]) => {
+    const image = decode(await readFile(join(root, "assets", sourceName)));
+    const scale = Math.min(LAYER_WIDTH / image.width, LAYER_HEIGHT / image.height, 1);
+    return [name, encode(quantize(resize(image, Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)))))];
+  })));
+
+const nativeCover = stillSVG(native, nativeLayers);
+
+// The default woodfish has no importable manifest layers; its two artwork files
+// are named by the native renderer. Publish the same static cover + downscaled
+// animation pair under the identical web shape so the gallery can treat the
+// free card like every other one instead of special-casing it to full-size art.
+{
+  const slug = "woodfish";
+  const revision = derivedRevision({
+    assetId: "builtin.woodfish",
+    previewRevision: sha256(nativeManifest),
+    cover: nativeCover,
+    layers: nativeLayers,
+  });
+  const webDirectory = join(stagingDirectory, "packs-web", slug, revision);
+  await mkdir(webDirectory, { recursive: true });
+  await writeFile(join(webDirectory, "cover.svg"), nativeCover);
+  const webFiles = { "cover.svg": { bytes: nativeCover.length, sha256: sha256(nativeCover) } };
+  for (const [name, bytes] of Object.entries(nativeLayers)) {
+    await writeFile(join(webDirectory, name), bytes);
+    webFiles[name] = { bytes: bytes.length, sha256: sha256(bytes) };
+  }
+  sourceMap.packs[slug].web = {
+    rule: DERIVATION_RULE,
+    revision,
+    // The native player identifies its pack by slug, so its revision binds to
+    // the extracted manifest rather than to a directory hash.
+    previewRevision: sha256(nativeManifest),
+    basePath: `/assets/previews/packs-web/${slug}/${revision}/`,
+    cover: "cover.svg",
+    layers: Object.fromEntries(Object.keys(nativeLayers).map((name) => [name, name])),
+    files: webFiles,
+  };
+}
+
+for (const [slug, entry] of Object.entries(sourceMap.packs)) {
+  const bytes = await readFile(join(stagingDirectory, "packs", slug, "manifest.json"));
+  const directory = join(stagingDirectory, "public", entry.manifestSha256);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "manifest.json"), bytes);
+  entry.files["manifest.json"].publicPath = `/assets/previews/public/${entry.manifestSha256}/manifest.json`;
+}
+
+const indexBytes = Buffer.from(`${JSON.stringify(sourceMap, null, 2)}\n`);
+await writeFile(join(stagingDirectory, "source-map.json"), indexBytes);
+await mkdir(join(stagingDirectory, "index"), { recursive: true });
+await writeFile(join(stagingDirectory, "index", `${sha256(indexBytes)}.json`), indexBytes);
 
 // `public/` holds hand-published background art this script does not generate;
 // carry it across so the swap stays a replacement of generated packs only.

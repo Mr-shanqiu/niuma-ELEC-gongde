@@ -1,8 +1,8 @@
 # 官网说明与发布边界
 
-当前规则以项目 `docs/PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md` 1.1 为准。0.9 客户端与新版官网采用全免费、永久离线交付流程；本文描述实现与发布边界，不代表客户端、API 或官网已经发布。
+当前官网采用基础客户端免费、官方扩展形象每个 1 元或群码免费领取；用户投稿及必要适配版免费，投稿仅通过抖音群人工接洽。现行规则以 `docs/WORK_PLAN_BASIC_FREE_PAID_PACKS.zh-CN.md` 及后续用户确认、发布回执为准。以下早期全免费与旧创作者工作台内容仅作历史记录，不表示现行功能。
 
-## 页面与免费流程
+## 历史页面与免费流程（非当前规则）
 
 - 客户端：`download.html`，内置基础木鱼直接免费下载，无需账号、领取码、关注或进群。
 - 统一形象库：`index.html#characters`，官方与创作者作品不分来源或收费入口，支持编号、作者、标签、关键词与每页 24 个分页。
@@ -25,7 +25,7 @@
 - `download.html` 通过 `GET /api/gongde/v2/installers` 的 `data.items` 读取批准发布的 `releaseId/platform/format/version/bytes/sha256/publicDownloadUrl/perpetualCompatible`。
 - `GET /api/gongde/v2/config` 提供 `minPerpetualClientVersion` 等真实平台状态。公开客户端下载不依赖领取码验证；新扩展形象领取需等待平台就绪。
 - 不硬写旧版本安装包链接，不编造 0.9 GitHub Release 文件 URL。客户端实际发布后，再由正式发布元数据提供对应公开地址、版本、大小和摘要。
-- 本轮 0.9.4（904.14）Mac 正式包为 Developer ID 分发签名并已完成 Apple 公证，`stapler` 票据已装订；Windows 0.9.4 正式包为 Authenticode 签名。更早的 0.9.4 候选（904.12、904.13）和 0.9.3 及以前为 ad-hoc 或 Apple Development 签名且未公证，只作为历史回退项保留，签名状态以 `DOWNLOADS.json` 中逐条记录为准。
+- 本轮 0.9.5（macOS 905.1、Windows 0.9.5）正式包均已完成代码签名，Mac 905.1 另完成 Apple 公证并装订 `stapler` 票据；更早的 0.9.4（904.12、904.13、904.14）和 0.9.3 及以前只作为历史回退项保留，签名状态以 `DOWNLOADS.json` 中逐条记录为准。
 - 系统可能阻止首次打开。只能在确认官方来源、文件完整性与愿意运行的前提下按安装说明处理单个应用；不关闭全局 Gatekeeper 或其他安全保护。“已损坏”“将损坏你的电脑”等提示不应绕过。
 
 ## 现有发布工具与证据
@@ -35,6 +35,6 @@
 - 静态站：`./scripts/package-website.sh --site`，只构建并打包站点，不需要本机存在客户端安装包。`--site-only` 保留为同义别名。
 - 下载材料：`./scripts/package-website.sh --downloads`，按 `release/downloads-manifest.json` 复制已发布的安装包并生成 `DOWNLOADS.json` 与 `SHA256SUMS.txt`。清单必须逐项写明源文件、字节数、摘要与签名状态；脚本会先核对，签名/公证声明与文件实际状态双向比对，缺文件、摘要不符或声明不符时直接失败且不动已有输出。回归测试见 `scripts/prepare-download-materials.test.mjs`。
 - 全量：`./scripts/package-website.sh`（等同 `--all`），预览生成 + 静态站 + 下载材料。须有相应授权，本文不是执行命令。
-- API 与静态站分别走专用受限发布器。新收费接口退役为 410，历史合法履行保留；不因回退重新开放新收费。
+- API 与静态站分别走专用受限发布器。当前官方扩展形象支持付费与群码免费两条路线；历史合法履行按现有规则处理。
 - `GET /healthz.txt` 应返回 `gongde-ok`。运行开放情况以实际服务状态和发布回执为准，本地源码、模拟测试与签名构建不等于上线或用户验收。
 - 本轮仅整理官网说明，未联网、部署、签名、重建指南 ZIP 或修改发布配置。

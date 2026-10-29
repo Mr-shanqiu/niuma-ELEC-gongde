@@ -1,0 +1,740 @@
+{
+  "schemaVersion": 3,
+  "generatedFrom": "appearance-pack-manifests",
+  "canvas": {
+    "width": 240,
+    "height": 250,
+    "artworkHeight": 170,
+    "plusY": 174
+  },
+  "visualEnvelope": {
+    "minWidth": 150,
+    "maxWidth": 220,
+    "minHeight": 120,
+    "maxHeight": 170
+  },
+  "packs": {
+    "lucky-cat": {
+      "id": "official.lucky-cat",
+      "version": "1.1.0",
+      "manifestSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
+      "assetSha256": "c0f469e8408bbbc08d8a56944996c066d580353f1c718e48e22c64b43df6e34b",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/lucky-cat/manifest.json",
+          "sourceSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
+          "projectedSha256": "b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/b25f29fb1095b3ae11c4be8fc964aead29413e3aaa96ece94738e82c1d406a04/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/lucky-cat/preview.png",
+          "sourceSha256": "5797f9123e6184b283618bb957f1212c6425b9b2f329c88359ad6cec31492f80",
+          "projectedSha256": "5797f9123e6184b283618bb957f1212c6425b9b2f329c88359ad6cec31492f80",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/lucky-cat/body.png",
+          "sourceSha256": "6dcb91c249b642398340b61df2408c3a37a9714be90dd6389bf10fd29ea48efd",
+          "projectedSha256": "6dcb91c249b642398340b61df2408c3a37a9714be90dd6389bf10fd29ea48efd",
+          "projection": "exact-copy"
+        },
+        "paw.png": {
+          "source": "assets/appearance-packs/lucky-cat/paw.png",
+          "sourceSha256": "ffa97de9b8a019a31ab8b68ef241ca482950d8d52a57c135053422ab78628bc7",
+          "projectedSha256": "ffa97de9b8a019a31ab8b68ef241ca482950d8d52a57c135053422ab78628bc7",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "d1153cfaab26790fe9e57648390f43d6fbcf5e2aa60756bb6adbe71c927fb4be",
+        "previewRevision": "c0f469e8408bbbc08d8a56944996c066d580353f1c718e48e22c64b43df6e34b",
+        "basePath": "/assets/previews/packs-web/lucky-cat/d1153cfaab26790fe9e57648390f43d6fbcf5e2aa60756bb6adbe71c927fb4be/",
+        "cover": "cover.svg",
+        "layers": {
+          "body.png": "body.png",
+          "paw.png": "paw.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 117567,
+            "sha256": "612117c46173623730694e26e15b06c85f58f37ce7b5608fa7166a8efdf31571"
+          },
+          "body.png": {
+            "bytes": 77165,
+            "sha256": "9442de15b74bb46e8e10a8a7c28da3e0c09c93f139cf14fcc7a3b02aacf50c95"
+          },
+          "paw.png": {
+            "bytes": 10401,
+            "sha256": "e36748ef7725ff5b84dbdedf9ad3716a7208ad22229d732df65f25a3fb5edb14"
+          }
+        }
+      }
+    },
+    "sea-lion-belly-pat": {
+      "id": "official.sea-lion-belly-pat",
+      "version": "1.0.0",
+      "manifestSha256": "48a07c138a0fe8dfa0a34311be084ea35d5b7a82a485a6cdbb2a93b15cab6813",
+      "assetSha256": "aed19e8110826605f145f40af0af41dd35647d258c8f50f0101e57341251d10b",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/sea-lion-belly-pat/manifest.json",
+          "sourceSha256": "48a07c138a0fe8dfa0a34311be084ea35d5b7a82a485a6cdbb2a93b15cab6813",
+          "projectedSha256": "48a07c138a0fe8dfa0a34311be084ea35d5b7a82a485a6cdbb2a93b15cab6813",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/48a07c138a0fe8dfa0a34311be084ea35d5b7a82a485a6cdbb2a93b15cab6813/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/sea-lion-belly-pat/preview.png",
+          "sourceSha256": "ed9c4d58b79d0343a098eed1b4bf1c98414e3ec5363d2223c5228c14e536a392",
+          "projectedSha256": "ed9c4d58b79d0343a098eed1b4bf1c98414e3ec5363d2223c5228c14e536a392",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/sea-lion-belly-pat/body.png",
+          "sourceSha256": "ab49e6d6558e3973cc48304abe56386b29d3d25105ac8a3643e0125b532fd9d7",
+          "projectedSha256": "ab49e6d6558e3973cc48304abe56386b29d3d25105ac8a3643e0125b532fd9d7",
+          "projection": "exact-copy"
+        },
+        "flipper.png": {
+          "source": "assets/appearance-packs/sea-lion-belly-pat/flipper.png",
+          "sourceSha256": "50c8f8aeb2757c66dbfcffafd0c0120d04256ceaa4cbfc95d21418b2ea5da7ae",
+          "projectedSha256": "50c8f8aeb2757c66dbfcffafd0c0120d04256ceaa4cbfc95d21418b2ea5da7ae",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "a33ba79ba82c7f2ee4aa3bccd32a6bbba83dde015c6c5aa2a4c5213340e047b2",
+        "previewRevision": "aed19e8110826605f145f40af0af41dd35647d258c8f50f0101e57341251d10b",
+        "basePath": "/assets/previews/packs-web/sea-lion-belly-pat/a33ba79ba82c7f2ee4aa3bccd32a6bbba83dde015c6c5aa2a4c5213340e047b2/",
+        "cover": "cover.svg",
+        "layers": {
+          "body.png": "body.png",
+          "flipper.png": "flipper.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 103551,
+            "sha256": "9270f04eb23e41217eb400eb3b0b1542cd8359b39f6e03ee6ce8ba0e44c32a45"
+          },
+          "body.png": {
+            "bytes": 67538,
+            "sha256": "0d4f28aacd77cdd98030bb363062112f31184001d879d5c7b7ea6eee3ea3ac78"
+          },
+          "flipper.png": {
+            "bytes": 9551,
+            "sha256": "eeec8d26046df28973216ddba18f4afb8a771c59d5068df00fe16dc8a4424779"
+          }
+        }
+      }
+    },
+    "chick-pecking": {
+      "id": "official.chick-pecking",
+      "version": "1.0.0",
+      "manifestSha256": "2867ba265d124a52523e7bf6579411911dca7de4e05880cbb891bee16855d312",
+      "assetSha256": "0b55997ed83b950fd2a5855a5f2bac91fbe80c8b8fdf71ba4c9a8e42c14c4d72",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/chick-pecking/manifest.json",
+          "sourceSha256": "2867ba265d124a52523e7bf6579411911dca7de4e05880cbb891bee16855d312",
+          "projectedSha256": "2867ba265d124a52523e7bf6579411911dca7de4e05880cbb891bee16855d312",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/2867ba265d124a52523e7bf6579411911dca7de4e05880cbb891bee16855d312/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/chick-pecking/preview.png",
+          "sourceSha256": "c3f2124ed6918095ce6d7bb6bf8d165dd171d7cfedaa88d71e824aafaf0b53d7",
+          "projectedSha256": "c3f2124ed6918095ce6d7bb6bf8d165dd171d7cfedaa88d71e824aafaf0b53d7",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/chick-pecking/body.png",
+          "sourceSha256": "1bbac72b0a08a139c2ad6630719759382f5c8298a7f50421f835bea13883a065",
+          "projectedSha256": "1bbac72b0a08a139c2ad6630719759382f5c8298a7f50421f835bea13883a065",
+          "projection": "exact-copy"
+        },
+        "head.png": {
+          "source": "assets/appearance-packs/chick-pecking/head.png",
+          "sourceSha256": "754df9705161cc2c64e2c50b9bd6ec525008b2b76de36e94945b8639e8ae2a8f",
+          "projectedSha256": "754df9705161cc2c64e2c50b9bd6ec525008b2b76de36e94945b8639e8ae2a8f",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "019a8ef5ba932ccea3d2abf3ec4c77bd40c0f6b59a1c840c32cb6a95aa2845c8",
+        "previewRevision": "0b55997ed83b950fd2a5855a5f2bac91fbe80c8b8fdf71ba4c9a8e42c14c4d72",
+        "basePath": "/assets/previews/packs-web/chick-pecking/019a8ef5ba932ccea3d2abf3ec4c77bd40c0f6b59a1c840c32cb6a95aa2845c8/",
+        "cover": "cover.svg",
+        "layers": {
+          "body.png": "body.png",
+          "head.png": "head.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 110354,
+            "sha256": "37d29266292a5146ba5cad3d9863364283fc1bccba383973402e5d7dc44d2115"
+          },
+          "body.png": {
+            "bytes": 48417,
+            "sha256": "fc8bac87c70fcbf376589c33633c3d231b2208033b0bb4f8b6a1bc2ac66b7733"
+          },
+          "head.png": {
+            "bytes": 33755,
+            "sha256": "550529180e2ece13e0d307bb3b0d26d927afd00e23ee39a17f7ad373ad99605e"
+          }
+        }
+      }
+    },
+    "caishen-ingot": {
+      "id": "zqscreen.caishen-ingot",
+      "version": "1.2.0",
+      "manifestSha256": "899f6b1db1b4118a3fcc441969977c7ab0df510890f1750c867f95a380bf4607",
+      "assetSha256": "0b456bdbfdfac7f13bf9795559c38c5e388d83baa17644133cfe0907763f447f",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/caishen-ingot/manifest.json",
+          "sourceSha256": "899f6b1db1b4118a3fcc441969977c7ab0df510890f1750c867f95a380bf4607",
+          "projectedSha256": "899f6b1db1b4118a3fcc441969977c7ab0df510890f1750c867f95a380bf4607",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/899f6b1db1b4118a3fcc441969977c7ab0df510890f1750c867f95a380bf4607/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/caishen-ingot/preview.png",
+          "sourceSha256": "421921870d6534493d640c73550091c1ff52effa78a190eb5940d3c7dc2e7e25",
+          "projectedSha256": "421921870d6534493d640c73550091c1ff52effa78a190eb5940d3c7dc2e7e25",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/caishen-ingot/body.png",
+          "sourceSha256": "972491cc644a6096a998c58da5e8faa41b14af86c8eeed4315ddecdb3fcfc2c4",
+          "projectedSha256": "972491cc644a6096a998c58da5e8faa41b14af86c8eeed4315ddecdb3fcfc2c4",
+          "projection": "exact-copy"
+        },
+        "ingot.png": {
+          "source": "assets/appearance-packs/caishen-ingot/ingot.png",
+          "sourceSha256": "84120ba1de44b0f0fb77511c925ab3bd7d817020d436a2f49427ca19b2d0a09f",
+          "projectedSha256": "84120ba1de44b0f0fb77511c925ab3bd7d817020d436a2f49427ca19b2d0a09f",
+          "projection": "exact-copy"
+        },
+        "sparkle.png": {
+          "source": "assets/appearance-packs/caishen-ingot/sparkle.png",
+          "sourceSha256": "c99528cbff5a6ba71de9341994f21505283ee652bf0f65dc714517a19700df13",
+          "projectedSha256": "c99528cbff5a6ba71de9341994f21505283ee652bf0f65dc714517a19700df13",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "3fe1cd3d715ef443c6720fd9289fad402e0db80c02064ffa61acd5865425032a",
+        "previewRevision": "0b456bdbfdfac7f13bf9795559c38c5e388d83baa17644133cfe0907763f447f",
+        "basePath": "/assets/previews/packs-web/caishen-ingot/3fe1cd3d715ef443c6720fd9289fad402e0db80c02064ffa61acd5865425032a/",
+        "cover": "cover.svg",
+        "layers": {
+          "body.png": "body.png",
+          "ingot.png": "ingot.png",
+          "sparkle.png": "sparkle.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 123727,
+            "sha256": "849f310175f0a7a01473a6151fb2d51d61e277567cdaff78ac476971911e0671"
+          },
+          "body.png": {
+            "bytes": 80706,
+            "sha256": "d60659826a210c65fe3e289a74a8ff6cd928d5c3f62bf79f66bef4ea2a8ca11f"
+          },
+          "ingot.png": {
+            "bytes": 6799,
+            "sha256": "e74ae4e6fec13b2db1fc78a9e73526d99179572b4a59dfd5ab0470dcb96b4361"
+          },
+          "sparkle.png": {
+            "bytes": 4457,
+            "sha256": "6fd832c3766e4f5cd1db48ae751bb30f308b1be9789e08bbef83f2ae3a21e6d6"
+          }
+        }
+      }
+    },
+    "shiba-tilt": {
+      "id": "zqscreen.shiba-tilt",
+      "version": "1.2.0",
+      "manifestSha256": "13ffaa0914d4d376769dc22b633adc80695d9fb6c5c679540332b0451eb0bd17",
+      "assetSha256": "12a1734ff449b25ea51ab844c68e528a300ab5247feb95fc7e5c63474a9d20da",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/shiba-tilt/manifest.json",
+          "sourceSha256": "13ffaa0914d4d376769dc22b633adc80695d9fb6c5c679540332b0451eb0bd17",
+          "projectedSha256": "13ffaa0914d4d376769dc22b633adc80695d9fb6c5c679540332b0451eb0bd17",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/13ffaa0914d4d376769dc22b633adc80695d9fb6c5c679540332b0451eb0bd17/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/shiba-tilt/preview.png",
+          "sourceSha256": "d25643e336cd4a92de805b5abbfddb17c813c4759337f4ac6295105b5c990a75",
+          "projectedSha256": "d25643e336cd4a92de805b5abbfddb17c813c4759337f4ac6295105b5c990a75",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/shiba-tilt/body.png",
+          "sourceSha256": "c458b519337dda7ba3c0a202c6929a75bc03d3544a770c4d97dbce1dec54413c",
+          "projectedSha256": "c458b519337dda7ba3c0a202c6929a75bc03d3544a770c4d97dbce1dec54413c",
+          "projection": "exact-copy"
+        },
+        "head.png": {
+          "source": "assets/appearance-packs/shiba-tilt/head.png",
+          "sourceSha256": "b2fec69f265fca75ed54926b241335e351c0a5f23899723ebac12530e2c6038f",
+          "projectedSha256": "b2fec69f265fca75ed54926b241335e351c0a5f23899723ebac12530e2c6038f",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "82770b07c7c1e1e0c498e42cd557bfc548c5849422718d86d1d5b0f50298aab7",
+        "previewRevision": "12a1734ff449b25ea51ab844c68e528a300ab5247feb95fc7e5c63474a9d20da",
+        "basePath": "/assets/previews/packs-web/shiba-tilt/82770b07c7c1e1e0c498e42cd557bfc548c5849422718d86d1d5b0f50298aab7/",
+        "cover": "cover.svg",
+        "layers": {
+          "body.png": "body.png",
+          "head.png": "head.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 95780,
+            "sha256": "7049117053ac69d7d6d02908cf4dc3f8e52cfaa7f2dabfb97acb467331d890e6"
+          },
+          "body.png": {
+            "bytes": 38083,
+            "sha256": "64a5c6b28c5e20bc2293712e13e5cb405168a758891f936be1312b32eaff7657"
+          },
+          "head.png": {
+            "bytes": 33139,
+            "sha256": "03281acac8c74cf378ec1df389c3c2fdf416393b930e2a59da34926b512a94ab"
+          }
+        }
+      }
+    },
+    "sweet-kiss": {
+      "id": "zqscreen.kiss-couple",
+      "version": "1.2.0",
+      "manifestSha256": "d0ef94439e3a690d82d8bb3777ba1d39bc74fc202649fbbd8459bef19299f6c7",
+      "assetSha256": "82ffb4d1945386cdd9fd0017cedb666d24091cf244baa50f588349116b9f6629",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/sweet-kiss/manifest.json",
+          "sourceSha256": "d0ef94439e3a690d82d8bb3777ba1d39bc74fc202649fbbd8459bef19299f6c7",
+          "projectedSha256": "d0ef94439e3a690d82d8bb3777ba1d39bc74fc202649fbbd8459bef19299f6c7",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/d0ef94439e3a690d82d8bb3777ba1d39bc74fc202649fbbd8459bef19299f6c7/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/sweet-kiss/preview.png",
+          "sourceSha256": "2090899e97aef56fb3192660bd0a7a32ddac24dcaf8b41c36d45f06c172d34d8",
+          "projectedSha256": "2090899e97aef56fb3192660bd0a7a32ddac24dcaf8b41c36d45f06c172d34d8",
+          "projection": "exact-copy"
+        },
+        "head.png": {
+          "source": "assets/appearance-packs/sweet-kiss/head.png",
+          "sourceSha256": "3dbc332a2b1f61880cf97f7455da51bdbbb42fb187cdfdd941a96dfb6ae6ffb7",
+          "projectedSha256": "3dbc332a2b1f61880cf97f7455da51bdbbb42fb187cdfdd941a96dfb6ae6ffb7",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/sweet-kiss/body.png",
+          "sourceSha256": "b738a45758ed6b1c8bef3c330ae727b35e43b42e06f2bd0152bb0097e55b924a",
+          "projectedSha256": "b738a45758ed6b1c8bef3c330ae727b35e43b42e06f2bd0152bb0097e55b924a",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "bfac16445a0189a05589873b0859d20a5d022708c0ccd9e60e2e50aa667c8b5c",
+        "previewRevision": "82ffb4d1945386cdd9fd0017cedb666d24091cf244baa50f588349116b9f6629",
+        "basePath": "/assets/previews/packs-web/sweet-kiss/bfac16445a0189a05589873b0859d20a5d022708c0ccd9e60e2e50aa667c8b5c/",
+        "cover": "cover.svg",
+        "layers": {
+          "head.png": "head.png",
+          "body.png": "body.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 68994,
+            "sha256": "61f287aab28dab73c2d8218bc29adeddbdcfea546cfa747bf2aad68e01897970"
+          },
+          "head.png": {
+            "bytes": 25122,
+            "sha256": "8e26583fd83df1017da98aaecc46fbb77261dbb3d764f2f46d5593a35908d357"
+          },
+          "body.png": {
+            "bytes": 26004,
+            "sha256": "d3e5a248c05da22f6d86e504a229e702b51223c4c9544ffef7376499c7d1e34c"
+          }
+        }
+      }
+    },
+    "baodan-charm": {
+      "id": "zqscreen.baodan-charm",
+      "version": "1.1.0",
+      "manifestSha256": "d8264038ce08d59ac54f9d1efac23fad3b58818c6a9200595eeba18f2e9067d4",
+      "assetSha256": "9de122e52fea6de07780722142e6b96cf8f2531ba33490546f422bdbb9a0a2e5",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/baodan-charm/manifest.json",
+          "sourceSha256": "d8264038ce08d59ac54f9d1efac23fad3b58818c6a9200595eeba18f2e9067d4",
+          "projectedSha256": "d8264038ce08d59ac54f9d1efac23fad3b58818c6a9200595eeba18f2e9067d4",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/d8264038ce08d59ac54f9d1efac23fad3b58818c6a9200595eeba18f2e9067d4/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/baodan-charm/preview.png",
+          "sourceSha256": "8ee15f38acc92b74d1ca4a6cbb277119a2031fd72c1f812e8a6c899cd421c0e2",
+          "projectedSha256": "8ee15f38acc92b74d1ca4a6cbb277119a2031fd72c1f812e8a6c899cd421c0e2",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/baodan-charm/body.png",
+          "sourceSha256": "020613bc4878cd3b567df7bf94df4927852d6b0b7cb2d99c856326e6b1e117bf",
+          "projectedSha256": "020613bc4878cd3b567df7bf94df4927852d6b0b7cb2d99c856326e6b1e117bf",
+          "projection": "exact-copy"
+        },
+        "glow.png": {
+          "source": "assets/appearance-packs/baodan-charm/glow.png",
+          "sourceSha256": "c9723dd52dff23875a2e65aa31cbafa78a950a46a05ff1eec8f9ba3285917132",
+          "projectedSha256": "c9723dd52dff23875a2e65aa31cbafa78a950a46a05ff1eec8f9ba3285917132",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "30f9400f4b5acbc08cf4fa4c5d405ca9d7fe8f169d8c2cd0e7e522b4092c0ff4",
+        "previewRevision": "9de122e52fea6de07780722142e6b96cf8f2531ba33490546f422bdbb9a0a2e5",
+        "basePath": "/assets/previews/packs-web/baodan-charm/30f9400f4b5acbc08cf4fa4c5d405ca9d7fe8f169d8c2cd0e7e522b4092c0ff4/",
+        "cover": "cover.svg",
+        "layers": {
+          "body.png": "body.png",
+          "glow.png": "glow.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 82474,
+            "sha256": "59eb89e12dc0d30c88c387eeeb387168ccb75d48e9d93010a466d795586e9fbc"
+          },
+          "body.png": {
+            "bytes": 48716,
+            "sha256": "f4be839edefc4862f8a323c931d4457576bf6271d343a7aeebe8495b0318b304"
+          },
+          "glow.png": {
+            "bytes": 12560,
+            "sha256": "f7413943926bce8fcacf3424989a7bc4d3805df5b9895733399ca2577eda7120"
+          }
+        }
+      }
+    },
+    "woodpecker-peck": {
+      "id": "zqscreen.woodpecker-peck",
+      "version": "1.2.0",
+      "manifestSha256": "42d79e13129343dc2a926222d74fcff649a5060c3d55199d1a189374f24f1e2f",
+      "assetSha256": "3d978101c6f95d89d0db60f7daaad32299a2a46ef9f8da86e0a11e96f4ebfd8c",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/woodpecker-peck/manifest.json",
+          "sourceSha256": "42d79e13129343dc2a926222d74fcff649a5060c3d55199d1a189374f24f1e2f",
+          "projectedSha256": "42d79e13129343dc2a926222d74fcff649a5060c3d55199d1a189374f24f1e2f",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/42d79e13129343dc2a926222d74fcff649a5060c3d55199d1a189374f24f1e2f/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/woodpecker-peck/preview.png",
+          "sourceSha256": "3815e18291cdae574baad06c60d3124d8ea8d25fe876e3ecd0d358042fa1cbce",
+          "projectedSha256": "3815e18291cdae574baad06c60d3124d8ea8d25fe876e3ecd0d358042fa1cbce",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/woodpecker-peck/body.png",
+          "sourceSha256": "88714ce6c096108826c126420bcf09a4a3da5f98714f7aff92a31b6df180c945",
+          "projectedSha256": "88714ce6c096108826c126420bcf09a4a3da5f98714f7aff92a31b6df180c945",
+          "projection": "exact-copy"
+        },
+        "head.png": {
+          "source": "assets/appearance-packs/woodpecker-peck/head.png",
+          "sourceSha256": "3a1c25ca16202960cf32e2b1a8d23103ddbf301e48d4506a3fdf25e2751bf5c1",
+          "projectedSha256": "3a1c25ca16202960cf32e2b1a8d23103ddbf301e48d4506a3fdf25e2751bf5c1",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "f51b99d9f382e3b8e9f50d53c2f4bd96602f00269e6d6b1285c0fa0a7e96151d",
+        "previewRevision": "3d978101c6f95d89d0db60f7daaad32299a2a46ef9f8da86e0a11e96f4ebfd8c",
+        "basePath": "/assets/previews/packs-web/woodpecker-peck/f51b99d9f382e3b8e9f50d53c2f4bd96602f00269e6d6b1285c0fa0a7e96151d/",
+        "cover": "cover.svg",
+        "layers": {
+          "body.png": "body.png",
+          "head.png": "head.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 100305,
+            "sha256": "06542db402d907d8a43e80d430802b37b78e76d57fd4e8ea9b1b74c6f07e3823"
+          },
+          "body.png": {
+            "bytes": 60444,
+            "sha256": "f6ddec50ce9e93c93613765294b36b8ac93fb730bf5602b3dfd95477b62facb4"
+          },
+          "head.png": {
+            "bytes": 14210,
+            "sha256": "3e9c22147a5746f11ca3560b537ec3481ddf23568da87d46e38224c303fb749e"
+          }
+        }
+      }
+    },
+    "treasure-basin": {
+      "id": "zqscreen.treasure-basin",
+      "version": "1.2.0",
+      "manifestSha256": "f4067ed083a986b343920a03e859ec7f9c8867525b793f171f249f6aa79a10ea",
+      "assetSha256": "ec6dd7be28a59e91553e846653d6d0444fd2c9060ac41b92050f2c6a0c750170",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/treasure-basin/manifest.json",
+          "sourceSha256": "f4067ed083a986b343920a03e859ec7f9c8867525b793f171f249f6aa79a10ea",
+          "projectedSha256": "f4067ed083a986b343920a03e859ec7f9c8867525b793f171f249f6aa79a10ea",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/f4067ed083a986b343920a03e859ec7f9c8867525b793f171f249f6aa79a10ea/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/treasure-basin/preview.png",
+          "sourceSha256": "0d7489ae1b1cd584ec3871fade5607be3a38872c88b92b8e9489ee0cb6331d93",
+          "projectedSha256": "0d7489ae1b1cd584ec3871fade5607be3a38872c88b92b8e9489ee0cb6331d93",
+          "projection": "exact-copy"
+        },
+        "coin.png": {
+          "source": "assets/appearance-packs/treasure-basin/coin.png",
+          "sourceSha256": "426ba8f6760ca3ab77928db93421de74e7b1eb711c21e6410a9797af458d1e00",
+          "projectedSha256": "426ba8f6760ca3ab77928db93421de74e7b1eb711c21e6410a9797af458d1e00",
+          "projection": "exact-copy"
+        },
+        "body.png": {
+          "source": "assets/appearance-packs/treasure-basin/body.png",
+          "sourceSha256": "793a6ba0834ff7cfb947288ade4b6d5b68dd2e462ec418b3f49b0021f9819a9f",
+          "projectedSha256": "793a6ba0834ff7cfb947288ade4b6d5b68dd2e462ec418b3f49b0021f9819a9f",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "73664b5aa284505bc99e7b5831c4380a9c2a4e5340b0d3f47907e961147b2ac8",
+        "previewRevision": "ec6dd7be28a59e91553e846653d6d0444fd2c9060ac41b92050f2c6a0c750170",
+        "basePath": "/assets/previews/packs-web/treasure-basin/73664b5aa284505bc99e7b5831c4380a9c2a4e5340b0d3f47907e961147b2ac8/",
+        "cover": "cover.svg",
+        "layers": {
+          "coin.png": "coin.png",
+          "body.png": "body.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 131749,
+            "sha256": "d034ec4c3aa5628b36cb9f14e220d3a87f86bee89b8ee2807baa7c67c45b4df6"
+          },
+          "coin.png": {
+            "bytes": 3317,
+            "sha256": "6f09822f6b141b533bcaf988ce73d3017f179a97fd1552d24d5009b356dffe52"
+          },
+          "body.png": {
+            "bytes": 87779,
+            "sha256": "cf9e621cd4683b61df559741eb18b9d0b53c4ee0de2da6c3e28f26132f2c8b63"
+          }
+        }
+      }
+    },
+    "wealth-button": {
+      "id": "official.wealth-button",
+      "version": "1.0.2",
+      "manifestSha256": "7009c87a1896311bd05bd372ccf9a0c1d2b0c053c4730bce7744793aa8d8b5aa",
+      "assetSha256": "41e51671256f3ab25bd92eb564f8f0f77dfe38b741f2d0b3adb07311152b9d4c",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/wealth-button/manifest.json",
+          "sourceSha256": "7009c87a1896311bd05bd372ccf9a0c1d2b0c053c4730bce7744793aa8d8b5aa",
+          "projectedSha256": "7009c87a1896311bd05bd372ccf9a0c1d2b0c053c4730bce7744793aa8d8b5aa",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/7009c87a1896311bd05bd372ccf9a0c1d2b0c053c4730bce7744793aa8d8b5aa/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/wealth-button/preview.png",
+          "sourceSha256": "9f24a679ef5118fdf38ccb33fdf2f2f23ee34bb29e72b775d20c6cf700fd145a",
+          "projectedSha256": "9f24a679ef5118fdf38ccb33fdf2f2f23ee34bb29e72b775d20c6cf700fd145a",
+          "projection": "exact-copy"
+        },
+        "base.png": {
+          "source": "assets/appearance-packs/wealth-button/base.png",
+          "sourceSha256": "260cdb48bcd911fece9f87206704d1b4369d593bffbd381268c4bdfca55df546",
+          "projectedSha256": "260cdb48bcd911fece9f87206704d1b4369d593bffbd381268c4bdfca55df546",
+          "projection": "exact-copy"
+        },
+        "cap.png": {
+          "source": "assets/appearance-packs/wealth-button/cap.png",
+          "sourceSha256": "a4dc5f1687e4bdd083f9243ed2bf0a1fa3d539d47d705b7fefc7e793fa6502d0",
+          "projectedSha256": "a4dc5f1687e4bdd083f9243ed2bf0a1fa3d539d47d705b7fefc7e793fa6502d0",
+          "projection": "exact-copy"
+        },
+        "hand.png": {
+          "source": "assets/appearance-packs/wealth-button/hand.png",
+          "sourceSha256": "9f24c077fc9225a6d0418bc2a756317d7c48e70bead25aac49f343bef85adc9a",
+          "projectedSha256": "9f24c077fc9225a6d0418bc2a756317d7c48e70bead25aac49f343bef85adc9a",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "4a7284bee5cf7e92fe80614b86982d796e3dce2e4f3c0d5057e818fa36899127",
+        "previewRevision": "41e51671256f3ab25bd92eb564f8f0f77dfe38b741f2d0b3adb07311152b9d4c",
+        "basePath": "/assets/previews/packs-web/wealth-button/4a7284bee5cf7e92fe80614b86982d796e3dce2e4f3c0d5057e818fa36899127/",
+        "cover": "cover.svg",
+        "layers": {
+          "base.png": "base.png",
+          "cap.png": "cap.png",
+          "hand.png": "hand.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 66056,
+            "sha256": "972cafe1d9b441d6b29e1fe3bf48e8722d79333132518cd5b48493fea563d0f1"
+          },
+          "base.png": {
+            "bytes": 17855,
+            "sha256": "34707ccc161ace3257f7b86d2f9ea0c170e34322656ea568c475bb7f2d4a7c68"
+          },
+          "cap.png": {
+            "bytes": 23467,
+            "sha256": "941c63dc951c36bc96bb7c797b786c0c6c0b83d764baedcc00a30fa39a4b3b76"
+          },
+          "hand.png": {
+            "bytes": 7275,
+            "sha256": "16cc23001d71cb3269c3a7a21028282f7128243dd1dbd90dd5c71b83dfa40925"
+          }
+        }
+      }
+    },
+    "offwork-button": {
+      "id": "official.offwork-button",
+      "version": "1.0.0",
+      "manifestSha256": "360ca8cecda67f0edd3a8e678fdfe77bb91a13bb704c009c901734f51bef566c",
+      "assetSha256": "1d2a85b787950d617c6d2c3846fa17e5dbf87df1e5372ec5293ada25133c8f45",
+      "files": {
+        "manifest.json": {
+          "source": "assets/appearance-packs/offwork-button/manifest.json",
+          "sourceSha256": "360ca8cecda67f0edd3a8e678fdfe77bb91a13bb704c009c901734f51bef566c",
+          "projectedSha256": "360ca8cecda67f0edd3a8e678fdfe77bb91a13bb704c009c901734f51bef566c",
+          "projection": "exact-copy",
+          "publicPath": "/assets/previews/public/360ca8cecda67f0edd3a8e678fdfe77bb91a13bb704c009c901734f51bef566c/manifest.json"
+        },
+        "preview.png": {
+          "source": "assets/appearance-packs/offwork-button/preview.png",
+          "sourceSha256": "14e219e4a01c8ebec9c14b951f7a47e31f3e9446a75cc344244c15d821b207d7",
+          "projectedSha256": "14e219e4a01c8ebec9c14b951f7a47e31f3e9446a75cc344244c15d821b207d7",
+          "projection": "exact-copy"
+        },
+        "base.png": {
+          "source": "assets/appearance-packs/offwork-button/base.png",
+          "sourceSha256": "caad2caca774c9a8a376f2fd66bc80004a6179a86fd2da9604884612621e795d",
+          "projectedSha256": "caad2caca774c9a8a376f2fd66bc80004a6179a86fd2da9604884612621e795d",
+          "projection": "exact-copy"
+        },
+        "cap.png": {
+          "source": "assets/appearance-packs/offwork-button/cap.png",
+          "sourceSha256": "436a64cdbbbedc1665fdcb1cb20d8f515c18f85cead9226950ad3dbc1cdec2d3",
+          "projectedSha256": "436a64cdbbbedc1665fdcb1cb20d8f515c18f85cead9226950ad3dbc1cdec2d3",
+          "projection": "exact-copy"
+        },
+        "hand.png": {
+          "source": "assets/appearance-packs/offwork-button/hand.png",
+          "sourceSha256": "da831976360c0e5f959042462d0cd67393f3476e2f17444848aea88a1b78f430",
+          "projectedSha256": "da831976360c0e5f959042462d0cd67393f3476e2f17444848aea88a1b78f430",
+          "projection": "exact-copy"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "df41d293e96b825d640601c056d12efcefa86896cedb66df631235bb04f3d094",
+        "previewRevision": "1d2a85b787950d617c6d2c3846fa17e5dbf87df1e5372ec5293ada25133c8f45",
+        "basePath": "/assets/previews/packs-web/offwork-button/df41d293e96b825d640601c056d12efcefa86896cedb66df631235bb04f3d094/",
+        "cover": "cover.svg",
+        "layers": {
+          "base.png": "base.png",
+          "cap.png": "cap.png",
+          "hand.png": "hand.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 69409,
+            "sha256": "1b8d0fa39cbd8a3bc68878cb4226738e0317193d6c0b5f2ec54bfb9a64dc786f"
+          },
+          "base.png": {
+            "bytes": 17855,
+            "sha256": "34707ccc161ace3257f7b86d2f9ea0c170e34322656ea568c475bb7f2d4a7c68"
+          },
+          "cap.png": {
+            "bytes": 18412,
+            "sha256": "ce406fc82128dd83410963d63478a5120cb6c67cb782a486b572a33d74429ebd"
+          },
+          "hand.png": {
+            "bytes": 14802,
+            "sha256": "7a54019d70faa86b5cad7320adf90a5325e51cf05e6c278e0cf7d5dba287fa43"
+          }
+        }
+      }
+    },
+    "woodfish": {
+      "id": "builtin.woodfish",
+      "manifestSha256": "eee3bddaeabd1ea16565de39b83d574f903ab4a06befbbe6f97023f7a49e7c5d",
+      "files": {
+        "body.png": {
+          "source": "assets/woodfish.png",
+          "sourceSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
+          "projectedSha256": "e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386",
+          "projection": "delivery-only",
+          "publicPath": "/assets/previews/public/e8a39c8cab37cb9c24089e977800070cc8fe1cbe7bc8707c02a9276891e9f386/body.png"
+        },
+        "mallet.png": {
+          "source": "assets/mallet.png",
+          "sourceSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
+          "projectedSha256": "98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249",
+          "projection": "delivery-only",
+          "publicPath": "/assets/previews/public/98f60366b8860f36f52e47b7510e4149213cae4fc194060cafc3afabe715e249/mallet.png"
+        },
+        "manifest.json": {
+          "sourceSha256": "eee3bddaeabd1ea16565de39b83d574f903ab4a06befbbe6f97023f7a49e7c5d",
+          "projectedSha256": "eee3bddaeabd1ea16565de39b83d574f903ab4a06befbbe6f97023f7a49e7c5d",
+          "projection": "native-code-extraction",
+          "publicPath": "/assets/previews/public/eee3bddaeabd1ea16565de39b83d574f903ab4a06befbbe6f97023f7a49e7c5d/manifest.json"
+        }
+      },
+      "web": {
+        "rule": "web-derivative-v4-first-frame",
+        "revision": "eecc2659a5eb5e285f6b1575d44e99f67ef333a7c82a43fbd601d8c936940812",
+        "previewRevision": "eee3bddaeabd1ea16565de39b83d574f903ab4a06befbbe6f97023f7a49e7c5d",
+        "basePath": "/assets/previews/packs-web/woodfish/eecc2659a5eb5e285f6b1575d44e99f67ef333a7c82a43fbd601d8c936940812/",
+        "cover": "cover.svg",
+        "layers": {
+          "body.png": "body.png",
+          "mallet.png": "mallet.png"
+        },
+        "files": {
+          "cover.svg": {
+            "bytes": 224092,
+            "sha256": "2da5243ac4a31e5fadf4c997fe5af0a8f54c7bd5b97e0872acb6393f0e390b3b"
+          },
+          "body.png": {
+            "bytes": 125536,
+            "sha256": "5138c08845d42d03853eda7cad42a1b39dd064a8699d9c96ea37bb2512d5e2bc"
+          },
+          "mallet.png": {
+            "bytes": 20896,
+            "sha256": "0e96fdb54de40924f6757c0ac01e663fa3330a5c599cea026bfab280939bcb74"
+          }
+        }
+      }
+    }
+  }
+}

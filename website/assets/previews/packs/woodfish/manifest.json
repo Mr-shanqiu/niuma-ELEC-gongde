@@ -91,5 +91,15 @@
     ],
     "shaftSourceX": 108,
     "headSourceWidth": 145
+  },
+  "sourceDimensions": {
+    "body.png": {
+      "width": 600,
+      "height": 500
+    },
+    "mallet.png": {
+      "width": 600,
+      "height": 150
+    }
   }
 }

@@ -38,8 +38,26 @@
       tab.tabIndex = active ? 0 : -1;
       if (active && focusTab) tab.focus();
     });
+    loadDeckImages();
     stopDemo();
     if (key === 'count') startDemo();
+  }
+
+  // Panels sit stacked in one grid cell, so even a `loading="lazy"` image
+  // inside them is geometrically in the viewport from the first paint — lazy
+  // loading never deferred anything. Giving the hidden cards their real
+  // address only once they join the deck keeps the first screen to the hero
+  // art, without changing what a visitor sees when a card turns up: by the
+  // time it reaches the back layer its picture is already on its way.
+  const deckImages = [...stage.querySelectorAll('img[data-src]')];
+  function loadDeckImages() {
+    for (const image of deckImages) {
+      const panel = image.closest('[data-feature-panel]');
+      if (!panel || panel.classList.contains('is-active') ||
+        panel.classList.contains('is-behind-1') || panel.classList.contains('is-behind-2')) {
+        if (image.dataset.src) { image.src = image.dataset.src; image.removeAttribute('data-src'); }
+      }
+    }
   }
 
   function stopDemo() {
@@ -142,6 +160,26 @@
   document.addEventListener('visibilitychange', schedule);
   reduced.addEventListener('change', () => { manualPause = reduced.matches; setPaused(reduced.matches); });
   addEventListener('pagehide', () => { clearInterval(timer); timer = 0; });
+
+  // A local demonstration: explicit buttons only, no global input collection or persistence.
+  const visibilityPanel = stage.querySelector('[data-feature-panel="visibility"]');
+  const visibilityToggle = visibilityPanel?.querySelector('[data-visibility-toggle]');
+  visibilityToggle?.addEventListener('click', () => {
+    const hidden = visibilityToggle.getAttribute('aria-pressed') !== 'true';
+    visibilityToggle.setAttribute('aria-pressed', String(hidden));
+    visibilityToggle.textContent = hidden ? '恢复显示' : '隐藏形象';
+    const art = visibilityPanel.querySelector('[data-visibility-art]');
+    art.classList.toggle('is-concealed', hidden);
+    art.setAttribute('aria-hidden', String(hidden));
+    visibilityPanel.querySelector('[data-visibility-status]').textContent = hidden
+      ? '已隐藏形象，试试计数 +1（展示示意）' : '展示示意，不读取键盘输入';
+    userActed();
+  });
+  visibilityPanel?.querySelector('[data-visibility-increment]')?.addEventListener('click', () => {
+    const count = visibilityPanel.querySelector('[data-visibility-count]');
+    count.textContent = String(Number(count.textContent) + 1);
+    userActed();
+  });
 
   // The fourth card is a locked teaser until the visitor earns it. Until then
   // the card still exists in the deck, so the carousel keeps its four-page

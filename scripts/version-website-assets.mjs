@@ -60,9 +60,34 @@ for (const file of runtimeFiles) {
 }
 const files = runtimeFiles.map(file => ({ name: file, sha256: digest(contents.get(file)), bytes: Buffer.byteLength(contents.get(file)) }));
 let previewIndexHash = null;
+async function previewPaths(directory, prefix = 'assets/previews') {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(error => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  const paths = await Promise.all(entries.map(entry => entry.isDirectory()
+    ? previewPaths(join(directory, entry.name), `${prefix}/${entry.name}`)
+    : [`${prefix}/${entry.name}`]));
+  return paths.flat().sort();
+}
 try { previewIndexHash = digest(await readFile(join(stage, 'assets/previews/source-map.json'))); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
-const revision = digest(JSON.stringify({ profile: 'browser-runtime-v1', files }));
+if (previewIndexHash) {
+  await mkdir(join(stage, 'assets/previews/index'), { recursive: true });
+  await copyFile(join(stage, 'assets/previews/source-map.json'),
+    join(stage, 'assets/previews/index', `${previewIndexHash}.json`));
+}
+// The hero still is a generated, content-addressed file, so its address only
+// exists after previews are built. The page carries a stable placeholder and
+// gets the real path here; without it the first screen would either preload
+// the full-size artwork again or show nothing until a script runs.
+let heroCover = null;
+try {
+  const sourceMap = JSON.parse(await readFile(join(stage, 'assets/previews/source-map.json'), 'utf8'));
+  const web = sourceMap.packs?.woodfish?.web;
+  if (web?.basePath && web?.files?.[web.cover || 'cover.png']) heroCover = `${web.basePath}${web.cover || 'cover.png'}`;
+} catch (error) { if (error.code !== 'ENOENT') throw error; }
+const revision = digest(JSON.stringify({ profile: 'browser-runtime-v1', files, previewIndexHash }));
 const prefix = `/assets/runtime/${revision}/`;
 await mkdir(join(stage, 'assets', 'runtime', revision), { recursive: true });
 for (const file of runtimeFiles) {
@@ -103,20 +128,28 @@ for (const file of htmlFiles) {
       ? html.replace(/<meta\s+name=["']gongde-preview-index["'][^>]*>/i, previewMeta)
       : html.replace(/<head(\s[^>]*)?>/i, match => `${match}\n  ${previewMeta}`);
   }
+  // `__GONGDE_HERO_COVER__` is written by hand into index.html. It resolves to
+  // the generated hero still, or to nothing at all when this build produced no
+  // derivatives, so a placeholder can never reach a browser as a 404.
+  html = html.replace(/\s*<link\s+rel=["']preload["'][^>]*__GONGDE_HERO_COVER__[^>]*>/gi,
+    heroCover ? `\n<link rel="preload" as="image" href="${heroCover}" fetchpriority="high">` : '');
+  html = html.replaceAll('__GONGDE_HERO_COVER__', heroCover || '');
   await writeFile(join(stage, file), html);
 }
 
 const adminPattern = /^admin\/assets\/[A-Za-z0-9][A-Za-z0-9_-]*-[A-Za-z0-9_-]{8,64}\.(?:js|css)$/;
+const adminReferences = html => [...new Set([...html.matchAll(/(?:src|href)=["'](\/admin\/assets\/[^"']+)["']/g)]
+  .map(match => match[1].slice(1)).filter(name => adminPattern.test(name)))].sort();
 let currentAdmin = [];
-try {
-  currentAdmin = (await readdir(join(stage, 'admin', 'assets')))
-    .map(name => `admin/assets/${name}`).filter(name => adminPattern.test(name)).sort();
-} catch (error) {
-  if (error.code !== 'ENOENT') throw error;
-}
+try { currentAdmin = adminReferences(await readFile(join(stage, 'admin/index.html'), 'utf8')); }
+catch (error) { if (error.code !== 'ENOENT') throw error; }
 let runtimeVersions = [revision];
 let adminBundles = currentAdmin.length ? [currentAdmin] : [];
 let retainedFiles = 0;
+// Carry the dependencies with each retained runtime, not every historic image.
+const previewDependencies = { [revision]: await previewPaths(join(stage, 'assets/previews')) };
+const validPreviewPath = name => /^assets\/previews\/[a-zA-Z0-9_./-]+$/.test(name) &&
+  !name.split('/').includes('..') && !name.endsWith('/');
 
 if (previousArchive) {
   if (!/^gongde-site-[a-f0-9]{64}\.tar\.gz$/.test(basename(previousArchive))) throw new Error('Previous archive must be a frozen site candidate');
@@ -126,29 +159,42 @@ if (previousArchive) {
   const manifestMember = members.find(name => name.replace(/^\.\//, '') === 'assets/build/runtime-assets.json');
   let previous = null;
   if (manifestMember) {
-    previous = JSON.parse(execFileSync('tar', ['-xzOf', previousArchive, manifestMember], { encoding: 'utf8', maxBuffer: 64 * 1024 }));
+    previous = JSON.parse(execFileSync('tar', ['-xzOf', previousArchive, manifestMember], { encoding: 'utf8', maxBuffer: 512 * 1024 }));
     if (previous.schemaVersion !== 1 || !Array.isArray(previous.runtimeVersions) || !previous.runtimeVersions.every(value => hex.test(value))) {
       throw new Error('Previous runtime manifest is invalid');
     }
     runtimeVersions = [...new Set([revision, ...previous.runtimeVersions])].slice(0, 3);
   }
-  const previousAdmin = previous?.adminBundles || [members.map(name => name.replace(/^\.\//, '')).filter(name => adminPattern.test(name))];
+  const previousAdmin = previous?.adminBundles || [];
   for (const bundle of previousAdmin) {
     if (!Array.isArray(bundle) || !bundle.every(name => adminPattern.test(name))) throw new Error('Previous admin bundle manifest is invalid');
+  }
+  const previousAdminIndex = members.find(name => name.replace(/^\.\//, '') === 'admin/index.html');
+  const activePreviousAdmin = previousAdminIndex ? adminReferences(execFileSync('tar', ['-xzOf', previousArchive, previousAdminIndex], { encoding: 'utf8', maxBuffer: 512 * 1024 })) : [];
+  if (activePreviousAdmin.some(name => !members.some(member => member.replace(/^\.\//, '') === name))) throw new Error('Previous active admin assets are missing');
+  const previousCandidates = [activePreviousAdmin, ...previousAdmin.filter(bundle =>
+    !activePreviousAdmin.length || !activePreviousAdmin.every(name => bundle.includes(name)))];
+  for (const bundle of previousCandidates) {
     if (bundle.length && !adminBundles.some(existing => JSON.stringify(existing) === JSON.stringify(bundle))) adminBundles.push(bundle);
   }
-  // Two admin bundles, not three: the deployer accepts at most 20 MiB and the
-  // site is already within a few hundred KiB of that. Each admin bundle is
-  // ~1.3 MB of JS, so a third generation is the difference between a release
-  // the deployer accepts and one it rejects. Two is the depth the live archive
-  // already carries, so nothing the current release guarantees is lost.
+  // Keep the current admin entry and one previous entry, without treating every
+  // asset already present in an overlay as part of the active bundle.
   adminBundles = adminBundles.slice(0, 2);
   const keepAdmin = new Set(adminBundles.flat());
   const keepRuntime = new Set(runtimeVersions.slice(1));
+  const keepPreview = new Set();
+  for (const oldRevision of keepRuntime) {
+    // Archives before dependency recording need one compatibility import.
+    const dependencies = previous?.previewDependencies?.[oldRevision] ??
+      members.map(name => name.replace(/^\.\//, '')).filter(validPreviewPath);
+    if (!Array.isArray(dependencies) || !dependencies.every(validPreviewPath)) throw new Error('Invalid preview dependencies');
+    previewDependencies[oldRevision] = dependencies;
+    for (const name of dependencies) keepPreview.add(name);
+  }
   const selected = members.filter(member => {
     const name = member.replace(/^\.\//, '');
     const match = name.match(/^assets\/runtime\/([a-f0-9]{64})\/(?:assets\/)?[a-z][a-z0-9-]*\.(?:js|css)$/);
-    return (match && keepRuntime.has(match[1])) || keepAdmin.has(name);
+    return (match && keepRuntime.has(match[1])) || keepAdmin.has(name) || keepPreview.has(name);
   });
   if (selected.length) {
     const temporary = await mkdtemp(join(stage, '.previous-runtime-'));
@@ -161,7 +207,9 @@ if (previousArchive) {
         const bytes = await readFile(join(temporary, relative));
         try {
           const existing = await readFile(target);
-          if (!existing.equals(bytes)) throw new Error(`Immutable asset collision: ${relative}`);
+          if (!existing.equals(bytes) && !/^assets\/previews\/(?:packs\/|source-map\.json$)/.test(relative)) {
+            throw new Error(`Immutable asset collision: ${relative}`);
+          }
         } catch (error) {
           if (error.code !== 'ENOENT') throw error;
           await copyFile(join(temporary, relative), target);
@@ -174,9 +222,24 @@ if (previousArchive) {
   }
 }
 
+// An overlay can already contain older assets. Apply the declared retention
+// policy to those files too, rather than only limiting files imported above.
+try {
+  for (const name of await readdir(join(stage, 'assets/runtime'))) {
+    if (hex.test(name) && !runtimeVersions.includes(name)) await rm(join(stage, 'assets/runtime', name), { recursive: true, force: true });
+  }
+} catch (error) { if (error.code !== 'ENOENT') throw error; }
+const retainedAdminAssets = new Set(adminBundles.flat());
+try {
+  for (const name of await readdir(join(stage, 'admin/assets'))) {
+    const relative = `admin/assets/${name}`;
+    if (adminPattern.test(relative) && !retainedAdminAssets.has(relative)) await rm(join(stage, relative));
+  }
+} catch (error) { if (error.code !== 'ENOENT') throw error; }
+
 await mkdir(join(stage, 'assets', 'build'), { recursive: true });
 await writeFile(join(stage, 'assets', 'build', 'runtime-assets.json'), `${JSON.stringify({
-  schemaVersion: 1, profile: 'browser-runtime-v1', revision, runtimeVersions, adminBundles, files,
+  schemaVersion: 1, profile: 'browser-runtime-v1', revision, runtimeVersions, adminBundles, files, previewDependencies,
 }, null, 2)}\n`);
 console.log(`SITE_RUNTIME_REVISION=${revision}`);
 console.log(`SITE_RUNTIME_RETAINED_FILES=${retainedFiles}`);

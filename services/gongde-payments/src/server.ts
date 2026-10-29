@@ -1,5 +1,7 @@
 import { ORDER_STATES } from "./domain/store.js";
 import { createFreeCreatorRuntime } from "./creators/runtime.js";
+import { creatorClientKey, parseCreatorTrustedProxies } from "./creators/client-key.js";
+import { DownloadCountRateLimit } from "./downloads/count-rate-limit.js";
 import { createFreeDistributionRuntime } from "./free-distribution/runtime.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
@@ -25,7 +27,7 @@ import { AdminObjectStore, PublicationBusy, PublicationConflict, PublicationUnav
 import { createPublicationLock } from "./admin/publication-lock.js";
 import { loadDownloadCoverage, loadInstallerRegistry } from "./downloads/installer-registry.js";
 import type { GongdeEntitlement, GongdeOrder, OrderState } from "./domain/types.js";
-import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH } from "./domain/catalog.js";
+import { MAX_ASSETS_PER_DELIVERY, OFFICIAL_ASSET_IDS, OFFICIAL_ASSET_NAMES_ZH, isRetiredOfficialAsset } from "./domain/catalog.js";
 import { AppearanceNumberError, AppearanceNumberRepository } from "./domain/appearance-numbers.js";
 import { queryAppearanceNumber, type OfficialAppearanceState } from "./domain/appearance-number-query.js";
 import { GROUP_BENEFIT_PERIOD_DAYS, GROUP_BENEFIT_TIME_ZONE, loadGroupBenefitCodeService } from "./domain/group-benefit-code.js";
@@ -58,6 +60,8 @@ const port = Number(process.env.PORT ?? "8787");
 const host = process.env.HOST ?? "127.0.0.1";
 const adminConfiguration = loadAdminAuthConfiguration();
 const adminAuth = adminConfiguration ? new AdminAuthService(adminConfiguration) : null;
+const downloadCountRateLimit = new DownloadCountRateLimit();
+const adminAndDownloadTrustedProxies = parseCreatorTrustedProxies(process.env.GONGDE_CREATOR_TRUSTED_PROXY_ADDRESSES);
 const adminObjectStoreConfiguration = loadAdminObjectStoreConfiguration();
 const adminObjectStore = adminObjectStoreConfiguration ? new AdminObjectStore(adminObjectStoreConfiguration) : null;
 // The publication object is the only place where two administrators can lose
@@ -95,7 +99,7 @@ async function availableAppearanceRevisions(): Promise<Record<string, string>> {
   if (!packSigner) return {};
   const revisions = packSigner.revisions();
   const publishedIds = adminObjectStore ? await adminObjectStore.publishedAssetIds(OFFICIAL_ASSET_IDS) : [...OFFICIAL_ASSET_IDS];
-  return Object.fromEntries(publishedIds.flatMap((assetId) => revisions[assetId] ? [[assetId, revisions[assetId]]] : []));
+  return Object.fromEntries(publishedIds.flatMap((assetId) => !isRetiredOfficialAsset(assetId) && revisions[assetId] ? [[assetId, revisions[assetId]]] : []));
 }
 
 function json(response: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -426,7 +430,7 @@ async function numberedOfficialStates(): Promise<Record<string, OfficialAppearan
     return Object.fromEntries(OFFICIAL_ASSET_IDS.map(assetId => [assetId, {
       revision: revisions[assetId] ?? null,
       firstPublishedAt: publication.firstPublishedAt[assetId] ?? null,
-      state: !revisions[assetId] ? "MISSING" : published.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
+      state: !revisions[assetId] ? "MISSING" : !isRetiredOfficialAsset(assetId) && published.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
     }]));
   } catch { throw new AppearanceNumberError("appearance_numbers_unavailable", 503); }
 }
@@ -498,7 +502,7 @@ export const server = createServer(async (request, response) => {
         return json(response, 400, { error: "invalid_login_request" });
       }
       try {
-        const token = adminAuth.login(body.username, body.password, request.socket.remoteAddress ?? "unknown");
+        const token = adminAuth.login(body.username, body.password, creatorClientKey(request, adminAndDownloadTrustedProxies));
         audit("login_succeeded");
         return json(response, 200, { username: adminConfiguration!.username }, { "set-cookie": adminAuth.sessionCookie(token) });
       } catch (error) {
@@ -672,13 +676,13 @@ export const server = createServer(async (request, response) => {
       }
       const publishedIds = new Set(publication.publishedAssetIds);
       const numbers = await optionalOfficialNumbers();
-      const data = OFFICIAL_ASSET_IDS.map((assetId) => ({
+      const data = OFFICIAL_ASSET_IDS.filter(assetId => !isRetiredOfficialAsset(assetId)).map((assetId) => ({
         id: assetId,
         assetId,
         appearanceNumber: numbers[assetId] ?? null,
         name: OFFICIAL_ASSET_NAMES_ZH[assetId] ?? assetId,
         revision: revisions[assetId] ?? null,
-        state: !revisions[assetId] ? "MISSING" : publishedIds.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
+        state: !revisions[assetId] ? "MISSING" : !isRetiredOfficialAsset(assetId) && publishedIds.has(assetId) ? "PUBLISHED" : "UNPUBLISHED"
       }));
       // `publicationRevision` versions the whole published set. Every write must
       // send it back; it is deliberately not named `revision`, which already
@@ -694,6 +698,7 @@ export const server = createServer(async (request, response) => {
       const assetId = adminAppearanceMatch[1];
       if (!OFFICIAL_ASSET_IDS.includes(assetId as typeof OFFICIAL_ASSET_IDS[number])) return json(response, 404, { error: "appearance_not_found" });
       const body = await readJson(request);
+      if (isRetiredOfficialAsset(assetId)) return json(response, 409, { error: "appearance_retired" });
       if (typeof body.published !== "boolean") return json(response, 400, { error: "invalid_appearance_state" });
       if (!Number.isSafeInteger(body.publicationRevision) || (body.publicationRevision as number) < 0) {
         // Refusing an unversioned write is the point: without it the write would
@@ -787,15 +792,19 @@ export const server = createServer(async (request, response) => {
       if (registry.status !== "available") return json(response, 503, { error: "download_registry_unavailable" }, { "cache-control": "no-store" });
       const entry = registry.items.find((item) => item.name === name);
       if (!entry) return json(response, 404, { error: "download_not_found" }, { "cache-control": "no-store" });
-      let counted = true;
-      try { await adminObjectStore.recordDownload(entry.name, entry.platform, new Date()); }
-      catch (error) { counted = false; audit("download_count_failed", { name: entry.name }); }
+      let countStatus: "counted" | "limited" | "failed" = "counted";
+      try {
+        // Bound optional COS writes without ever blocking the installer itself.
+        // A hashed client key is accepted only through the configured trusted proxy.
+        if (!downloadCountRateLimit.allow(creatorClientKey(request, adminAndDownloadTrustedProxies))) countStatus = "limited";
+        else await adminObjectStore.recordDownload(entry.name, entry.platform, new Date());
+      } catch (error) { countStatus = "failed"; audit("download_count_failed", { name: entry.name }); }
       // A counting failure must not block the download itself. The redirect is
       // no-store in both cases so no cache can skip the next count.
       response.writeHead(302, {
         location: entry.publicDownloadUrl,
         "cache-control": "no-store",
-        ...(counted ? {} : { "x-gongde-count": "failed" })
+        ...(countStatus === "counted" ? {} : { "x-gongde-count": countStatus })
       });
       return response.end();
     }
