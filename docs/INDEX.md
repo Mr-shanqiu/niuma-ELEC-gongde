@@ -1,6 +1,6 @@
 # 项目文档导航
 
-本文件只分类文档。项目唯一总入口仍是根目录 `PROJECT_HOME.md`；执行检查点仍是根目录 `WORK_PLAN.md`。当前产品规则以 PRD 及用户已确认的后续修订为准，不能把历史付费方案当成当前需求。
+本文件只分类文档。项目唯一总入口仍是根目录 `PROJECT_HOME.md`；执行检查点仍是根目录 `WORK_PLAN.md`。当前产品规则以基础免费与扩展形象双路线工作方案及用户后续确认为准；官方扩展形象1元或群码免费，用户投稿作品及必要适配版免费，仅群内人工接洽。旧全免费PRD和旧在线创作者流程仅作历史参考。
 
 ## 当前交接
 
@@ -17,16 +17,17 @@
 - [通用编号](APPEARANCE_PACK_NUMBERING.zh-CN.md)：作品查找与身份规则。
 - [形象视觉规范](APPEARANCE_VISUAL_STANDARD.zh-CN.md)：画布、布局及展示要求。
 - [创作者制作指南](CREATOR_PACK_GUIDE.zh-CN.md)：供外部制作工具与创作者使用。
-- [AI 自动审核](CREATOR_AUTO_REVIEW.zh-CN.md)：安全校验和审核机制。
+- [AI 自动审核](CREATOR_AUTO_REVIEW.zh-CN.md)：旧在线创作者流程的历史机制，当前群内人工投稿不自动启用它。
+- [独立创作Skill](https://github.com/Mr-shanqiu/gongde-appearance-pack)：当前规范、模板、检查与打包工具；官网创作区提供安装入口。
 
 ## 使用、发布与运维
 
 - [安装与使用](INSTALLATION_GUIDE.zh-CN.md)。
-- [当前安装升级与历史未签名提示](INSTALL_UNSIGNED.md)：当前Mac904.14已签名公证，Windows0.9.4已签名，文件名沿用历史。
+- [当前安装升级与历史未签名提示](INSTALL_UNSIGNED.md)：当前Mac0.9.5／905.1已签名公证，Windows0.9.5已签名，文件名沿用历史。
 - [0.9.1 发布说明](RELEASE_0.9.1.zh-CN.md)。
 - [0.9.2 发布说明](RELEASE_0.9.2.zh-CN.md)。
 - [0.9.3 发布说明](RELEASE_0.9.3.zh-CN.md)。
-- 0.9.4 当前正式版：以 [GitHub v0.9.4](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.4)、[官网下载页](https://gongde.zqscreen.cn/download.html) 和[当前交接说明](PROJECT_HANDOFF.zh-CN.md)为准，不另建发布文档。
+- 0.9.5当前正式版：以[官网下载页](https://gongde.zqscreen.cn/download.html)和[GitHub v0.9.5](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.5)为准；0.9.4保留内部历史材料，下载页只展示当前版。两个客户端实际源码与制品绑定见发行说明，不能把main当成同一提交构建双端的证明。
 - [访问与运维](PROJECT_ACCESS_AND_OPERATIONS.zh-CN.md)：服务器、发布器、凭据引用和最新绑定；不是密钥库。
 - [官网发布说明](GONGDE_SITE_DEPLOYMENT.md)。
 - [产物保留策略](ARTIFACT_RETENTION.zh-CN.md)：站点归档与构建产物的保留类别、判断规则和清理前置条件。只定义口径，不是删除授权。
@@ -34,13 +35,13 @@
 
 ## 方案背景与验收资料
 
-- [共创系统早期规划](CREATOR_SYSTEM_PLAN.zh-CN.md)：背景参考；与当前 PRD 冲突时以 PRD 为准。
+- [共创系统早期规划](CREATOR_SYSTEM_PLAN.zh-CN.md)：背景参考；与当前双路线及用户后续确认冲突时以后者为准。
 - [共创验收记录](FREE_CREATOR_ACCEPTANCE.zh-CN.md)：按记录时间和证据层级阅读。
 - [共创历史卡点](CREATOR_COMMUNITY_BLOCKERS.zh-CN.md)：诊断过程，不等同于所有卡点目前仍存在。
 - [招财猫动作对齐](LUCKY_CAT_PARITY_2026-09-23.md)。
 - `visual-review/`：视觉资料。
 - [历史购买与批次规则](PURCHASE_AND_BATCH_DOWNLOAD_RULES.zh-CN.md)：旧付费流程背景与既有订单履行；当前规则（每个 1 元或官方群码免费）以双路线工作方案为准。
-- [历史群福利方案](GROUP_BENEFITS.zh-CN.md)：旧方案背景，当前码格式与周期按 PRD。
+- [历史群福利方案](GROUP_BENEFITS.zh-CN.md)：旧方案背景，当前码格式与周期以群码实现及官网说明为准。
 
 ## 已归档文档
 

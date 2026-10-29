@@ -6,14 +6,13 @@
 
 ## 当前永久包与发布状态
 
-- 当前正式客户端为 macOS 0.9.4 / build 904.14（Developer ID 签名并公证）和 Windows 0.9.4（已代码签名）。
+- 当前正式客户端为 macOS 0.9.5 / build 905.1（Developer ID 签名并公证）和 Windows 0.9.5（已代码签名）。
 - 免费领取服务已上线启用；基础客户端免费，扩展形象每个 1 元、每批最多 10 个不同形象，或使用当期有效官方群码免费领取。
 - 永久包使用 `license.mode = "perpetual"`，签名格式沿用 [历史 PRD](PRD_FREE_DOWNLOAD_AND_CO_CREATION.zh-CN.md) 第 14.1 节定义的消息结构（该 PRD 的业务规则已暂停，但签名格式仍用于既有文件校验），不沿用下文 timed 签名消息。不存在首次导入截止时间，保存的文件可永久导入并离线使用。
 - 历史 timed 包仍须通过原始签名与内容校验；0.9.0 不因其首次导入日期已过而拒绝导入，不改写旧签名或伪造新授权。
 - 服务启用后，服务器重新下载窗口为签发后 7 日；窗口到期只影响服务器重下，不影响本地永久导入。一次领取交付单个 `.nmgpack` 或一个包含多个独立包的 `.nmgpacks` 文件。
-- 公开共创与投稿已暂停，不再新增创作者投稿；下文源包、安全预算、投稿 ID 和审核流程仅用于处理既有作品，不恢复投稿入口或作者权益。
-- 当前正式客户端以[官网下载页](https://gongde.zqscreen.cn/download.html)和 [GitHub v0.9.4](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.4) 为准。
-- 历史回退记录（非当前推荐版本）：[macOS 0.9.0](https://download.gongde.zqscreen.cn/niuma-merit-macos-0.9.0.dmg)、[Windows 0.9.0](https://download.gongde.zqscreen.cn/niuma-merit-windows-0.9.0-setup.exe)、[GitHub v0.9.0](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.0)。该版 macOS 为 Apple Development 签名、非 Developer ID、未公证；Windows 未签名，仍可能出现系统安全提示。
+- 旧在线共创上传及自动审核继续暂停；现已开放抖音群人工免费投稿，当前DIY制作规范和预算见[制作指南](CREATOR_PACK_GUIDE.zh-CN.md)及其链接的公开Skill。下文历史源包身份与审核流程不能直接用于新作DIY。
+- 当前正式客户端以[官网下载页](https://gongde.zqscreen.cn/download.html)和 [GitHub v0.9.5](https://github.com/Mr-shanqiu/niuma-ELEC-gongde/releases/tag/v0.9.5) 为准。
 
 下文适用范围为历史 macOS 与 Windows 0.7.0 及以后协议说明，不代表旧客户端支持新永久模式。
 
